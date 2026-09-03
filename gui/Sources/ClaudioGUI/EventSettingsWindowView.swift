@@ -27,7 +27,6 @@ struct EventSettingsWindowView: View {
     #endif
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedTarget: EventSettingsFocusTarget?
-    @State private var previewPlayer = NSSoundAudioPreviewPlayer()
     @State private var handledFocusRequestRevision: UInt64 = 0
     @State private var playingCandidateID: UUID?
     @State private var playingCandidateTitle: String?
@@ -95,9 +94,22 @@ struct EventSettingsWindowView: View {
         return events.compactMap { presentation in
             guard presentation.controls.previewEnabled,
                 editor.eventAccess.first(where: { $0.event == presentation.event })?
-                    .previewAvailability.isAvailable == true
+                    .previewAction != nil
             else { return nil }
             return presentation.event
+        }
+    }
+    private var editorCapabilityUnavailableHint: String {
+        switch soundPacksEditorOwner.presentation.library {
+        case .loading(previousAvailable: true):
+            return l10n.text(.panelLoadingEvents)
+        case .failed(previousAvailable: true, let reason):
+            return l10n.format(
+                .soundPacksLibraryRefreshFailed,
+                localizedLibraryFailure(reason))
+        case .unloaded, .loading(previousAvailable: false), .ready,
+            .failed(previousAvailable: false, _):
+            return l10n.text(.panelUnavailableEvents)
         }
     }
 
@@ -570,7 +582,7 @@ struct EventSettingsWindowView: View {
             case .empty:
                 activateEventsEditor()
             case .failed(let event):
-                previewPlayer.stop()
+                soundPacksEditorNativeEffects.stopPreview(owner: soundPacksEditorOwner)
                 previewAllFailureEvent = event
                 onAnnouncement?(previewAllFailureMessage(for: event))
                 activateEventsEditor()
@@ -583,12 +595,7 @@ struct EventSettingsWindowView: View {
 
     private func stopAllPreviews() {
         cancelPreviewSequenceState()
-        if let stopAction = eventsEditorPresentation?.stopPreviewAction {
-            soundPacksEditorNativeEffects.consume(
-                soundPacksEditorOwner.send(.invoke(stopAction)),
-                owner: soundPacksEditorOwner)
-        }
-        previewPlayer.stop()
+        soundPacksEditorNativeEffects.stopPreview(owner: soundPacksEditorOwner)
         selection.notePreviewStopped()
     }
 
@@ -638,6 +645,9 @@ struct EventSettingsWindowView: View {
                                     EventSettingsEventRow(
                                         presentation: event,
                                         previewAvailability: editorAccess?.previewAvailability,
+                                        previewActionAvailable: editorAccess?.previewAction != nil,
+                                        previewCapabilityUnavailableHint:
+                                            editorCapabilityUnavailableHint,
                                         windowLayout: windowLayout,
                                         language: languageStore.language,
                                         focusedTarget: $focusedTarget,
@@ -676,6 +686,10 @@ struct EventSettingsWindowView: View {
                                             languageStore: languageStore,
                                             eventTitle: event.title,
                                             playingCandidateID: playingCandidateID,
+                                            adoptionEnabled:
+                                                eventsEditorPresentation?.adoptionPermit != nil,
+                                            adoptionUnavailableHint:
+                                                editorCapabilityUnavailableHint,
                                             onConfigureCredential: { showsCredentialSheet = true },
                                             onPreviewCandidate: previewAICueCandidate,
                                             onAdoptCandidate: adoptAICueCandidate,
@@ -857,7 +871,7 @@ struct EventSettingsWindowView: View {
         event: Event
     ) {
         guard case .eligible = eligibility else { return }
-        previewPlayer.stop()
+        soundPacksEditorNativeEffects.stopPreview(owner: soundPacksEditorOwner)
         playingCandidateID = nil
         playingCandidateTitle = nil
         selection.beginAISession(scope: selectedScope.scope, event: event)
@@ -893,9 +907,9 @@ struct EventSettingsWindowView: View {
             return
         }
         guard
-            previewPlayer.play(
-                fileAt: candidate.asset.fileURL,
-                volume: Float(previewVolume(for: model.config)))
+            soundPacksEditorNativeEffects.playAICueCandidate(
+                candidate,
+                volume: previewVolume(for: model.config)) != nil
         else {
             aiCueViewModel.reportCandidateUnavailable()
             return
@@ -946,7 +960,7 @@ struct EventSettingsWindowView: View {
 
     private func stopCandidatePreview() {
         let stoppedCandidateTitle = playingCandidateTitle
-        previewPlayer.stop()
+        soundPacksEditorNativeEffects.stopPreview(owner: soundPacksEditorOwner)
         playingCandidateID = nil
         playingCandidateTitle = nil
         if let stoppedCandidateTitle {
@@ -988,6 +1002,8 @@ struct EventSettingsWindowView: View {
 private struct EventSettingsEventRow: View {
     let presentation: PanelEventPresentation
     let previewAvailability: EventPreviewAvailability?
+    let previewActionAvailable: Bool
+    let previewCapabilityUnavailableHint: String
     let windowLayout: EventSettingsWindowLayout
     let language: ClaudioAppLanguage
     let onGenerateAICue: () -> Void
@@ -1007,6 +1023,8 @@ private struct EventSettingsEventRow: View {
     init(
         presentation: PanelEventPresentation,
         previewAvailability: EventPreviewAvailability?,
+        previewActionAvailable: Bool,
+        previewCapabilityUnavailableHint: String,
         windowLayout: EventSettingsWindowLayout,
         language: ClaudioAppLanguage,
         focusedTarget: FocusState<EventSettingsFocusTarget?>.Binding,
@@ -1022,6 +1040,8 @@ private struct EventSettingsEventRow: View {
     ) {
         self.presentation = presentation
         self.previewAvailability = previewAvailability
+        self.previewActionAvailable = previewActionAvailable
+        self.previewCapabilityUnavailableHint = previewCapabilityUnavailableHint
         self.windowLayout = windowLayout
         self.language = language
         self.focusedTarget = focusedTarget
@@ -1123,13 +1143,16 @@ private struct EventSettingsEventRow: View {
 
     private var previewHint: String {
         if controlsUnavailable { return presentation.capabilityText }
+        if previewAvailability?.isAvailable == true, !previewActionAvailable {
+            return previewCapabilityUnavailableHint
+        }
         return localizedEventPreviewHint(
             previewAvailability ?? presentation.controls.previewAvailability,
             language: language)
     }
 
     private var previewEnabled: Bool {
-        !controlsUnavailable && previewAvailability?.isAvailable == true
+        !controlsUnavailable && previewActionAvailable
     }
 
     private var capabilityBadge: some View {

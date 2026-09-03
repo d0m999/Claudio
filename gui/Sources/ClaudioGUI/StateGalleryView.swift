@@ -441,6 +441,9 @@ private struct AICueExperienceStateFrame: View {
                     languageStore: languageStore,
                     eventTitle: localizedEventName(.stop, language: languageStore.language),
                     playingCandidateID: scenario.playingCandidateID,
+                    adoptionEnabled: true,
+                    adoptionUnavailableHint: ClaudioL10n(language: languageStore.language).text(
+                        .aiCueEligibilityUnavailable),
                     onConfigureCredential: {},
                     onPreviewCandidate: { _ in },
                     onAdoptCandidate: { _ in },

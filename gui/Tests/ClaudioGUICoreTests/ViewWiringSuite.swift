@@ -2702,7 +2702,9 @@ func runViewWiringSuites() {
                 && flatView.contains("selection.$aiSessionEndRequestRevision")
                 && flatView.contains("eventsEditorPresentation?.packs")
                 && flatView.contains("previewActionAvailable: editorAccess?.previewAction != nil")
-                && !flatView.contains("previewAvailability?.isAvailable == true")
+                && flatView.contains(
+                    "private var previewEnabled: Bool { !controlsUnavailable && previewActionAvailable }"
+                )
                 && !flatView.contains("SoundPacksWindowModel")
                 && !flatView.contains("AudioImportEnvironment")
                 && !flatView.contains("eventPreviewFileURL(")

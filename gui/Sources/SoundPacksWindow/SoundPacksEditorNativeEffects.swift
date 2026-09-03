@@ -29,6 +29,7 @@ package enum SoundPacksEditorNativeLifecycleEvent: Sendable {
 package final class SoundPacksEditorNativeEffectsDispatcher: ObservableObject {
     private let adapter: any SoundPacksEditorNativeEffectsAdapter
     private var operationTasks: [UUID: Task<Void, Never>] = [:]
+    private var hasActiveAudio = false
 
     package init(adapter: any SoundPacksEditorNativeEffectsAdapter) {
         self.adapter = adapter
@@ -43,10 +44,10 @@ package final class SoundPacksEditorNativeEffectsDispatcher: ObservableObject {
                 allowsMultipleSelection: bindTo == nil)
             return .importAudio(permit: permit, sources: sources, bindTo: bindTo)
         case .playAudio(let fileURL, let volume):
-            _ = adapter.playAudio(fileURL: fileURL, volume: volume)
+            _ = playAudio(fileURL: fileURL, volume: volume)
             return nil
         case .stopAudio:
-            adapter.stopAudio()
+            stopActiveAudio()
             return nil
         case .reveal(let fileURL):
             adapter.revealInFinder(fileURL: fileURL)
@@ -64,7 +65,38 @@ package final class SoundPacksEditorNativeEffectsDispatcher: ObservableObject {
             case .nativeEffect(.playAudio(let fileURL, let volume)) =
                 owner.send(.invoke(action))
         else { return nil }
-        return adapter.playAudio(fileURL: fileURL, volume: volume)
+        return playAudio(fileURL: fileURL, volume: volume)
+    }
+
+    /// AI candidates are validated temporary assets, not Sound Pack mappings. They still execute
+    /// through the retained native adapter so Events audio has exactly one playback owner.
+    package func playAICueCandidate(
+        _ candidate: AICueCandidate,
+        volume: Double
+    ) -> TimeInterval? {
+        playAudio(fileURL: candidate.asset.fileURL, volume: volume)
+    }
+
+    /// Stops whichever Event or AI preview the retained adapter currently owns. Resolving the
+    /// stop action directly from the owner avoids route-filtered view getters and never retires a
+    /// newly activated context.
+    package func stopPreview(owner: SoundPacksEditorOwner) {
+        guard hasActiveAudio else { return }
+        let result: SoundPacksEditorCommandResult
+        switch owner.presentation.mode {
+        case .inactive:
+            stopActiveAudio()
+            return
+        case .sounds(let sounds):
+            result = owner.send(.invoke(sounds.stopPreviewAction))
+        case .events(let events):
+            result = owner.send(.invoke(events.stopPreviewAction))
+        }
+        guard case .nativeEffect(.stopAudio) = result else {
+            stopActiveAudio()
+            return
+        }
+        stopActiveAudio()
     }
 
     /// Consumes only the instantaneous native-effect branch. Async owner operations are retained
@@ -88,24 +120,31 @@ package final class SoundPacksEditorNativeEffectsDispatcher: ObservableObject {
     ) {
         switch event {
         case .soundsViewDisappeared:
-            guard case .sounds(let sounds) = owner.presentation.mode else { return }
-            consume(owner.send(.invoke(sounds.stopPreviewAction)), owner: owner)
+            guard case .sounds = owner.presentation.mode else { return }
+            stopPreview(owner: owner)
             _ = owner.send(.activate(.inactive))
         case .eventsViewDisappeared:
-            guard case .events(let events) = owner.presentation.mode else { return }
-            consume(owner.send(.invoke(events.stopPreviewAction)), owner: owner)
+            guard case .events = owner.presentation.mode else { return }
+            stopPreview(owner: owner)
             _ = owner.send(.activate(.inactive))
         case .settingsWindowWillClose:
-            switch owner.presentation.mode {
-            case .inactive:
-                return
-            case .sounds(let sounds):
-                consume(owner.send(.invoke(sounds.stopPreviewAction)), owner: owner)
-            case .events(let events):
-                consume(owner.send(.invoke(events.stopPreviewAction)), owner: owner)
+            stopPreview(owner: owner)
+            if owner.presentation.mode != .inactive {
+                _ = owner.send(.activate(.inactive))
             }
-            _ = owner.send(.activate(.inactive))
         }
+    }
+
+    private func playAudio(fileURL: URL, volume: Double) -> TimeInterval? {
+        let duration = adapter.playAudio(fileURL: fileURL, volume: volume)
+        hasActiveAudio = duration != nil
+        return duration
+    }
+
+    private func stopActiveAudio() {
+        guard hasActiveAudio else { return }
+        hasActiveAudio = false
+        adapter.stopAudio()
     }
 
     /// Captures the owner-signed Event permit before the item-provider suspension. A provider
