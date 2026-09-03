@@ -2304,6 +2304,13 @@ func runSoundPacksRefreshSuites() async {
             atPath: productionSourcesRoot.path)
         var rawModelConstructionSites: [String] = []
         var rawModelReferenceSites: [String] = []
+        let retiredCompatibilityTypes = [
+            "SoundPacksWindowAudioImportCompletion",
+            "AICueAdoptionRequest",
+            "AICueAdoptionError",
+            "AICuePostImportFailure",
+        ]
+        var retiredCompatibilityTypeSites: [String: [String]] = [:]
         while let name = productionEnumerator?.nextObject() as? String {
             guard name.hasSuffix(".swift"),
                 let code = soundPacksCode("gui/Sources/\(name)")
@@ -2313,6 +2320,9 @@ func runSoundPacksRefreshSuites() async {
             }
             if code.contains("SoundPacksWindowModel(") {
                 rawModelConstructionSites.append(name)
+            }
+            for type in retiredCompatibilityTypes where code.contains(type) {
+                retiredCompatibilityTypeSites[type, default: []].append(name)
             }
         }
         let modelImplementation =
@@ -2333,6 +2343,28 @@ func runSoundPacksRefreshSuites() async {
                 && !modelImplementation.contains("@Published"),
             "raw window model 只能经 owner settled callback 发布 coherent projection，"
                 + "不得保留独立 observation seam")
+        expect(
+            !model.contains("audioImportExecutor")
+                && !model.contains("func importSelectedAudioFiles(")
+                && !model.contains("func previewFileForSelectedEvent(")
+                && !model.contains("func assignImportedAudioFile(")
+                && !model.contains("func adoptAICue(")
+                && !model.contains("func refreshAICueAdoptionSnapshot("),
+            "raw model 的 import/preview/direct-bind/AI adoption compatibility interface 必须完整删除")
+        expect(
+            retiredCompatibilityTypeSites.isEmpty,
+            "owner interface 替代后不得继续 shipping 专用 raw-model DTO/error，实得 "
+                + "\(retiredCompatibilityTypeSites)")
+        expect(
+            !model.contains("package var managedScopeIsInvalid")
+                && !model.contains("package var managedSurfaceProfileIsMalformed")
+                && !model.contains("package var audioInventoryError")
+                && !model.contains("package var selectedPackIsReferenced")
+                && !model.contains("package var selectedPackCanRestoreFactory")
+                && !model.contains("package var hasFactoryPacks")
+                && !model.contains("package var starredPacksFailureReason")
+                && !model.contains("package func completeSynchronousWrite("),
+            "raw model 只供旧测试使用的 getter/wrapper 必须删除，保留行为应经 owner interface 验证")
         expect(
             rawModelConstructionSites == ["ClaudioGUICore/SoundPacksEditorOwner.swift"],
             "shipping/DEBUG production 只能由 owner implementation 构造 raw model，实得 "
