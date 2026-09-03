@@ -313,6 +313,23 @@ func runSoundPacksRefreshSuites() async {
             "复制、恢复、使用与重试的真控件/焦点必须由同一 owner capability 投影驱动")
     }
 
+    suite("SoundPacksRefreshCoordinator：completion 只发布 revision，不返回 caller refresh flag") {
+        guard
+            let coordinator = soundPacksCode(
+                "gui/Sources/ClaudioGUICore/SoundPacksRefreshCoordinator.swift"),
+            let model = soundPacksCode(
+                "gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift")
+        else {
+            expect(false, "读不到 refresh coordinator 或 window model source")
+            return
+        }
+
+        expect(
+            !coordinator.contains("SoundPacksRefreshEffect")
+                && !model.contains("SoundPacksRefreshEffect"),
+            "revision 与 requires-refresh facts 已完整表达刷新语义；legacy caller effect enum/return seam 必须删除")
+    }
+
     suite("SoundPacksRefreshCoordinator：窗口成功写只发 panel full reload") {
         let coordinator = SoundPacksRefreshCoordinator()
 
