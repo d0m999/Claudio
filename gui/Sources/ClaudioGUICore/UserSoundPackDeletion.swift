@@ -86,11 +86,18 @@ public func deleteUserSoundPack(
         }
 
         let packsOutcome = withNonBlockingLock(path: environment.packsLockFile.path) {
-            deleteUserSoundPackWhileLocked(
+            #if DEBUG
+            let afterIsolation =
+                environment.afterUserPackIsolationForTesting ?? { (_: URL) throws in }
+            #else
+            let afterIsolation = { (_: URL) throws in }
+            #endif
+            return deleteUserSoundPackWhileLocked(
                 packID: packID,
                 userPacksDirectory: userPacksDirectory,
                 expected: expected,
                 beforeIsolation: beforeIsolation,
+                afterIsolation: afterIsolation,
                 moveToTrash: moveToTrash)
         }
         switch packsOutcome {
@@ -148,6 +155,7 @@ private func deleteUserSoundPackWhileLocked(
     userPacksDirectory: URL,
     expected: URL,
     beforeIsolation: @MainActor (URL) throws -> Void,
+    afterIsolation: @MainActor (URL) throws -> Void,
     moveToTrash: @MainActor (URL) throws -> URL?
 ) -> Result<UserSoundPackDeletionOutcome, UserSoundPackDeletionError> {
     let rootDescriptor = userPacksDirectory.withUnsafeFileSystemRepresentation { path in
@@ -239,6 +247,19 @@ private func deleteUserSoundPackWhileLocked(
         userPacksDirectory
         .appendingPathComponent(isolationName, isDirectory: true)
         .appendingPathComponent(packID, isDirectory: true)
+    do {
+        try afterIsolation(isolated)
+    } catch {
+        if restoreIsolatedPack(
+            packID: packID,
+            rootDescriptor: rootDescriptor,
+            isolationDescriptor: isolationDescriptor)
+        {
+            return .failure(.trashFailed(reason: error.localizedDescription))
+        }
+        return .failure(
+            .trashFailedRetained(reason: error.localizedDescription, path: isolated.path))
+    }
     var isolatedStatus = stat()
     let isolatedStatusResult = packID.withCString {
         fstatat(isolationDescriptor, $0, &isolatedStatus, AT_SYMLINK_NOFOLLOW)

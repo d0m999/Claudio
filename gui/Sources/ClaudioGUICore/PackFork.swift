@@ -54,7 +54,7 @@ public enum PackForkError: Error, Sendable, Equatable {
 /// read-modify-write primitive (``mutateManifestJSON(at:lockFile:_:)``) directly — never
 /// `bindEventToManifest` — so only the four cases that primitive itself can actually produce
 /// (`.manifestUnreadable`, `.writeFailed`, `.lockBusy`, `.lockFailed`) are reachable here in
-/// practice; the other three are `bindEventToManifest`'s own file-level pre-check cases (see
+/// practice; the other four are `bindEventToManifest`'s own file-level/CAS pre-check cases (see
 /// ``ManifestBindError``'s doc comment) and are handled below defensively, never expected to
 /// fire from this call site.
 private func manifestRewriteReason(_ error: ManifestBindError) -> String {
@@ -66,6 +66,7 @@ private func manifestRewriteReason(_ error: ManifestBindError) -> String {
     case .packNotFound(let packID): return "包目录未找到：\(packID)"
     case .unsafeFileName: return "文件名不安全"
     case .fileNotFound(let fileName): return "文件不存在：\(fileName)"
+    case .targetChanged: return "目标事件在操作期间已改变"
     }
 }
 
@@ -121,7 +122,9 @@ public func occupiedPackBasenames(in directory: URL) throws -> Set<String> {
     }
 }
 
-private func makeForkStagingRoot(in userPacksDirectory: URL, newID: String) -> Result<URL, PackForkError> {
+private func makeForkStagingRoot(in userPacksDirectory: URL, newID: String) -> Result<
+    URL, PackForkError
+> {
     let templateURL = userPacksDirectory.appendingPathComponent(".\(newID).tmp-XXXXXX")
     var template = Array(templateURL.path.utf8CString)
     let created = template.withUnsafeMutableBufferPointer { buffer in
