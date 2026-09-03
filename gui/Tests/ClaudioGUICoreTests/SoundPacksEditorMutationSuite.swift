@@ -1639,8 +1639,11 @@ func runSoundPacksEditorMutationSuites() async {
                 "fork changed 必须发布一次 panel refresh")
             expect(
                 owner.presentation.pendingAnnouncement?.kind
-                    == .operation(kind: .fork, completion: .succeeded),
-                "fork success 必须排入一个 compound semantic announcement")
+                    == .windowStatus(.packFork)
+                    && owner.presentation.pendingAnnouncement?.messageText?.resolve(
+                        language: .zhHans)
+                        == "已创建并选中「factory-a」。原内置包未更改；需要时可点「用这个包」。",
+                "fork success 必须只排入 model 已生成的精确信息型 semantic announcement")
         }
     }
 

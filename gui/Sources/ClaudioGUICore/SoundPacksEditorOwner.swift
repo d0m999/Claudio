@@ -1244,16 +1244,15 @@ public final class SoundPacksEditorOwner: ObservableObject {
         let phase = receipt.phase
         operationStates[operationID] = state.withPhase(phase)
         if case .succeeded = phase {
-            // The operation receipt is the semantic debt for this synchronous transition.
-            // Retain legacy model statuses for direct model consumers, but do not enqueue a
-            // second owner debt describing the same completed mutation.
-            for status in seed.windowStatuses {
-                seenStatusRevisions.insert(status.revision)
+            // Preserve the model's exact informational status (pack identity, retained salvage,
+            // and other user-facing facts) as the single operation debt. A successful receipt
+            // without a status still needs the privacy-preserving generic fallback.
+            if !ingestAnnouncements(from: seed.windowStatuses, operationID: operationID) {
+                enqueueOperationAnnouncement(
+                    state.kind,
+                    completion: .succeeded,
+                    operationID: operationID)
             }
-            enqueueOperationAnnouncement(
-                state.kind,
-                completion: .succeeded,
-                operationID: operationID)
         } else if let completion = phase.announcementCompletion,
             !ingestAnnouncements(from: seed.windowStatuses, operationID: operationID)
         {
