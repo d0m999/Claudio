@@ -316,22 +316,26 @@ func runSettingsPresentationSliceSuites() {
 
     #if DEBUG
     suite("Settings presentation fixture：DEBUG seam 随机隔离且只暴露真实 owner") {
-        withTempDirectory { sentinelRoot in
-            let sentinel = sentinelRoot.appendingPathComponent("user-path-sentinel")
+        withTempDirectory { fixtureParent in
+            let sentinel = fixtureParent.appendingPathComponent("user-path-sentinel")
             let sentinelBytes = Data("do-not-touch".utf8)
             try? sentinelBytes.write(to: sentinel)
 
             let first = SettingsPresentationFixtures.generalLogin(
+                temporaryParent: fixtureParent,
                 language: .english,
                 loginItemRegistration: .requiresApproval,
                 platformActionResult: .performed)
-            let second = SettingsPresentationFixtures.generalLogin()
-            let temporaryRoot = FileManager.default.temporaryDirectory.standardizedFileURL.path
+            let second = SettingsPresentationFixtures.generalLogin(
+                temporaryParent: fixtureParent)
 
             expect(
-                first.temporaryRoot.standardizedFileURL.path.hasPrefix(temporaryRoot)
+                first.temporaryRoot.deletingLastPathComponent().standardizedFileURL
+                    == fixtureParent.standardizedFileURL
+                    && second.temporaryRoot.deletingLastPathComponent().standardizedFileURL
+                        == fixtureParent.standardizedFileURL
                     && first.temporaryRoot != second.temporaryRoot,
-                "每个 fixture 必须使用唯一的系统临时根")
+                "每个 fixture 必须在 supplied parent 下使用不同 UUID child root")
             expect(
                 first.session.state.loginItemRegistration == .requiresApproval
                     && first.session.perform(.openCalendarPrivacySettings) == .performed
@@ -344,9 +348,14 @@ func runSettingsPresentationSliceSuites() {
             let hostingView = NSHostingView(rootView: first.rootView)
             hostingView.frame = NSRect(x: 0, y: 0, width: 620, height: 520)
             hostingView.layoutSubtreeIfNeeded()
+            let secondHostingView = NSHostingView(rootView: second.rootView)
+            secondHostingView.frame = NSRect(x: 0, y: 0, width: 620, height: 520)
+            secondHostingView.layoutSubtreeIfNeeded()
             expect(
-                hostingView.fittingSize.width > 0 && hostingView.fittingSize.height > 0,
-                "fixture 必须挂载同一个 production SettingsRootView")
+                hostingView.fittingSize.width > 0 && hostingView.fittingSize.height > 0
+                    && secondHostingView.fittingSize.width > 0
+                    && secondHostingView.fittingSize.height > 0,
+                "两个隔离 fixture 都必须挂载同一个 production SettingsRootView")
             expect(
                 (try? Data(contentsOf: sentinel)) == sentinelBytes,
                 "fixture construction 与 mount 不得访问 supplied sentinel user path")
@@ -365,6 +374,8 @@ func runSettingsPresentationSliceSuites() {
             "fixture source 必须从首行到末行由 DEBUG guard 包住")
         expect(
             fixture.contains("SoundPacksEditorOwner.stateGalleryFixture(")
+                && fixture.contains(
+                    "temporaryParent: URL = FileManager.default.temporaryDirectory")
                 && !fixture.contains("SoundPacksWindowModel")
                 && !fixture.contains("homeDirectoryForCurrentUser")
                 && !fixture.contains("~/.claudio")
