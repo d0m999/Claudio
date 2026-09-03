@@ -1597,7 +1597,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
             makeAction(
                 .preview,
                 binding: .preview(fileURL: target),
-                seed: seed))
+                seed: seed)
+        )
     }
 
     private func scopeAvailability(

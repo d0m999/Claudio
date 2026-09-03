@@ -250,8 +250,7 @@ private struct EventSettingsLayoutFrame: View {
     @StateObject private var aiCueViewModel: AICueGenerationViewModel
     @StateObject private var soundPacksEditorOwner: SoundPacksEditorOwner
     @StateObject private var panelModel: PanelConfigController
-    @StateObject private var soundPacksEditorNativeEffects:
-        SoundPacksEditorNativeEffectsDispatcher
+    @StateObject private var soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher
     private let width: CGFloat
 
     init(
@@ -329,7 +328,6 @@ private struct EventSettingsGalleryFixture {
         let environment = previewAudioImportEnvironment
         let configFile = root.appendingPathComponent("config.json")
         let configLock = root.appendingPathComponent("config.lock")
-        let coordinator = SoundPacksRefreshCoordinator()
 
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -362,20 +360,19 @@ private struct EventSettingsGalleryFixture {
             preconditionFailure("Unable to build isolated Events gallery fixture: \(error)")
         }
 
-        let library = SoundPackLibrary(environment: environment)
         panel = PanelConfigController(
             configFile: configFile,
             lockFile: configLock,
             environment: environment,
-            soundPackLibrary: library,
-            soundPacksRefreshCoordinator: coordinator)
+            soundPackLibrary: previewStateGallerySoundPackLibrary,
+            soundPacksRefreshCoordinator: previewStateGalleryRefreshCoordinator)
         panel.selectSoundSurface(.workBuddy)
         owner = SoundPacksEditorOwner(
             configFile: configFile,
             lockFile: configLock,
             environment: environment,
-            soundPackLibrary: library,
-            refreshCoordinator: coordinator)
+            soundPackLibrary: previewStateGallerySoundPackLibrary,
+            refreshCoordinator: previewStateGalleryRefreshCoordinator)
     }
 }
 
@@ -1531,7 +1528,7 @@ private struct GalleryFrame<Content: View>: View {
     }
 }
 
-// MARK: - Preview-only support environment (never touches disk)
+// MARK: - Preview-only support environment (never touches user data)
 
 /// A fixed-duration stub — the gallery never actually imports a file (every drop-zone
 /// frame's state is pinned via `previewState:`, not produced by running the pipeline),
@@ -1553,6 +1550,13 @@ private let previewAudioImportEnvironment = AudioImportEnvironment(
     durationProbe: PreviewDurationProbe(),
     packsLockFile: previewStateGalleryRoot.appendingPathComponent("packs.lock")
 )
+
+@MainActor
+private let previewStateGallerySoundPackLibrary = SoundPackLibrary(
+    environment: previewAudioImportEnvironment)
+
+@MainActor
+private let previewStateGalleryRefreshCoordinator = SoundPacksRefreshCoordinator()
 
 // MARK: - Preview providers (classic `PreviewProvider` ONLY — `#Preview` does not
 // compile under CommandLineTools, see this file's header doc comment)

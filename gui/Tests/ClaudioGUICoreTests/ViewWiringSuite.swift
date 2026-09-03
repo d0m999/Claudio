@@ -2701,6 +2701,8 @@ func runViewWiringSuites() {
                 && flatView.contains("selection.$previewStopRequestRevision")
                 && flatView.contains("selection.$aiSessionEndRequestRevision")
                 && flatView.contains("eventsEditorPresentation?.packs")
+                && flatView.contains("previewAvailability: editorAccess?.previewAvailability")
+                && flatView.contains("previewAvailability?.isAvailable == true")
                 && !flatView.contains("SoundPacksWindowModel")
                 && !flatView.contains("AudioImportEnvironment")
                 && !flatView.contains("eventPreviewFileURL(")
@@ -2723,6 +2725,7 @@ func runViewWiringSuites() {
         expect(
             flatView.contains("EventSettingsAICueServiceCard(")
                 && flatView.contains("EventSettingsAICueComposerView(")
+                && flatView.contains("route: editorRoute")
                 && flatView.contains("eventAccess.first(where:")
                 && flatView.contains("?.adoptionAvailability")
                 && !flatView.contains("AICueAdoptionTarget")

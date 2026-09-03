@@ -140,6 +140,24 @@ private actor ComposerGeneratorFixture: AICueGenerating {
     }
 }
 
+private actor SuspendedComposerAdoptionFixture {
+    private var continuation: CheckedContinuation<SoundPacksEditorOperationResult, Never>?
+
+    func run() async -> SoundPacksEditorOperationResult {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    var isSuspended: Bool { continuation != nil }
+
+    func resume(with result: SoundPacksEditorOperationResult) {
+        let continuation = continuation
+        self.continuation = nil
+        continuation?.resume(returning: result)
+    }
+}
+
 @MainActor
 func runAICueGenerationViewModelSuites() async {
     await suite("AI 提示音状态层：迟到的同 profile 状态读取不得覆盖新凭据 mutation") {
@@ -393,6 +411,78 @@ func runAICueGenerationViewModelSuites() async {
         expect(viewModel.adoptingCandidateID == nil, "失败恢复候选态时必须清理忙状态身份")
     }
 
+    await suite("AI 提示音状态层：orphan 诚实可见且保留候选恢复路径") {
+        await withTempDirectory { root in
+            let generation = aiCueComposerGeneration(root: root)
+            let generator = ComposerGeneratorFixture(mode: .success(generation))
+            let viewModel = AICueGenerationViewModel(
+                credentialManager: ComposerCredentialManagerFixture(
+                    status: .stored(verification: .verified, hasPendingReplacement: false)),
+                generator: generator,
+                providerProfileID: .elevenLabsGlobal)
+            let editor = await aiCueComposerEditorFixture(
+                root: root.appendingPathComponent("editor"),
+                generationID: generation.id)
+            let permit = aiCueComposerAdoptionPermit(from: editor.owner)
+            let imported = aiCueImportedFixture(root: root, packID: "workbuddy-pack")
+            viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+            viewModel.updateDescription("短促木琴")
+            viewModel.startGeneration(locale: "zh-Hans")
+            await waitForAICueViewModel { viewModel.phase == .candidatesReady }
+
+            viewModel.adopt(candidateID: generation.candidates[0].id, permit: permit) {
+                _, _, _ in
+                .adoptionOrphan(imported: imported, failure: .mutationFailed)
+            }
+            await waitForAICueViewModel { viewModel.phase != .adopting }
+
+            expect(viewModel.phase == .candidatesReady, "orphan 后必须保留可恢复的候选态")
+            expect(
+                viewModel.failure
+                    == .adoption(.importedButNotBound(fileName: imported.fileName)),
+                "orphan 必须暴露已导入但未绑定的诚实语义")
+            expect(viewModel.generation == generation, "orphan 不得伪造 applied 或清掉可恢复候选")
+            expect(viewModel.adoptionOutcome == nil, "orphan 绝不能产生 adopted outcome")
+        }
+    }
+
+    await suite("AI 提示音状态层：隐藏后的迟到 adoption 只清理 generation 不复活 UI") {
+        await withTempDirectory { root in
+            let generation = aiCueComposerGeneration(root: root)
+            let generator = ComposerGeneratorFixture(mode: .success(generation))
+            let viewModel = AICueGenerationViewModel(
+                credentialManager: ComposerCredentialManagerFixture(
+                    status: .stored(verification: .verified, hasPendingReplacement: false)),
+                generator: generator,
+                providerProfileID: .elevenLabsGlobal)
+            let editor = await aiCueComposerEditorFixture(
+                root: root.appendingPathComponent("editor"),
+                generationID: generation.id)
+            let permit = aiCueComposerAdoptionPermit(from: editor.owner)
+            let gate = SuspendedComposerAdoptionFixture()
+            viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+            viewModel.updateDescription("短促木琴")
+            viewModel.startGeneration(locale: "zh-Hans")
+            await waitForAICueViewModel { viewModel.phase == .candidatesReady }
+
+            viewModel.adopt(candidateID: generation.candidates[0].id, permit: permit) {
+                _, _, _ in await gate.run()
+            }
+            await waitForSuspendedComposerAdoption(gate)
+            viewModel.endSession()
+            await gate.resume(with: .rejected(.targetChanged))
+            await waitForAICueDiscard(generator: generator, generationID: generation.id)
+
+            expect(
+                viewModel.session == nil && viewModel.phase == .editing,
+                "隐藏后迟到 completion 不得重开或推进已结束 composer")
+            expect(
+                viewModel.generation == nil && viewModel.failure == nil
+                    && viewModel.adoptionOutcome == nil,
+                "迟到 completion 只能结算 owner truth 与清理临时 generation，不得复活旧 UI")
+        }
+    }
+
     await suite("AI 提示音状态层：替换 key 失败时保留已配置状态与描述") {
         let credentials = ComposerCredentialManagerFixture(
             status: .stored(verification: .verified, hasPendingReplacement: false),
@@ -593,6 +683,18 @@ private func waitForSuspendedCredentialStatus(
     }
     await MainActor.run {
         expect(false, "等待悬挂 credential status 读取超时")
+    }
+}
+
+private func waitForSuspendedComposerAdoption(
+    _ adoption: SuspendedComposerAdoptionFixture
+) async {
+    for _ in 0..<2_000 {
+        if await adoption.isSuspended { return }
+        await Task.yield()
+    }
+    await MainActor.run {
+        expect(false, "等待悬挂 adoption operation 超时")
     }
 }
 

@@ -60,8 +60,9 @@ package final class SoundPacksEditorNativeEffectsDispatcher: ObservableObject {
         _ action: SoundPackEditorAction,
         owner: SoundPacksEditorOwner
     ) -> TimeInterval? {
-        guard case .nativeEffect(.playAudio(let fileURL, let volume)) =
-            owner.send(.invoke(action))
+        guard
+            case .nativeEffect(.playAudio(let fileURL, let volume)) =
+                owner.send(.invoke(action))
         else { return nil }
         return adapter.playAudio(fileURL: fileURL, volume: volume)
     }

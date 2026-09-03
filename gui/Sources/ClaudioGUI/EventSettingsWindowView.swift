@@ -35,6 +35,7 @@ struct EventSettingsWindowView: View {
     @State private var previewAllTask: Task<Void, Never>?
     @State private var previewAllFailureEvent: Event?
     @State private var previewAllCoordinator = EventPreviewSequenceCoordinator()
+    @State private var isEventsDestinationActive = false
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
     private var interfaceTextSize: ClaudioInterfaceTextSize { languageStore.interfaceTextSize }
@@ -57,12 +58,16 @@ struct EventSettingsWindowView: View {
     }
     private var eventsEditorPresentation: EventsSoundPackPresentation? {
         guard case .events(let presentation) = soundPacksEditorOwner.presentation.mode,
-            presentation.route == selection.route,
+            presentation.route == editorRoute,
             presentation.requestRevision == selection.routeRequestRevision
         else {
             return nil
         }
         return presentation
+    }
+    private var editorRoute: EventSettingsWindowRoute {
+        guard let session = aiCueViewModel.session else { return selection.route }
+        return EventSettingsWindowRoute(scope: session.scope, event: session.event)
     }
     private var editorLibraryHasUsableSnapshot: Bool {
         switch soundPacksEditorOwner.presentation.library {
@@ -84,6 +89,16 @@ struct EventSettingsWindowView: View {
             masterVolume: model.config.masterVolume,
             language: languageStore.language,
             configWritesAllowed: model.surfaceSoundIssue == nil)
+    }
+    private var previewableEvents: [Event] {
+        guard let editor = eventsEditorPresentation else { return [] }
+        return events.compactMap { presentation in
+            guard presentation.controls.previewEnabled,
+                editor.eventAccess.first(where: { $0.event == presentation.event })?
+                    .previewAvailability.isAvailable == true
+            else { return nil }
+            return presentation.event
+        }
     }
 
     var body: some View {
@@ -116,6 +131,7 @@ struct EventSettingsWindowView: View {
             focusedTarget = selection.focusTarget
         }
         .onAppear {
+            isEventsDestinationActive = true
             #if DEBUG
             if reloadsOnAppear {
                 model.reload()
@@ -164,12 +180,13 @@ struct EventSettingsWindowView: View {
                 languageStore: languageStore)
         }
         .onDisappear {
+            isEventsDestinationActive = false
             selection.leaveDestination()
             cancelPreviewSequenceState()
+            closeAICueComposer()
             soundPacksEditorNativeEffects.handleLifecycle(
                 .eventsViewDisappeared,
                 owner: soundPacksEditorOwner)
-            closeAICueComposer()
         }
     }
 
@@ -352,7 +369,7 @@ struct EventSettingsWindowView: View {
             .buttonStyle(.bordered)
             .disabled(
                 routeIsUnavailable
-                    || !events.contains(where: { $0.controls.previewEnabled })
+                    || previewableEvents.isEmpty
             )
             .focused($focusedTarget, equals: .previewAll)
             .accessibilityLabel(
@@ -533,18 +550,11 @@ struct EventSettingsWindowView: View {
             return
         }
         stopAllPreviews()
-        let previewEvents = events.compactMap { presentation -> Event? in
-            guard presentation.controls.previewEnabled,
-                eventsEditorPresentation?.eventAccess.first(where: {
-                    $0.event == presentation.event
-                })?.previewAction != nil
-            else { return nil }
-            return presentation.event
-        }
+        let eventsToPreview = previewableEvents
         let generation = selection.beginPreviewSequence()
         previewAllTask = Task { @MainActor in
             let result = await previewAllCoordinator.run(
-                events: previewEvents,
+                events: eventsToPreview,
                 onPlay: { event in
                     guard
                         let action = eventsEditorPresentation?.eventAccess.first(where: {
@@ -618,12 +628,16 @@ struct EventSettingsWindowView: View {
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(Array(events.enumerated()), id: \.element.id) {
                                     index, event in
-                                    let eligibility =
+                                    let editorAccess =
                                         eventsEditorPresentation?.eventAccess.first(where: {
                                             $0.event == event.event
-                                        })?.adoptionAvailability ?? .ineligible(.writesStopped)
+                                        })
+                                    let eligibility =
+                                        editorAccess?.adoptionAvailability
+                                        ?? .ineligible(.writesStopped)
                                     EventSettingsEventRow(
                                         presentation: event,
+                                        previewAvailability: editorAccess?.previewAvailability,
                                         windowLayout: windowLayout,
                                         language: languageStore.language,
                                         focusedTarget: $focusedTarget,
@@ -825,9 +839,10 @@ struct EventSettingsWindowView: View {
     private func playPreview(_ event: Event) {
         stopCandidatePreview()
         stopAllPreviews()
-        guard let action = eventsEditorPresentation?.eventAccess.first(where: {
-            $0.event == event
-        })?.previewAction,
+        guard
+            let action = eventsEditorPresentation?.eventAccess.first(where: {
+                $0.event == event
+            })?.previewAction,
             soundPacksEditorNativeEffects.playPreview(
                 action,
                 owner: soundPacksEditorOwner) != nil
@@ -856,6 +871,7 @@ struct EventSettingsWindowView: View {
         stopCandidatePreview()
         aiCueViewModel.endSession()
         selection.noteAISessionEnded()
+        activateEventsEditor()
         if hadSession {
             onAnnouncement?(
                 l10n.text(
@@ -919,10 +935,11 @@ struct EventSettingsWindowView: View {
     }
 
     private func activateEventsEditor() {
+        guard isEventsDestinationActive else { return }
         _ = soundPacksEditorOwner.send(
             .activate(
                 .events(
-                    route: selection.route,
+                    route: editorRoute,
                     requestRevision: selection.routeRequestRevision,
                     candidateGenerationID: aiCueViewModel.generation?.id)))
     }
@@ -970,6 +987,7 @@ struct EventSettingsWindowView: View {
 @MainActor
 private struct EventSettingsEventRow: View {
     let presentation: PanelEventPresentation
+    let previewAvailability: EventPreviewAvailability?
     let windowLayout: EventSettingsWindowLayout
     let language: ClaudioAppLanguage
     let onGenerateAICue: () -> Void
@@ -988,6 +1006,7 @@ private struct EventSettingsEventRow: View {
 
     init(
         presentation: PanelEventPresentation,
+        previewAvailability: EventPreviewAvailability?,
         windowLayout: EventSettingsWindowLayout,
         language: ClaudioAppLanguage,
         focusedTarget: FocusState<EventSettingsFocusTarget?>.Binding,
@@ -1002,6 +1021,7 @@ private struct EventSettingsEventRow: View {
         writeDisabledReason: String?
     ) {
         self.presentation = presentation
+        self.previewAvailability = previewAvailability
         self.windowLayout = windowLayout
         self.language = language
         self.focusedTarget = focusedTarget
@@ -1104,8 +1124,12 @@ private struct EventSettingsEventRow: View {
     private var previewHint: String {
         if controlsUnavailable { return presentation.capabilityText }
         return localizedEventPreviewHint(
-            presentation.controls.previewAvailability,
+            previewAvailability ?? presentation.controls.previewAvailability,
             language: language)
+    }
+
+    private var previewEnabled: Bool {
+        !controlsUnavailable && previewAvailability?.isAvailable == true
     }
 
     private var capabilityBadge: some View {
@@ -1174,11 +1198,11 @@ private struct EventSettingsEventRow: View {
             }
             .buttonStyle(ClaudioIconButtonStyle())
             .foregroundColor(
-                presentation.controls.previewEnabled
+                previewEnabled
                     ? ClaudioTheme.event(presentation.event, colorScheme)
                     : ClaudioTheme.secondaryText(colorScheme)
             )
-            .disabled(!presentation.controls.previewEnabled)
+            .disabled(!previewEnabled)
             .focused(focusedTarget, equals: .preview(presentation.event))
             .help(previewHint)
             .accessibilityLabel(
