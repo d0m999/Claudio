@@ -683,6 +683,27 @@ func runSoundPacksEditorInterfaceSuites() async {
             expect(
                 owner.send(.invoke(oldUse)) == .rejected(.staleAction),
                 "上一 fresh generation 的 write capability 必须失效")
+
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: EventSettingsWindowRoute(
+                            scope: .global,
+                            event: .stop),
+                        requestRevision: 28,
+                        candidateGenerationID: UUID())))
+            guard case .events(let staleEvents) = owner.presentation.mode,
+                let staleStop = staleEvents.eventAccess.first(where: { $0.event == .stop })
+            else {
+                expect(false, "non-fresh previous 必须仍能投影 Events 可见事实")
+                return
+            }
+            expect(
+                staleStop.previewAvailability.isAvailable,
+                "non-fresh previous 可保留上次 preview 语义，供视图解释禁用原因")
+            expect(
+                staleStop.previewAction == nil && staleEvents.adoptionPermit == nil,
+                "non-fresh previous 的 preview/adoption 可执行性必须由缺席 capability fail closed")
         }
     }
 

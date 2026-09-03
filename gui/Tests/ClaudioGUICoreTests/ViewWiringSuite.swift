@@ -2701,8 +2701,8 @@ func runViewWiringSuites() {
                 && flatView.contains("selection.$previewStopRequestRevision")
                 && flatView.contains("selection.$aiSessionEndRequestRevision")
                 && flatView.contains("eventsEditorPresentation?.packs")
-                && flatView.contains("previewAvailability: editorAccess?.previewAvailability")
-                && flatView.contains("previewAvailability?.isAvailable == true")
+                && flatView.contains("previewActionAvailable: editorAccess?.previewAction != nil")
+                && !flatView.contains("previewAvailability?.isAvailable == true")
                 && !flatView.contains("SoundPacksWindowModel")
                 && !flatView.contains("AudioImportEnvironment")
                 && !flatView.contains("eventPreviewFileURL(")
@@ -2725,6 +2725,8 @@ func runViewWiringSuites() {
         expect(
             flatView.contains("EventSettingsAICueServiceCard(")
                 && flatView.contains("EventSettingsAICueComposerView(")
+                && flatView.contains(
+                    "adoptionEnabled: eventsEditorPresentation?.adoptionPermit != nil")
                 && flatView.contains("route: editorRoute")
                 && flatView.contains("eventAccess.first(where:")
                 && flatView.contains("?.adoptionAvailability")
@@ -2735,6 +2737,14 @@ func runViewWiringSuites() {
                     ".accessibilityIdentifier( \"event-settings.event.")
                 && flatViewWithStrings.contains(".ai-cue\")"),
             "AI 提示音必须作为事件设置的页面级服务与逐事件动作接入，并消费 fail-closed 采用资格")
+        expect(
+            !flatView.contains("NSSoundAudioPreviewPlayer")
+                && flatView.contains("soundPacksEditorNativeEffects.playAICueCandidate(")
+                && flatView.contains("soundPacksEditorNativeEffects.stopPreview(owner:")
+                && flatAIView.contains("let adoptionEnabled: Bool")
+                && flatAIView.contains("viewModel.phase == .adopting || !adoptionEnabled"),
+            "Event/AI preview 必须共用 retained native dispatcher；preview/adoption 按 capability presence 禁用"
+        )
         expect(
             flatView.contains("EventSettingsAICueCredentialSheet(")
                 && flatView.contains(

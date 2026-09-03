@@ -321,6 +321,24 @@ func runSoundPacksEditorNativeEffectsSuites() async {
                 dispatcher.playPreview(previewAction, owner: owner) == nil,
                 "Events preview action 必须 single-use")
 
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: EventSettingsWindowRoute(
+                            scope: .global,
+                            event: .notification),
+                        requestRevision: 609)))
+            dispatcher.stopPreview(owner: owner)
+            expect(
+                adapter.stopCount == 1,
+                "同页 route/Event 已切换后仍必须由 retained dispatcher 停掉旧试听")
+            expect(
+                {
+                    guard case .events(let current) = owner.presentation.mode else { return false }
+                    return current.route.event == .notification
+                }(),
+                "route 切换 stop 不得 retire 已接管的新 Events context")
+
             dispatcher.handleLifecycle(.eventsViewDisappeared, owner: owner)
             expect(
                 adapter.stopCount == 1 && owner.presentation.mode == .inactive,
@@ -339,6 +357,47 @@ func runSoundPacksEditorNativeEffectsSuites() async {
                     return false
                 }() && adapter.stopCount == 1,
                 "迟到的 Events disappear 不得 clobber 已接管 owner 的 Sounds context")
+        }
+    }
+
+    await suite("Sound editor native effects：AI candidate 与 Events 共用 retained playback lifecycle")
+    {
+        await withTempDirectory { root in
+            let fixture = makeSoundEditorFixture(root: root, packIDs: ["pack-a"])
+            let candidateURL = root.appendingPathComponent("candidate.mp3")
+            let generationID = UUID()
+            let candidate = AICueCandidate(
+                id: UUID(),
+                variant: .clear,
+                asset: AICueTemporaryAudioAsset(
+                    fileURL: candidateURL,
+                    byteCount: 12,
+                    sniffedFormat: .mp3),
+                durationMilliseconds: 250,
+                mediaType: "audio/mpeg",
+                provenance: AICueCandidateProvenance(
+                    providerID: .elevenLabs,
+                    profileID: .elevenLabsGlobal,
+                    modelID: "fixture",
+                    generationID: generationID,
+                    requestOrdinal: 1,
+                    providerRequestID: nil))
+            let adapter = RecordingSoundPacksEditorNativeEffectsAdapter(playbackDuration: 0.25)
+            let dispatcher = SoundPacksEditorNativeEffectsDispatcher(adapter: adapter)
+
+            expect(
+                dispatcher.playAICueCandidate(candidate, volume: 0.6) == 0.25,
+                "candidate 必须经同一 native adapter 开始播放并返回时长")
+            expect(
+                adapter.playRequests
+                    == [.init(fileURL: candidateURL, volume: 0.6)],
+                "candidate URL/volume 必须原样进入 retained playback adapter")
+
+            dispatcher.handleLifecycle(.settingsWindowWillClose, owner: fixture.owner)
+            dispatcher.handleLifecycle(.settingsWindowWillClose, owner: fixture.owner)
+            expect(
+                adapter.stopCount == 1,
+                "即使 editor context 已 inactive，Settings close 也必须 exact once 停止 candidate")
         }
     }
 }
