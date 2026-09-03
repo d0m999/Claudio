@@ -108,11 +108,20 @@ func runSettingsPresentationTargetSuites() {
                 expect(false, "读不到 \(path)")
                 return
             }
-            code[name] = strippingComments(source).codeWithoutStringLiterals
+            let scanned = strippingComments(source)
+            guard scanned.unmodeledConstructs.isEmpty else {
+                expect(false, "\(path) 含 source audit 无法建模的构造")
+                return
+            }
+            code[name] = scanned.codeWithoutStringLiterals
         }
         guard let component = code["component"], let panel = code["panel"],
             let events = code["events"], let session = code["session"],
             let gallery = code["gallery"],
+            let panelSliderScope = settingsBracedBlock(
+                after: "private var slider: some View", in: panel),
+            let eventSliderScope = settingsBracedBlock(
+                after: "private struct EventSettingsMasterVolumeControl: View", in: events),
             let refresh = settingsBracedBlock(after: "package func refreshLoginItem", in: session),
             let setEnabled = settingsBracedBlock(
                 after: "package func setLoginItemEnabled", in: session),
@@ -123,8 +132,8 @@ func runSettingsPresentationTargetSuites() {
             return
         }
         let flatComponent = collapsingWhitespace(component)
-        let flatPanel = collapsingWhitespace(panel)
-        let flatEvents = collapsingWhitespace(events)
+        let flatPanelSliderScope = collapsingWhitespace(panelSliderScope)
+        let flatEventSliderScope = collapsingWhitespace(eventSliderScope)
 
         expect(
             flatComponent.contains("package struct SharedMasterVolumeSlider: View")
@@ -134,12 +143,19 @@ func runSettingsPresentationTargetSuites() {
                 && !component.contains("focusIdentity")
                 && !component.contains(".focused("),
             "共享 slider 必须非泛型且不拥有 caller 的 focus identity")
-        expect(
-            flatPanel.contains(
-                "onCommit: onCommit ) .focused(focusedTarget, equals: .masterVolume)")
-                && flatEvents.contains(
-                    "onCommit: onCommit ) .focused(focusedTarget, equals: .masterVolume)"),
-            "Panel 与 Events caller 必须各自把原 exact focus identity 接回共享 slider")
+        for (name, scope) in [
+            ("Panel", flatPanelSliderScope), ("Events", flatEventSliderScope),
+        ] {
+            guard let slider = scope.range(of: "SharedMasterVolumeSlider("),
+                let focus = scope.range(of: ".focused(focusedTarget, equals: .masterVolume)")
+            else {
+                expect(false, "\(name) caller 必须同时包含 slider 与 exact focus identity")
+                continue
+            }
+            expect(
+                slider.lowerBound < focus.lowerBound,
+                "\(name) caller 必须在共享 slider 后接回原 exact focus identity")
+        }
         expect(
             !session.contains("loginItemSettings.$projection")
                 && !session.contains("Set<AnyCancellable>")
@@ -182,9 +198,19 @@ func runSettingsPresentationTargetSuites() {
             expect(false, "读不到 announcement/section/controller source")
             return
         }
-        let announcement = strippingComments(announcementSource).codeWithoutStringLiterals
-        let section = strippingComments(sectionSource).codeWithoutStringLiterals
-        let controller = strippingComments(controllerSource).codeWithoutStringLiterals
+        let announcementScan = strippingComments(announcementSource)
+        let sectionScan = strippingComments(sectionSource)
+        let controllerScan = strippingComments(controllerSource)
+        guard announcementScan.unmodeledConstructs.isEmpty,
+            sectionScan.unmodeledConstructs.isEmpty,
+            controllerScan.unmodeledConstructs.isEmpty
+        else {
+            expect(false, "announcement/section/controller source audit 遇到无法建模的构造")
+            return
+        }
+        let announcement = announcementScan.codeWithoutStringLiterals
+        let section = sectionScan.codeWithoutStringLiterals
+        let controller = controllerScan.codeWithoutStringLiterals
         guard
             let delivery = settingsBracedBlock(
                 after: "private func deliverPendingSettingsPresentationAnnouncement",
@@ -220,7 +246,10 @@ func runSettingsPresentationTargetSuites() {
         let scanned = strippingComments(controller)
         let code = scanned.codeWithoutStringLiterals
         guard scanned.unmodeledConstructs.isEmpty,
-            let subscription = settingsBracedBlock(
+            let subscriptionBody = settingsBracedBlock(
+                after: "settingsPresentationCancellable = settingsPresentationSession.$state",
+                in: code),
+            let subscriptionPrefix = settingsSinkStatementPrefix(
                 after: "settingsPresentationCancellable = settingsPresentationSession.$state",
                 in: code),
             let scheduler = settingsBracedBlock(
@@ -235,6 +264,16 @@ func runSettingsPresentationTargetSuites() {
             let showRetry = showWindow.range(
                 of: "scheduleSettingsPresentationAnnouncementDelivery()"),
             let deferredTurn = scheduler.range(of: "DispatchQueue.main.async"),
+            let latchGuard = scheduler.range(
+                of: "guard !settingsPresentationAnnouncementDeliveryScheduled"),
+            let latchSet = scheduler.range(
+                of: "settingsPresentationAnnouncementDeliveryScheduled = true"),
+            let deferredBody = settingsBracedBlock(
+                after: "DispatchQueue.main.async", in: scheduler),
+            let latchReset = deferredBody.range(
+                of: "settingsPresentationAnnouncementDeliveryScheduled = false"),
+            let deferredDelivery = deferredBody.range(
+                of: "deliverPendingSettingsPresentationAnnouncement()"),
             let currentHead = delivery.range(
                 of: "settingsPresentationSession.state.pendingAnnouncement"),
             let post = delivery.range(of: "announceBasicSettingsUpdate(sentence)"),
@@ -245,17 +284,19 @@ func runSettingsPresentationTargetSuites() {
         }
 
         expect(
-            subscription.contains("guard state.pendingAnnouncement != nil")
-                && subscription.contains("scheduleSettingsPresentationAnnouncementDelivery()")
-                && !subscription.contains(".map(")
-                && !subscription.contains(".removeDuplicates(")
-                && !subscription.contains("acknowledgeAnnouncement"),
+            subscriptionBody.contains("guard state.pendingAnnouncement != nil")
+                && subscriptionBody.contains("scheduleSettingsPresentationAnnouncementDelivery()")
+                && !subscriptionBody.contains("acknowledgeAnnouncement")
+                && !subscriptionPrefix.contains(".map(")
+                && !subscriptionPrefix.contains(".removeDuplicates("),
             "$state synchronous sink 必须直接读 emitted state，且只能调度、不能同步 post/ack")
         expect(
-            scheduler.contains("settingsPresentationAnnouncementDeliveryScheduled")
+            latchGuard.lowerBound < latchSet.lowerBound
+                && latchSet.lowerBound < deferredTurn.lowerBound
+                && latchReset.lowerBound < deferredDelivery.lowerBound
                 && !scheduler[..<deferredTurn.lowerBound].contains(
                     "settingsPresentationSession.state.pendingAnnouncement"),
-            "scheduler 在 async 前只能去重，不得读取仍处于 @Published willSet 的旧 head")
+            "scheduler 必须先 guard/set latch，deferred 内先清 latch 再 delivery，且 async 前不读旧 head")
         expect(
             delivery.contains("!isPresentingWindow")
                 && delivery.contains("window.isVisible")
@@ -268,6 +309,71 @@ func runSettingsPresentationTargetSuites() {
                 && didBecomeKey.contains("settingsPresentationSession.refreshLoginItem()")
                 && didBecomeKey.contains("scheduleSettingsPresentationAnnouncementDelivery()"),
             "pre-key debt 必须在 showWindow 清 latch 后及真实 didBecomeKey 中显式重试")
+    }
+
+    suite("Settings native announcement source audit：operator prefix 解析自证有牙") {
+        let direct = """
+            settingsPresentationCancellable = settingsPresentationSession.$state
+                .sink { state in consume(state) }
+            """
+        let staleChain = """
+            settingsPresentationCancellable = settingsPresentationSession.$state
+                .map(\\.pendingAnnouncement)
+                .removeDuplicates()
+                .sink { state in consume(state) }
+            """
+        guard
+            let directPrefix = settingsSinkStatementPrefix(
+                after: "settingsPresentationCancellable = settingsPresentationSession.$state",
+                in: direct),
+            let stalePrefix = settingsSinkStatementPrefix(
+                after: "settingsPresentationCancellable = settingsPresentationSession.$state",
+                in: staleChain)
+        else {
+            expect(false, "sink statement prefix 解析失败必须 fail closed")
+            return
+        }
+        expect(
+            !directPrefix.contains(".map(") && !directPrefix.contains(".removeDuplicates("),
+            "direct sink 正控不得伪造旧 operator chain")
+        expect(
+            stalePrefix.contains(".map(") && stalePrefix.contains(".removeDuplicates("),
+            "旧 map/removeDuplicates chain 必须落入被审计的 sink statement prefix")
+
+        let coordinatedScheduler = """
+            {
+                guard !settingsPresentationAnnouncementDeliveryScheduled else { return }
+                settingsPresentationAnnouncementDeliveryScheduled = true
+                DispatchQueue.main.async {
+                    settingsPresentationAnnouncementDeliveryScheduled = false
+                    deliverPendingSettingsPresentationAnnouncement()
+                }
+            }
+            """
+        let missingSetScheduler = """
+            {
+                guard !settingsPresentationAnnouncementDeliveryScheduled else { return }
+                DispatchQueue.main.async {
+                    settingsPresentationAnnouncementDeliveryScheduled = false
+                    deliverPendingSettingsPresentationAnnouncement()
+                }
+            }
+            """
+        let lateResetScheduler = """
+            {
+                guard !settingsPresentationAnnouncementDeliveryScheduled else { return }
+                settingsPresentationAnnouncementDeliveryScheduled = true
+                DispatchQueue.main.async {
+                    deliverPendingSettingsPresentationAnnouncement()
+                    settingsPresentationAnnouncementDeliveryScheduled = false
+                }
+            }
+            """
+        expect(
+            settingsAnnouncementSchedulerHasLatchContract(coordinatedScheduler)
+                && !settingsAnnouncementSchedulerHasLatchContract(missingSetScheduler)
+                && !settingsAnnouncementSchedulerHasLatchContract(lateResetScheduler),
+            "latch 审计必须接受正确顺序，并拒绝缺 set 或 delivery 后才 reset 的 mutation")
     }
 }
 
@@ -624,6 +730,37 @@ private func settingsBracedBlock(after marker: String, in source: String) -> Str
         index = source.index(after: index)
     }
     return nil
+}
+
+private func settingsSinkStatementPrefix(after marker: String, in source: String) -> String? {
+    guard let markerRange = source.range(of: marker),
+        let sinkRange = source.range(
+            of: ".sink",
+            range: markerRange.upperBound..<source.endIndex),
+        let openingBrace = source[sinkRange.upperBound...].firstIndex(of: "{")
+    else {
+        return nil
+    }
+    return String(source[markerRange.lowerBound..<openingBrace])
+}
+
+private func settingsAnnouncementSchedulerHasLatchContract(_ source: String) -> Bool {
+    guard let deferredTurn = source.range(of: "DispatchQueue.main.async"),
+        let latchGuard = source.range(
+            of: "guard !settingsPresentationAnnouncementDeliveryScheduled"),
+        let latchSet = source.range(
+            of: "settingsPresentationAnnouncementDeliveryScheduled = true"),
+        let deferredBody = settingsBracedBlock(after: "DispatchQueue.main.async", in: source),
+        let latchReset = deferredBody.range(
+            of: "settingsPresentationAnnouncementDeliveryScheduled = false"),
+        let delivery = deferredBody.range(
+            of: "deliverPendingSettingsPresentationAnnouncement()")
+    else {
+        return false
+    }
+    return latchGuard.lowerBound < latchSet.lowerBound
+        && latchSet.lowerBound < deferredTurn.lowerBound
+        && latchReset.lowerBound < delivery.lowerBound
 }
 
 private struct DumpedSettingsPackageTarget {
