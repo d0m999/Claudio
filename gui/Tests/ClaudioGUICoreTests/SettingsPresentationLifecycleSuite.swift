@@ -9,14 +9,8 @@ import SwiftUI
 
 @MainActor
 func runSettingsPresentationLifecycleSuites() async {
-    suite("Settings session deletion contract：route、phase 与 lifecycle 只有一个 owner") {
+    suite("Settings executable deletion contract：controller 与 menu 不恢复第二 owner") {
         let root = guiTestRepositoryRoot()
-        let sessionURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift")
-        let stateURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationState.swift")
-        let rootViewURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift")
         let controllerURL = root.appendingPathComponent(
             "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
         let navigationURL = root.appendingPathComponent(
@@ -24,29 +18,20 @@ func runSettingsPresentationLifecycleSuites() async {
         let menuBarURL = root.appendingPathComponent(
             "gui/Sources/ClaudioGUI/MenuBarController.swift")
         guard
-            let session = try? String(contentsOf: sessionURL, encoding: .utf8),
-            let state = try? String(contentsOf: stateURL, encoding: .utf8),
-            let rootView = try? String(contentsOf: rootViewURL, encoding: .utf8),
             let controller = try? String(contentsOf: controllerURL, encoding: .utf8),
             let navigation = try? String(contentsOf: navigationURL, encoding: .utf8),
             let menuBar = try? String(contentsOf: menuBarURL, encoding: .utf8)
         else {
-            expect(false, "读不到 Settings session/controller/navigation ownership source")
+            expect(false, "读不到 Settings controller/navigation/menu composition source")
             return
         }
-
-        expect(
-            session.contains("func send(")
-                && session.contains("SettingsPresentationCommand")
-                && state.contains("SettingsRouteResolution")
-                && state.contains("SettingsWindowPhase")
-                && state.contains("focusDebt"),
-            "session state/command 必须共同拥有 typed route、window phase 与 focus debt")
-        expect(
-            rootView.contains("settingsPresentationSession.send(.route(")
-                && !rootView.contains("SettingsWindowPresentationModel")
-                && !rootView.contains("model.request("),
-            "production root 必须只通过 session command 路由，不得保留第二 navigation owner")
+        let scans = [controller, navigation, menuBar].map(strippingComments)
+        guard scans.allSatisfy({ $0.unmodeledConstructs.isEmpty }) else {
+            expect(false, "Settings executable source audit 遇到无法建模的构造")
+            return
+        }
+        let controllerCode = scans[0].codeWithoutStringLiterals
+        let navigationCode = scans[1].codeWithoutStringLiterals
 
         let forbiddenControllerOwners = [
             "SettingsWindowPresentationModel",
@@ -59,12 +44,20 @@ func runSettingsPresentationLifecycleSuites() async {
             "settingsSoundPackShellProjections(",
         ]
         expect(
-            forbiddenControllerOwners.allSatisfy { !controller.contains($0) },
+            forbiddenControllerOwners.allSatisfy { !controllerCode.contains($0) },
             "AppKit controller 不得持有 destination model/publisher 或 raw Sound Pack owner")
         expect(
-            !navigation.contains("SettingsWindowPresentationModel<")
-                && !navigation.contains("pendingHandback"),
-            "ClaudioGUICore 只能保留纯 route/revision reducer，旧泛型 handback wrapper 必须删除")
+            controllerCode.contains(
+                "let content = SettingsRootView(session: settingsPresentationSession)")
+                && controllerCode.contains("NSHostingController(rootView: content)")
+                && !controllerCode.contains("SettingsWindowView"),
+            "唯一 native Settings controller 必须挂 production SettingsRootView(session:)，不得回退旧树")
+        expect(
+            !navigationCode.contains("SettingsWindowPresentationModel<")
+                && !navigationCode.contains("pendingHandback")
+                && !navigationCode.contains("SettingsWindowLifecycle")
+                && !navigationCode.contains("SettingsWindowPresentation"),
+            "ClaudioGUICore 不得恢复旧泛型 handback 或 lifecycle facade")
         let mutation = menuBar.replacingOccurrences(
             of: "let selectedHost = host ?? integrationsModel.selectedHost ?? .claudeCode",
             with:
@@ -75,6 +68,75 @@ func runSettingsPresentationLifecycleSuites() async {
             settingsMenuRequestOwnsOnlyTypedRoute(menuBar)
                 && !settingsMenuRequestOwnsOnlyTypedRoute(mutation),
             "MenuBar 只能构造 typed route；Host 选择 mutation 必须由 session 单事务拥有")
+    }
+
+    suite("Settings executable gallery：所有场景只经 target-owned production root mount") {
+        let galleryURL = guiTestRepositoryRoot().appendingPathComponent(
+            "gui/Sources/ClaudioGUI/StateGalleryView.swift")
+        guard let gallery = try? String(contentsOf: galleryURL, encoding: .utf8) else {
+            expect(false, "读不到 executable StateGalleryView.swift")
+            return
+        }
+        let scanned = strippingComments(gallery)
+        guard scanned.unmodeledConstructs.isEmpty else {
+            expect(false, "State gallery source audit 遇到无法建模的构造")
+            return
+        }
+        let code = scanned.codeWithoutStringLiterals
+        let forbiddenDirectMounts = [
+            "EventSettingsWindowView(",
+            "EventSettingsAICueServiceCard(",
+            "EventSettingsAICueCredentialSheet(",
+            "EventSettingsAICueComposerView(",
+            "IntegrationsSettingsDestinationView(",
+            "EventSettingsWindowSelection(",
+            "SoundPacksWindowModel(",
+        ]
+        expect(
+            code.components(separatedBy: "SettingsStateGalleryView(").count - 1 == 1
+                && forbiddenDirectMounts.allSatisfy { !code.contains($0) },
+            "gallery 必须只组合 target-owned SettingsStateGalleryView，不得直接重建 destination/model")
+    }
+
+    suite("Settings native announcement adapter：deferred exact-head post/ack 与 key retry") {
+        let controllerURL = guiTestRepositoryRoot().appendingPathComponent(
+            "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
+        guard let controller = try? String(contentsOf: controllerURL, encoding: .utf8) else {
+            expect(false, "读不到唯一 Settings native announcement adapter")
+            return
+        }
+        let missingLatchGuard = controller.replacingOccurrences(
+            of: "guard !settingsPresentationAnnouncementDeliveryScheduled else { return }",
+            with: "")
+        let eagerHeadRead = controller.replacingOccurrences(
+            of:
+                "settingsPresentationAnnouncementDeliveryScheduled = true\n"
+                + "        DispatchQueue.main.async",
+            with:
+                "settingsPresentationAnnouncementDeliveryScheduled = true\n"
+                + "        _ = settingsPresentationSession.state.pendingAnnouncement\n"
+                + "        DispatchQueue.main.async")
+        let missingKeyGate = controller.replacingOccurrences(
+            of: "window.isKeyWindow\n        else { return }",
+            with: "true\n        else { return }")
+        let missingNativePost = controller.replacingOccurrences(
+            of: "NSAccessibility.post(",
+            with: "settingsNativePostWasDeleted(")
+        let missingKeyRetry = settingsReplacingFirstOccurrence(
+            in: controller,
+            of:
+                "_ = settingsPresentationSession.send(.windowPhaseChanged(.key))\n"
+                + "        scheduleSettingsPresentationAnnouncementDelivery()",
+            with: "_ = settingsPresentationSession.send(.windowPhaseChanged(.key))")
+
+        expect(
+            settingsNativeAnnouncementAdapterIsSound(controller)
+                && !settingsNativeAnnouncementAdapterIsSound(missingLatchGuard)
+                && !settingsNativeAnnouncementAdapterIsSound(eagerHeadRead)
+                && !settingsNativeAnnouncementAdapterIsSound(missingKeyGate)
+                && !settingsNativeAnnouncementAdapterIsSound(missingNativePost)
+                && !settingsNativeAnnouncementAdapterIsSound(missingKeyRetry),
+            "窄 adapter contract 必须 fail closed，并杀死 latch/head/gate/post/key-retry mutations")
     }
 
     #if DEBUG
@@ -481,7 +543,7 @@ func runSettingsPresentationLifecycleSuites() async {
         let fixture = SettingsPresentationFixtures.generalLogin(
             route: .destination(.general),
             availability: PreviewFixtures.settingsRouteAvailability)
-        let hostingView = NSHostingView(rootView: fixture.rootView)
+        let hostingView = NSHostingView(rootView: SettingsRootView(session: fixture.session))
         hostingView.frame = NSRect(x: 0, y: 0, width: 1_240, height: 820)
         hostingView.layoutSubtreeIfNeeded()
         _ = fixture.session.send(.windowPhaseChanged(.key))
@@ -504,7 +566,7 @@ func runSettingsPresentationLifecycleSuites() async {
         let fixture = SettingsPresentationFixtures.generalLogin(
             route: .events(scope: .global, event: .stop),
             availability: PreviewFixtures.settingsRouteAvailability)
-        let hostingView = NSHostingView(rootView: fixture.rootView)
+        let hostingView = NSHostingView(rootView: SettingsRootView(session: fixture.session))
         hostingView.frame = NSRect(x: 0, y: 0, width: 1_240, height: 820)
         hostingView.layoutSubtreeIfNeeded()
         fixture.beginEventTransientActivity()
@@ -563,10 +625,80 @@ func runSettingsPresentationLifecycleSuites() async {
             presentation.eventAccess.first(where: { $0.event == .stop })?.adoptionAvailability
                 == .eligible,
             "fixture 的当前 Surface pack/Event 必须先具备 adoption eligibility")
+        guard let permit = presentation.adoptionPermit,
+            let candidateID = generation.candidates.first?.id
+        else {
+            expect(
+                false,
+                "$session/$generation 的 emitted coherent tuple 必须把当前 generation 交给 owner 签 adoption permit"
+            )
+            return
+        }
+        let ownerRevision = fixture.soundPacksEditor.presentation.revision
+        let eligibility =
+            presentation.eventAccess.first(where: { $0.event == .stop })?.adoptionAvailability
+
+        fixture.presentCredentialSheet()
+
+        guard case .events(let credential) = fixture.soundPacksEditor.presentation.mode else {
+            expect(false, "credential-only projection 后 shared owner 必须保持 Events presentation")
+            return
+        }
         expect(
-            presentation.adoptionPermit != nil,
-            "$session/$generation 的 emitted coherent tuple 必须把当前 generation 交给 owner 签 adoption permit"
-        )
+            fixture.session.state.eventPresentation.credentialSheetIsPresented
+                && fixture.session.state.eventPresentation.playingCandidateID == nil
+                && fixture.soundPacksEditor.presentation.revision == ownerRevision
+                && credential.adoptionPermit == permit
+                && credential.eventAccess.first(where: { $0.event == .stop })?
+                    .adoptionAvailability == eligibility,
+            "credential-sheet visibility publication 不得重激活 editor generation context")
+
+        fixture.beginCandidatePreview(id: candidateID)
+
+        guard case .events(let playing) = fixture.soundPacksEditor.presentation.mode else {
+            expect(false, "playing-only projection 后 shared owner 必须保持 Events presentation")
+            return
+        }
+        expect(
+            fixture.session.state.eventPresentation.credentialSheetIsPresented
+                && fixture.session.state.eventPresentation.playingCandidateID == candidateID,
+            "credential/playing transient 必须继续发布到 session projection")
+        expect(
+            fixture.soundPacksEditor.presentation.revision == ownerRevision
+                && playing.adoptionPermit == permit
+                && playing.eventAccess.first(where: { $0.event == .stop })?.adoptionAvailability
+                    == eligibility,
+            "credential/playing-only publication 不得重激活 editor 或替换 generation permit")
+
+        fixture.stopCandidatePreview()
+
+        guard case .events(let stopped) = fixture.soundPacksEditor.presentation.mode else {
+            expect(false, "停止候选试听后 shared owner 必须保持 Events presentation")
+            return
+        }
+        expect(
+            fixture.session.state.eventPresentation.credentialSheetIsPresented
+                && fixture.session.state.eventPresentation.playingCandidateID == nil
+                && fixture.soundPacksEditor.presentation.revision == ownerRevision
+                && stopped.adoptionPermit == permit
+                && stopped.eventAccess.first(where: { $0.event == .stop })?.adoptionAvailability
+                    == eligibility,
+            "preview stop 必须只清 playing transient，并保留原 generation permit identity/eligibility")
+
+        fixture.dismissCredentialSheet()
+
+        guard case .events(let dismissed) = fixture.soundPacksEditor.presentation.mode else {
+            expect(false, "关闭 credential sheet 后 shared owner 必须保持 Events presentation")
+            return
+        }
+        expect(
+            !fixture.session.state.eventPresentation.credentialSheetIsPresented
+                && fixture.session.state.eventPresentation.playingCandidateID == nil
+                && fixture.soundPacksEditor.presentation.revision == ownerRevision
+                && dismissed.adoptionPermit == permit
+                && dismissed.eventAccess.first(where: { $0.event == .stop })?.adoptionAvailability
+                    == eligibility,
+            "credential dismiss 必须只清 UI transient，并保留原 generation permit identity/eligibility")
     }
 
     suite("Settings session close：Events transient cleanup 恰好一次且 close 幂等") {
@@ -727,4 +859,66 @@ private func settingsMenuRequestOwnsOnlyTypedRoute(_ source: String) -> Bool {
     return request.contains("host ?? integrationsModel.selectedHost ?? .claudeCode")
         && request.contains(".route(.integrations(surface: selectedHost.surfaceID))")
         && !request.contains("integrationsModel.selectHost")
+}
+
+private func settingsNativeAnnouncementAdapterIsSound(_ source: String) -> Bool {
+    let scanned = strippingComments(source)
+    guard scanned.unmodeledConstructs.isEmpty,
+        let scheduler = settingsLifecycleBracedBlock(
+            after: "private func scheduleSettingsPresentationAnnouncementDelivery()",
+            in: scanned.code),
+        let delivery = settingsLifecycleBracedBlock(
+            after: "private func deliverPendingSettingsPresentationAnnouncement()",
+            in: scanned.code),
+        let didBecomeKey = settingsLifecycleBracedBlock(
+            after: "func windowDidBecomeKey(",
+            in: scanned.code),
+        let showWindow = settingsLifecycleBracedBlock(
+            after: "func showWindow(",
+            in: scanned.code),
+        let dispatch = scheduler.range(of: "DispatchQueue.main.async"),
+        let latchGuard = scheduler.range(
+            of: "guard !settingsPresentationAnnouncementDeliveryScheduled"),
+        let latchSet = scheduler.range(
+            of: "settingsPresentationAnnouncementDeliveryScheduled = true"),
+        let latchClear = scheduler.range(
+            of: "settingsPresentationAnnouncementDeliveryScheduled = false"),
+        let deliver = scheduler.range(of: "deliverPendingSettingsPresentationAnnouncement()"),
+        latchGuard.lowerBound < latchSet.lowerBound,
+        latchSet.lowerBound < dispatch.lowerBound,
+        dispatch.lowerBound < latchClear.lowerBound,
+        latchClear.lowerBound < deliver.lowerBound,
+        !scheduler[..<dispatch.lowerBound].contains(
+            "settingsPresentationSession.state.pendingAnnouncement"),
+        let phaseGate = delivery.range(
+            of: "settingsPresentationSession.state.windowPhase == .key"),
+        let currentHead = delivery.range(
+            of: "settingsPresentationSession.state.pendingAnnouncement"),
+        let visibleGate = delivery.range(of: "window.isVisible"),
+        let keyGate = delivery.range(of: "window.isKeyWindow"),
+        let post = delivery.range(of: "NSAccessibility.post("),
+        let exactAck = delivery.range(
+            of: ".acknowledgeAnnouncement(id: announcement.id, didPost: true)"),
+        phaseGate.lowerBound < currentHead.lowerBound,
+        currentHead.lowerBound < visibleGate.lowerBound,
+        visibleGate.lowerBound < keyGate.lowerBound,
+        keyGate.lowerBound < post.lowerBound,
+        post.lowerBound < exactAck.lowerBound
+    else { return false }
+
+    return didBecomeKey.contains(".windowPhaseChanged(.key)")
+        && didBecomeKey.contains("scheduleSettingsPresentationAnnouncementDelivery()")
+        && showWindow.contains("makeKeyAndOrderFront")
+        && showWindow.contains("scheduleSettingsPresentationAnnouncementDelivery()")
+}
+
+private func settingsReplacingFirstOccurrence(
+    in source: String,
+    of target: String,
+    with replacement: String
+) -> String {
+    guard let range = source.range(of: target) else { return source }
+    var result = source
+    result.replaceSubrange(range, with: replacement)
+    return result
 }

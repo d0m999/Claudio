@@ -9,7 +9,7 @@ import PackageDescription
 //   - `ClaudioGUICore`: pure Foundation state/view-model logic (no SwiftUI import), so it
 //     can be exercised by the same dependency-free test harness `helper/` uses.
 //   - `ClaudioSettingsPresentation`: the importable Settings tree and its typed presentation
-//     transaction; it has no native system API or resource ownership.
+//     transaction; it has no native window, system-effect adapter, or resource ownership.
 //   - `ClaudioGUI`: the executable — SwiftUI `App`/`View` layer, depends on `ClaudioGUICore`.
 let package = Package(
     name: "claudio-gui",
@@ -76,8 +76,8 @@ let package = Package(
             ]
         ),
         // Importable Settings presentation seam. Its session owns typed route/focus/destination
-        // lifecycle and semantic announcement debt, while native window and system APIs stay in
-        // the executable. Production and the harness mount the same concrete presentation types.
+        // lifecycle and semantic announcement debt, while the native window and system-effect
+        // adapters stay in the executable. Production and the harness mount the same types.
         .target(
             name: "ClaudioSettingsPresentation",
             dependencies: [
@@ -88,9 +88,9 @@ let package = Package(
                 .product(name: "ClaudioCore", package: "helper"),
             ]
         ),
-        // The SwiftUI app shell owns the status-item panel and one retained unified Settings
-        // window. Its embedded Integrations destination consumes `ClaudioGUICore` presentation
-        // values and never opens host config itself, so cutover creates no second truth source.
+        // The SwiftUI app shell owns the status-item panel, native adapters, and one retained
+        // Settings window. The imported presentation target consumes `ClaudioGUICore` values and
+        // never opens host config itself, so composition creates no second truth source.
         //
         // Depends on `ClaudioCore` directly (not just transitively via `ClaudioGUICore`,
         // same reasoning as `claudio-gui-tests` below) since `EventRowView`/`DesignTokens`

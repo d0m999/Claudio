@@ -9,7 +9,7 @@ struct AboutSettingsView: View {
     @ObservedObject var model: AboutSettingsModel
     @ObservedObject var preferences: ClaudioPreferences
     let focusedTarget: FocusState<SettingsWindowFocusTarget?>.Binding
-    let onAnnouncement: (@MainActor (String) -> Void)?
+    let onAnnouncement: @MainActor (String) -> Void
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -39,8 +39,9 @@ struct AboutSettingsView: View {
         }
         .font(ClaudioTheme.font(.body))
         .frame(maxWidth: 620, alignment: .leading)
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.about))
         .onReceive(model.$feedback.dropFirst().compactMap { $0 }) { feedback in
-            onAnnouncement?(feedbackText(feedback))
+            onAnnouncement(feedbackText(feedback))
         }
     }
 

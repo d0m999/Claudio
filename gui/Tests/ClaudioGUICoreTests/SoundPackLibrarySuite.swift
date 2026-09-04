@@ -1134,7 +1134,9 @@ func runSoundPackLibrarySuites() async {
                 refreshCoordinator: coordinator)
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 1)))
             await waitForSoundEditorReady(owner, library: library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "stop.mp3" }
+            }
             guard case .sounds(let sounds) = owner.presentation.mode,
                 let requestImport = sounds.requestImportAction,
                 case .nativeEffect(.selectAudioFiles(let permit, nil)) =

@@ -296,15 +296,6 @@ func runAboutInformationSuites() {
                 contentsOf: root.appendingPathComponent(
                     "gui/Sources/ClaudioGUICore/AboutSettingsModel.swift"),
                 encoding: .utf8)) ?? ""
-        let settings =
-            (try? String(
-                contentsOf: root.appendingPathComponent(
-                    "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
-                encoding: .utf8)) ?? ""
-        expect(
-            settings.contains("case .about:")
-                && settings.contains("AboutSettingsView("),
-            "About destination must render production content instead of the debug route")
         expect(
             view.contains(".firstAction(.about)")
                 && view.contains("settings.about.copy-version")

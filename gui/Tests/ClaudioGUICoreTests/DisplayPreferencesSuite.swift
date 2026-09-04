@@ -146,8 +146,6 @@ func runDisplayPreferencesSuites() {
     suite("Display preferences：所有生产消费者只观察共享 typed owner") {
         let paths = [
             "gui/Sources/ClaudioGUI/PanelView.swift",
-            "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift",
-            "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift",
             "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift",
         ]
         for path in paths {
@@ -163,8 +161,6 @@ func runDisplayPreferencesSuites() {
         }
 
         guard
-            let settings = displayPreferenceSource(
-                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let controller = displayPreferenceSource(
                 "gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let icon = displayPreferenceSource("gui/Sources/ClaudioGUI/MenuBarIcon.swift")
@@ -172,13 +168,6 @@ func runDisplayPreferencesSuites() {
             expect(false, "读不到 Display、MenuBarController 或 MenuBarIcon wiring")
             return
         }
-        expect(
-            settings.contains("case .display:")
-                && settings.contains("preferences.setInterfaceTextSize($0)")
-                && settings.contains("preferences.setPanelWidthPreference($0)")
-                && settings.contains("preferences.setShowsMenuBarStatusDot($0)")
-                && settings.contains("managesFocus: false"),
-            "Display destination 必须接到共享 typed owner，并服从 Settings 窗口焦点")
         expect(
             controller.contains("languageStore.$snapshot")
                 && controller.contains("applyMenuBarIcon")

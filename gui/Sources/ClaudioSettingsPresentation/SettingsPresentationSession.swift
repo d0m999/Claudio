@@ -31,6 +31,7 @@ package final class SettingsPresentationSession: ObservableObject {
     private var pendingAnnouncement: SettingsPresentationAnnouncement?
     private var pendingSoundPackOwnerAnnouncement: SoundPackEditorAnnouncement?
     private var pendingSoundPackAnnouncementID: SoundPackEditorAnnouncement.ID?
+    private var eventPresentation: SettingsEventPresentationState
     private var nextAnnouncementID: UInt64 = 0
     private var presentationRevision: UInt64 = 0
     private var isPresented = false
@@ -51,6 +52,7 @@ package final class SettingsPresentationSession: ObservableObject {
         self.actions = actions
         eventSettingsSelection = EventSettingsWindowSelection()
         integrationsFocusCoordinator = IntegrationDestinationFocusCoordinator()
+        eventPresentation = eventSettingsSelection.presentationState
         preferenceSnapshot = dependencies.preferences.snapshot
         loginProjection = dependencies.loginItemSettings.projection
         let initialShell = SettingsSoundPackShellProjection(
@@ -68,7 +70,7 @@ package final class SettingsPresentationSession: ObservableObject {
             focusDebt: nil,
             windowPhase: .hidden,
             activeDestination: nil,
-            eventPresentation: eventSettingsSelection.presentationState,
+            eventPresentation: eventPresentation,
             preferenceSnapshot: preferenceSnapshot,
             loginProjection: loginProjection,
             platformActionFailure: nil,
@@ -110,19 +112,28 @@ package final class SettingsPresentationSession: ObservableObject {
                         self.lifecycleDestination == .eventsAndSounds
                     else { return }
                     self.activateEventsEditor(
+                        eventPresentation: self.eventPresentation,
                         aiSession: projection.0,
                         candidateGenerationID: projection.1)
                 }
             }
-        eventPresentationCancellable = eventSettingsSelection.$stateRevision
+        eventPresentationCancellable = eventSettingsSelection.$presentationState
             .dropFirst()
-            .sink { [weak self] _ in
+            .sink { [weak self] presentation in
                 MainActor.assumeIsolated {
                     guard let self else { return }
+                    let previousPresentation = self.eventPresentation
+                    self.eventPresentation = presentation
                     if !self.isPerformingTransaction,
-                        self.lifecycleDestination == .eventsAndSounds
+                        self.lifecycleDestination == .eventsAndSounds,
+                        presentation.route != previousPresentation.route
+                            || presentation.routeRequestRevision
+                                != previousPresentation.routeRequestRevision
                     {
-                        self.activateEventsEditor()
+                        self.activateEventsEditor(
+                            eventPresentation: presentation,
+                            aiSession: self.dependencies.aiCueViewModel.session,
+                            candidateGenerationID: self.dependencies.aiCueViewModel.generation?.id)
                     }
                     self.publishProjection()
                 }
@@ -369,11 +380,13 @@ package final class SettingsPresentationSession: ObservableObject {
 
     private func activateEventsEditor() {
         activateEventsEditor(
+            eventPresentation: eventPresentation,
             aiSession: dependencies.aiCueViewModel.session,
             candidateGenerationID: dependencies.aiCueViewModel.generation?.id)
     }
 
     private func activateEventsEditor(
+        eventPresentation: SettingsEventPresentationState,
         aiSession: AICueComposerSession?,
         candidateGenerationID: UUID?
     ) {
@@ -381,7 +394,7 @@ package final class SettingsPresentationSession: ObservableObject {
             if let aiSession {
                 EventSettingsWindowRoute(scope: aiSession.scope, event: aiSession.event)
             } else {
-                eventSettingsSelection.route
+                eventPresentation.route
             }
         _ = dependencies.soundPacksEditorOwner.send(
             .activate(
@@ -597,7 +610,7 @@ package final class SettingsPresentationSession: ObservableObject {
             focusDebt: focusDebt,
             windowPhase: windowPhase,
             activeDestination: activeDestination,
-            eventPresentation: eventSettingsSelection.presentationState,
+            eventPresentation: eventPresentation,
             preferenceSnapshot: preferenceSnapshot,
             loginProjection: loginProjection,
             platformActionFailure: platformActionFailure,

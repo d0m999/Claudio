@@ -1,5 +1,7 @@
+import ClaudioCore
 import ClaudioGUICore
 import ClaudioLocalization
+import Foundation
 
 package struct SettingsPlatformActionFailure: Equatable, Sendable {
     package let action: SettingsPlatformAction
@@ -18,6 +20,16 @@ package struct SettingsFocusDebt: Equatable, Sendable {
     package let destination: SettingsDestination
 }
 
+package enum EventSettingsDestinationPreviewState: Sendable, Equatable {
+    case idle
+    case running(generation: UInt64)
+}
+
+package enum EventSettingsDestinationAISessionState: Sendable, Equatable {
+    case idle
+    case active(scope: PanelSoundScopeID, event: Event)
+}
+
 package struct SettingsEventPresentationState: Equatable, Sendable {
     package let route: EventSettingsWindowRoute
     package let routeRequestRevision: UInt64
@@ -27,6 +39,8 @@ package struct SettingsEventPresentationState: Equatable, Sendable {
     package let previewStopRequestRevision: UInt64
     package let aiSessionState: EventSettingsDestinationAISessionState
     package let aiSessionEndRequestRevision: UInt64
+    package let credentialSheetIsPresented: Bool
+    package let playingCandidateID: UUID?
 }
 
 package enum SettingsPresentationRequest: Equatable, Sendable {

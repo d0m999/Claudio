@@ -15,21 +15,21 @@ package final class SettingsPresentationActionRecorder {
     package private(set) var eventAudibilityChangeCount = 0
     private let result: SettingsPlatformActionResult
 
-    package init(result: SettingsPlatformActionResult) {
+    init(result: SettingsPlatformActionResult) {
         self.result = result
     }
 
-    package func perform(_ action: SettingsPlatformAction) -> SettingsPlatformActionResult {
+    func perform(_ action: SettingsPlatformAction) -> SettingsPlatformActionResult {
         actions.append(action)
         return result
     }
 
-    package func noteEventAudibilityInputsChanged() {
+    func noteEventAudibilityInputsChanged() {
         eventAudibilityChangeCount += 1
     }
 }
 
-/// Production-shape DEBUG fixture composed only from the public presentation seams. The sound
+/// Production-shape DEBUG fixture composed only from the package presentation seams. The sound
 /// editor remains owned by `SoundPacksEditorOwner`; no raw model or runtime library is exposed.
 @MainActor
 package struct SettingsPresentationFixture {
@@ -41,20 +41,14 @@ package struct SettingsPresentationFixture {
     package let aiCueViewModel: AICueGenerationViewModel
     package let actionRecorder: SettingsPresentationActionRecorder
 
-    package var rootView: SettingsRootView {
-        SettingsRootView(session: session)
-    }
-
-    package var selectedDestination: SettingsDestination {
-        session.state.routeResolution.destination
-    }
-
     package var lastSettingsDestination: SettingsDestination {
         session.dependencies.preferences.lastSettingsDestination
     }
 
     package var previewStopRequestRevisions: AnyPublisher<UInt64, Never> {
-        session.eventSettingsSelection.$previewStopRequestRevision.eraseToAnyPublisher()
+        session.eventSettingsSelection.$presentationState
+            .map(\.previewStopRequestRevision)
+            .eraseToAnyPublisher()
     }
 
     package func beginEventTransientActivity(
@@ -64,6 +58,22 @@ package struct SettingsPresentationFixture {
         _ = session.eventSettingsSelection.beginPreviewSequence()
         session.eventSettingsSelection.beginAISession(scope: scope, event: event)
         aiCueViewModel.begin(scope: scope, event: event)
+    }
+
+    package func presentCredentialSheet() {
+        session.eventSettingsSelection.presentCredentialSheet()
+    }
+
+    package func dismissCredentialSheet() {
+        session.eventSettingsSelection.dismissCredentialSheet()
+    }
+
+    package func beginCandidatePreview(id: UUID) {
+        session.eventSettingsSelection.beginCandidatePreview(id: id)
+    }
+
+    package func stopCandidatePreview() {
+        session.eventSettingsSelection.noteCandidatePreviewStopped()
     }
 }
 
@@ -78,7 +88,10 @@ package enum SettingsPresentationFixtures {
         availability: SettingsRouteAvailability? = nil,
         textSize: ClaudioInterfaceTextSize = .standard,
         experienceProfile: PreviewFixtures.SettingsExperienceProfile? = nil,
-        aiCueViewModel injectedAICueViewModel: AICueGenerationViewModel? = nil
+        aiCueViewModel injectedAICueViewModel: AICueGenerationViewModel? = nil,
+        aiCueScenario: PreviewFixtures.AICueGalleryScenario? = nil,
+        integrationScenario: PreviewFixtures.HostIntegrationScenario? = nil,
+        integrationInFlightAction: HostIntegrationUserAction? = nil
     ) -> SettingsPresentationFixture {
         let temporaryRoot = temporaryParent.appendingPathComponent(
             "claudio-settings-presentation-fixture-\(UUID().uuidString)",
@@ -125,6 +138,13 @@ package enum SettingsPresentationFixtures {
                     presentEvents: Set(Event.allCases),
                     state: .complete,
                     isSelected: false),
+                PackCard(
+                    id: "gallery-pack",
+                    name: "Gallery Pack",
+                    isCC0: true,
+                    presentEvents: Set(Event.allCases),
+                    state: .complete,
+                    isSelected: false),
             ],
             selectedPackID: "settings-fixture-pack",
             selectedEventRows: Event.allCases.map {
@@ -139,10 +159,18 @@ package enum SettingsPresentationFixtures {
                 durationProbe: SettingsPresentationFixtureDurationProbe(),
                 packsLockFile: temporaryRoot.appendingPathComponent("packs.lock")),
             activation: nil)
-        let hostState = PreviewFixtures.workBuddyVisualScenarios.first {
-            $0.phase == .allImplementedBindingsCurrent
-        }!.state
-        let hostIntegrations = HostIntegrationPresentationStore(state: hostState)
+        let hostState =
+            integrationScenario?.state
+            ?? PreviewFixtures.workBuddyVisualScenarios.first {
+                $0.phase == .allImplementedBindingsCurrent
+            }!.state
+        let hostIntegrations = HostIntegrationPresentationStore(
+            state: hostState,
+            configurationSources: [
+                .claudeCode: "~/.claude/settings.json",
+                .codex: "~/.codex/hooks.json",
+                .workBuddy: "~/.workbuddy/settings.json",
+            ])
         let dynamicQuietPolicy = makeSettingsFixtureDynamicQuietPolicy(
             for: experienceProfile)
         let usageSettings = makeSettingsFixtureUsageSettings(for: experienceProfile)
@@ -159,6 +187,9 @@ package enum SettingsPresentationFixtures {
             actionHandler: IntegrationDestinationActionHandler { _ in integrationOutcome },
             preferences: preferences,
             clipboardWriter: IntegrationDestinationClipboardWriter { _ in true })
+        if let integrationInFlightAction {
+            integrationsModel.pinPreviewInFlight(integrationInFlightAction)
+        }
         let eventSettingsModel = PanelConfigController(
             previewConfigState: .operational(
                 settingsConfig),
@@ -178,7 +209,8 @@ package enum SettingsPresentationFixtures {
         let aiCueViewModel =
             injectedAICueViewModel
             ?? AICueGenerationViewModel(
-                previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState)
+                previewState: (aiCueScenario ?? PreviewFixtures.AICueGalleryScenario.editing)
+                    .previewState)
         let session = SettingsPresentationSession(
             dependencies: SettingsPresentationDependencies(
                 preferences: preferences,
@@ -202,7 +234,25 @@ package enum SettingsPresentationFixtures {
         if let availability {
             session.replaceAvailabilityForTesting(availability)
         }
-        _ = session.send(.present(.route(route)))
+        let presentationRoute: SettingsRoute
+        if let aiSession = aiCueScenario?.previewState.session {
+            presentationRoute = .events(scope: aiSession.scope, event: aiSession.event)
+        } else {
+            presentationRoute = route
+        }
+        if case .events(let scope, let event) = presentationRoute,
+            aiCueScenario?.previewState.session != nil
+        {
+            session.eventSettingsSelection.select(
+                EventSettingsWindowRoute(scope: scope, event: event))
+        }
+        _ = session.send(.present(.route(presentationRoute)))
+        if aiCueScenario?.rendersCredentialSheet == true {
+            session.eventSettingsSelection.presentCredentialSheet()
+        }
+        if let playingCandidateID = aiCueScenario?.playingCandidateID {
+            session.eventSettingsSelection.beginCandidatePreview(id: playingCandidateID)
+        }
 
         return SettingsPresentationFixture(
             temporaryRoot: temporaryRoot,

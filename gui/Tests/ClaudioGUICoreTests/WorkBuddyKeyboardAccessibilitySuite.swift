@@ -57,49 +57,4 @@ func runWorkBuddyKeyboardAccessibilitySuites() {
             "选择控件和 Toggle 必须保持不同身份")
     }
 
-    suite("集成 destination accessibility wiring：真实 Toggle、选中行背景、四行与窗口可见性守卫") {
-        let root = guiTestRepositoryRoot()
-        guard
-            let view = try? String(
-                contentsOf: root.appendingPathComponent(
-                    "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift"
-                ),
-                encoding: .utf8),
-            let session = try? String(
-                contentsOf: root.appendingPathComponent(
-                    "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift"),
-                encoding: .utf8)
-        else {
-            expect(false, "读不到集成 destination accessibility wiring")
-            return
-        }
-        let stripped = strippingComments(view)
-        expect(stripped.unmodeledConstructs.isEmpty, "destination source scanner 必须理解源码")
-        expect(
-            view.contains("Toggle(")
-                && view.contains("get: { agent.isOn }")
-                && view.contains("model.requestToggle(for: agent.host)"),
-            "Agent 行必须连接真实 manager-derived Toggle，不得本地乐观翻转")
-        expect(
-            view.contains("model.selectedHost == agent.host")
-                && view.contains(
-                    ".accessibilityAddTraits(model.selectedHost == agent.host ? .isSelected : [])"),
-            "选择控件必须独立表达 selected 语义")
-        expect(
-            view.contains("IntegrationConnectionRowKind.allCases")
-                || view.contains("ForEach(section.rows)"),
-            "连接组必须消费 typed 四行 presentation")
-        expect(
-            view.contains("model.isWindowVisible, model.isWindowKey")
-                && view.contains("onAnnouncement?(sentence)"),
-            "VoiceOver 反馈只允许在 destination 可见且窗口为 key 时播报")
-        expect(
-            session.contains("synchronizeIntegrationsLifecycle()")
-                && session.contains("dependencies.integrationsModel.noteWindowVisibility")
-                && session.contains("dependencies.integrationsModel.noteWindowKeyState"),
-            "统一 Settings session 必须把真实窗口 phase 投影给 Integration owner")
-        expect(
-            !view.contains("NSSound") && !view.contains("AVAudio") && !view.contains("readLine"),
-            "展示层不得自行试听、访问宿主文件或启动额外输入链")
-    }
 }

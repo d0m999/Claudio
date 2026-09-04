@@ -93,26 +93,16 @@ func runHitTargetSuites() {
             "图标与紧凑动作都只能触发自身，实得 \(targetRecorder.actions)")
     }
 
-    suite("生产接线：Events、声音包、onboarding 与 AI composer 使用显式命中合同") {
-        let eventSettings = productionSource(
-            "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift")
+    suite("生产接线：声音包与 onboarding 使用显式命中合同") {
         let packGallery = productionSource("gui/Sources/ClaudioGUI/PackGalleryView.swift")
         let panelRows = productionSource("gui/Sources/ClaudioGUI/PanelRows.swift")
-        let aiCue = productionSource(
-            "gui/Sources/ClaudioSettingsPresentation/EventSettingsAICueView.swift")
 
-        expect(
-            eventSettings?.contains(".buttonStyle(ClaudioFullRowButtonStyle())") == true,
-            "Events 的所有 Sound Scope 条目必须使用共享整行按钮样式")
         expect(
             packGallery?.contains(".buttonStyle(ClaudioFullRowButtonStyle())") == true,
             "可复用声音包整行按钮必须使用显式整行命中合同")
         expect(
             panelRows?.contains(".buttonStyle(ClaudioFullRowButtonStyle())") == true,
             "onboarding 可展开失败行必须使用至少 28pt 的共享整行合同")
-        expect(
-            aiCue?.contains(".buttonStyle(ClaudioCompactButtonStyle())") == true,
-            "AI composer 的 plain 关闭动作必须复用经过原生点击验证的紧凑命中合同")
     }
 }
 

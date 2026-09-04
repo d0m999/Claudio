@@ -11,7 +11,9 @@ func runSoundPacksEditorNativeEffectsSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 601)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "stop.mp3" }
+            }
 
             let first = root.appendingPathComponent("first.mp3")
             let second = root.appendingPathComponent("second.wav")
@@ -70,7 +72,9 @@ func runSoundPacksEditorNativeEffectsSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 602)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "stop.mp3" }
+            }
             guard case .sounds(let sounds) = owner.presentation.mode,
                 let stopRow = sounds.eventRows.first(where: { $0.event == .stop }),
                 let previewAction = stopRow.previewAction,
@@ -109,7 +113,9 @@ func runSoundPacksEditorNativeEffectsSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 603)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "stop.mp3" }
+            }
 
             guard case .sounds(let sounds) = owner.presentation.mode,
                 let importAction = sounds.eventRows.first(where: { $0.event == .stop })?
@@ -142,7 +148,9 @@ func runSoundPacksEditorNativeEffectsSuites() async {
             writeFixture(validMP3ID3Data(), to: source)
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 604)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "stop.mp3" }
+            }
 
             let adapter = RecordingSoundPacksEditorNativeEffectsAdapter(
                 pickerResults: [[source], []])
@@ -163,7 +171,9 @@ func runSoundPacksEditorNativeEffectsSuites() async {
                     && adapter.playRequests[0].volume == 0.37,
                 "foreground success 必须只执行一次 owner-signed preview URL/volume")
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "new.mp3" }
+            }
 
             guard case .sounds(let refreshed) = owner.presentation.mode,
                 let cancelAction = refreshed.requestImportAction,
@@ -192,7 +202,9 @@ func runSoundPacksEditorNativeEffectsSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 605)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "stop.mp3" }
+            }
             guard case .sounds(let sounds) = owner.presentation.mode,
                 let importAction = sounds.eventRows.first(where: { $0.event == .stop })?
                     .importAction
@@ -244,7 +256,9 @@ func runSoundPacksEditorNativeEffectsSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 606)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "stop.mp3" }
+            }
 
             let adapter = RecordingSoundPacksEditorNativeEffectsAdapter()
             let dispatcher = SoundPacksEditorNativeEffectsDispatcher(adapter: adapter)

@@ -13,35 +13,36 @@ ClaudioGUIApp (@main)
       │  ├─ PanelPackSectionView / PackGalleryView
       │  └─ PanelQuitFooter / onboarding and state-driven notices
       └─ retained SettingsWindowController
-         ├─ SettingsWindowView
-         │  ├─ ClaudioSettingsPresentation.LoginItemSettingsSection
-         │  ├─ IntegrationsSettingsDestinationView
-         │  ├─ EventSettingsWindowView
-         │  └─ embedded SoundPacksWindowView
-         ├─ SettingsPresentationSession (General/Login projection and typed actions)
-         └─ one app-lifetime SoundPacksEditorOwner
+         ├─ ClaudioSettingsPresentation.SettingsRootView(session:)
+         │  ├─ fixed nine-destination sidebar + exhaustive destination mount
+         │  ├─ General / Notifications / Display / Usage / Shortcuts / About
+         │  ├─ Integrations / Events & Sounds
+         │  └─ embedded SoundPacksWindow view
+         ├─ SettingsPresentationSession
+         │  └─ typed route transaction / focus debt / destination lifecycle / announcement intent
+         └─ native NSWindow / activation handback / accessibility post-and-ack adapter
 ```
 
 `ClaudioGUIComponents` supplies `ClaudioTheme`, branding, failure rows, audio preview, and text
 size controls, including the two-caller `SharedMasterVolumeSlider`. `ClaudioLocalization` owns the
-string catalog and explicit language store. `ClaudioSettingsPresentation.SettingsRootView` is the
-importable production-shape General/Login root used by the compiled harness; the retained
-nine-destination production shell stays in `ClaudioGUI` until its later cutover.
+string catalog and explicit language store. Production, the executable harness, and the DEBUG
+state gallery all mount the same importable `ClaudioSettingsPresentation.SettingsRootView`.
 
 ## State flow
 
 ```text
 composition root
   → HostIntegrationManagerBridge (actor) → HostIntegrationPresentationState
-  → ClaudioPreferences + LoginItemSettingsModel
-    → SettingsPresentationSession.state
-      → LoginItemSettingsSection / SettingsRootView
+  → nonoptional SettingsPresentationDependencies
+    → SettingsPresentationSession.state (one coherent published projection)
+      → SettingsRootView → exhaustive typed destination mount
       → SettingsPlatformAction → ClaudioGUI native adapter
+      → semantic announcement intent → SettingsWindowController native post + exact ack
   → SoundPackLibrary (actor) → SoundPackLibrarySnapshot
     → SoundPacksWindowModel (package implementation, owner-private)
       → SoundPacksEditorOwner.presentation
         → Settings route/announcement projection + embedded editor view
-  → stores/models/coordinators → SwiftUI/AppKit views
+  → app-lifetime stores/models → session transaction → SwiftUI destination views
 ```
 
 - `HostIntegrationPresentationStore` publishes host rows; `IntegrationDestinationModel` owns
@@ -53,21 +54,27 @@ composition root
   owner implementation.
 - `PanelConfigController`, `MasterVolumeController`, `EventMuteController`, and onboarding models
   keep pure Foundation decisions outside SwiftUI.
-- `SettingsPresentationSession` projects the real General/Login slice from non-optional existing
-  owners. It owns neither Settings routing/window handback nor duplicate preference/login facts;
-  native Login Items and Calendar effects are a closed typed action handled in `ClaudioGUI`.
-- `PanelFocusCoordinator` and the retained Settings owner own popover/window focus handoff; views
-  do not own the app lifetime of management windows.
+- `SettingsPresentationSession` is the single Settings presentation owner for typed route
+  resolution/revision, window phase, focus debt, destination-local transient state, lifecycle
+  transitions, and semantic announcement intent. Invalid or stale routes preserve the requested
+  destination and typed failure without applying destination-specific domain mutation.
+- Native Login Items/Calendar effects remain closed typed actions implemented by `ClaudioGUI`.
+  `SettingsWindowController` owns only the retained `NSWindow`, app activation/handback, phase
+  forwarding, and native accessibility post/ack.
+- `PanelFocusCoordinator` owns panel focus. Settings focus debt belongs to the Settings session;
+  destination views only consume and acknowledge the exact published request.
 
 ## Source boundaries
 
 - `ClaudioGUICore`: testable state, presentation, accessibility, pack import/restore, and layout
   decisions; no SwiftUI dependency.
 - `ClaudioGUIComponents`: reusable SwiftUI visual primitives.
-- `ClaudioSettingsPresentation`: resource-free SwiftUI presentation for the real General/Login
-  slice, with no AppKit, ServiceManagement, system workspace, route, or window ownership.
-- `ClaudioGUI` / `SoundPacksWindow`: executable native adapters plus AppKit/SwiftUI rendering and
-  lifecycle wiring.
+- `ClaudioSettingsPresentation`: resource-free SwiftUI presentation for all nine Settings
+  destinations. It owns the Settings presentation transaction but no native window or
+  system-effect adapter, resource bundle, Sound Pack disk fact, or host schema.
+- `ClaudioGUI`: executable composition plus native adapters and the retained AppKit window.
+- `SoundPacksWindow`: reusable editor rendering and native accessibility bridge; all editor facts
+  and mutations remain behind `SoundPacksEditorOwner`.
 - Native menu-bar, VoiceOver, keyboard, audio, and focus behavior requires real macOS manual evidence
   in addition to executable harness checks.
 
@@ -81,10 +88,11 @@ composition root
   command/operation boundary.
 - `gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift`: package-local owner implementation for
   sound-pack projection and writes.
-- `gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift`: General/Login
-  projection, typed actions, and semantic announcement debt.
-- `gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift`: importable real-slice root.
+- `gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift`: the coherent typed
+  Settings transaction, lifecycle, focus, and semantic announcement owner.
+- `gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift`: importable exhaustive
+  nine-destination production root.
 - `gui/Sources/ClaudioGUI/SettingsPlatformActionsAdapter.swift`: exhaustive native adapter for the
   two Settings-only system effects.
-- `gui/Sources/ClaudioGUI/SettingsWindowController.swift`: retained settings lifecycle and native
-  semantic announcement acknowledgement.
+- `gui/Sources/ClaudioGUI/SettingsWindowController.swift`: retained native window,
+  activation/handback, phase forwarding, and semantic announcement post/ack.

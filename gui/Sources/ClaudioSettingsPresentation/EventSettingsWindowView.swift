@@ -3,6 +3,7 @@ import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
 import ClaudioLocalization
+import Combine
 import SoundPacksWindow
 import SwiftUI
 
@@ -10,7 +11,7 @@ import SwiftUI
 /// It reuses the panel's manager-owned scope and event projections; full per-event file editing
 /// routes inside the same retained Settings window to the embedded Sounds editor.
 @MainActor
-package struct EventSettingsWindowView: View {
+struct EventSettingsWindowView: View {
     @ObservedObject var model: PanelConfigController
     @ObservedObject var selection: EventSettingsWindowSelection
     @ObservedObject var hostIntegrations: HostIntegrationPresentationStore
@@ -21,21 +22,18 @@ package struct EventSettingsWindowView: View {
     let soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher
     let onConfigureSound: @MainActor (SoundPacksWindowRoute) -> Void
     let onAudibilityInputsChanged: @MainActor () -> Void
-    let onAnnouncement: (@MainActor (String) -> Void)?
+    let onAnnouncement: @MainActor (String) -> Void
     #if DEBUG
     var reloadsOnAppear = true
     #endif
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedTarget: EventSettingsFocusTarget?
     @State private var handledFocusRequestRevision: UInt64 = 0
-    @State private var playingCandidateID: UUID?
-    @State private var playingCandidateTitle: String?
-    @State private var showsCredentialSheet = false
     @State private var previewAllTask: Task<Void, Never>?
     @State private var previewAllFailureEvent: Event?
     @State private var previewAllCoordinator = EventPreviewSequenceCoordinator()
 
-    package init(
+    init(
         model: PanelConfigController,
         selection: EventSettingsWindowSelection,
         hostIntegrations: HostIntegrationPresentationStore,
@@ -45,7 +43,7 @@ package struct EventSettingsWindowView: View {
         soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher,
         onConfigureSound: @escaping @MainActor (SoundPacksWindowRoute) -> Void,
         onAudibilityInputsChanged: @escaping @MainActor () -> Void,
-        onAnnouncement: (@MainActor (String) -> Void)?
+        onAnnouncement: @escaping @MainActor (String) -> Void
     ) {
         self.model = model
         self.selection = selection
@@ -136,7 +134,7 @@ package struct EventSettingsWindowView: View {
         }
     }
 
-    package var body: some View {
+    var body: some View {
         HStack(spacing: 0) {
             scopeSidebar
                 .frame(width: 230)
@@ -151,7 +149,8 @@ package struct EventSettingsWindowView: View {
         .environment(\.dynamicTypeSize, interfaceTextSize.dynamicTypeSize)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.eventSettingsWindowTitle))
-        .onReceive(selection.$focusRequestRevision) { revision in
+        .onReceive(selection.$presentationState) { presentation in
+            let revision = presentation.focusRequestRevision
             guard revision > handledFocusRequestRevision else { return }
             handledFocusRequestRevision = revision
             if eventSettingsShouldCloseAICueComposer(
@@ -163,11 +162,11 @@ package struct EventSettingsWindowView: View {
             {
                 closeAICueComposer()
             }
-            focusedTarget = selection.focusTarget
+            focusedTarget = presentation.focusTarget
         }
         .onAppear {
             #if DEBUG
-            if reloadsOnAppear {
+            if reloadsOnAppear && !model.usesInjectedPreviewState {
                 model.reload()
             }
             #else
@@ -183,12 +182,21 @@ package struct EventSettingsWindowView: View {
             stopAllPreviews()
             reconcileScopeSelection()
         }
-        .onReceive(selection.$previewStopRequestRevision) { _ in
+        .onReceive(
+            selection.$presentationState
+                .map(\.previewStopRequestRevision)
+                .removeDuplicates()
+                .dropFirst()
+        ) { _ in
             stopAllPreviews()
         }
-        .onReceive(selection.$aiSessionEndRequestRevision) { _ in
+        .onReceive(
+            selection.$presentationState
+                .map(\.aiSessionEndRequestRevision)
+                .removeDuplicates()
+                .dropFirst()
+        ) { _ in
             stopCandidatePreview()
-            showsCredentialSheet = false
         }
         .onChange(of: model.config.selectedPack) { _ in
             closeAICueComposer()
@@ -198,13 +206,13 @@ package struct EventSettingsWindowView: View {
         }
         .onChange(of: aiCueViewModel.requiresCredentialConfiguration) { required in
             if required {
-                showsCredentialSheet = true
+                selection.presentCredentialSheet()
             }
         }
         .task {
             await aiCueViewModel.refreshCredentialStatus()
         }
-        .sheet(isPresented: $showsCredentialSheet) {
+        .sheet(isPresented: credentialSheetBinding) {
             EventSettingsAICueCredentialSheet(
                 viewModel: aiCueViewModel,
                 languageStore: languageStore)
@@ -213,6 +221,7 @@ package struct EventSettingsWindowView: View {
             cancelPreviewSequenceState()
             stopCandidatePreview()
         }
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.eventsAndSounds))
     }
 
     private var scopeSidebar: some View {
@@ -326,7 +335,7 @@ package struct EventSettingsWindowView: View {
             EventSettingsAICueServiceCard(
                 viewModel: aiCueViewModel,
                 languageStore: languageStore,
-                onManageCredential: { showsCredentialSheet = true }
+                onManageCredential: { selection.presentCredentialSheet() }
             )
             .padding(.horizontal, 24)
             .padding(.bottom, 18)
@@ -597,7 +606,7 @@ package struct EventSettingsWindowView: View {
             case .failed(let event):
                 soundPacksEditorNativeEffects.stopPreview(owner: soundPacksEditorOwner)
                 previewAllFailureEvent = event
-                onAnnouncement?(previewAllFailureMessage(for: event))
+                onAnnouncement(previewAllFailureMessage(for: event))
             case .completed, .cancelled:
                 break
             }
@@ -697,12 +706,15 @@ package struct EventSettingsWindowView: View {
                                             viewModel: aiCueViewModel,
                                             languageStore: languageStore,
                                             eventTitle: event.title,
-                                            playingCandidateID: playingCandidateID,
+                                            playingCandidateID:
+                                                selection.presentationState.playingCandidateID,
                                             adoptionEnabled:
                                                 eventsEditorPresentation?.adoptionPermit != nil,
                                             adoptionUnavailableHint:
                                                 editorCapabilityUnavailableHint,
-                                            onConfigureCredential: { showsCredentialSheet = true },
+                                            onConfigureCredential: {
+                                                selection.presentCredentialSheet()
+                                            },
                                             onPreviewCandidate: previewAICueCandidate,
                                             onAdoptCandidate: adoptAICueCandidate,
                                             onClose: closeAICueComposer
@@ -883,8 +895,7 @@ package struct EventSettingsWindowView: View {
     ) {
         guard case .eligible = eligibility else { return }
         soundPacksEditorNativeEffects.stopPreview(owner: soundPacksEditorOwner)
-        playingCandidateID = nil
-        playingCandidateTitle = nil
+        selection.noteCandidatePreviewStopped()
         selection.beginAISession(scope: selectedScope.scope, event: event)
         aiCueViewModel.begin(scope: selectedScope.scope, event: event)
     }
@@ -896,7 +907,7 @@ package struct EventSettingsWindowView: View {
         aiCueViewModel.endSession()
         selection.noteAISessionEnded()
         if hadSession {
-            onAnnouncement?(
+            onAnnouncement(
                 l10n.text(
                     clearedCandidates
                         ? .aiCueComposerClosedCandidatesCleared
@@ -905,7 +916,8 @@ package struct EventSettingsWindowView: View {
     }
 
     private func previewAICueCandidate(_ candidate: AICueCandidate) {
-        let togglesCurrentCandidate = playingCandidateID == candidate.id
+        let togglesCurrentCandidate =
+            selection.presentationState.playingCandidateID == candidate.id
         stopCandidatePreview()
         stopAllPreviews()
         if togglesCurrentCandidate {
@@ -923,19 +935,18 @@ package struct EventSettingsWindowView: View {
             aiCueViewModel.reportCandidateUnavailable()
             return
         }
-        playingCandidateID = candidate.id
+        selection.beginCandidatePreview(id: candidate.id)
         let title = localizedAICueCandidateTitle(
             candidate.variant,
             language: languageStore.language)
-        playingCandidateTitle = title
-        onAnnouncement?(
+        onAnnouncement(
             l10n.format(
                 .aiCueCandidatePlaybackStarted,
                 title as NSString))
         let candidateID = candidate.id
         let resetDelay = Double(candidate.durationMilliseconds) / 1_000 + 0.15
         DispatchQueue.main.asyncAfter(deadline: .now() + resetDelay) {
-            guard playingCandidateID == candidateID else { return }
+            guard selection.presentationState.playingCandidateID == candidateID else { return }
             stopCandidatePreview()
         }
     }
@@ -958,16 +969,34 @@ package struct EventSettingsWindowView: View {
     }
 
     private func stopCandidatePreview() {
-        let stoppedCandidateTitle = playingCandidateTitle
+        let stoppedCandidateTitle = selection.presentationState.playingCandidateID.flatMap {
+            candidateID in
+            aiCueViewModel.generation?.candidates.first(where: { $0.id == candidateID }).map {
+                localizedAICueCandidateTitle(
+                    $0.variant,
+                    language: languageStore.language)
+            }
+        }
         soundPacksEditorNativeEffects.stopPreview(owner: soundPacksEditorOwner)
-        playingCandidateID = nil
-        playingCandidateTitle = nil
+        selection.noteCandidatePreviewStopped()
         if let stoppedCandidateTitle {
-            onAnnouncement?(
+            onAnnouncement(
                 l10n.format(
                     .aiCueCandidatePlaybackStopped,
                     stoppedCandidateTitle as NSString))
         }
+    }
+
+    private var credentialSheetBinding: Binding<Bool> {
+        Binding(
+            get: { selection.presentationState.credentialSheetIsPresented },
+            set: { isPresented in
+                if isPresented {
+                    selection.presentCredentialSheet()
+                } else {
+                    selection.dismissCredentialSheet()
+                }
+            })
     }
 
     private func aiCueGenerationIsEnabled(

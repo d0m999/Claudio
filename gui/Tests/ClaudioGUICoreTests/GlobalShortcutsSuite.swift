@@ -508,19 +508,11 @@ func runGlobalShortcutsSuites() {
             "gui/Sources/ClaudioSettingsPresentation/ShortcutSettingsView.swift")
         let menuURL = root.appendingPathComponent(
             "gui/Sources/ClaudioGUI/MenuBarController.swift")
-        let settingsSessionURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift")
-        let eventsURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift")
         let coreURL = root.appendingPathComponent(
             "gui/Sources/ClaudioGUICore/GlobalShortcuts.swift")
         guard let carbon = try? String(contentsOf: carbonURL, encoding: .utf8),
             let recorder = try? String(contentsOf: recorderURL, encoding: .utf8),
             let menu = try? String(contentsOf: menuURL, encoding: .utf8),
-            let settingsSession = try? String(
-                contentsOf: settingsSessionURL,
-                encoding: .utf8),
-            let events = try? String(contentsOf: eventsURL, encoding: .utf8),
             let core = try? String(contentsOf: coreURL, encoding: .utf8)
         else {
             expect(false, "读不到 global shortcut production wiring")
@@ -539,7 +531,15 @@ func runGlobalShortcutsSuites() {
         expect(
             recorder.contains("override func keyDown(with event: NSEvent)")
                 && recorder.contains("guard isRecording, !event.isARepeat")
-                && recorder.contains("onCapture?(UInt32(event.keyCode)")
+                && recorder.contains("LocalShortcutCaptureNSView(")
+                && recorder.contains("onCapture: onCapture")
+                && recorder.contains("onCancel: onCancel")
+                && recorder.contains("let onCapture: @MainActor")
+                && recorder.contains("let onCancel: @MainActor")
+                && recorder.contains("onCapture(UInt32(event.keyCode)")
+                && recorder.contains("onCancel()")
+                && !recorder.contains("onCapture?(")
+                && !recorder.contains("onCancel?(")
                 && recorder.contains("event.keyCode == 53")
                 && recorder.contains("else if model.suspendForRecording()")
                 && recorder.contains("model.resumeAfterRecording(preservingFailureFor: action)")
@@ -555,7 +555,7 @@ func runGlobalShortcutsSuites() {
                 && !recorder.contains(".foregroundColor(.red)")
                 && !recorder.contains("event.characters")
                 && !recorder.contains("charactersIgnoringModifiers"),
-            "录制必须暂停 Carbon，使用字体/颜色 token，并在结束后恢复发起按钮焦点")
+            "录制必须持有 required callback、暂停 Carbon、使用 token，并在结束后恢复发起按钮焦点")
         expect(
             menu.contains("private let globalShortcutSettings: GlobalShortcutSettingsModel")
                 && menu.contains("fileprivate func performGlobalShortcut(")
@@ -571,15 +571,6 @@ func runGlobalShortcutsSuites() {
                     separatedBy: "handbackApplication: globalShortcutHandbackApplication()"
                 ).count - 1 == 2,
             "通用设置与当前 Sound Scope 两个入口必须接入同一已测试 handback 规则")
-        expect(
-            settingsSession.contains("case .eventShortcut(let route)")
-                && settingsSession.contains(".destination(.eventsAndSounds)"),
-            "快捷键必须进入唯一 Settings session，非法 raw scope 仍落在 Events destination")
-        expect(
-            events.contains("selection.unavailableRequestedScopeStoredValue")
-                && events.contains("ClaudioTheme.error(colorScheme)")
-                && events.contains("event-settings.shortcut-scope-failure"),
-            "非法或失效 scope 必须仍打开 production Events，并用错误 token 显示原因")
         expect(
             core.contains("public let persist:")
                 && core.contains("private var systemSuspensionActive = false")
