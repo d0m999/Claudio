@@ -250,7 +250,10 @@ private func settingsAnnouncementSurfaceSources(
     executable: [ScannedSource],
     presentation: [ScannedSource]
 ) -> [ScannedSource] {
-    executable + presentation
+    repositoryRelativeSources([
+        (root: "gui/Sources/ClaudioGUI", sources: executable),
+        (root: "gui/Sources/ClaudioSettingsPresentation", sources: presentation),
+    ])
 }
 
 private func settingsAnnouncementSurfaceCensus(
@@ -485,13 +488,13 @@ func runViewWiringSuites() {
 
         expect(
             census.posts == [
-                "PanelView.swift": 1,
-                "SettingsWindowController.swift": 1,
+                "gui/Sources/ClaudioGUI/PanelView.swift": 1,
+                "gui/Sources/ClaudioGUI/SettingsWindowController.swift": 1,
             ],
             "Panel 与统一 Settings 的基础页动作反馈各有一个窗口级主动播报出口；"
                 + "destination 通过注入 callback，不得新增 AppKit post。实得 \(census.posts)")
         expect(
-            census.consumes == ["PanelView.swift": 1],
+            census.consumes == ["gui/Sources/ClaudioGUI/PanelView.swift": 1],
             "去重器也只许有一个调用点，理由一字不差 —— 绕过它 = 把「同一趟里 post 两条」放回来。"
                 + "实得 \(census.consumes)")
         let integrations =
