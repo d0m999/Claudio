@@ -1,8 +1,8 @@
 import ClaudioGUICore
 import SwiftUI
 
-package enum SettingsRootInteractionDriver {
-    package static func movedDestination(
+private enum SettingsRootInteractionDriver {
+    static func movedDestination(
         _ direction: SettingsSidebarMoveDirection,
         from current: SettingsDestination,
         availableDestinations: [SettingsDestination]
@@ -14,7 +14,7 @@ package enum SettingsRootInteractionDriver {
         return next == current ? nil : next
     }
 
-    package static func exitFocusTarget(
+    static func exitFocusTarget(
         destination: SettingsDestination
     ) -> SettingsWindowFocusTarget {
         .sidebar(destination)

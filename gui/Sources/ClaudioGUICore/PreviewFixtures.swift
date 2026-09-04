@@ -451,9 +451,10 @@ public enum PreviewFixtures {
 
     public static let settingsExperienceScenarios = SettingsExperienceScenario.allCases
 
-    /// Exhaustive visual/AX roster for the allowlisted AI Cue profiles, credential states,
-    /// composer lifecycle and the failure families required by the Settings acceptance matrix.
-    /// The gallery renders production service-card, credential-sheet and composer views directly.
+    /// Exhaustive visual roster for the allowlisted AI Cue profiles, credential states, composer
+    /// lifecycle and failure families required by the Settings acceptance matrix. The gallery
+    /// routes every scenario through SettingsStateGalleryView into the production
+    /// SettingsRootView/session mount.
     public enum AICueGalleryScenario: String, CaseIterable, Identifiable, Sendable {
         case elevenLabsMissing = "elevenlabs.missing"
         case elevenLabsVerified = "elevenlabs.verified"

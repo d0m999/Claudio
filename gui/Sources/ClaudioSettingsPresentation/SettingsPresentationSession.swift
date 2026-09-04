@@ -112,6 +112,7 @@ package final class SettingsPresentationSession: ObservableObject {
                         self.lifecycleDestination == .eventsAndSounds
                     else { return }
                     self.activateEventsEditor(
+                        eventPresentation: self.eventPresentation,
                         aiSession: projection.0,
                         candidateGenerationID: projection.1)
                 }
@@ -121,11 +122,18 @@ package final class SettingsPresentationSession: ObservableObject {
             .sink { [weak self] presentation in
                 MainActor.assumeIsolated {
                     guard let self else { return }
+                    let previousPresentation = self.eventPresentation
                     self.eventPresentation = presentation
                     if !self.isPerformingTransaction,
-                        self.lifecycleDestination == .eventsAndSounds
+                        self.lifecycleDestination == .eventsAndSounds,
+                        presentation.route != previousPresentation.route
+                            || presentation.routeRequestRevision
+                                != previousPresentation.routeRequestRevision
                     {
-                        self.activateEventsEditor(eventPresentation: presentation)
+                        self.activateEventsEditor(
+                            eventPresentation: presentation,
+                            aiSession: self.dependencies.aiCueViewModel.session,
+                            candidateGenerationID: self.dependencies.aiCueViewModel.generation?.id)
                     }
                     self.publishProjection()
                 }
@@ -378,15 +386,15 @@ package final class SettingsPresentationSession: ObservableObject {
     }
 
     private func activateEventsEditor(
-        eventPresentation: SettingsEventPresentationState? = nil,
-        aiSession: AICueComposerSession? = nil,
-        candidateGenerationID: UUID? = nil
+        eventPresentation: SettingsEventPresentationState,
+        aiSession: AICueComposerSession?,
+        candidateGenerationID: UUID?
     ) {
         let route =
             if let aiSession {
                 EventSettingsWindowRoute(scope: aiSession.scope, event: aiSession.event)
             } else {
-                (eventPresentation ?? self.eventPresentation).route
+                eventPresentation.route
             }
         _ = dependencies.soundPacksEditorOwner.send(
             .activate(
