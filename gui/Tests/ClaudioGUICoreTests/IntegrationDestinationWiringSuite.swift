@@ -57,6 +57,22 @@ func runIntegrationDestinationWiringSuites() {
                 entrypoint: "runIntegrationDestinationWiringSuites",
                 documented: "IntegrationDestinationWiringSuite"
             ),
+            (
+                entrypoint: "runEventSettingsWindowSelectionSuites",
+                documented: "EventSettingsWindowSelectionSuite"
+            ),
+            (
+                entrypoint: "runSettingsPresentationLifecycleSuites",
+                documented: "SettingsPresentationLifecycleSuite"
+            ),
+            (
+                entrypoint: "runSettingsPresentationTargetSuites",
+                documented: "SettingsPresentationTargetSuite"
+            ),
+            (
+                entrypoint: "runSettingsPresentationSliceSuites",
+                documented: "SettingsPresentationTargetSuite"
+            ),
         ]
         for suiteName in currentSuites {
             expect(
@@ -71,7 +87,10 @@ func runIntegrationDestinationWiringSuites() {
         }
         expect(
             !gate.contains("runIntegrationsWindowWiringSuites")
-                && !acceptance.contains("IntegrationsWindowWiringSuite"),
-            "已删除的 Integration Window suite 不得残留在门禁或当前验收文档")
+                && !gate.contains("runEventSettingsDestinationCoordinatorSuites")
+                && !acceptance.contains("IntegrationsWindowWiringSuite")
+                && !acceptance.contains("EventSettingsDestinationCoordinatorSuite")
+                && !acceptance.contains("SettingsPresentationCharacterizationSuite"),
+            "已删除的 Window/Coordinator/Characterization suite 不得残留在门禁或当前验收文档")
     }
 }
