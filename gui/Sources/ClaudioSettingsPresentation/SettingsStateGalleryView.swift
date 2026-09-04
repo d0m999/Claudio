@@ -15,14 +15,20 @@ package struct SettingsStateGalleryView: View {
         availability: SettingsRouteAvailability,
         language: ClaudioAppLanguage,
         textSize: ClaudioInterfaceTextSize = .standard,
-        experienceProfile: PreviewFixtures.SettingsExperienceProfile? = nil
+        experienceProfile: PreviewFixtures.SettingsExperienceProfile? = nil,
+        aiCueScenario: PreviewFixtures.AICueGalleryScenario? = nil,
+        integrationScenario: PreviewFixtures.HostIntegrationScenario? = nil,
+        integrationInFlightAction: HostIntegrationUserAction? = nil
     ) {
         let fixture = SettingsPresentationFixtures.generalLogin(
             language: language,
             route: route,
             availability: availability,
             textSize: textSize,
-            experienceProfile: experienceProfile)
+            experienceProfile: experienceProfile,
+            aiCueScenario: aiCueScenario,
+            integrationScenario: integrationScenario,
+            integrationInFlightAction: integrationInFlightAction)
         _session = StateObject(wrappedValue: fixture.session)
     }
 

@@ -5,138 +5,157 @@ import Combine
 /// App-lifetime typed selection shared by the unified Events & Sounds destination and its routes.
 @MainActor
 package final class EventSettingsWindowSelection: ObservableObject {
-    @Published private(set) var route: EventSettingsWindowRoute
-    @Published private(set) var routeRequestRevision: UInt64
-    @Published private(set) var focusRequestRevision: UInt64
-    @Published private(set) var focusTarget: EventSettingsFocusTarget?
-    @Published private(set) var previewState: EventSettingsDestinationPreviewState
-    @Published private(set) var previewStopRequestRevision: UInt64
-    @Published private(set) var aiSessionState: EventSettingsDestinationAISessionState
-    @Published private(set) var aiSessionEndRequestRevision: UInt64
-    @Published private(set) var stateRevision: UInt64 = 0
+    @Published package private(set) var presentationState: SettingsEventPresentationState
 
-    private var coordinator: EventSettingsDestinationCoordinator
-    private var isPublishingCoordinatorState = false
-    private var coordinatorRepublishRequested = false
+    private var storage: Storage
+    private var isPublishingState = false
+    private var republishRequested = false
+
+    package var route: EventSettingsWindowRoute { storage.route }
+    package var routeRequestRevision: UInt64 { storage.routeRequestRevision }
+    package var focusTarget: EventSettingsFocusTarget? { storage.focusTarget }
 
     package var unavailableRequestedScopeStoredValue: String? {
         route.unavailableRequestedScopeStoredValue
     }
 
     package init(route: EventSettingsWindowRoute = EventSettingsWindowRoute(scope: .global)) {
-        let coordinator = EventSettingsDestinationCoordinator(route: route)
-        self.coordinator = coordinator
-        self.route = coordinator.route
-        routeRequestRevision = coordinator.routeRequestRevision
-        focusRequestRevision = coordinator.focusRequestRevision
-        focusTarget = coordinator.focusTarget
-        previewState = coordinator.previewState
-        previewStopRequestRevision = coordinator.previewStopRequestRevision
-        aiSessionState = coordinator.aiSessionState
-        aiSessionEndRequestRevision = coordinator.aiSessionEndRequestRevision
+        let storage = Storage(route: route)
+        self.storage = storage
+        presentationState = storage.presentationState
     }
 
     package func select(_ route: EventSettingsWindowRoute) {
-        guard coordinator.select(route) else { return }
-        publishCoordinatorState()
+        guard storage.route != route else { return }
+        storage.requestPreviewStop()
+        storage.requestAISessionEnd()
+        storage.route = route
+        storage.routeRequestRevision &+= 1
+        storage.focusTarget = nil
+        publishState()
     }
 
     package func markCurrentScopeUnavailable() {
-        guard coordinator.markCurrentScopeUnavailable() else { return }
-        publishCoordinatorState()
+        guard storage.route.unavailableRequestedScopeStoredValue == nil else { return }
+        storage.requestPreviewStop()
+        storage.requestAISessionEnd()
+        storage.route = EventSettingsWindowRoute(
+            scope: storage.route.scope,
+            event: storage.route.event,
+            unavailableRequestedScopeStoredValue: storage.route.scope.storedValue)
+        storage.routeRequestRevision &+= 1
+        storage.focusTarget = nil
+        publishState()
     }
 
     package func clearUnavailableScope() {
-        guard coordinator.clearUnavailableScope() else { return }
-        publishCoordinatorState()
+        guard storage.route.unavailableRequestedScopeStoredValue != nil else { return }
+        storage.route = EventSettingsWindowRoute(
+            scope: storage.route.scope,
+            event: storage.route.event)
+        storage.routeRequestRevision &+= 1
+        publishState()
     }
 
     package func requestInitialFocus(scopes: [PanelSoundScopeID]) {
-        coordinator.requestInitialFocus(scopes: scopes)
-        publishCoordinatorState()
+        if storage.route.unavailableRequestedScopeStoredValue != nil {
+            storage.focusTarget = eventSettingsFirstFocusTarget(scopes: scopes)
+        } else {
+            storage.focusTarget = eventSettingsRouteFocusTarget(
+                route: storage.route,
+                scopes: scopes,
+                events: Set(Event.allCases))
+        }
+        storage.focusRequestRevision &+= 1
+        publishState()
     }
 
     package func beginPreviewSequence() -> UInt64 {
-        let generation = coordinator.beginPreviewSequence()
-        publishCoordinatorState()
-        return generation
+        storage.previewGeneration &+= 1
+        storage.previewState = .running(generation: storage.previewGeneration)
+        publishState()
+        return storage.previewGeneration
     }
 
     package func completePreviewSequence(generation: UInt64) -> Bool {
-        guard coordinator.completePreviewSequence(generation: generation) else { return false }
-        publishCoordinatorState()
+        guard storage.previewState == .running(generation: generation) else { return false }
+        storage.previewState = .idle
+        publishState()
         return true
     }
 
     package func notePreviewStopped() {
-        coordinator.notePreviewStopped()
-        publishCoordinatorState()
+        storage.previewState = .idle
+        publishState()
     }
 
     package func requestPreviewStop() {
-        coordinator.requestPreviewStop()
-        publishCoordinatorState()
+        storage.requestPreviewStop()
+        publishState()
     }
 
     package func beginAISession(scope: PanelSoundScopeID, event: Event) {
-        coordinator.beginAISession(scope: scope, event: event)
-        publishCoordinatorState()
+        storage.aiSessionState = .active(scope: scope, event: event)
+        publishState()
     }
 
     package func noteAISessionEnded() {
-        coordinator.noteAISessionEnded()
-        publishCoordinatorState()
+        storage.aiSessionState = .idle
+        publishState()
     }
 
     package func leaveDestination() {
-        coordinator.leaveDestination()
-        publishCoordinatorState()
+        storage.requestPreviewStop()
+        storage.requestAISessionEnd()
+        publishState()
     }
 
-    package var presentationState: SettingsEventPresentationState {
-        SettingsEventPresentationState(
-            route: route,
-            routeRequestRevision: routeRequestRevision,
-            focusRequestRevision: focusRequestRevision,
-            focusTarget: focusTarget,
-            previewState: previewState,
-            previewStopRequestRevision: previewStopRequestRevision,
-            aiSessionState: aiSessionState,
-            aiSessionEndRequestRevision: aiSessionEndRequestRevision)
-    }
-
-    private func publishCoordinatorState() {
-        guard !isPublishingCoordinatorState else {
-            coordinatorRepublishRequested = true
+    private func publishState() {
+        guard !isPublishingState else {
+            republishRequested = true
             return
         }
-        isPublishingCoordinatorState = true
-        defer { isPublishingCoordinatorState = false }
+        isPublishingState = true
+        defer { isPublishingState = false }
 
         repeat {
-            coordinatorRepublishRequested = false
-            let previous = presentationState
-            if route != coordinator.route { route = coordinator.route }
-            if routeRequestRevision != coordinator.routeRequestRevision {
-                routeRequestRevision = coordinator.routeRequestRevision
-            }
-            if focusTarget != coordinator.focusTarget { focusTarget = coordinator.focusTarget }
-            if previewState != coordinator.previewState { previewState = coordinator.previewState }
-            if aiSessionState != coordinator.aiSessionState {
-                aiSessionState = coordinator.aiSessionState
-            }
-            if previewStopRequestRevision != coordinator.previewStopRequestRevision {
-                previewStopRequestRevision = coordinator.previewStopRequestRevision
-            }
-            if aiSessionEndRequestRevision != coordinator.aiSessionEndRequestRevision {
-                aiSessionEndRequestRevision = coordinator.aiSessionEndRequestRevision
-            }
-            if focusRequestRevision != coordinator.focusRequestRevision {
-                focusRequestRevision = coordinator.focusRequestRevision
-            }
-            if presentationState != previous {
-                stateRevision &+= 1
-            }
-        } while coordinatorRepublishRequested
+            republishRequested = false
+            let projection = storage.presentationState
+            if presentationState != projection { presentationState = projection }
+        } while republishRequested
+    }
+
+    private struct Storage {
+        var route: EventSettingsWindowRoute
+        var routeRequestRevision: UInt64 = 0
+        var focusRequestRevision: UInt64 = 0
+        var focusTarget: EventSettingsFocusTarget?
+        var previewState: EventSettingsDestinationPreviewState = .idle
+        var previewStopRequestRevision: UInt64 = 0
+        var aiSessionState: EventSettingsDestinationAISessionState = .idle
+        var aiSessionEndRequestRevision: UInt64 = 0
+        var previewGeneration: UInt64 = 0
+
+        var presentationState: SettingsEventPresentationState {
+            SettingsEventPresentationState(
+                route: route,
+                routeRequestRevision: routeRequestRevision,
+                focusRequestRevision: focusRequestRevision,
+                focusTarget: focusTarget,
+                previewState: previewState,
+                previewStopRequestRevision: previewStopRequestRevision,
+                aiSessionState: aiSessionState,
+                aiSessionEndRequestRevision: aiSessionEndRequestRevision)
+        }
+
+        mutating func requestPreviewStop() {
+            previewState = .idle
+            previewStopRequestRevision &+= 1
+        }
+
+        mutating func requestAISessionEnd() {
+            aiSessionState = .idle
+            aiSessionEndRequestRevision &+= 1
+        }
     }
 }

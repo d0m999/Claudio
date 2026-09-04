@@ -9,7 +9,7 @@ struct ShortcutSettingsView: View {
     @ObservedObject var model: GlobalShortcutSettingsModel
     @ObservedObject var preferences: ClaudioPreferences
     let focusedTarget: FocusState<SettingsWindowFocusTarget?>.Binding
-    let onAnnouncement: (@MainActor (String) -> Void)?
+    let onAnnouncement: @MainActor (String) -> Void
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var recordingAction: GlobalShortcutAction?
@@ -192,7 +192,7 @@ struct ShortcutSettingsView: View {
     private func announceState(_ action: GlobalShortcutAction) {
         let state = model.state(for: action)
         let value = state.failure.map(shortcutFailureText) ?? currentValue(state)
-        onAnnouncement?(
+        onAnnouncement(
             l10n.format(
                 .settingsAnnouncementValue,
                 actionTitle(action) as NSString,

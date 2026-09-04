@@ -1,3 +1,4 @@
+import ClaudioCore
 import ClaudioGUICore
 import ClaudioLocalization
 
@@ -16,6 +17,16 @@ package enum SettingsWindowPhase: Equatable, Sendable {
 package struct SettingsFocusDebt: Equatable, Sendable {
     package let revision: UInt64
     package let destination: SettingsDestination
+}
+
+package enum EventSettingsDestinationPreviewState: Sendable, Equatable {
+    case idle
+    case running(generation: UInt64)
+}
+
+package enum EventSettingsDestinationAISessionState: Sendable, Equatable {
+    case idle
+    case active(scope: PanelSoundScopeID, event: Event)
 }
 
 package struct SettingsEventPresentationState: Equatable, Sendable {

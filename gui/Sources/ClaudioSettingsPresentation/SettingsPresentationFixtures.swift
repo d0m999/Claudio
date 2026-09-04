@@ -54,7 +54,9 @@ package struct SettingsPresentationFixture {
     }
 
     package var previewStopRequestRevisions: AnyPublisher<UInt64, Never> {
-        session.eventSettingsSelection.$previewStopRequestRevision.eraseToAnyPublisher()
+        session.eventSettingsSelection.$presentationState
+            .map(\.previewStopRequestRevision)
+            .eraseToAnyPublisher()
     }
 
     package func beginEventTransientActivity(
@@ -78,7 +80,10 @@ package enum SettingsPresentationFixtures {
         availability: SettingsRouteAvailability? = nil,
         textSize: ClaudioInterfaceTextSize = .standard,
         experienceProfile: PreviewFixtures.SettingsExperienceProfile? = nil,
-        aiCueViewModel injectedAICueViewModel: AICueGenerationViewModel? = nil
+        aiCueViewModel injectedAICueViewModel: AICueGenerationViewModel? = nil,
+        aiCueScenario: PreviewFixtures.AICueGalleryScenario? = nil,
+        integrationScenario: PreviewFixtures.HostIntegrationScenario? = nil,
+        integrationInFlightAction: HostIntegrationUserAction? = nil
     ) -> SettingsPresentationFixture {
         let temporaryRoot = temporaryParent.appendingPathComponent(
             "claudio-settings-presentation-fixture-\(UUID().uuidString)",
@@ -139,10 +144,18 @@ package enum SettingsPresentationFixtures {
                 durationProbe: SettingsPresentationFixtureDurationProbe(),
                 packsLockFile: temporaryRoot.appendingPathComponent("packs.lock")),
             activation: nil)
-        let hostState = PreviewFixtures.workBuddyVisualScenarios.first {
-            $0.phase == .allImplementedBindingsCurrent
-        }!.state
-        let hostIntegrations = HostIntegrationPresentationStore(state: hostState)
+        let hostState =
+            integrationScenario?.state
+            ?? PreviewFixtures.workBuddyVisualScenarios.first {
+                $0.phase == .allImplementedBindingsCurrent
+            }!.state
+        let hostIntegrations = HostIntegrationPresentationStore(
+            state: hostState,
+            configurationSources: [
+                .claudeCode: "~/.claude/settings.json",
+                .codex: "~/.codex/hooks.json",
+                .workBuddy: "~/.workbuddy/settings.json",
+            ])
         let dynamicQuietPolicy = makeSettingsFixtureDynamicQuietPolicy(
             for: experienceProfile)
         let usageSettings = makeSettingsFixtureUsageSettings(for: experienceProfile)
@@ -159,6 +172,9 @@ package enum SettingsPresentationFixtures {
             actionHandler: IntegrationDestinationActionHandler { _ in integrationOutcome },
             preferences: preferences,
             clipboardWriter: IntegrationDestinationClipboardWriter { _ in true })
+        if let integrationInFlightAction {
+            integrationsModel.pinPreviewInFlight(integrationInFlightAction)
+        }
         let eventSettingsModel = PanelConfigController(
             previewConfigState: .operational(
                 settingsConfig),
@@ -178,7 +194,8 @@ package enum SettingsPresentationFixtures {
         let aiCueViewModel =
             injectedAICueViewModel
             ?? AICueGenerationViewModel(
-                previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState)
+                previewState: (aiCueScenario ?? PreviewFixtures.AICueGalleryScenario.editing)
+                    .previewState)
         let session = SettingsPresentationSession(
             dependencies: SettingsPresentationDependencies(
                 preferences: preferences,

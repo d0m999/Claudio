@@ -11,8 +11,8 @@ package struct IntegrationsSettingsDestinationView: View {
     @ObservedObject var model: IntegrationDestinationModel
     @ObservedObject var focusCoordinator: IntegrationDestinationFocusCoordinator
     @ObservedObject var languageStore: ClaudioPreferences
-    let onManageEvents: (@MainActor (HostID) -> Void)?
-    let onAnnouncement: (@MainActor (String) -> Void)?
+    let onManageEvents: @MainActor (HostID) -> Void
+    let onAnnouncement: @MainActor (String) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
@@ -26,8 +26,8 @@ package struct IntegrationsSettingsDestinationView: View {
         model: IntegrationDestinationModel,
         focusCoordinator: IntegrationDestinationFocusCoordinator,
         languageStore: ClaudioPreferences,
-        onManageEvents: (@MainActor (HostID) -> Void)?,
-        onAnnouncement: (@MainActor (String) -> Void)?
+        onManageEvents: @escaping @MainActor (HostID) -> Void,
+        onAnnouncement: @escaping @MainActor (String) -> Void
     ) {
         self.model = model
         self.focusCoordinator = focusCoordinator
@@ -299,7 +299,7 @@ package struct IntegrationsSettingsDestinationView: View {
                 .accessibilityIdentifier("integrations.destination.copy-source.\(host.rawValue)")
             case .manageEvents(let host):
                 Button(l10n.text(.settingsIntegrationsManageEvents)) {
-                    onManageEvents?(host)
+                    onManageEvents(host)
                 }
                 .accessibilityHint(l10n.text(.settingsIntegrationsManageEventsHint))
                 .accessibilityIdentifier("integrations.destination.manage-events.\(host.rawValue)")
@@ -469,7 +469,7 @@ package struct IntegrationsSettingsDestinationView: View {
                 model.feedback,
                 language: languageStore.language)
         else { return }
-        onAnnouncement?(sentence)
+        onAnnouncement(sentence)
     }
 
     private func localizedAgentStatus(_ status: HostSourceRowStatus) -> String {

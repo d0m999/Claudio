@@ -3,6 +3,7 @@ import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
 import ClaudioLocalization
+import Combine
 import SoundPacksWindow
 import SwiftUI
 
@@ -21,7 +22,7 @@ package struct EventSettingsWindowView: View {
     let soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher
     let onConfigureSound: @MainActor (SoundPacksWindowRoute) -> Void
     let onAudibilityInputsChanged: @MainActor () -> Void
-    let onAnnouncement: (@MainActor (String) -> Void)?
+    let onAnnouncement: @MainActor (String) -> Void
     #if DEBUG
     var reloadsOnAppear = true
     #endif
@@ -45,7 +46,7 @@ package struct EventSettingsWindowView: View {
         soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher,
         onConfigureSound: @escaping @MainActor (SoundPacksWindowRoute) -> Void,
         onAudibilityInputsChanged: @escaping @MainActor () -> Void,
-        onAnnouncement: (@MainActor (String) -> Void)?
+        onAnnouncement: @escaping @MainActor (String) -> Void
     ) {
         self.model = model
         self.selection = selection
@@ -151,7 +152,8 @@ package struct EventSettingsWindowView: View {
         .environment(\.dynamicTypeSize, interfaceTextSize.dynamicTypeSize)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.eventSettingsWindowTitle))
-        .onReceive(selection.$focusRequestRevision) { revision in
+        .onReceive(selection.$presentationState) { presentation in
+            let revision = presentation.focusRequestRevision
             guard revision > handledFocusRequestRevision else { return }
             handledFocusRequestRevision = revision
             if eventSettingsShouldCloseAICueComposer(
@@ -163,7 +165,7 @@ package struct EventSettingsWindowView: View {
             {
                 closeAICueComposer()
             }
-            focusedTarget = selection.focusTarget
+            focusedTarget = presentation.focusTarget
         }
         .onAppear {
             #if DEBUG
@@ -183,10 +185,18 @@ package struct EventSettingsWindowView: View {
             stopAllPreviews()
             reconcileScopeSelection()
         }
-        .onReceive(selection.$previewStopRequestRevision) { _ in
+        .onReceive(
+            selection.$presentationState
+                .map(\.previewStopRequestRevision)
+                .removeDuplicates()
+        ) { _ in
             stopAllPreviews()
         }
-        .onReceive(selection.$aiSessionEndRequestRevision) { _ in
+        .onReceive(
+            selection.$presentationState
+                .map(\.aiSessionEndRequestRevision)
+                .removeDuplicates()
+        ) { _ in
             stopCandidatePreview()
             showsCredentialSheet = false
         }
@@ -597,7 +607,7 @@ package struct EventSettingsWindowView: View {
             case .failed(let event):
                 soundPacksEditorNativeEffects.stopPreview(owner: soundPacksEditorOwner)
                 previewAllFailureEvent = event
-                onAnnouncement?(previewAllFailureMessage(for: event))
+                onAnnouncement(previewAllFailureMessage(for: event))
             case .completed, .cancelled:
                 break
             }
@@ -896,7 +906,7 @@ package struct EventSettingsWindowView: View {
         aiCueViewModel.endSession()
         selection.noteAISessionEnded()
         if hadSession {
-            onAnnouncement?(
+            onAnnouncement(
                 l10n.text(
                     clearedCandidates
                         ? .aiCueComposerClosedCandidatesCleared
@@ -928,7 +938,7 @@ package struct EventSettingsWindowView: View {
             candidate.variant,
             language: languageStore.language)
         playingCandidateTitle = title
-        onAnnouncement?(
+        onAnnouncement(
             l10n.format(
                 .aiCueCandidatePlaybackStarted,
                 title as NSString))
@@ -963,7 +973,7 @@ package struct EventSettingsWindowView: View {
         playingCandidateID = nil
         playingCandidateTitle = nil
         if let stoppedCandidateTitle {
-            onAnnouncement?(
+            onAnnouncement(
                 l10n.format(
                     .aiCueCandidatePlaybackStopped,
                     stoppedCandidateTitle as NSString))

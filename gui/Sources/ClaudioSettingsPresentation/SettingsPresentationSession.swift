@@ -31,6 +31,7 @@ package final class SettingsPresentationSession: ObservableObject {
     private var pendingAnnouncement: SettingsPresentationAnnouncement?
     private var pendingSoundPackOwnerAnnouncement: SoundPackEditorAnnouncement?
     private var pendingSoundPackAnnouncementID: SoundPackEditorAnnouncement.ID?
+    private var eventPresentation: SettingsEventPresentationState
     private var nextAnnouncementID: UInt64 = 0
     private var presentationRevision: UInt64 = 0
     private var isPresented = false
@@ -51,6 +52,7 @@ package final class SettingsPresentationSession: ObservableObject {
         self.actions = actions
         eventSettingsSelection = EventSettingsWindowSelection()
         integrationsFocusCoordinator = IntegrationDestinationFocusCoordinator()
+        eventPresentation = eventSettingsSelection.presentationState
         preferenceSnapshot = dependencies.preferences.snapshot
         loginProjection = dependencies.loginItemSettings.projection
         let initialShell = SettingsSoundPackShellProjection(
@@ -68,7 +70,7 @@ package final class SettingsPresentationSession: ObservableObject {
             focusDebt: nil,
             windowPhase: .hidden,
             activeDestination: nil,
-            eventPresentation: eventSettingsSelection.presentationState,
+            eventPresentation: eventPresentation,
             preferenceSnapshot: preferenceSnapshot,
             loginProjection: loginProjection,
             platformActionFailure: nil,
@@ -114,15 +116,16 @@ package final class SettingsPresentationSession: ObservableObject {
                         candidateGenerationID: projection.1)
                 }
             }
-        eventPresentationCancellable = eventSettingsSelection.$stateRevision
+        eventPresentationCancellable = eventSettingsSelection.$presentationState
             .dropFirst()
-            .sink { [weak self] _ in
+            .sink { [weak self] presentation in
                 MainActor.assumeIsolated {
                     guard let self else { return }
+                    self.eventPresentation = presentation
                     if !self.isPerformingTransaction,
                         self.lifecycleDestination == .eventsAndSounds
                     {
-                        self.activateEventsEditor()
+                        self.activateEventsEditor(eventPresentation: presentation)
                     }
                     self.publishProjection()
                 }
@@ -369,19 +372,21 @@ package final class SettingsPresentationSession: ObservableObject {
 
     private func activateEventsEditor() {
         activateEventsEditor(
+            eventPresentation: eventPresentation,
             aiSession: dependencies.aiCueViewModel.session,
             candidateGenerationID: dependencies.aiCueViewModel.generation?.id)
     }
 
     private func activateEventsEditor(
-        aiSession: AICueComposerSession?,
-        candidateGenerationID: UUID?
+        eventPresentation: SettingsEventPresentationState? = nil,
+        aiSession: AICueComposerSession? = nil,
+        candidateGenerationID: UUID? = nil
     ) {
         let route =
             if let aiSession {
                 EventSettingsWindowRoute(scope: aiSession.scope, event: aiSession.event)
             } else {
-                eventSettingsSelection.route
+                (eventPresentation ?? self.eventPresentation).route
             }
         _ = dependencies.soundPacksEditorOwner.send(
             .activate(
@@ -597,7 +602,7 @@ package final class SettingsPresentationSession: ObservableObject {
             focusDebt: focusDebt,
             windowPhase: windowPhase,
             activeDestination: activeDestination,
-            eventPresentation: eventSettingsSelection.presentationState,
+            eventPresentation: eventPresentation,
             preferenceSnapshot: preferenceSnapshot,
             loginProjection: loginProjection,
             platformActionFailure: platformActionFailure,
