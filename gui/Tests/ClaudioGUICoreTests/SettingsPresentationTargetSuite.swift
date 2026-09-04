@@ -167,6 +167,122 @@ func runSettingsPresentationTargetSuites() {
             "Release Settings view tree 必须直接使用 native modifiers，DEBUG recorder modifier 不得进入 production generic shape"
         )
     }
+
+    suite("Settings presentation target：Release projection 删除 caller-specific metadata") {
+        let root = guiTestRepositoryRoot()
+        let paths = [
+            "visual": "gui/Sources/ClaudioSettingsPresentation/SettingsVisualComponents.swift",
+            "state": "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationState.swift",
+            "navigation": "gui/Sources/ClaudioGUICore/SettingsNavigation.swift",
+            "root": "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift",
+            "selection":
+                "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowSelection.swift",
+        ]
+        var sources: [String: String] = [:]
+        for (name, path) in paths {
+            guard
+                let source = try? String(
+                    contentsOf: root.appendingPathComponent(path),
+                    encoding: .utf8)
+            else {
+                expect(false, "读不到 Settings Release footprint source：\(path)")
+                return
+            }
+            sources[name] = source
+        }
+        guard let visual = sources["visual"],
+            let state = sources["state"],
+            let navigation = sources["navigation"],
+            let rootView = sources["root"],
+            let selection = sources["selection"]
+        else {
+            expect(false, "Settings Release footprint source map 不完整")
+            return
+        }
+
+        let shallowVisualFixture = """
+            struct SettingsSectionCard: View {
+                private let content: AnyView
+                init<Content: View>(@ViewBuilder content: () -> Content) {
+                    self.content = AnyView(content())
+                }
+            }
+            """
+        let shallowStateFixture = """
+            package struct SettingsPresentationState {
+                package let language: ClaudioAppLanguage
+                package let platformActionFailure: SettingsPlatformAction?
+            }
+            """
+        let shallowNavigationFixture = """
+            #if DEBUG
+            extension SettingsRoute {
+                var stableIdentityComponents: [String] { [] }
+            }
+            #endif
+            """
+        let shallowSelectionFixture = """
+            package final class EventSettingsWindowSelection {
+                package private(set) var presentationState: SettingsEventPresentationState
+            }
+            """
+        let typedRootFixture = """
+            @ViewBuilder
+            private var routeSlot: some View {
+                switch destination {
+                case .general: generalSettings
+                case .integrations: integrationsSettings
+                }
+            }
+            """
+        expect(
+            settingsReleaseProjectionIsShallow(
+                visualSource: shallowVisualFixture,
+                stateSource: shallowStateFixture,
+                navigationSource: shallowNavigationFixture,
+                selectionSource: shallowSelectionFixture,
+                rootViewSource: typedRootFixture)
+                && !settingsReleaseProjectionIsShallow(
+                    visualSource: shallowVisualFixture.replacingOccurrences(
+                        of: "struct SettingsSectionCard: View",
+                        with: "struct SettingsSectionCard<Content: View>: View"),
+                    stateSource: shallowStateFixture,
+                    navigationSource: shallowNavigationFixture,
+                    selectionSource: shallowSelectionFixture,
+                    rootViewSource: typedRootFixture)
+                && !settingsReleaseProjectionIsShallow(
+                    visualSource: shallowVisualFixture,
+                    stateSource: shallowStateFixture
+                        + "\npackage let interfaceTextSize: ClaudioInterfaceTextSize",
+                    navigationSource: shallowNavigationFixture,
+                    selectionSource: shallowSelectionFixture,
+                    rootViewSource: typedRootFixture)
+                && !settingsReleaseProjectionIsShallow(
+                    visualSource: shallowVisualFixture,
+                    stateSource: shallowStateFixture,
+                    navigationSource: shallowNavigationFixture
+                        + "\nvar stableIdentityComponents: [String] { [] }",
+                    selectionSource: shallowSelectionFixture,
+                    rootViewSource: typedRootFixture)
+                && !settingsReleaseProjectionIsShallow(
+                    visualSource: shallowVisualFixture,
+                    stateSource: shallowStateFixture,
+                    navigationSource: shallowNavigationFixture,
+                    selectionSource: shallowSelectionFixture,
+                    rootViewSource: typedRootFixture
+                        + "\nprivate var routeSlot: AnyView { AnyView(generalSettings) }"),
+            "Release footprint scanner 必须能杀死 generic card、冗余 projection 与 test-only API leak mutation"
+        )
+        expect(
+            settingsReleaseProjectionIsShallow(
+                visualSource: visual,
+                stateSource: state,
+                navigationSource: navigation,
+                selectionSource: selection,
+                rootViewSource: rootView),
+            "Release Settings projection 只保留真实 consumer facts，card type erasure 必须局限在 module-local visual seam"
+        )
+    }
 }
 
 @MainActor
@@ -644,6 +760,48 @@ private func settingsReleasePresentationSourcesAreShallow(
         && !interactionRelease.contains("SettingsExitInteractionModifier")
         && !interactionRelease.contains("SettingsSidebarInteractionReportingView")
         && !interactionRelease.contains("SettingsExitInteractionReportingView")
+}
+
+private func settingsReleaseProjectionIsShallow(
+    visualSource: String,
+    stateSource: String,
+    navigationSource: String,
+    selectionSource: String,
+    rootViewSource: String
+) -> Bool {
+    let visual = strippingComments(visualSource)
+    let state = strippingComments(stateSource)
+    let selection = strippingComments(selectionSource)
+    let rootView = strippingComments(rootViewSource)
+    guard visual.unmodeledConstructs.isEmpty,
+        state.unmodeledConstructs.isEmpty,
+        selection.unmodeledConstructs.isEmpty,
+        rootView.unmodeledConstructs.isEmpty,
+        let releaseNavigation = swiftSourceTakingReleaseBranches(navigationSource)
+    else {
+        return false
+    }
+    let visualCode = visual.codeWithoutStringLiterals
+    let stateCode = state.codeWithoutStringLiterals
+    let selectionCode = selection.codeWithoutStringLiterals
+    let rootViewCode = rootView.codeWithoutStringLiterals
+
+    return visualCode.contains("struct SettingsSectionCard: View")
+        && !visualCode.contains("struct SettingsSectionCard<")
+        && !visualCode.contains("package struct SettingsSectionCard")
+        && !visualCode.contains("public struct SettingsSectionCard")
+        && visualCode.contains("private let content: AnyView")
+        && visualCode.contains("init<Content: View>")
+        && visualCode.contains("self.content = AnyView(content())")
+        && !stateCode.contains("SettingsPlatformActionFailure")
+        && stateCode.contains("package let platformActionFailure: SettingsPlatformAction?")
+        && !stateCode.contains("package let languageMode:")
+        && !stateCode.contains("package let interfaceTextSize:")
+        && !stateCode.contains("package let recoveryIssues:")
+        && !releaseNavigation.contains("stableIdentityComponents")
+        && !selectionCode.contains("package var focusTarget:")
+        && rootViewCode.contains("private var routeSlot: some View")
+        && !rootViewCode.contains("AnyView")
 }
 
 private func swiftSourceTakingReleaseBranches(_ source: String) -> String? {
