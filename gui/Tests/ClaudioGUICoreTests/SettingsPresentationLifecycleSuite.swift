@@ -502,7 +502,7 @@ func runSettingsPresentationLifecycleSuites() async {
         let fixture = SettingsPresentationFixtures.generalLogin(
             route: .destination(.general),
             availability: PreviewFixtures.settingsRouteAvailability)
-        let hostingView = NSHostingView(rootView: fixture.rootView)
+        let hostingView = NSHostingView(rootView: SettingsRootView(session: fixture.session))
         hostingView.frame = NSRect(x: 0, y: 0, width: 1_240, height: 820)
         hostingView.layoutSubtreeIfNeeded()
         _ = fixture.session.send(.windowPhaseChanged(.key))
@@ -525,7 +525,7 @@ func runSettingsPresentationLifecycleSuites() async {
         let fixture = SettingsPresentationFixtures.generalLogin(
             route: .events(scope: .global, event: .stop),
             availability: PreviewFixtures.settingsRouteAvailability)
-        let hostingView = NSHostingView(rootView: fixture.rootView)
+        let hostingView = NSHostingView(rootView: SettingsRootView(session: fixture.session))
         hostingView.frame = NSRect(x: 0, y: 0, width: 1_240, height: 820)
         hostingView.layoutSubtreeIfNeeded()
         fixture.beginEventTransientActivity()

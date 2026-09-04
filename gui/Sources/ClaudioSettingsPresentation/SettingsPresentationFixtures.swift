@@ -15,21 +15,21 @@ package final class SettingsPresentationActionRecorder {
     package private(set) var eventAudibilityChangeCount = 0
     private let result: SettingsPlatformActionResult
 
-    package init(result: SettingsPlatformActionResult) {
+    init(result: SettingsPlatformActionResult) {
         self.result = result
     }
 
-    package func perform(_ action: SettingsPlatformAction) -> SettingsPlatformActionResult {
+    func perform(_ action: SettingsPlatformAction) -> SettingsPlatformActionResult {
         actions.append(action)
         return result
     }
 
-    package func noteEventAudibilityInputsChanged() {
+    func noteEventAudibilityInputsChanged() {
         eventAudibilityChangeCount += 1
     }
 }
 
-/// Production-shape DEBUG fixture composed only from the public presentation seams. The sound
+/// Production-shape DEBUG fixture composed only from the package presentation seams. The sound
 /// editor remains owned by `SoundPacksEditorOwner`; no raw model or runtime library is exposed.
 @MainActor
 package struct SettingsPresentationFixture {
@@ -40,14 +40,6 @@ package struct SettingsPresentationFixture {
     package let integrationsModel: IntegrationDestinationModel
     package let aiCueViewModel: AICueGenerationViewModel
     package let actionRecorder: SettingsPresentationActionRecorder
-
-    package var rootView: SettingsRootView {
-        SettingsRootView(session: session)
-    }
-
-    package var selectedDestination: SettingsDestination {
-        session.state.routeResolution.destination
-    }
 
     package var lastSettingsDestination: SettingsDestination {
         session.dependencies.preferences.lastSettingsDestination

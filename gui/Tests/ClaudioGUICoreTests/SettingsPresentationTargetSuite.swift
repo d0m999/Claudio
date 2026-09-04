@@ -365,11 +365,11 @@ func runSettingsPresentationSliceSuites() {
             let fixture = SettingsPresentationFixtures.generalLogin(
                 route: scenario.route,
                 availability: PreviewFixtures.settingsRouteAvailability)
-            let hostingView = NSHostingView(rootView: fixture.rootView)
+            let hostingView = NSHostingView(rootView: SettingsRootView(session: fixture.session))
             hostingView.frame = NSRect(x: 0, y: 0, width: 980, height: 720)
             hostingView.layoutSubtreeIfNeeded()
             if hostingView.fittingSize.width > 0 && hostingView.fittingSize.height > 0,
-                fixture.selectedDestination == scenario.destination
+                fixture.session.state.routeResolution.destination == scenario.destination
             {
                 mountedDestinations.insert(scenario.destination)
             }
@@ -414,10 +414,11 @@ func runSettingsPresentationSliceSuites() {
                 "General fixture 的 shared editor 必须保持 inactive，activation 只由 session route transaction 驱动"
             )
 
-            let hostingView = NSHostingView(rootView: first.rootView)
+            let hostingView = NSHostingView(rootView: SettingsRootView(session: first.session))
             hostingView.frame = NSRect(x: 0, y: 0, width: 620, height: 520)
             hostingView.layoutSubtreeIfNeeded()
-            let secondHostingView = NSHostingView(rootView: second.rootView)
+            let secondHostingView = NSHostingView(
+                rootView: SettingsRootView(session: second.session))
             secondHostingView.frame = NSRect(x: 0, y: 0, width: 620, height: 520)
             secondHostingView.layoutSubtreeIfNeeded()
             expect(
