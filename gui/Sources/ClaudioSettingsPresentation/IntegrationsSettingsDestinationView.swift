@@ -4,7 +4,7 @@ import ClaudioGUICore
 import ClaudioLocalization
 import SwiftUI
 
-/// Prototype-aligned Integrations destination. It owns no host configuration or capability-matrix
+/// Production Integrations destination. It owns no host configuration or capability-matrix
 /// state; all facts and asynchronous lifecycle behavior come from the Core model.
 @MainActor
 struct IntegrationsSettingsDestinationView: View {

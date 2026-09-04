@@ -9,8 +9,8 @@ package enum SettingsPresentationAccessibilityID {
     package static let loginItemToggle = "settings.general.login-item.toggle"
 }
 
-/// The real Login Item section shared by the transitional nine-destination shell and the new
-/// importable Settings root. All mutations and system effects return through the session seam.
+/// The Login Item section rendered by the importable Settings root. All mutations and system
+/// effects return through the session seam.
 @MainActor
 struct LoginItemSettingsSection: View {
     @ObservedObject private var session: SettingsPresentationSession

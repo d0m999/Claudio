@@ -15,7 +15,8 @@ bash scripts/verify-settings-experience.sh <BASE_SHA>
 脚本确认 `<BASE_SHA>` 是 `HEAD` 的祖先且 working tree/index 没有 tracked 或 untracked 改动，然后执行：
 
 - helper 与 GUI executable harness；
-- GUI Debug build、localization JSON、开发 bundle 与 release-size 检查；
+- Settings target 与 GUI app 的 Debug/Release build、localization JSON、开发 bundle 与
+  release-size 检查；
 - working tree 和 `<BASE_SHA>...HEAD` 的 `git diff --check`；
 - 全仓 `swift format lint --strict --recursive helper gui` 与基线快照的诊断差分；
 - strict-format 稳定身份、多重集计数和不可解析失败的聚焦回归；
@@ -29,7 +30,9 @@ bash scripts/verify-settings-experience.sh <BASE_SHA>
 
 | 合同 | 主要 executable suite |
 |---|---|
-| 九个 destination 恰好一次、production 无 placeholder、唯一 retained window、旧三窗口不挂载、声音写入 owner 唯一 | `SettingsNavigationSuite`、`SoundPacksEditorOwnerSuite`、`IntegrationDestinationPresentationSuite`、`IntegrationDestinationModelSuite`、`IntegrationDestinationWiringSuite` |
+| 九个 destination 恰好一次、production root 可挂载、nonoptional dependencies 与 target DAG | `SettingsPresentationTargetSuite`、`SettingsNavigationSuite` |
+| typed route/failure、focus debt、window phase、destination lifecycle、announcement post/ack 与 gallery 共用 production root | `SettingsPresentationLifecycleSuite`、`EventSettingsWindowSelectionSuite` |
+| 唯一 retained window、controller→`SettingsRootView(session:)` composition、系统 adapter 与声音写入 owner 唯一 | `SettingsPresentationLifecycleSuite`、`SoundPacksEditorOwnerSuite`、`IntegrationDestinationPresentationSuite`、`IntegrationDestinationModelSuite`、`IntegrationDestinationWiringSuite` |
 | Host Surface 能力、receipt/current activation、Sound Scope 与 Effective Profile | `HostIntegrationModelSuite`、`HostIntegrationPresentationSuite`、`HostHookReceiptSuite`、`SurfaceSoundPreferencesSuite` |
 | allowlisted registry、route-derived capability、slot/policy 与逐 profile 隔离 | `AICueProviderContractsSuite`、`AICueCredentialSuite`、`AICueGenerationDispatcherSuite` |
 | exact-origin 认证注入、redirect 拒绝、unary/SSE wire 与 decoded ceiling | `AICueHTTPTransportSuite`、`AICueSSETransportSuite`、`AICuePayloadDecodingSuite` |
@@ -42,6 +45,12 @@ bash scripts/verify-settings-experience.sh <BASE_SHA>
 
 这些 suite 使用受控 fixture，不会读取真实 API key、请求真实 Provider、修改真实 host、注册真实登录项，
 或证明声音质量。若 suite 文件存在但从 `main.swift` 移除，总门禁会先在注册检查失败。
+
+Settings 的 route、lifecycle、focus、destination mount 与 gallery 行为由可导入
+`ClaudioSettingsPresentation` 的 compiled tests 证明；旧 path/source characterization 与重复
+Events coordinator suites 已删除。长期 source audit 只保留 compiled seam 无法表达的 executable composition、唯一
+`@main`/controller/owner、native accessibility、SwiftPM/resource 与 release wiring，不再把视图源码
+形状当作行为证据。
 
 ## 安全与隐私判据
 

@@ -88,9 +88,9 @@ let package = Package(
                 .product(name: "ClaudioCore", package: "helper"),
             ]
         ),
-        // The SwiftUI app shell owns the status-item panel and one retained unified Settings
-        // window. Its embedded Integrations destination consumes `ClaudioGUICore` presentation
-        // values and never opens host config itself, so cutover creates no second truth source.
+        // The SwiftUI app shell owns the status-item panel, native adapters, and one retained
+        // Settings window. The imported presentation target consumes `ClaudioGUICore` values and
+        // never opens host config itself, so composition creates no second truth source.
         //
         // Depends on `ClaudioCore` directly (not just transitively via `ClaudioGUICore`,
         // same reasoning as `claudio-gui-tests` below) since `EventRowView`/`DesignTokens`

@@ -81,7 +81,10 @@ for suite in \
     runUsageActivitySuites \
     runGlobalShortcutsSuites \
     runSettingsNavigationSuites \
-    runEventSettingsDestinationCoordinatorSuites \
+    runEventSettingsWindowSelectionSuites \
+    runSettingsPresentationLifecycleSuites \
+    runSettingsPresentationTargetSuites \
+    runSettingsPresentationSliceSuites \
     runPreviewFixturesSuites \
     runMultiProviderPrototypeContractSuites
 do
@@ -91,7 +94,10 @@ echo "✅ required integration suites are registered"
 
 swift run --package-path helper claudio-tests
 swift run --package-path gui claudio-gui-tests
+swift build -c debug --package-path gui --target ClaudioSettingsPresentation
+swift build -c release --package-path gui --target ClaudioSettingsPresentation
 swift build -c debug --package-path gui --product ClaudioGUI
+swift build -c release --package-path gui --product ClaudioGUI
 jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings
 bash scripts/dev-bundle.sh
 bash scripts/check-release-size.sh dist/claudi0.app
