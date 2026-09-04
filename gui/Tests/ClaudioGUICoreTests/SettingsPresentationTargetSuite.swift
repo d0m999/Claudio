@@ -826,7 +826,9 @@ private func swiftSourceTakingReleaseBranches(_ source: String) -> String? {
 
     var result: [String] = []
     var debugBranches: [Bool] = []
-    for line in scanned.code.split(separator: "\n", omittingEmptySubsequences: false) {
+    for line in scanned.codeWithoutStringLiterals.split(
+        separator: "\n", omittingEmptySubsequences: false
+    ) {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         switch trimmed {
         case "#if DEBUG":
