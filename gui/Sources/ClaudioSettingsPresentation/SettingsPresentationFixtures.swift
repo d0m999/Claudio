@@ -59,6 +59,22 @@ package struct SettingsPresentationFixture {
         session.eventSettingsSelection.beginAISession(scope: scope, event: event)
         aiCueViewModel.begin(scope: scope, event: event)
     }
+
+    package func presentCredentialSheet() {
+        session.eventSettingsSelection.presentCredentialSheet()
+    }
+
+    package func dismissCredentialSheet() {
+        session.eventSettingsSelection.dismissCredentialSheet()
+    }
+
+    package func beginCandidatePreview(id: UUID) {
+        session.eventSettingsSelection.beginCandidatePreview(id: id)
+    }
+
+    package func stopCandidatePreview() {
+        session.eventSettingsSelection.noteCandidatePreviewStopped()
+    }
 }
 
 @MainActor

@@ -625,10 +625,52 @@ func runSettingsPresentationLifecycleSuites() async {
             presentation.eventAccess.first(where: { $0.event == .stop })?.adoptionAvailability
                 == .eligible,
             "fixture 的当前 Surface pack/Event 必须先具备 adoption eligibility")
+        guard let permit = presentation.adoptionPermit,
+            let candidateID = generation.candidates.first?.id
+        else {
+            expect(
+                false,
+                "$session/$generation 的 emitted coherent tuple 必须把当前 generation 交给 owner 签 adoption permit"
+            )
+            return
+        }
+        let ownerRevision = fixture.soundPacksEditor.presentation.revision
+        let eligibility =
+            presentation.eventAccess.first(where: { $0.event == .stop })?.adoptionAvailability
+
+        fixture.presentCredentialSheet()
+        fixture.beginCandidatePreview(id: candidateID)
+
+        guard case .events(let playing) = fixture.soundPacksEditor.presentation.mode else {
+            expect(false, "playing-only projection 后 shared owner 必须保持 Events presentation")
+            return
+        }
         expect(
-            presentation.adoptionPermit != nil,
-            "$session/$generation 的 emitted coherent tuple 必须把当前 generation 交给 owner 签 adoption permit"
-        )
+            fixture.session.state.eventPresentation.credentialSheetIsPresented
+                && fixture.session.state.eventPresentation.playingCandidateID == candidateID,
+            "credential/playing transient 必须继续发布到 session projection")
+        expect(
+            fixture.soundPacksEditor.presentation.revision == ownerRevision
+                && playing.adoptionPermit == permit
+                && playing.eventAccess.first(where: { $0.event == .stop })?.adoptionAvailability
+                    == eligibility,
+            "credential/playing-only publication 不得重激活 editor 或替换 generation permit")
+
+        fixture.stopCandidatePreview()
+        fixture.dismissCredentialSheet()
+
+        guard case .events(let stopped) = fixture.soundPacksEditor.presentation.mode else {
+            expect(false, "停止候选试听后 shared owner 必须保持 Events presentation")
+            return
+        }
+        expect(
+            !fixture.session.state.eventPresentation.credentialSheetIsPresented
+                && fixture.session.state.eventPresentation.playingCandidateID == nil
+                && fixture.soundPacksEditor.presentation.revision == ownerRevision
+                && stopped.adoptionPermit == permit
+                && stopped.eventAccess.first(where: { $0.event == .stop })?.adoptionAvailability
+                    == eligibility,
+            "preview stop 必须只清 UI transient，并保留原 generation permit identity/eligibility")
     }
 
     suite("Settings session close：Events transient cleanup 恰好一次且 close 幂等") {
