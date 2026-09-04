@@ -27,7 +27,7 @@ package final class SettingsPresentationSession: ObservableObject {
     private var windowPhase: SettingsWindowPhase = .hidden
     private var activeDestination: SettingsDestination?
     private var lifecycleDestination: SettingsDestination?
-    private var platformActionFailure: SettingsPlatformActionFailure?
+    private var platformActionFailure: SettingsPlatformAction?
     private var pendingAnnouncement: SettingsPresentationAnnouncement?
     private var pendingSoundPackOwnerAnnouncement: SoundPackEditorAnnouncement?
     private var pendingSoundPackAnnouncementID: SoundPackEditorAnnouncement.ID?
@@ -208,9 +208,7 @@ package final class SettingsPresentationSession: ObservableObject {
     @discardableResult
     private func perform(_ action: SettingsPlatformAction) -> SettingsPlatformActionResult {
         let result = actions.perform(action)
-        platformActionFailure =
-            result == .performed
-            ? nil : SettingsPlatformActionFailure(action: action, result: result)
+        platformActionFailure = result == .performed ? nil : action
         if result != .performed {
             enqueueAnnouncement(.platformAction(action, result))
         } else {
@@ -627,7 +625,7 @@ package final class SettingsPresentationSession: ObservableObject {
         eventPresentation: SettingsEventPresentationState,
         preferenceSnapshot: ClaudioPreferenceSnapshot,
         loginProjection: LoginItemSettingsProjection,
-        platformActionFailure: SettingsPlatformActionFailure?,
+        platformActionFailure: SettingsPlatformAction?,
         pendingAnnouncement: SettingsPresentationAnnouncement?,
         presentationRevision: UInt64
     ) -> SettingsPresentationState {
@@ -638,10 +636,7 @@ package final class SettingsPresentationSession: ObservableObject {
             windowPhase: windowPhase,
             activeDestination: activeDestination,
             eventPresentation: eventPresentation,
-            languageMode: preferenceSnapshot.languageMode,
             language: preferenceSnapshot.language,
-            interfaceTextSize: preferenceSnapshot.interfaceTextSize,
-            recoveryIssues: preferenceSnapshot.recoveryIssues,
             loginItemRegistration: loginProjection.registration,
             loginItemFailure: loginProjection.failure,
             platformActionFailure: platformActionFailure,

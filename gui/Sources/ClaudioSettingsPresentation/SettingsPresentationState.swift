@@ -3,11 +3,6 @@ import ClaudioGUICore
 import ClaudioLocalization
 import Foundation
 
-package struct SettingsPlatformActionFailure: Equatable, Sendable {
-    package let action: SettingsPlatformAction
-    package let result: SettingsPlatformActionResult
-}
-
 package enum SettingsWindowPhase: Equatable, Sendable {
     case hidden
     case visibleNonKey
@@ -82,13 +77,10 @@ package struct SettingsPresentationState: Equatable, Sendable {
     package let windowPhase: SettingsWindowPhase
     package let activeDestination: SettingsDestination?
     package let eventPresentation: SettingsEventPresentationState
-    package let languageMode: ClaudioLanguageMode
     package let language: ClaudioAppLanguage
-    package let interfaceTextSize: ClaudioInterfaceTextSize
-    package let recoveryIssues: Set<ClaudioPreferenceRecoveryIssue>
     package let loginItemRegistration: LoginItemRegistrationState
     package let loginItemFailure: LoginItemOperationFailure?
-    package let platformActionFailure: SettingsPlatformActionFailure?
+    package let platformActionFailure: SettingsPlatformAction?
     package let pendingAnnouncement: SettingsPresentationAnnouncement?
     package let presentationRevision: UInt64
 }

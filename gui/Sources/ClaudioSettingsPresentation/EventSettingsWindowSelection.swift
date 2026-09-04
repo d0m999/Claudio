@@ -14,8 +14,6 @@ package final class EventSettingsWindowSelection: ObservableObject {
 
     package var route: EventSettingsWindowRoute { storage.route }
     package var routeRequestRevision: UInt64 { storage.routeRequestRevision }
-    package var focusTarget: EventSettingsFocusTarget? { storage.focusTarget }
-
     package var unavailableRequestedScopeStoredValue: String? {
         route.unavailableRequestedScopeStoredValue
     }
