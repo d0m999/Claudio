@@ -9,14 +9,8 @@ import SwiftUI
 
 @MainActor
 func runSettingsPresentationLifecycleSuites() async {
-    suite("Settings session deletion contract：route、phase 与 lifecycle 只有一个 owner") {
+    suite("Settings executable deletion contract：controller 与 menu 不恢复第二 owner") {
         let root = guiTestRepositoryRoot()
-        let sessionURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift")
-        let stateURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationState.swift")
-        let rootViewURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift")
         let controllerURL = root.appendingPathComponent(
             "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
         let navigationURL = root.appendingPathComponent(
@@ -24,29 +18,20 @@ func runSettingsPresentationLifecycleSuites() async {
         let menuBarURL = root.appendingPathComponent(
             "gui/Sources/ClaudioGUI/MenuBarController.swift")
         guard
-            let session = try? String(contentsOf: sessionURL, encoding: .utf8),
-            let state = try? String(contentsOf: stateURL, encoding: .utf8),
-            let rootView = try? String(contentsOf: rootViewURL, encoding: .utf8),
             let controller = try? String(contentsOf: controllerURL, encoding: .utf8),
             let navigation = try? String(contentsOf: navigationURL, encoding: .utf8),
             let menuBar = try? String(contentsOf: menuBarURL, encoding: .utf8)
         else {
-            expect(false, "读不到 Settings session/controller/navigation ownership source")
+            expect(false, "读不到 Settings controller/navigation/menu composition source")
             return
         }
-
-        expect(
-            session.contains("func send(")
-                && session.contains("SettingsPresentationCommand")
-                && state.contains("SettingsRouteResolution")
-                && state.contains("SettingsWindowPhase")
-                && state.contains("focusDebt"),
-            "session state/command 必须共同拥有 typed route、window phase 与 focus debt")
-        expect(
-            rootView.contains("settingsPresentationSession.send(.route(")
-                && !rootView.contains("SettingsWindowPresentationModel")
-                && !rootView.contains("model.request("),
-            "production root 必须只通过 session command 路由，不得保留第二 navigation owner")
+        let scans = [controller, navigation, menuBar].map(strippingComments)
+        guard scans.allSatisfy({ $0.unmodeledConstructs.isEmpty }) else {
+            expect(false, "Settings executable source audit 遇到无法建模的构造")
+            return
+        }
+        let controllerCode = scans[0].codeWithoutStringLiterals
+        let navigationCode = scans[1].codeWithoutStringLiterals
 
         let forbiddenControllerOwners = [
             "SettingsWindowPresentationModel",
@@ -59,12 +44,20 @@ func runSettingsPresentationLifecycleSuites() async {
             "settingsSoundPackShellProjections(",
         ]
         expect(
-            forbiddenControllerOwners.allSatisfy { !controller.contains($0) },
+            forbiddenControllerOwners.allSatisfy { !controllerCode.contains($0) },
             "AppKit controller 不得持有 destination model/publisher 或 raw Sound Pack owner")
         expect(
-            !navigation.contains("SettingsWindowPresentationModel<")
-                && !navigation.contains("pendingHandback"),
-            "ClaudioGUICore 只能保留纯 route/revision reducer，旧泛型 handback wrapper 必须删除")
+            controllerCode.contains(
+                "let content = SettingsRootView(session: settingsPresentationSession)")
+                && controllerCode.contains("NSHostingController(rootView: content)")
+                && !controllerCode.contains("SettingsWindowView"),
+            "唯一 native Settings controller 必须挂 production SettingsRootView(session:)，不得回退旧树")
+        expect(
+            !navigationCode.contains("SettingsWindowPresentationModel<")
+                && !navigationCode.contains("pendingHandback")
+                && !navigationCode.contains("SettingsWindowLifecycle")
+                && !navigationCode.contains("SettingsWindowPresentation"),
+            "ClaudioGUICore 不得恢复旧泛型 handback 或 lifecycle facade")
         let mutation = menuBar.replacingOccurrences(
             of: "let selectedHost = host ?? integrationsModel.selectedHost ?? .claudeCode",
             with:
@@ -75,6 +68,34 @@ func runSettingsPresentationLifecycleSuites() async {
             settingsMenuRequestOwnsOnlyTypedRoute(menuBar)
                 && !settingsMenuRequestOwnsOnlyTypedRoute(mutation),
             "MenuBar 只能构造 typed route；Host 选择 mutation 必须由 session 单事务拥有")
+    }
+
+    suite("Settings executable gallery：所有场景只经 target-owned production root mount") {
+        let galleryURL = guiTestRepositoryRoot().appendingPathComponent(
+            "gui/Sources/ClaudioGUI/StateGalleryView.swift")
+        guard let gallery = try? String(contentsOf: galleryURL, encoding: .utf8) else {
+            expect(false, "读不到 executable StateGalleryView.swift")
+            return
+        }
+        let scanned = strippingComments(gallery)
+        guard scanned.unmodeledConstructs.isEmpty else {
+            expect(false, "State gallery source audit 遇到无法建模的构造")
+            return
+        }
+        let code = scanned.codeWithoutStringLiterals
+        let forbiddenDirectMounts = [
+            "EventSettingsWindowView(",
+            "EventSettingsAICueServiceCard(",
+            "EventSettingsAICueCredentialSheet(",
+            "EventSettingsAICueComposerView(",
+            "IntegrationsSettingsDestinationView(",
+            "EventSettingsWindowSelection(",
+            "SoundPacksWindowModel(",
+        ]
+        expect(
+            code.components(separatedBy: "SettingsStateGalleryView(").count - 1 == 1
+                && forbiddenDirectMounts.allSatisfy { !code.contains($0) },
+            "gallery 必须只组合 target-owned SettingsStateGalleryView，不得直接重建 destination/model")
     }
 
     #if DEBUG

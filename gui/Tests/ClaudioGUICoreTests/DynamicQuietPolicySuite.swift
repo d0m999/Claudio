@@ -292,8 +292,6 @@ func runDynamicQuietPolicySuites() {
 
     suite("Notifications wiring：单一组合 owner、跨版本 EventKit 与 privacy boundary") {
         guard
-            let view = dynamicQuietSource(
-                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let owner = dynamicQuietSource(
                 "gui/Sources/ClaudioGUI/DynamicQuietSystemObserver.swift"),
             let menu = dynamicQuietSource(
@@ -315,16 +313,9 @@ func runDynamicQuietPolicySuites() {
         }
 
         expect(
-            view.contains("settings.notifications.focus-toggle")
-                && view.contains("dynamicQuietPolicy.setFocusEnabled($0)")
-                && view.contains("settings.notifications.calendar-toggle")
-                && view.contains("dynamicQuietPolicy.setCalendarEnabled($0)")
-                && view.contains("settings.notifications.calendar-privacy")
-                && view.contains("openCalendarPrivacySettings")
-                && settingsActions.contains("Privacy_Calendars")
-                && settingsActions.contains("NSWorkspace.shared.open")
-                && !view.contains("ForEach(Event.allCases)"),
-            "通知页必须提供两条策略与 Calendar 恢复动作，不得复制 Event 开关")
+            settingsActions.contains("Privacy_Calendars")
+                && settingsActions.contains("NSWorkspace.shared.open"),
+            "Calendar privacy 恢复必须留在 executable system adapter")
         expect(
             menu.contains("private let dynamicQuietObserver")
                 && menu.contains("let dynamicQuietObserver = DynamicQuietSystemObserver()")

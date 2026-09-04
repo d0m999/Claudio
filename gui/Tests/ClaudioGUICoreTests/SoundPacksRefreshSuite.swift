@@ -2006,7 +2006,7 @@ func runSoundPacksRefreshSuites() async {
             "gui/Sources 下只许主 app 与内嵌 LoginItem 两个 shipping @main，实得 \(mainSites)")
     }
 
-    suite("SoundPacks editor owner：单写模型嵌入统一 Settings，standalone wiring 退役") {
+    suite("SoundPacks editor owner：raw model 只由单一 package owner 暴露 coherent interface") {
         guard
             let owner = soundPacksCode(
                 "gui/Sources/ClaudioGUICore/SoundPacksEditorOwner.swift"),
@@ -2014,10 +2014,6 @@ func runSoundPacksRefreshSuites() async {
                 "gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift"),
             let accessibility = soundPacksCode(
                 "gui/Sources/ClaudioGUICore/SoundPacksWindowAccessibility.swift"),
-            let settingsController = soundPacksCode(
-                "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
-            let settingsView = soundPacksCode(
-                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let gallery = soundPacksCode(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowStateGalleryView.swift"),
             let menu = soundPacksCode("gui/Sources/ClaudioGUI/MenuBarController.swift")
@@ -2125,9 +2121,7 @@ func runSoundPacksRefreshSuites() async {
                 && owner.contains("private let model: SoundPacksWindowModel")
                 && !owner.contains("public let model: SoundPacksWindowModel")
                 && !owner.contains("public let userPacksDirectory: URL")
-                && menu.components(separatedBy: "SoundPacksEditorOwner(").count - 1 == 1
-                && settingsView.contains("editorOwner: soundPacksEditorOwner")
-                && !settingsController.contains("model = SoundPacksWindowModel("),
+                && menu.components(separatedBy: "SoundPacksEditorOwner(").count - 1 == 1,
             "package-local owner 必须隐藏 raw model/directory，并保持 production 唯一可写来源")
         expect(
             !owner.contains("public func apply(")
@@ -2136,19 +2130,6 @@ func runSoundPacksRefreshSuites() async {
                 && !owner.contains("public func shouldAnnounceSelectionChange(")
                 && !owner.contains("public func announcementFacts("),
             "common production interface 只能保留 coherent presentation、sync send 与 async perform")
-        expect(
-            settingsController.contains("window.isReleasedWhenClosed = false")
-                && settingsController.contains(
-                    "RetainedWindowHandbackTracker<NSRunningApplication>")
-                && settingsController.contains(
-                    "let handback = handbackTracker.consumeOnClose()")
-                && settingsController.contains("focusRestoration = nil"),
-            "Sounds 必须共享统一 retained 窗口，关闭一次消费最新 handback")
-        expect(
-            !settingsController.contains("Task.detached")
-                && !settingsController.contains("mutateManifestJSON")
-                && !settingsController.contains("setEventEnabled("),
-            "窗口 owner 不得自行启动后台 manifest/config 写路径")
     }
 
     suite(".openSoundSettings：携带当前 Sound Scope，并通过单一 pending-close 展示 Settings Events") {

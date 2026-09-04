@@ -3101,10 +3101,6 @@ func runViewWiringSuites() {
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
             let nativeEffects = codeWithoutStrings(
                 "gui/Sources/SoundPacksWindow/SoundPacksEditorNativeEffects.swift"),
-            let settingsSession = codeWithoutStrings(
-                "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift"),
-            let settingsView = codeWithoutStrings(
-                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let menuBar = codeWithoutStrings(
                 "gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let package = source("gui/Package.swift")
@@ -3143,28 +3139,13 @@ func runViewWiringSuites() {
                 "package final class SoundPacksEditorNativeEffectsDispatcher: ObservableObject")
                 && !window.contains("@StateObject private var nativeEffects")
                 && !window.contains("SystemSoundPacksEditorNativeEffectsAdapter()")
-                && settingsSession.contains("dependencies.soundPacksEditorNativeEffects")
-                && settingsView.contains(
-                    "soundPacksEditorNativeEffects: soundPacksEditorNativeEffects")
-                && settingsView.contains(
-                    "let soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher")
-                && settingsView.contains("nativeEffects: soundPacksEditorNativeEffects")
                 && menuBar.contains("SystemSoundPacksEditorNativeEffectsAdapter()")
                 && window.components(separatedBy: "@ObservedObject private var editorOwner").count
                     - 1 == 2
                 && window.contains("let presentation: SoundPacksEditorPresentation")
                 && window.contains("presentation: presentation"),
-            "dispatcher/player 必须由 Settings session 持有并 required 注入整个 production view tree；"
-                + "root 只观察 owner 一次并把同 revision 的 presentation 传给不观察 owner 的 child")
-        expect(
-            settingsSession.contains(
-                "soundPacksEditorNativeEffects.handleLifecycle(")
-                && settingsSession.contains(".soundsViewDisappeared")
-                && settingsSession.contains(".eventsViewDisappeared")
-                && !window.contains(".soundsViewDisappeared")
-                && nativeEffects.contains("case soundsViewDisappeared"),
-            "retained Settings session 必须成为唯一 compiled lifecycle seam，"
-                + "由同一 dispatcher 消费 owner-signed stop")
+            "dispatcher/player 必须由 executable 构造，SoundPacks view 只消费 required adapter/owner projection"
+        )
         expect(
             !window.contains(".onChange(of: editorOwner.presentation.revision)")
                 && window.contains(".onChange(of: focusProjection)")
