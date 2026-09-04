@@ -1,12 +1,14 @@
+import AppKit
 import ClaudioCore
 import ClaudioGUICore
 import ClaudioSettingsPresentation
 import Combine
 import Foundation
 import SoundPacksWindow
+import SwiftUI
 
 @MainActor
-func runSettingsPresentationLifecycleSuites() {
+func runSettingsPresentationLifecycleSuites() async {
     suite("Settings session deletion contract：route、phase 与 lifecycle 只有一个 owner") {
         let root = guiTestRepositoryRoot()
         let sessionURL = root.appendingPathComponent(
@@ -19,12 +21,15 @@ func runSettingsPresentationLifecycleSuites() {
             "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
         let navigationURL = root.appendingPathComponent(
             "gui/Sources/ClaudioGUICore/SettingsNavigation.swift")
+        let menuBarURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioGUI/MenuBarController.swift")
         guard
             let session = try? String(contentsOf: sessionURL, encoding: .utf8),
             let state = try? String(contentsOf: stateURL, encoding: .utf8),
             let rootView = try? String(contentsOf: rootViewURL, encoding: .utf8),
             let controller = try? String(contentsOf: controllerURL, encoding: .utf8),
-            let navigation = try? String(contentsOf: navigationURL, encoding: .utf8)
+            let navigation = try? String(contentsOf: navigationURL, encoding: .utf8),
+            let menuBar = try? String(contentsOf: menuBarURL, encoding: .utf8)
         else {
             expect(false, "读不到 Settings session/controller/navigation ownership source")
             return
@@ -60,6 +65,21 @@ func runSettingsPresentationLifecycleSuites() {
             !navigation.contains("SettingsWindowPresentationModel<")
                 && !navigation.contains("pendingHandback"),
             "ClaudioGUICore 只能保留纯 route/revision reducer，旧泛型 handback wrapper 必须删除")
+        guard
+            let integrationsRequest = settingsLifecycleBracedBlock(
+                after: "fileprivate func requestIntegrationsSettingsPresentation(",
+                in: menuBar)
+        else {
+            expect(false, "无法解析 MenuBar Integrations Settings request owner")
+            return
+        }
+        expect(
+            integrationsRequest.contains(
+                "host ?? integrationsModel.selectedHost ?? .claudeCode")
+                && integrationsRequest.contains(
+                    ".route(.integrations(surface: selectedHost.surfaceID))")
+                && !integrationsRequest.contains("integrationsModel.selectHost"),
+            "MenuBar 只能构造 typed route；Host 选择 mutation 必须由 session 单事务拥有")
     }
 
     #if DEBUG
@@ -220,6 +240,125 @@ func runSettingsPresentationLifecycleSuites() {
         )
     }
 
+    suite("Settings session failure matrix：Surface、scope、pack、Event 均只发布 typed failure") {
+        let allSurfaces = Set(HostID.productVisibleCases.map(\.surfaceID))
+        let allScopes = Set(
+            [PanelSoundScopeID.global]
+                + HostID.productVisibleCases.map { .surface($0.surfaceID) })
+        let cases: [(
+            route: SettingsRoute,
+            availability: SettingsRouteAvailability,
+            failure: SettingsRouteFailure,
+            destination: SettingsDestination
+        )] = [
+            (
+                .integrations(surface: .chatGPTDesktopAX),
+                SettingsRouteAvailability(
+                    integrationSurfaces: allSurfaces,
+                    eventScopes: allScopes,
+                    soundScopes: allScopes,
+                    soundPackIDs: ["settings-fixture-pack"],
+                    events: Set(Event.allCases)),
+                .invalidSurface(.chatGPTDesktopAX),
+                .integrations
+            ),
+            (
+                .integrations(surface: .workBuddy),
+                SettingsRouteAvailability(
+                    integrationSurfaces: [],
+                    eventScopes: allScopes,
+                    soundScopes: allScopes,
+                    soundPackIDs: ["settings-fixture-pack"],
+                    events: Set(Event.allCases)),
+                .staleSurface(.workBuddy),
+                .integrations
+            ),
+            (
+                .events(scope: .global, event: .stop),
+                SettingsRouteAvailability(
+                    integrationSurfaces: allSurfaces,
+                    eventScopes: [],
+                    soundScopes: allScopes,
+                    soundPackIDs: ["settings-fixture-pack"],
+                    events: Set(Event.allCases)),
+                .staleSoundScope(.global),
+                .eventsAndSounds
+            ),
+            (
+                .sounds(
+                    .editEvent(
+                        surface: nil,
+                        packID: "missing-pack",
+                        event: .stop)),
+                SettingsRouteAvailability(
+                    integrationSurfaces: allSurfaces,
+                    eventScopes: allScopes,
+                    soundScopes: allScopes,
+                    soundPackIDs: [],
+                    events: Set(Event.allCases)),
+                .staleSoundPack("missing-pack"),
+                .sounds
+            ),
+            (
+                .sounds(
+                    .editEvent(
+                        surface: nil,
+                        packID: "   ",
+                        event: .stop)),
+                SettingsRouteAvailability(
+                    integrationSurfaces: allSurfaces,
+                    eventScopes: allScopes,
+                    soundScopes: allScopes,
+                    soundPackIDs: ["settings-fixture-pack"],
+                    events: Set(Event.allCases)),
+                .invalidSoundPackID,
+                .sounds
+            ),
+            (
+                .events(scope: .global, event: .stopFailure),
+                SettingsRouteAvailability(
+                    integrationSurfaces: allSurfaces,
+                    eventScopes: allScopes,
+                    soundScopes: allScopes,
+                    soundPackIDs: ["settings-fixture-pack"],
+                    events: Set(Event.allCases).subtracting([.stopFailure])),
+                .staleEvent(.stopFailure),
+                .eventsAndSounds
+            ),
+        ]
+
+        for testCase in cases {
+            let fixture = SettingsPresentationFixtures.generalLogin(
+                route: .destination(.general),
+                availability: testCase.availability)
+            let session = fixture.session
+            let initialHost = fixture.integrationsModel.selectedHost
+            let initialEventSurface = fixture.eventSettingsModel.selectedSurface
+            let initialEventPresentation = session.state.eventPresentation
+            let initialSoundPresentation = fixture.soundPacksEditor.presentation
+            let initialPreference = fixture.lastSettingsDestination
+            let initialRevision = session.state.explicitRouteRequestRevision
+
+            let result = session.send(.route(testCase.route))
+            expect(
+                result == .rejected(testCase.failure)
+                    && session.state.routeResolution
+                        == SettingsRouteResolution(
+                            route: testCase.route,
+                            failure: testCase.failure)
+                    && session.state.activeDestination == testCase.destination
+                    && session.state.explicitRouteRequestRevision == initialRevision + 1
+                    && session.state.focusDebt?.destination == testCase.destination
+                    && fixture.integrationsModel.selectedHost == initialHost
+                    && fixture.eventSettingsModel.selectedSurface == initialEventSurface
+                    && session.state.eventPresentation == initialEventPresentation
+                    && fixture.soundPacksEditor.presentation == initialSoundPresentation
+                    && fixture.lastSettingsDestination == initialPreference,
+                "\(testCase.failure) 必须保留 requested destination/failure，同时保持 Host/Event/Sound/preference 零 mutation"
+            )
+        }
+    }
+
     suite("Settings session event shortcut：未知 raw scope 可见且不授权 Global fallback") {
         let fixture = SettingsPresentationFixtures.generalLogin(
             route: .events(scope: .surface(.workBuddy), event: .stop),
@@ -288,6 +427,90 @@ func runSettingsPresentationLifecycleSuites() {
             sounds.route == soundsRoute,
             "Sounds typed route 必须逐字应用到 owner，而不是只切换 top-level destination")
         withExtendedLifetime((stateCancellable, soundCancellable)) {}
+    }
+
+    suite("Settings mounted root：visible explicit route 必须消费 emitted focus debt") {
+        let fixture = SettingsPresentationFixtures.generalLogin(
+            route: .destination(.general),
+            availability: PreviewFixtures.settingsRouteAvailability)
+        let hostingView = NSHostingView(rootView: fixture.rootView)
+        hostingView.frame = NSRect(x: 0, y: 0, width: 1_240, height: 820)
+        hostingView.layoutSubtreeIfNeeded()
+        _ = fixture.session.send(.windowPhaseChanged(.key))
+        if let initialDebt = fixture.session.state.focusDebt {
+            _ = fixture.session.send(.acknowledgeFocus(revision: initialDebt.revision))
+        }
+
+        let priorRevision = fixture.session.state.explicitRouteRequestRevision
+        _ = fixture.session.send(.route(.destination(.notifications)))
+        hostingView.layoutSubtreeIfNeeded()
+        expect(
+            fixture.session.state.activeDestination == .notifications
+                && fixture.session.state.explicitRouteRequestRevision == priorRevision + 1
+                && fixture.session.state.focusDebt == nil,
+            "mounted root 必须用 $state emitted value 移交目标焦点并 exact-ack visible route debt")
+        withExtendedLifetime(hostingView) {}
+    }
+
+    suite("Settings mounted Events：离开 destination 的 preview/AI cleanup 必须恰好一次") {
+        let fixture = SettingsPresentationFixtures.generalLogin(
+            route: .events(scope: .global, event: .stop),
+            availability: PreviewFixtures.settingsRouteAvailability)
+        let hostingView = NSHostingView(rootView: fixture.rootView)
+        hostingView.frame = NSRect(x: 0, y: 0, width: 1_240, height: 820)
+        hostingView.layoutSubtreeIfNeeded()
+        fixture.beginEventTransientActivity()
+        let before = fixture.session.state.eventPresentation
+        var previewStopPublications = 0
+        let cancellable = fixture.previewStopRequestRevisions.dropFirst().sink { _ in
+            previewStopPublications += 1
+        }
+        _ = fixture.session.send(.route(.destination(.general)))
+        hostingView.layoutSubtreeIfNeeded()
+        let after = fixture.session.state.eventPresentation
+        expect(
+            previewStopPublications == 1
+                && after.previewStopRequestRevision == before.previewStopRequestRevision + 1
+                && after.aiSessionEndRequestRevision == before.aiSessionEndRequestRevision + 1
+                && after.previewState == .idle
+                && after.aiSessionState == .idle
+                && fixture.aiCueViewModel.session == nil
+                && fixture.soundPacksEditor.presentation.mode == .inactive,
+            "真实 mounted Events view 必须无递归地恰好一次消费 leave cleanup debt")
+        withExtendedLifetime((hostingView, cancellable)) {}
+    }
+
+    await suite("Settings Events AI generation：emitted tuple 必须签发当前 candidate adoption permit") {
+        let generation = PreviewFixtures.AICueGalleryScenario.candidates.previewState.generation!
+        let aiCueViewModel = AICueGenerationViewModel(
+            credentialManager: SettingsLifecycleCredentialManager(),
+            generator: SettingsLifecycleGenerator(generation: generation),
+            providerProfileID: generation.profileID,
+            providerPreferences: AICueProviderPreferences(defaults: UserDefaults()))
+        let fixture = SettingsPresentationFixtures.generalLogin(
+            route: .events(scope: .surface(.workBuddy), event: .stop),
+            availability: PreviewFixtures.settingsRouteAvailability,
+            aiCueViewModel: aiCueViewModel)
+        aiCueViewModel.begin(scope: .surface(.workBuddy), event: .stop)
+        aiCueViewModel.updateDescription("short completion cue")
+        aiCueViewModel.startGeneration(locale: "en")
+        for _ in 0..<200 where aiCueViewModel.generation?.id != generation.id {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+
+        guard case .events(let presentation) = fixture.soundPacksEditor.presentation.mode else {
+            expect(false, "AI generation 后 shared owner 必须保持 Events presentation")
+            return
+        }
+        expect(
+            aiCueViewModel.generation?.id == generation.id
+                && presentation.route
+                    == EventSettingsWindowRoute(
+                        scope: .surface(.workBuddy),
+                        event: .stop)
+                && presentation.adoptionPermit != nil,
+            "$session/$generation 的 emitted coherent tuple 必须把当前 generation 交给 owner 签 adoption permit"
+        )
     }
 
     suite("Settings session close：Events transient cleanup 恰好一次且 close 幂等") {
@@ -377,4 +600,63 @@ func runSettingsPresentationLifecycleSuites() {
             "Calendar privacy 必须经 closed typed platform effect 恰好一次")
     }
     #endif
+}
+
+private actor SettingsLifecycleCredentialManager: AICueCredentialManaging {
+    func status(for _: AICueProviderProfileID) async -> AICueCredentialStatus {
+        .stored(verification: .verified, hasPendingReplacement: false)
+    }
+
+    func save(
+        _: SensitiveCredentialInput,
+        for _: AICueProviderProfileID
+    ) async throws -> AICueCredentialStatus {
+        .stored(verification: .verified, hasPendingReplacement: false)
+    }
+
+    func delete(for _: AICueProviderProfileID) async throws {}
+    func cancelPendingReplacement(for _: AICueProviderProfileID) async throws {}
+}
+
+private actor SettingsLifecycleGenerator: AICueGenerating {
+    let generation: AICueGeneration
+
+    init(generation: AICueGeneration) {
+        self.generation = generation
+    }
+
+    func generate(
+        description _: String,
+        locale _: String,
+        providerProfileID _: AICueProviderProfileID,
+        deadline _: AICueGenerationDeadline
+    ) async throws -> AICueGeneration {
+        generation
+    }
+
+    func discard(generationID _: UUID) async {}
+    func discardAll() async {}
+}
+
+private func settingsLifecycleBracedBlock(after marker: String, in source: String) -> String? {
+    guard let markerRange = source.range(of: marker),
+        let openingBrace = source[markerRange.upperBound...].firstIndex(of: "{")
+    else { return nil }
+    var depth = 0
+    var index = openingBrace
+    while index < source.endIndex {
+        switch source[index] {
+        case "{":
+            depth += 1
+        case "}":
+            depth -= 1
+            if depth == 0 {
+                return String(source[openingBrace...index])
+            }
+        default:
+            break
+        }
+        index = source.index(after: index)
+    }
+    return nil
 }

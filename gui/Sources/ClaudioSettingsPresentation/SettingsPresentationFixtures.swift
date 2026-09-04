@@ -3,6 +3,7 @@ import AppKit
 import ClaudioCore
 import ClaudioGUICore
 import ClaudioLocalization
+import Combine
 import Foundation
 import SoundPacksWindow
 
@@ -48,6 +49,14 @@ package struct SettingsPresentationFixture {
         session.state.routeResolution.destination
     }
 
+    package var lastSettingsDestination: SettingsDestination {
+        session.dependencies.preferences.lastSettingsDestination
+    }
+
+    package var previewStopRequestRevisions: AnyPublisher<UInt64, Never> {
+        session.eventSettingsSelection.$previewStopRequestRevision.eraseToAnyPublisher()
+    }
+
     package func beginEventTransientActivity(
         scope: PanelSoundScopeID = .global,
         event: Event = .stop
@@ -68,7 +77,8 @@ package enum SettingsPresentationFixtures {
         route: SettingsRoute = .destination(.general),
         availability: SettingsRouteAvailability? = nil,
         textSize: ClaudioInterfaceTextSize = .standard,
-        experienceProfile: PreviewFixtures.SettingsExperienceProfile? = nil
+        experienceProfile: PreviewFixtures.SettingsExperienceProfile? = nil,
+        aiCueViewModel injectedAICueViewModel: AICueGenerationViewModel? = nil
     ) -> SettingsPresentationFixture {
         let temporaryRoot = temporaryParent.appendingPathComponent(
             "claudio-settings-presentation-fixture-\(UUID().uuidString)",
@@ -153,8 +163,9 @@ package enum SettingsPresentationFixtures {
                 packsLockFile: temporaryRoot.appendingPathComponent("event-packs.lock")))
         let nativeEffects = SoundPacksEditorNativeEffectsDispatcher(
             adapter: SettingsPresentationFixtureNativeEffectsAdapter())
-        let aiCueViewModel = AICueGenerationViewModel(
-            previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState)
+        let aiCueViewModel = injectedAICueViewModel
+            ?? AICueGenerationViewModel(
+                previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState)
         let session = SettingsPresentationSession(
             dependencies: SettingsPresentationDependencies(
                 preferences: preferences,
