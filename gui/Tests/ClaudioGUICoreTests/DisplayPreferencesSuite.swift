@@ -146,8 +146,8 @@ func runDisplayPreferencesSuites() {
     suite("Display preferences：所有生产消费者只观察共享 typed owner") {
         let paths = [
             "gui/Sources/ClaudioGUI/PanelView.swift",
-            "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift",
-            "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift",
+            "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift",
+            "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift",
             "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift",
         ]
         for path in paths {
@@ -164,7 +164,7 @@ func runDisplayPreferencesSuites() {
 
         guard
             let settings = displayPreferenceSource(
-                "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let controller = displayPreferenceSource(
                 "gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let icon = displayPreferenceSource("gui/Sources/ClaudioGUI/MenuBarIcon.swift")
@@ -173,7 +173,7 @@ func runDisplayPreferencesSuites() {
             return
         }
         expect(
-            settings.contains("destination == .display")
+            settings.contains("case .display:")
                 && settings.contains("preferences.setInterfaceTextSize($0)")
                 && settings.contains("preferences.setPanelWidthPreference($0)")
                 && settings.contains("preferences.setShowsMenuBarStatusDot($0)")

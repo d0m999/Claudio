@@ -4,7 +4,7 @@ import Combine
 
 /// App-lifetime typed selection shared by the unified Events & Sounds destination and its routes.
 @MainActor
-final class EventSettingsWindowSelection: ObservableObject {
+package final class EventSettingsWindowSelection: ObservableObject {
     @Published private(set) var route: EventSettingsWindowRoute
     @Published private(set) var routeRequestRevision: UInt64
     @Published private(set) var focusRequestRevision: UInt64
@@ -16,11 +16,11 @@ final class EventSettingsWindowSelection: ObservableObject {
 
     private var coordinator: EventSettingsDestinationCoordinator
 
-    var unavailableRequestedScopeStoredValue: String? {
+    package var unavailableRequestedScopeStoredValue: String? {
         route.unavailableRequestedScopeStoredValue
     }
 
-    init(route: EventSettingsWindowRoute = EventSettingsWindowRoute(scope: .global)) {
+    package init(route: EventSettingsWindowRoute = EventSettingsWindowRoute(scope: .global)) {
         let coordinator = EventSettingsDestinationCoordinator(route: route)
         self.coordinator = coordinator
         self.route = coordinator.route
@@ -33,59 +33,59 @@ final class EventSettingsWindowSelection: ObservableObject {
         aiSessionEndRequestRevision = coordinator.aiSessionEndRequestRevision
     }
 
-    func select(_ route: EventSettingsWindowRoute) {
+    package func select(_ route: EventSettingsWindowRoute) {
         guard coordinator.select(route) else { return }
         publishCoordinatorState()
     }
 
-    func markCurrentScopeUnavailable() {
+    package func markCurrentScopeUnavailable() {
         guard coordinator.markCurrentScopeUnavailable() else { return }
         publishCoordinatorState()
     }
 
-    func clearUnavailableScope() {
+    package func clearUnavailableScope() {
         guard coordinator.clearUnavailableScope() else { return }
         publishCoordinatorState()
     }
 
-    func requestInitialFocus(scopes: [PanelSoundScopeID]) {
+    package func requestInitialFocus(scopes: [PanelSoundScopeID]) {
         coordinator.requestInitialFocus(scopes: scopes)
         publishCoordinatorState()
     }
 
-    func beginPreviewSequence() -> UInt64 {
+    package func beginPreviewSequence() -> UInt64 {
         let generation = coordinator.beginPreviewSequence()
         publishCoordinatorState()
         return generation
     }
 
-    func completePreviewSequence(generation: UInt64) -> Bool {
+    package func completePreviewSequence(generation: UInt64) -> Bool {
         guard coordinator.completePreviewSequence(generation: generation) else { return false }
         publishCoordinatorState()
         return true
     }
 
-    func notePreviewStopped() {
+    package func notePreviewStopped() {
         coordinator.notePreviewStopped()
         publishCoordinatorState()
     }
 
-    func requestPreviewStop() {
+    package func requestPreviewStop() {
         coordinator.requestPreviewStop()
         publishCoordinatorState()
     }
 
-    func beginAISession(scope: PanelSoundScopeID, event: Event) {
+    package func beginAISession(scope: PanelSoundScopeID, event: Event) {
         coordinator.beginAISession(scope: scope, event: event)
         publishCoordinatorState()
     }
 
-    func noteAISessionEnded() {
+    package func noteAISessionEnded() {
         coordinator.noteAISessionEnded()
         publishCoordinatorState()
     }
 
-    func leaveDestination() {
+    package func leaveDestination() {
         coordinator.leaveDestination()
         publishCoordinatorState()
     }

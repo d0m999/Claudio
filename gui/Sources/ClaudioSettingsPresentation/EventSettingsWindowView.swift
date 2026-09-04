@@ -10,7 +10,7 @@ import SwiftUI
 /// It reuses the panel's manager-owned scope and event projections; full per-event file editing
 /// routes inside the same retained Settings window to the embedded Sounds editor.
 @MainActor
-struct EventSettingsWindowView: View {
+package struct EventSettingsWindowView: View {
     @ObservedObject var model: PanelConfigController
     @ObservedObject var selection: EventSettingsWindowSelection
     @ObservedObject var hostIntegrations: HostIntegrationPresentationStore
@@ -35,6 +35,30 @@ struct EventSettingsWindowView: View {
     @State private var previewAllFailureEvent: Event?
     @State private var previewAllCoordinator = EventPreviewSequenceCoordinator()
     @State private var isEventsDestinationActive = false
+
+    package init(
+        model: PanelConfigController,
+        selection: EventSettingsWindowSelection,
+        hostIntegrations: HostIntegrationPresentationStore,
+        languageStore: ClaudioPreferences,
+        aiCueViewModel: AICueGenerationViewModel,
+        soundPacksEditorOwner: SoundPacksEditorOwner,
+        soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher,
+        onConfigureSound: @escaping @MainActor (SoundPacksWindowRoute) -> Void,
+        onAudibilityInputsChanged: @escaping @MainActor () -> Void,
+        onAnnouncement: (@MainActor (String) -> Void)?
+    ) {
+        self.model = model
+        self.selection = selection
+        self.hostIntegrations = hostIntegrations
+        self.languageStore = languageStore
+        self.aiCueViewModel = aiCueViewModel
+        self.soundPacksEditorOwner = soundPacksEditorOwner
+        self.soundPacksEditorNativeEffects = soundPacksEditorNativeEffects
+        self.onConfigureSound = onConfigureSound
+        self.onAudibilityInputsChanged = onAudibilityInputsChanged
+        self.onAnnouncement = onAnnouncement
+    }
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
     private var interfaceTextSize: ClaudioInterfaceTextSize { languageStore.interfaceTextSize }
@@ -113,7 +137,7 @@ struct EventSettingsWindowView: View {
         }
     }
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: 0) {
             scopeSidebar
                 .frame(width: 230)

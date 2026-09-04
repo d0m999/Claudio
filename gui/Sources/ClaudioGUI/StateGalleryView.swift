@@ -464,14 +464,11 @@ private struct AICueExperienceStateFrame: View {
 
 @MainActor
 private struct SettingsWindowRouteFrame: View {
-    @StateObject private var model: SettingsWindowPresentationModel<NSRunningApplication>
-    @StateObject private var languageStore: ClaudioPreferences
-    @StateObject private var dynamicQuietPolicy: DynamicQuietPolicyController
-    @StateObject private var settingsPresentationSession: SettingsPresentationSession
-    @StateObject private var usageSettings: UsageSettingsModel
-    @StateObject private var globalShortcutSettings: GlobalShortcutSettingsModel
-    @StateObject private var aboutSettings: AboutSettingsModel
-    @StateObject private var soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher
+    let route: SettingsRoute
+    let availability: SettingsRouteAvailability
+    let language: ClaudioAppLanguage
+    let textSize: ClaudioInterfaceTextSize
+    let experienceProfile: PreviewFixtures.SettingsExperienceProfile?
 
     init(
         route: SettingsRoute,
@@ -480,251 +477,26 @@ private struct SettingsWindowRouteFrame: View {
         textSize: ClaudioInterfaceTextSize = .standard,
         experienceScenario: PreviewFixtures.SettingsExperienceScenario? = nil
     ) {
-        let preferences = ClaudioPreferences(previewLanguage: language)
-        let experienceProfile = experienceScenario?.profile
-        preferences.setInterfaceTextSize(textSize)
-        _model = StateObject(
-            wrappedValue: SettingsWindowPresentationModel(
-                initialRoute: route,
-                preferences: preferences,
-                availability: availability))
-        _languageStore = StateObject(wrappedValue: preferences)
-        _dynamicQuietPolicy = StateObject(
-            wrappedValue: Self.makeDynamicQuietPolicy(for: experienceProfile))
-        let loginItemSettings = Self.makeLoginItemSettings(for: experienceProfile)
-        _settingsPresentationSession = StateObject(
-            wrappedValue: SettingsPresentationSession(
-                dependencies: SettingsPresentationDependencies(
-                    preferences: preferences,
-                    loginItemSettings: loginItemSettings),
-                actions: SettingsPresentationActions { _ in .performed }))
-        _usageSettings = StateObject(
-            wrappedValue: Self.makeUsageSettings(for: experienceProfile))
-        _globalShortcutSettings = StateObject(
-            wrappedValue: Self.makeShortcutSettings(for: experienceProfile))
-        _aboutSettings = StateObject(
-            wrappedValue: Self.makeAboutSettings(for: experienceProfile))
-        _soundPacksEditorNativeEffects = StateObject(
-            wrappedValue: SoundPacksEditorNativeEffectsDispatcher(
-                adapter: SettingsGallerySoundPacksEditorNativeEffectsAdapter()))
+        self.route = route
+        self.availability = availability
+        self.language = language
+        self.textSize = textSize
+        experienceProfile = experienceScenario?.profile
     }
 
     var body: some View {
-        SettingsWindowView(
-            model: model,
-            preferences: languageStore,
-            dynamicQuietPolicy: dynamicQuietPolicy,
-            settingsPresentationSession: settingsPresentationSession,
-            usageSettings: usageSettings,
-            globalShortcutSettings: globalShortcutSettings,
-            aboutSettings: aboutSettings,
-            soundPacksEditorNativeEffects: soundPacksEditorNativeEffects
+        SettingsStateGalleryView(
+            route: route,
+            availability: availability,
+            language: language,
+            textSize: textSize,
+            experienceProfile: experienceProfile
         )
         .frame(
             width: SettingsWindowGeometry.minimumWidth,
             height: SettingsWindowGeometry.minimumHeight)
     }
 
-    private static func makeLoginItemSettings(
-        for profile: PreviewFixtures.SettingsExperienceProfile?
-    ) -> LoginItemSettingsModel {
-        let state = profile?.general ?? .ready
-        let status: LoginItemRegistrationState =
-            state == .permissionRequired ? .requiresApproval : .disabled
-        let model = LoginItemSettingsModel(
-            adapter: makeLoginItemServiceAdapter(
-                status: { status },
-                setEnabled: { enabled in
-                    if state == .writeFailed {
-                        throw LoginItemOperationFailureReason.systemRejected
-                    }
-                    return enabled ? .enabled : .disabled
-                }))
-        if state == .writeFailed {
-            model.setEnabled(true)
-        }
-        return model
-    }
-
-    private static func makeDynamicQuietPolicy(
-        for profile: PreviewFixtures.SettingsExperienceProfile?
-    ) -> DynamicQuietPolicyController {
-        let state = profile?.notifications ?? .ready
-        let suiteName = "Claudio.SettingsGallery.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        let policyEnabled = profile?.destination == .notifications
-        if policyEnabled {
-            defaults.setVolatileDomain(
-                [
-                    DynamicQuietPolicyController.focusDefaultsKey: true,
-                    DynamicQuietPolicyController.calendarDefaultsKey: true,
-                ],
-                forName: suiteName)
-        }
-        let permissionDenied = state == .permissionRequired
-        let publicationGate = SettingsPreviewPublicationGate()
-        let focusState = FocusQuietSystemState(
-            authorization: permissionDenied ? .denied : .authorized,
-            isFocused: permissionDenied ? nil : false)
-        let calendarState = CalendarQuietSystemState(
-            authorization: permissionDenied ? .denied : .authorized,
-            events: permissionDenied ? nil : [])
-        let model = DynamicQuietPolicyController(
-            defaults: defaults,
-            readFocusState: { focusState },
-            requestFocusAuthorization: { $0(focusState) },
-            readCalendarState: { _ in calendarState },
-            requestCalendarAuthorization: { $0(calendarState) },
-            publish: { _, _, now in
-                guard publicationGate.succeeds else { return nil }
-                return state == .stale
-                    ? now : now.addingTimeInterval(12)
-            })
-        if state == .writeFailed {
-            publicationGate.succeeds = false
-            model.refresh()
-        }
-        return model
-    }
-
-    private static func makeUsageSettings(
-        for profile: PreviewFixtures.SettingsExperienceProfile?
-    ) -> UsageSettingsModel {
-        let state = profile?.usage ?? .empty
-        let empty = usagePresentation(state: .missing, hasEvents: false)
-        let presentation: UsageActivityPresentation
-        switch state {
-        case .ready, .stale:
-            presentation = usagePresentation(state: .available, hasEvents: true)
-        case .unreadable:
-            presentation = usagePresentation(state: .unreadable, hasEvents: false)
-        case .loading, .empty, .writeFailed:
-            presentation = empty
-        }
-        let feedback: UsageSettingsFeedback? =
-            switch state {
-            case .stale:
-                UsageSettingsFeedback(action: .clearHistory, failure: .historyClearFailed)
-            case .writeFailed:
-                UsageSettingsFeedback(action: .copyLogPath, failure: .clipboardFailed)
-            case .loading, .ready, .empty, .unreadable:
-                nil
-            }
-        return UsageSettingsModel(
-            previewPresentation: presentation,
-            isRefreshing: state == .loading,
-            feedback: feedback)
-    }
-
-    private static func usagePresentation(
-        state: UsageHistorySourceState,
-        hasEvents: Bool
-    ) -> UsageActivityPresentation {
-        let events =
-            hasEvents
-            ? [
-                UsageEventActivity(
-                    event: .stop,
-                    resultCounts: [
-                        UsagePlaybackResultCount(result: .played, count: 4),
-                        UsagePlaybackResultCount(result: .muted, count: 1),
-                    ])
-            ] : []
-        return UsageActivityPresentation(
-            surfaces: HostID.productVisibleCases.map {
-                UsageSurfaceActivity(
-                    host: $0,
-                    retainedCount: hasEvents ? 5 : 0,
-                    events: events,
-                    sourceState: state)
-            },
-            log: UsageDiagnosticLogSnapshot(
-                path: "/Users/example/.claudio/claudio.log",
-                state: state == .unreadable
-                    ? .unreadable : (hasEvents ? .available(sizeBytes: 512) : .missing),
-                failures: []))
-    }
-
-    private static func makeShortcutSettings(
-        for profile: PreviewFixtures.SettingsExperienceProfile?
-    ) -> GlobalShortcutSettingsModel {
-        let state = profile?.shortcuts ?? .empty
-        let readyShortcut = GlobalShortcut(
-            shortcutID: .togglePanel,
-            keyCode: 0,
-            modifiers: [.command, .control])
-        let persisted = try? JSONEncoder().encode(readyShortcut)
-        let model = GlobalShortcutSettingsModel(
-            adapter: GlobalHotKeyAdapter(
-                register: { _ in
-                    if state == .writeFailed {
-                        throw GlobalShortcutAdapterError.conflict
-                    }
-                },
-                unregister: { _ in },
-                setActionHandler: { _ in }),
-            persistence: GlobalShortcutPersistenceAdapter(
-                read: { action in
-                    state == .ready && action == .togglePanel
-                        ? persisted : nil
-                },
-                persist: { _, _ in }),
-            actionHandler: { _ in })
-        if state == .writeFailed {
-            model.replace(.togglePanel, keyCode: 0, modifiers: [.command, .control])
-        }
-        return model
-    }
-
-    private static func makeAboutSettings(
-        for profile: PreviewFixtures.SettingsExperienceProfile?
-    ) -> AboutSettingsModel {
-        let state = profile?.about ?? .ready
-        let empty = state == .empty
-        let model = AboutSettingsModel(
-            bundleFacts: empty
-                ? projectAboutBundleFacts(
-                    AboutBundleFactsInput(
-                        brandName: nil,
-                        productName: nil,
-                        version: nil,
-                        build: nil,
-                        architecture: nil,
-                        minimumSystemVersion: nil,
-                        operatingSystemVersion: "15.6.1"))
-                : PreviewFixtures.aboutBundleFacts,
-            resources: empty
-                ? AboutBundledResourceKind.allCases.map {
-                    AboutBundledResource(kind: $0, url: nil)
-                } : PreviewFixtures.aboutBundledResources,
-            pathFacts: empty
-                ? AboutPathKind.allCases.map {
-                    AboutPathExistenceFact(kind: $0, exists: false)
-                } : PreviewFixtures.aboutPathFacts,
-            surfaceFacts: empty ? [] : PreviewFixtures.aboutSurfaceFacts,
-            actions: AboutSettingsActions(
-                copy: { _ in state != .writeFailed },
-                open: { _ in state != .writeFailed }))
-        if state == .writeFailed {
-            model.copyDiagnostics()
-        }
-        return model
-    }
-}
-
-@MainActor
-private final class SettingsGallerySoundPacksEditorNativeEffectsAdapter:
-    SoundPacksEditorNativeEffectsAdapter
-{
-    func selectAudioFiles(allowsMultipleSelection: Bool) -> [URL] { [] }
-    func playAudio(fileURL: URL, volume: Double) -> TimeInterval? { nil }
-    func stopAudio() {}
-    func revealInFinder(fileURL: URL) {}
-}
-
-@MainActor
-private final class SettingsPreviewPublicationGate {
-    var succeeds = true
 }
 
 // MARK: - Production Agent panel (2 languages × 4 sizes × critical states)
@@ -1567,6 +1339,16 @@ private let previewAudioImportEnvironment = AudioImportEnvironment(
 @MainActor
 private let previewStateGallerySoundPackLibrary = SoundPackLibrary(
     environment: previewAudioImportEnvironment)
+
+@MainActor
+private final class SettingsGallerySoundPacksEditorNativeEffectsAdapter:
+    SoundPacksEditorNativeEffectsAdapter
+{
+    func selectAudioFiles(allowsMultipleSelection: Bool) -> [URL] { [] }
+    func playAudio(fileURL: URL, volume: Double) -> TimeInterval? { nil }
+    func stopAudio() {}
+    func revealInFinder(fileURL: URL) {}
+}
 
 @MainActor
 private let previewStateGalleryRefreshCoordinator = SoundPacksRefreshCoordinator()

@@ -51,7 +51,7 @@ func runIntegrationDestinationWiringSuites() {
     suite("统一 Settings wiring：直接挂载 production destination，不创建第二窗口或 controller") {
         guard
             let settings = integrationDestinationSource(
-                "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let controller = integrationDestinationSource(
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
             let menu = integrationDestinationSource(
@@ -85,7 +85,7 @@ func runIntegrationDestinationWiringSuites() {
     suite("集成 destination layout contract：单层纵向 ScrollView、820 内容宽度、无旧矩阵/Inspector") {
         guard
             let view = integrationDestinationSource(
-                "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift")
+                "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift")
         else {
             expect(false, "缺少 IntegrationsSettingsDestinationView.swift")
             return
@@ -116,9 +116,9 @@ func runIntegrationDestinationWiringSuites() {
     suite("集成 destination typed focus：通用入口的 title 请求落到真实可聚焦标题") {
         guard
             let view = integrationDestinationSource(
-                "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift"),
             let settings = integrationDestinationSource(
-                "gui/Sources/ClaudioGUI/SettingsWindowView.swift")
+                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift")
         else {
             expect(false, "缺少 Integrations destination 或 Settings route source")
             return
@@ -150,7 +150,7 @@ func runIntegrationDestinationWiringSuites() {
     suite("集成 destination action boundary：连接、清除、配置来源与 Events 各有唯一入口") {
         guard
             let view = integrationDestinationSource(
-                "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift")
+                "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift")
         else {
             expect(false, "缺少 destination view")
             return
@@ -207,7 +207,7 @@ func runIntegrationDestinationWiringSuites() {
             let model = integrationDestinationSource(
                 "gui/Sources/ClaudioGUICore/IntegrationDestinationModel.swift"),
             let view = integrationDestinationSource(
-                "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift"),
             let gallery = integrationDestinationSource(
                 "gui/Sources/ClaudioGUI/StateGalleryView.swift")
         else {
@@ -238,7 +238,7 @@ func runIntegrationDestinationWiringSuites() {
     suite("配置与偏好 wiring：展示层不读宿主文件，Surface 偏好使用独立稳定 key") {
         guard
             let view = integrationDestinationSource(
-                "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift"),
             let preferences = integrationDestinationSource(
                 "gui/Sources/ClaudioGUICore/SettingsPreferences.swift"),
             let menu = integrationDestinationSource(

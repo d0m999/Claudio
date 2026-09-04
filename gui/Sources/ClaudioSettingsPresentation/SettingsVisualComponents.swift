@@ -10,7 +10,7 @@ private struct SettingsReduceTransparencyOverrideKey: EnvironmentKey {
 extension EnvironmentValues {
     /// Controlled visual-environment seam. Production leaves this nil and follows AppKit;
     /// deterministic render and snapshot hosts may inject the same platform fact explicitly.
-    var settingsReduceTransparencyOverride: Bool? {
+    package var settingsReduceTransparencyOverride: Bool? {
         get { self[SettingsReduceTransparencyOverrideKey.self] }
         set { self[SettingsReduceTransparencyOverrideKey.self] = newValue }
     }

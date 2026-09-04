@@ -96,7 +96,8 @@ func runSettingsPresentationTargetSuites() {
         let paths = [
             "component": "gui/Sources/ClaudioGUIComponents/SharedMasterVolumeSlider.swift",
             "panel": "gui/Sources/ClaudioGUI/MasterVolumeRow.swift",
-            "events": "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift",
+            "events":
+                "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift",
             "session":
                 "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift",
             "gallery": "gui/Sources/ClaudioGUI/StateGalleryView.swift",
@@ -375,6 +376,147 @@ func runSettingsPresentationTargetSuites() {
                 && !settingsAnnouncementSchedulerHasLatchContract(lateResetScheduler),
             "latch 审计必须接受正确顺序，并拒绝缺 set 或 delivery 后才 reset 的 mutation")
     }
+
+    suite("Settings production tree：九个 typed destination 由唯一 root 穷尽挂载") {
+        let root = guiTestRepositoryRoot()
+        let presentationDirectory = root.appendingPathComponent(
+            "gui/Sources/ClaudioSettingsPresentation", isDirectory: true)
+        let executableDirectory = root.appendingPathComponent(
+            "gui/Sources/ClaudioGUI", isDirectory: true)
+        let migratedFiles = [
+            "SettingsRootView.swift",
+            "EventSettingsWindowView.swift",
+            "EventSettingsAICueView.swift",
+            "IntegrationsSettingsDestinationView.swift",
+            "UsageSettingsView.swift",
+            "ShortcutSettingsView.swift",
+            "AboutSettingsView.swift",
+            "SettingsVisualComponents.swift",
+            "EventSettingsWindowSelection.swift",
+            "SettingsStateGalleryView.swift",
+        ]
+        let legacyFiles = migratedFiles.map { filename in
+            filename == "SettingsRootView.swift" ? "SettingsWindowView.swift" : filename
+        }
+        expect(
+            migratedFiles.allSatisfy {
+                FileManager.default.fileExists(
+                    atPath: presentationDirectory.appendingPathComponent($0).path)
+            },
+            "完整 production Settings view tree 必须由 ClaudioSettingsPresentation module 拥有")
+        expect(
+            legacyFiles.allSatisfy {
+                !FileManager.default.fileExists(
+                    atPath: executableDirectory.appendingPathComponent($0).path)
+            },
+            "ClaudioGUI 不得保留迁移后 source 或 duplicate SettingsWindowView")
+
+        let rootURL = presentationDirectory.appendingPathComponent("SettingsRootView.swift")
+        let controllerURL = executableDirectory.appendingPathComponent(
+            "SettingsWindowController.swift")
+        let galleryURL = executableDirectory.appendingPathComponent("StateGalleryView.swift")
+        guard let rootSource = try? String(contentsOf: rootURL, encoding: .utf8),
+            let controllerSource = try? String(contentsOf: controllerURL, encoding: .utf8),
+            let gallerySource = try? String(contentsOf: galleryURL, encoding: .utf8)
+        else {
+            expect(false, "读不到 production Settings root 或 controller wiring")
+            return
+        }
+        let rootScan = strippingComments(rootSource)
+        let controllerScan = strippingComments(controllerSource)
+        let galleryScan = strippingComments(gallerySource)
+        guard rootScan.unmodeledConstructs.isEmpty,
+            controllerScan.unmodeledConstructs.isEmpty,
+            galleryScan.unmodeledConstructs.isEmpty,
+            let routeSlot = settingsBracedBlock(after: "private var routeSlot", in: rootScan.code)
+        else {
+            expect(false, "production Settings root source audit 必须 fail closed")
+            return
+        }
+        let normalizedRouteSlot = collapsingWhitespace(routeSlot)
+        let normalizedController = collapsingWhitespace(controllerScan.code)
+        let normalizedGallery = collapsingWhitespace(galleryScan.code)
+        let destinationCases = [
+            ".general", ".integrations", ".eventsAndSounds", ".notifications", ".display",
+            ".sounds", ".usage", ".shortcuts", ".about",
+        ]
+        expect(
+            normalizedRouteSlot.contains("switch destination")
+                && destinationCases.allSatisfy {
+                    normalizedRouteSlot.contains("case \($0):")
+                }
+                && !normalizedRouteSlot.contains("default:")
+                && !normalizedRouteSlot.contains("AnyView")
+                && !normalizedRouteSlot.contains("rawValue"),
+            "root 必须用无 default/String/AnyView 的 exhaustive typed switch 穷尽九个 destination")
+        expect(
+            normalizedController.contains(
+                "SettingsRootView(session: settingsPresentationSession)")
+                && !normalizedController.contains("SettingsWindowView("),
+            "production controller 必须只挂载与 harness 相同的 SettingsRootView(session:) interface")
+        expect(
+            normalizedGallery.contains("SettingsStateGalleryView(")
+                && !normalizedGallery.contains("SettingsRootView(")
+                && !normalizedGallery.contains("SettingsPresentationDependencies("),
+            "executable gallery 只能挂载 target-owned Settings gallery，不得复制 fixture composition")
+    }
+
+    suite("Settings production root：root 与 General identity 挂在各自唯一顶层容器") {
+        let rootURL = guiTestRepositoryRoot().appendingPathComponent(
+            "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift")
+        guard let source = try? String(contentsOf: rootURL, encoding: .utf8) else {
+            expect(false, "读不到 production SettingsRootView.swift")
+            return
+        }
+        let scan = strippingComments(source)
+        guard scan.unmodeledConstructs.isEmpty,
+            let rootBody = settingsBracedBlock(
+                after: "package var body: some View", in: scan.codeWithoutStringLiterals),
+            let generalBody = settingsBracedBlock(
+                after: "private var generalSettings: some View",
+                in: scan.codeWithoutStringLiterals)
+        else {
+            expect(false, "Settings root identity source audit 必须 fail closed")
+            return
+        }
+        expect(
+            settingsAccessibilityIdentityContract(
+                rootBody: rootBody,
+                generalBody: generalBody,
+                source: scan.codeWithoutStringLiterals),
+            "真实 SettingsRootView 顶层 root 与 General 内容容器必须各挂唯一 typed AX identity")
+
+        let rootIdentity =
+            ".accessibilityIdentifier(SettingsPresentationAccessibilityID.root)"
+        let generalIdentity =
+            ".accessibilityIdentifier(SettingsPresentationAccessibilityID.general)"
+        let validRoot = "{ GeometryReader { EmptyView() } \(rootIdentity) }"
+        let validGeneral = "{ VStack { EmptyView() } \(generalIdentity) }"
+        let nestedRoot = "{ GeometryReader { EmptyView() \(rootIdentity) } }"
+        let duplicateGeneral =
+            "{ VStack { EmptyView() } \(generalIdentity) \(generalIdentity) }"
+        let fixtures = [validRoot, validGeneral, nestedRoot, duplicateGeneral].map(
+            strippingComments)
+        guard fixtures.allSatisfy({ $0.unmodeledConstructs.isEmpty }) else {
+            expect(false, "Settings root identity mutation fixtures 必须可由 scanner 完整建模")
+            return
+        }
+        let fixtureCode = fixtures.map(\.codeWithoutStringLiterals)
+        expect(
+            settingsAccessibilityIdentityContract(
+                rootBody: fixtureCode[0],
+                generalBody: fixtureCode[1],
+                source: fixtureCode[0] + fixtureCode[1])
+                && !settingsAccessibilityIdentityContract(
+                    rootBody: fixtureCode[2],
+                    generalBody: fixtureCode[1],
+                    source: fixtureCode[2] + fixtureCode[1])
+                && !settingsAccessibilityIdentityContract(
+                    rootBody: fixtureCode[0],
+                    generalBody: fixtureCode[3],
+                    source: fixtureCode[0] + fixtureCode[3]),
+            "AX identity 审计必须接受各自顶层唯一 modifier，并拒绝嵌套或重复 mutation")
+    }
 }
 
 @MainActor
@@ -630,6 +772,28 @@ func runSettingsPresentationSliceSuites() {
     }
 
     #if DEBUG
+    suite("Settings presentation root：九个 destination 都经同一 compiled production root 挂载") {
+        var mountedDestinations = Set<SettingsDestination>()
+        for scenario in PreviewFixtures.settingsRouteScenarios {
+            let fixture = SettingsPresentationFixtures.generalLogin(
+                route: scenario.route,
+                availability: PreviewFixtures.settingsRouteAvailability)
+            let hostingView = NSHostingView(rootView: fixture.rootView)
+            hostingView.frame = NSRect(x: 0, y: 0, width: 980, height: 720)
+            hostingView.layoutSubtreeIfNeeded()
+            if hostingView.fittingSize.width > 0 && hostingView.fittingSize.height > 0,
+                fixture.selectedDestination == scenario.destination
+            {
+                mountedDestinations.insert(scenario.destination)
+            }
+        }
+
+        expect(
+            mountedDestinations == Set(SettingsDestination.allCases)
+                && mountedDestinations.count == 9,
+            "固定九个 destination 必须全部由 fixture 与 production 共用的 SettingsRootView(session:) 挂载")
+    }
+
     suite("Settings presentation fixture：DEBUG seam 随机隔离且只暴露真实 owner") {
         withTempDirectory { fixtureParent in
             let sentinel = fixtureParent.appendingPathComponent("user-path-sentinel")
@@ -761,6 +925,43 @@ private func settingsAnnouncementSchedulerHasLatchContract(_ source: String) -> 
     return latchGuard.lowerBound < latchSet.lowerBound
         && latchSet.lowerBound < deferredTurn.lowerBound
         && latchReset.lowerBound < delivery.lowerBound
+}
+
+private func settingsAccessibilityIdentityContract(
+    rootBody: String,
+    generalBody: String,
+    source: String
+) -> Bool {
+    let rootIdentity =
+        ".accessibilityIdentifier(SettingsPresentationAccessibilityID.root)"
+    let generalIdentity =
+        ".accessibilityIdentifier(SettingsPresentationAccessibilityID.general)"
+    let normalizedRoot = collapsingWhitespace(rootBody)
+    let normalizedGeneral = collapsingWhitespace(generalBody)
+    let normalizedSource = collapsingWhitespace(source)
+    return settingsHasSingleTopLevelMarker(rootIdentity, in: normalizedRoot)
+        && settingsHasSingleTopLevelMarker(generalIdentity, in: normalizedGeneral)
+        && normalizedSource.components(separatedBy: rootIdentity).count - 1 == 1
+        && normalizedSource.components(separatedBy: generalIdentity).count - 1 == 1
+        && !normalizedRoot.contains(generalIdentity)
+        && !normalizedGeneral.contains(rootIdentity)
+}
+
+private func settingsHasSingleTopLevelMarker(_ marker: String, in scope: String) -> Bool {
+    guard scope.components(separatedBy: marker).count - 1 == 1,
+        let markerRange = scope.range(of: marker)
+    else {
+        return false
+    }
+    var braceDepth = 0
+    for character in scope[..<markerRange.lowerBound] {
+        if character == "{" {
+            braceDepth += 1
+        } else if character == "}" {
+            braceDepth -= 1
+        }
+    }
+    return braceDepth == 1
 }
 
 private struct DumpedSettingsPackageTarget {

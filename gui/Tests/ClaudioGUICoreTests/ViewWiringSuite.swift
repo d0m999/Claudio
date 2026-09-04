@@ -224,6 +224,52 @@ private func scannedFixture(path: String, text: String) -> ScannedSource {
     return (path: path, code: scanned.code, unmodeled: scanned.unmodeledConstructs)
 }
 
+private func repositoryRelativeSources(
+    _ groups: [(root: String, sources: [ScannedSource])]
+) -> [ScannedSource] {
+    groups.flatMap { group in
+        group.sources.map { source in
+            (
+                path: "\(group.root)/\(source.path)",
+                code: source.code,
+                unmodeled: source.unmodeled
+            )
+        }
+    }
+}
+
+private func unmodeledConstructCensus(in sources: [ScannedSource]) -> [String: [String]] {
+    var census: [String: [String]] = [:]
+    for source in sources where !source.unmodeled.isEmpty {
+        census[source.path] = source.unmodeled
+    }
+    return census
+}
+
+private func settingsAnnouncementSurfaceSources(
+    executable: [ScannedSource],
+    presentation: [ScannedSource]
+) -> [ScannedSource] {
+    repositoryRelativeSources([
+        (root: "gui/Sources/ClaudioGUI", sources: executable),
+        (root: "gui/Sources/ClaudioSettingsPresentation", sources: presentation),
+    ])
+}
+
+private func settingsAnnouncementSurfaceCensus(
+    in sources: [ScannedSource]
+) -> (posts: [String: Int], consumes: [String: Int]) {
+    var posts: [String: Int] = [:]
+    var consumes: [String: Int] = [:]
+    for file in sources {
+        let postCount = file.code.components(separatedBy: "NSAccessibility.post").count - 1
+        let consumeCount = file.code.components(separatedBy: "announcer.consume(").count - 1
+        if postCount > 0 { posts[file.path] = postCount }
+        if consumeCount > 0 { consumes[file.path] = consumeCount }
+    }
+    return (posts: posts, consumes: consumes)
+}
+
 @MainActor
 private func guiSources() -> [ScannedSource] {
     sourcesUnder("gui/Sources/ClaudioGUI")
@@ -343,7 +389,7 @@ func runViewWiringSuites() {
             "菜单栏必须使用同源 Orbit Zero 减法几何，并保持 template image 自动适配亮暗菜单栏")
     }
 
-    suite("扫描器的前提：ClaudioGUI / ClaudioGUICore 里没有一处它自己不认识的构造") {
+    suite("扫描器的前提：三个 GUI production targets 没有一处它自己不认识的构造") {
         // ## GUI 这一半此前**一条守卫都没有**（`/codex review be332ff` 的 P3）
         //
         // 本文件下面的兜底全是**负向**断言（除 PanelView 外不许出现锁、ClaudioGUICore 里不许出现
@@ -365,28 +411,71 @@ func runViewWiringSuites() {
         // 位置感知是必须的：`ClaudioColorHex.swift:206` / `ContrastRatio.swift:27` 里的
         // `hasPrefix("#")` 逐字包含 `#"` —— 一条纯文本的 `#"` 守卫会在它们身上当场假红，然后被
         // 下一个人删掉，洞原样回来。
-        let scanned = guiSources() + guiCoreSources()
+        let scanned = repositoryRelativeSources([
+            (root: "gui/Sources/ClaudioGUI", sources: guiSources()),
+            (root: "gui/Sources/ClaudioGUICore", sources: guiCoreSources()),
+            (
+                root: "gui/Sources/ClaudioSettingsPresentation",
+                sources: sourcesUnder("gui/Sources/ClaudioSettingsPresentation")
+            ),
+        ])
         expect(
             scanned.count >= 10,
-            "两个 target 加起来一个 Swift 文件都没数到（实得 \(scanned.count)）—— 这条是**普查**，"
+            "三个 target 加起来一个 Swift 文件都没数到（实得 \(scanned.count)）—— 这条是**普查**，"
                 + "普查不到任何文件就永远等不到红，只会安静地绿下去")
-        var unmodeled: [String: [String]] = [:]
-        for file in scanned where !file.unmodeled.isEmpty {
-            unmodeled[file.path] = file.unmodeled
-        }
+        let expectedTargetRoots = [
+            "gui/Sources/ClaudioGUI/",
+            "gui/Sources/ClaudioGUICore/",
+            "gui/Sources/ClaudioSettingsPresentation/",
+        ]
+        expect(
+            expectedTargetRoots.allSatisfy { root in
+                scanned.contains { $0.path.hasPrefix(root) }
+            },
+            "fail-closed census 必须以 repository-relative path 覆盖三个 production target")
+        let unmodeled = unmodeledConstructCensus(in: scanned)
         expect(
             unmodeled.isEmpty,
             "这些文件里出现了扫描器不建模的词法构造：\(unmodeled) —— 它剥出来的「代码」从此不可信，"
                 + "而本文件的兜底全是负向断言：一段被误判成字符串 / 注释而消失的代码只会让它们**更绿**，"
                 + "一句藏在里面的 `ClaudioPaths.playLockFile` 或 `\"play.lock\"` 会对整套锁普查"
                 + "**永久隐身**。要么把这个构造挪走，要么先教 `strippingComments` 认识它")
+
+        let duplicateBasenameFixtures = repositoryRelativeSources([
+            (
+                root: "gui/Sources/ClaudioGUI",
+                sources: [
+                    scannedFixture(
+                        path: "Duplicate.swift", text: "let pattern = ##\"a//b\"##")
+                ]
+            ),
+            (
+                root: "gui/Sources/ClaudioSettingsPresentation",
+                sources: [
+                    scannedFixture(
+                        path: "Duplicate.swift", text: "let pattern = ##\"c//d\"##")
+                ]
+            ),
+        ])
+        let mutationCensus = unmodeledConstructCensus(in: duplicateBasenameFixtures)
+        expect(
+            Set(mutationCensus.keys)
+                == [
+                    "gui/Sources/ClaudioGUI/Duplicate.swift",
+                    "gui/Sources/ClaudioSettingsPresentation/Duplicate.swift",
+                ]
+                && mutationCensus.values.allSatisfy { !$0.isEmpty },
+            "同 basename 的不建模 mutation 必须保留两个 relative-path findings，不能覆盖成一个")
     }
 
     suite("主动播报出口按 surface 唯一：Panel、Integrations 与统一 Settings 各一个") {
-        let sources = guiSources()
+        let sources = settingsAnnouncementSurfaceSources(
+            executable: guiSources(),
+            presentation: sourcesUnder("gui/Sources/ClaudioSettingsPresentation"))
         expect(
             sources.count >= 5,
-            "在 gui/Sources/ClaudioGUI 下一个 Swift 文件都没数到（实得 \(sources.count)）。"
+            "在 executable 与 Settings presentation targets 下一个 Swift 文件都没数到"
+                + "（实得 \(sources.count)）。"
                 + "这条断言存在的全部意义就是去数那些文件 —— 数不到，它就永远等不到 1，安静地绿下去")
         expect(
             sources.contains { $0.path.hasSuffix("PanelView.swift") }
@@ -395,26 +484,19 @@ func runViewWiringSuites() {
                 },
             "Panel 与统一 Settings 集成 destination 两个独立 surface 都必须在普查名册里")
 
-        var posts: [String: Int] = [:]
-        var consumes: [String: Int] = [:]
-        for file in sources {
-            let postCount = file.code.components(separatedBy: "NSAccessibility.post").count - 1
-            let consumeCount = file.code.components(separatedBy: "announcer.consume(").count - 1
-            if postCount > 0 { posts[file.path] = postCount }
-            if consumeCount > 0 { consumes[file.path] = consumeCount }
-        }
+        let census = settingsAnnouncementSurfaceCensus(in: sources)
 
         expect(
-            posts == [
-                "PanelView.swift": 1,
-                "SettingsWindowController.swift": 1,
+            census.posts == [
+                "gui/Sources/ClaudioGUI/PanelView.swift": 1,
+                "gui/Sources/ClaudioGUI/SettingsWindowController.swift": 1,
             ],
             "Panel 与统一 Settings 的基础页动作反馈各有一个窗口级主动播报出口；"
-                + "destination 通过注入 callback，不得新增 AppKit post。实得 \(posts)")
+                + "destination 通过注入 callback，不得新增 AppKit post。实得 \(census.posts)")
         expect(
-            consumes == ["PanelView.swift": 1],
+            census.consumes == ["gui/Sources/ClaudioGUI/PanelView.swift": 1],
             "去重器也只许有一个调用点，理由一字不差 —— 绕过它 = 把「同一趟里 post 两条」放回来。"
-                + "实得 \(consumes)")
+                + "实得 \(census.consumes)")
         let integrations =
             sources.first {
                 $0.path.hasSuffix("IntegrationsSettingsDestinationView.swift")
@@ -422,6 +504,29 @@ func runViewWiringSuites() {
         expect(
             integrations.components(separatedBy: "feedbackAnnouncer.consume(").count - 1 == 1,
             "集成 destination 的出口必须只经过一处 feedback revision 去重器")
+
+        let collisionMutation = settingsAnnouncementSurfaceSources(
+            executable: [
+                scannedFixture(
+                    path: "PanelView.swift",
+                    text: "NSAccessibility.post; announcer.consume("),
+                scannedFixture(
+                    path: "SettingsWindowController.swift", text: "NSAccessibility.post"),
+            ],
+            presentation: [
+                scannedFixture(path: "PanelView.swift", text: "NSAccessibility.post")
+            ])
+        let mutationCensus = settingsAnnouncementSurfaceCensus(in: collisionMutation)
+        expect(
+            mutationCensus.posts
+                == [
+                    "gui/Sources/ClaudioGUI/PanelView.swift": 1,
+                    "gui/Sources/ClaudioGUI/SettingsWindowController.swift": 1,
+                    "gui/Sources/ClaudioSettingsPresentation/PanelView.swift": 1,
+                ]
+                && mutationCensus.consumes
+                    == ["gui/Sources/ClaudioGUI/PanelView.swift": 1],
+            "同 basename presentation mutation 的额外 post 必须成为独立 finding，不能覆盖 executable key")
     }
 
     suite("PanelView 单作用域边界：无宿主探测，固定呈现 scope/报告/当前来源内容") {
@@ -431,7 +536,7 @@ func runViewWiringSuites() {
                 "gui/Sources/ClaudioGUI/PanelSoundScopePicker.swift"),
             let menu = codeOnly("gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let integrationsView = codeOnly(
-                "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift"),
             let integrationsModel = codeOnly(
                 "gui/Sources/ClaudioGUICore/IntegrationDestinationModel.swift")
         else {
@@ -2309,7 +2414,7 @@ func runViewWiringSuites() {
             let scopePicker = codeOnly(
                 "gui/Sources/ClaudioGUI/PanelSoundScopePicker.swift"),
             let integrations = codeOnly(
-                "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift"),
             let packs = codeOnly(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
             let footer = codeOnly(
@@ -2580,15 +2685,15 @@ func runViewWiringSuites() {
     suite("事件与提示音：统一 retained Settings 复用作用域/事件投影并内部路由 Sounds") {
         guard
             let view = codeWithoutStrings(
-                "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift"),
             let viewWithStrings = codeOnly(
-                "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift"),
             let aiView = codeWithoutStrings(
-                "gui/Sources/ClaudioGUI/EventSettingsAICueView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/EventSettingsAICueView.swift"),
             let aiViewWithStrings = codeOnly(
-                "gui/Sources/ClaudioGUI/EventSettingsAICueView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/EventSettingsAICueView.swift"),
             let settingsView = codeWithoutStrings(
-                "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let settingsController = codeWithoutStrings(
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
             let previewSequence = codeWithoutStrings(
@@ -3235,7 +3340,7 @@ func runViewWiringSuites() {
             let settingsController = codeWithoutStrings(
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
             let settingsView = codeWithoutStrings(
-                "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let menuBar = codeWithoutStrings(
                 "gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let package = source("gui/Package.swift")

@@ -94,10 +94,12 @@ func runHitTargetSuites() {
     }
 
     suite("生产接线：Events、声音包、onboarding 与 AI composer 使用显式命中合同") {
-        let eventSettings = productionSource("gui/Sources/ClaudioGUI/EventSettingsWindowView.swift")
+        let eventSettings = productionSource(
+            "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift")
         let packGallery = productionSource("gui/Sources/ClaudioGUI/PackGalleryView.swift")
         let panelRows = productionSource("gui/Sources/ClaudioGUI/PanelRows.swift")
-        let aiCue = productionSource("gui/Sources/ClaudioGUI/EventSettingsAICueView.swift")
+        let aiCue = productionSource(
+            "gui/Sources/ClaudioSettingsPresentation/EventSettingsAICueView.swift")
 
         expect(
             eventSettings?.contains(".buttonStyle(ClaudioFullRowButtonStyle())") == true,
