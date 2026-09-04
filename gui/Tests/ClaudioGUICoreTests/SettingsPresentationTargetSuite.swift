@@ -146,6 +146,16 @@ func runSettingsPresentationTargetSuites() {
             private struct SettingsExitInteractionModifier: ViewModifier {}
             #endif
             """
+        let handlerStringDecoyMutation =
+            shallowInteractionFixture
+            .replacingOccurrences(of: "onMoveCommand", with: "debugOnlyMove")
+            .replacingOccurrences(of: "onExitCommand", with: "debugOnlyExit")
+            + "\nlet handlerNames = \"\"\"\nonMoveCommand\nonExitCommand\n\"\"\"\n"
+        let directiveStringDecoyFixture =
+            "let decoy = \"\"\"\n#if DEBUG\n\"\"\"\n"
+            + "#if DEBUG\nlet debugOnly = true\n#else\nlet releaseOnly = true\n#endif\n"
+        let directiveStringDecoyRelease = swiftSourceTakingReleaseBranches(
+            directiveStringDecoyFixture)
         expect(
             settingsReleasePresentationSourcesAreShallow(
                 mountSource: shallowMountFixture,
@@ -158,8 +168,14 @@ func runSettingsPresentationTargetSuites() {
                     mountSource: shallowMountFixture,
                     interactionSource:
                         shallowInteractionFixture
-                        .replacingOccurrences(of: "onMoveCommand", with: "debugOnlyMove")),
-            "Release branch scanner 必须识别 leaked modifier metadata 与缺失 native handler mutation")
+                        .replacingOccurrences(of: "onMoveCommand", with: "debugOnlyMove"))
+                && !settingsReleasePresentationSourcesAreShallow(
+                    mountSource: shallowMountFixture,
+                    interactionSource: handlerStringDecoyMutation)
+                && directiveStringDecoyRelease?.contains("let releaseOnly = true") == true
+                && directiveStringDecoyRelease?.contains("let debugOnly = true") == false,
+            "Release branch scanner 必须忽略 string decoy，并识别 leaked metadata 与缺失 native handler mutation"
+        )
         expect(
             settingsReleasePresentationSourcesAreShallow(
                 mountSource: mountSource,
