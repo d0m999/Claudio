@@ -16,6 +16,8 @@ package final class EventSettingsWindowSelection: ObservableObject {
     @Published private(set) var stateRevision: UInt64 = 0
 
     private var coordinator: EventSettingsDestinationCoordinator
+    private var isPublishingCoordinatorState = false
+    private var coordinatorRepublishRequested = false
 
     package var unavailableRequestedScopeStoredValue: String? {
         route.unavailableRequestedScopeStoredValue
@@ -104,27 +106,37 @@ package final class EventSettingsWindowSelection: ObservableObject {
     }
 
     private func publishCoordinatorState() {
-        let previous = presentationState
-        if route != coordinator.route { route = coordinator.route }
-        if routeRequestRevision != coordinator.routeRequestRevision {
-            routeRequestRevision = coordinator.routeRequestRevision
+        guard !isPublishingCoordinatorState else {
+            coordinatorRepublishRequested = true
+            return
         }
-        if focusTarget != coordinator.focusTarget { focusTarget = coordinator.focusTarget }
-        if previewState != coordinator.previewState { previewState = coordinator.previewState }
-        if aiSessionState != coordinator.aiSessionState {
-            aiSessionState = coordinator.aiSessionState
-        }
-        if previewStopRequestRevision != coordinator.previewStopRequestRevision {
-            previewStopRequestRevision = coordinator.previewStopRequestRevision
-        }
-        if aiSessionEndRequestRevision != coordinator.aiSessionEndRequestRevision {
-            aiSessionEndRequestRevision = coordinator.aiSessionEndRequestRevision
-        }
-        if focusRequestRevision != coordinator.focusRequestRevision {
-            focusRequestRevision = coordinator.focusRequestRevision
-        }
-        if presentationState != previous {
-            stateRevision &+= 1
-        }
+        isPublishingCoordinatorState = true
+        defer { isPublishingCoordinatorState = false }
+
+        repeat {
+            coordinatorRepublishRequested = false
+            let previous = presentationState
+            if route != coordinator.route { route = coordinator.route }
+            if routeRequestRevision != coordinator.routeRequestRevision {
+                routeRequestRevision = coordinator.routeRequestRevision
+            }
+            if focusTarget != coordinator.focusTarget { focusTarget = coordinator.focusTarget }
+            if previewState != coordinator.previewState { previewState = coordinator.previewState }
+            if aiSessionState != coordinator.aiSessionState {
+                aiSessionState = coordinator.aiSessionState
+            }
+            if previewStopRequestRevision != coordinator.previewStopRequestRevision {
+                previewStopRequestRevision = coordinator.previewStopRequestRevision
+            }
+            if aiSessionEndRequestRevision != coordinator.aiSessionEndRequestRevision {
+                aiSessionEndRequestRevision = coordinator.aiSessionEndRequestRevision
+            }
+            if focusRequestRevision != coordinator.focusRequestRevision {
+                focusRequestRevision = coordinator.focusRequestRevision
+            }
+            if presentationState != previous {
+                stateRevision &+= 1
+            }
+        } while coordinatorRepublishRequested
     }
 }

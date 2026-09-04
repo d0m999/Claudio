@@ -598,9 +598,6 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         preselect host: HostID?,
         returnFocusTo target: PanelFocusTarget
     ) {
-        if let host {
-            _ = integrationsModel.selectHost(host)
-        }
         let selectedHost = host ?? integrationsModel.selectedHost ?? .claudeCode
         requestSettingsPresentation(
             request: .route(.integrations(surface: selectedHost.surfaceID)),

@@ -240,87 +240,88 @@ func runSettingsPresentationLifecycleSuites() async {
         let allScopes = Set(
             [PanelSoundScopeID.global]
                 + HostID.productVisibleCases.map { .surface($0.surfaceID) })
-        let cases: [(
-            route: SettingsRoute,
-            availability: SettingsRouteAvailability,
-            failure: SettingsRouteFailure,
-            destination: SettingsDestination
-        )] = [
-            (
-                .integrations(surface: .chatGPTDesktopAX),
-                SettingsRouteAvailability(
-                    integrationSurfaces: allSurfaces,
-                    eventScopes: allScopes,
-                    soundScopes: allScopes,
-                    soundPackIDs: ["settings-fixture-pack"],
-                    events: Set(Event.allCases)),
-                .invalidSurface(.chatGPTDesktopAX),
-                .integrations
-            ),
-            (
-                .integrations(surface: .workBuddy),
-                SettingsRouteAvailability(
-                    integrationSurfaces: [],
-                    eventScopes: allScopes,
-                    soundScopes: allScopes,
-                    soundPackIDs: ["settings-fixture-pack"],
-                    events: Set(Event.allCases)),
-                .staleSurface(.workBuddy),
-                .integrations
-            ),
-            (
-                .events(scope: .global, event: .stop),
-                SettingsRouteAvailability(
-                    integrationSurfaces: allSurfaces,
-                    eventScopes: [],
-                    soundScopes: allScopes,
-                    soundPackIDs: ["settings-fixture-pack"],
-                    events: Set(Event.allCases)),
-                .staleSoundScope(.global),
-                .eventsAndSounds
-            ),
-            (
-                .sounds(
-                    .editEvent(
-                        surface: nil,
-                        packID: "missing-pack",
-                        event: .stop)),
-                SettingsRouteAvailability(
-                    integrationSurfaces: allSurfaces,
-                    eventScopes: allScopes,
-                    soundScopes: allScopes,
-                    soundPackIDs: [],
-                    events: Set(Event.allCases)),
-                .staleSoundPack("missing-pack"),
-                .sounds
-            ),
-            (
-                .sounds(
-                    .editEvent(
-                        surface: nil,
-                        packID: "   ",
-                        event: .stop)),
-                SettingsRouteAvailability(
-                    integrationSurfaces: allSurfaces,
-                    eventScopes: allScopes,
-                    soundScopes: allScopes,
-                    soundPackIDs: ["settings-fixture-pack"],
-                    events: Set(Event.allCases)),
-                .invalidSoundPackID,
-                .sounds
-            ),
-            (
-                .events(scope: .global, event: .stopFailure),
-                SettingsRouteAvailability(
-                    integrationSurfaces: allSurfaces,
-                    eventScopes: allScopes,
-                    soundScopes: allScopes,
-                    soundPackIDs: ["settings-fixture-pack"],
-                    events: Set(Event.allCases).subtracting([.stopFailure])),
-                .staleEvent(.stopFailure),
-                .eventsAndSounds
-            ),
-        ]
+        let cases:
+            [(
+                route: SettingsRoute,
+                availability: SettingsRouteAvailability,
+                failure: SettingsRouteFailure,
+                destination: SettingsDestination
+            )] = [
+                (
+                    .integrations(surface: .chatGPTDesktopAX),
+                    SettingsRouteAvailability(
+                        integrationSurfaces: allSurfaces,
+                        eventScopes: allScopes,
+                        soundScopes: allScopes,
+                        soundPackIDs: ["settings-fixture-pack"],
+                        events: Set(Event.allCases)),
+                    .invalidSurface(.chatGPTDesktopAX),
+                    .integrations
+                ),
+                (
+                    .integrations(surface: .workBuddy),
+                    SettingsRouteAvailability(
+                        integrationSurfaces: [],
+                        eventScopes: allScopes,
+                        soundScopes: allScopes,
+                        soundPackIDs: ["settings-fixture-pack"],
+                        events: Set(Event.allCases)),
+                    .staleSurface(.workBuddy),
+                    .integrations
+                ),
+                (
+                    .events(scope: .global, event: .stop),
+                    SettingsRouteAvailability(
+                        integrationSurfaces: allSurfaces,
+                        eventScopes: [],
+                        soundScopes: allScopes,
+                        soundPackIDs: ["settings-fixture-pack"],
+                        events: Set(Event.allCases)),
+                    .staleSoundScope(.global),
+                    .eventsAndSounds
+                ),
+                (
+                    .sounds(
+                        .editEvent(
+                            surface: nil,
+                            packID: "missing-pack",
+                            event: .stop)),
+                    SettingsRouteAvailability(
+                        integrationSurfaces: allSurfaces,
+                        eventScopes: allScopes,
+                        soundScopes: allScopes,
+                        soundPackIDs: [],
+                        events: Set(Event.allCases)),
+                    .staleSoundPack("missing-pack"),
+                    .sounds
+                ),
+                (
+                    .sounds(
+                        .editEvent(
+                            surface: nil,
+                            packID: "   ",
+                            event: .stop)),
+                    SettingsRouteAvailability(
+                        integrationSurfaces: allSurfaces,
+                        eventScopes: allScopes,
+                        soundScopes: allScopes,
+                        soundPackIDs: ["settings-fixture-pack"],
+                        events: Set(Event.allCases)),
+                    .invalidSoundPackID,
+                    .sounds
+                ),
+                (
+                    .events(scope: .global, event: .stopFailure),
+                    SettingsRouteAvailability(
+                        integrationSurfaces: allSurfaces,
+                        eventScopes: allScopes,
+                        soundScopes: allScopes,
+                        soundPackIDs: ["settings-fixture-pack"],
+                        events: Set(Event.allCases).subtracting([.stopFailure])),
+                    .staleEvent(.stopFailure),
+                    .eventsAndSounds
+                ),
+            ]
 
         for testCase in cases {
             let fixture = SettingsPresentationFixtures.generalLogin(

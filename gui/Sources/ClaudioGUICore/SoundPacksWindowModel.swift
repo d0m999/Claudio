@@ -652,6 +652,9 @@ package final class SoundPacksWindowModel {
     private var editorTransitionDepth = 0
     private var editorSettlePending = false
     var onEditorStateSettled: ((SoundPacksEditorModelSeed) -> Void)?
+    #if DEBUG
+    private var isStateGalleryFixture = false
+    #endif
 
     private var factoryRestoreRetainedSalvages: [SalvagedPack] {
         guard case .restore(_, _, let retainedSalvages)? = factoryRestoreActionError
@@ -839,6 +842,7 @@ package final class SoundPacksWindowModel {
         configState = previewConfig.selectedPack.isEmpty ? .needsPack : .operational(previewConfig)
         config = previewConfig
         baseConfig = previewConfig
+        isStateGalleryFixture = true
         managedSurface = nil
         managedScopeFailureReason = nil
         self.packCards = packCards
@@ -884,6 +888,18 @@ package final class SoundPacksWindowModel {
     package func setManagedSurface(_ surface: HostSurfaceID?) {
         guard managedSurface != surface || managedScopeFailureReason != nil else { return }
         managedSurface = surface
+        #if DEBUG
+        // State-gallery models retain their injected projection across typed route activation;
+        // reading the sentinel /dev/null URL would turn a no-I/O fixture into a false missing state.
+        if isStateGalleryFixture {
+            configState = .operational(baseConfig)
+            applyManagedScopeConfig()
+            if packCards.contains(where: { $0.id == config.selectedPack }) {
+                selectedPackID = config.selectedPack
+            }
+            return
+        }
+        #endif
         let loadedState = loadPanelConfig(from: configFile)
         configState = loadedState
         baseConfig = loadedState.resolvedConfig

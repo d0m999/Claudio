@@ -2,6 +2,7 @@ import ClaudioCore
 import ClaudioGUICore
 import ClaudioLocalization
 import Combine
+import Foundation
 import SoundPacksWindow
 
 /// Single presentation-transaction owner for the retained Settings window. Domain facts remain
@@ -25,6 +26,7 @@ package final class SettingsPresentationSession: ObservableObject {
     private var focusDebt: SettingsFocusDebt?
     private var windowPhase: SettingsWindowPhase = .hidden
     private var activeDestination: SettingsDestination?
+    private var lifecycleDestination: SettingsDestination?
     private var platformActionFailure: SettingsPlatformActionFailure?
     private var pendingAnnouncement: SettingsPresentationAnnouncement?
     private var pendingSoundPackOwnerAnnouncement: SoundPackEditorAnnouncement?
@@ -102,12 +104,14 @@ package final class SettingsPresentationSession: ObservableObject {
                 lhs.0 == rhs.0 && lhs.1 == rhs.1
             }
             .dropFirst()
-            .sink { [weak self] _ in
+            .sink { [weak self] projection in
                 MainActor.assumeIsolated {
                     guard let self, !self.isPerformingTransaction,
-                        self.activeDestination == .eventsAndSounds
+                        self.lifecycleDestination == .eventsAndSounds
                     else { return }
-                    self.activateEventsEditor()
+                    self.activateEventsEditor(
+                        aiSession: projection.0,
+                        candidateGenerationID: projection.1)
                 }
             }
         eventPresentationCancellable = eventSettingsSelection.$stateRevision
@@ -116,7 +120,7 @@ package final class SettingsPresentationSession: ObservableObject {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     if !self.isPerformingTransaction,
-                        self.activeDestination == .eventsAndSounds
+                        self.lifecycleDestination == .eventsAndSounds
                     {
                         self.activateEventsEditor()
                     }
@@ -133,7 +137,7 @@ package final class SettingsPresentationSession: ObservableObject {
         case .present(let request):
             return present(request)
         case .route(let route):
-            return routeTransaction(.route(route), isPresentation: false)
+            return routeTransaction(.route(route))
         case .setLanguageMode(let languageMode):
             dependencies.preferences.setLanguageMode(languageMode)
             return .routed
@@ -206,9 +210,7 @@ package final class SettingsPresentationSession: ObservableObject {
 
     #if DEBUG
     package func replaceAvailabilityForTesting(_ replacement: SettingsRouteAvailability) {
-        availability = replacement
-        routeResolution = resolveSettingsRoute(routeResolution.route, availability: replacement)
-        publishProjection()
+        applyAvailability(replacement)
     }
     #endif
 
@@ -225,7 +227,7 @@ package final class SettingsPresentationSession: ObservableObject {
         } else {
             effectiveRequest = request
         }
-        let result = routeTransaction(effectiveRequest, isPresentation: true)
+        let result = routeTransaction(effectiveRequest)
         if case .rejected = result {
             return result
         }
@@ -233,8 +235,7 @@ package final class SettingsPresentationSession: ObservableObject {
     }
 
     private func routeTransaction(
-        _ request: SettingsPresentationRequest,
-        isPresentation: Bool
+        _ request: SettingsPresentationRequest
     ) -> SettingsPresentationResult {
         let requestedRoute: SettingsRoute
         let eventShortcut: EventSettingsWindowRoute?
@@ -252,39 +253,41 @@ package final class SettingsPresentationSession: ObservableObject {
         }
 
         let resolved = resolveSettingsRoute(requestedRoute, availability: availability)
-        if let failure = resolved.failure {
-            if isPresentation, activeDestination == nil {
-                _ = routeTransaction(
-                    .route(.destination(dependencies.preferences.lastSettingsDestination)),
-                    isPresentation: true)
-            }
-            return .rejected(failure)
-        }
-
         isPerformingTransaction = true
         defer {
             isPerformingTransaction = false
             publishProjection()
         }
 
-        let previousDestination = activeDestination
+        let previousLifecycleDestination = lifecycleDestination
         routeResolution = resolved
-        applyRoute(requestedRoute, eventShortcut: eventShortcut)
-        if previousDestination != resolved.destination {
-            if let previousDestination {
-                deactivate(previousDestination)
+        if resolved.failure == nil {
+            applyRoute(requestedRoute, eventShortcut: eventShortcut)
+        }
+        activeDestination = resolved.destination
+        if resolved.failure == nil {
+            if let previousLifecycleDestination,
+                previousLifecycleDestination != resolved.destination
+            {
+                deactivate(previousLifecycleDestination)
             }
-            activeDestination = resolved.destination
-            activate(resolved.destination, route: requestedRoute)
-        } else {
-            requestFocusForActiveDestination(resolved.destination, route: requestedRoute)
+            lifecycleDestination = resolved.destination
+            activate(
+                resolved.destination,
+                route: requestedRoute,
+                requestsFocus: true)
         }
         explicitRouteRequestRevision &+= 1
         focusDebt = SettingsFocusDebt(
             revision: explicitRouteRequestRevision,
             destination: resolved.destination)
-        dependencies.preferences.setLastSettingsDestination(resolved.destination)
+        if resolved.failure == nil {
+            dependencies.preferences.setLastSettingsDestination(resolved.destination)
+        }
         synchronizePendingSoundPackAnnouncement()
+        if let failure = resolved.failure {
+            return .rejected(failure)
+        }
         return .routed
     }
 
@@ -324,36 +327,21 @@ package final class SettingsPresentationSession: ObservableObject {
         }
     }
 
-    private func activate(_ destination: SettingsDestination, route: SettingsRoute) {
-        switch destination {
-        case .integrations:
-            requestFocusForActiveDestination(destination, route: route)
-            synchronizeIntegrationsLifecycle()
-        case .eventsAndSounds:
-            requestFocusForActiveDestination(destination, route: route)
-        case .sounds:
-            requestFocusForActiveDestination(destination, route: route)
-        case .general, .notifications, .display, .usage, .shortcuts, .about:
-            break
-        }
-    }
-
-    private func requestFocusForActiveDestination(
+    private func activate(
         _ destination: SettingsDestination,
-        route: SettingsRoute
+        route: SettingsRoute,
+        requestsFocus: Bool
     ) {
         switch destination {
         case .integrations:
-            if case .integrations(let surface) = route,
-                let host = HostID.productVisibleCases.first(where: { $0.surfaceID == surface })
-            {
-                integrationsFocusCoordinator.requestFocus(.agent(host))
-            } else {
-                dependencies.integrationsModel.restorePreferredHost()
-                integrationsFocusCoordinator.requestFocus(.title)
+            if requestsFocus {
+                requestIntegrationsFocus(route: route)
             }
+            synchronizeIntegrationsLifecycle()
         case .eventsAndSounds:
-            eventSettingsSelection.requestInitialFocus(scopes: eventSettingsFocusScopes)
+            if requestsFocus {
+                eventSettingsSelection.requestInitialFocus(scopes: eventSettingsFocusScopes)
+            }
             activateEventsEditor()
         case .sounds:
             let soundRoute: SoundPacksWindowRoute =
@@ -362,15 +350,35 @@ package final class SettingsPresentationSession: ObservableObject {
                 .activate(
                     .sounds(
                         route: soundRoute,
-                        requestRevision: explicitRouteRequestRevision + 1)))
+                        requestRevision: explicitRouteRequestRevision + (requestsFocus ? 1 : 0))))
         case .general, .notifications, .display, .usage, .shortcuts, .about:
             break
         }
     }
 
+    private func requestIntegrationsFocus(route: SettingsRoute) {
+        if case .integrations(let surface) = route,
+            let host = HostID.productVisibleCases.first(where: { $0.surfaceID == surface })
+        {
+            integrationsFocusCoordinator.requestFocus(.agent(host))
+        } else {
+            dependencies.integrationsModel.restorePreferredHost()
+            integrationsFocusCoordinator.requestFocus(.title)
+        }
+    }
+
     private func activateEventsEditor() {
+        activateEventsEditor(
+            aiSession: dependencies.aiCueViewModel.session,
+            candidateGenerationID: dependencies.aiCueViewModel.generation?.id)
+    }
+
+    private func activateEventsEditor(
+        aiSession: AICueComposerSession?,
+        candidateGenerationID: UUID?
+    ) {
         let route =
-            if let aiSession = dependencies.aiCueViewModel.session {
+            if let aiSession {
                 EventSettingsWindowRoute(scope: aiSession.scope, event: aiSession.event)
             } else {
                 eventSettingsSelection.route
@@ -380,7 +388,7 @@ package final class SettingsPresentationSession: ObservableObject {
                 .events(
                     route: route,
                     requestRevision: eventSettingsSelection.routeRequestRevision,
-                    candidateGenerationID: dependencies.aiCueViewModel.generation?.id)))
+                    candidateGenerationID: candidateGenerationID)))
     }
 
     private func deactivate(
@@ -427,10 +435,11 @@ package final class SettingsPresentationSession: ObservableObject {
         guard isPresented else { return .unchanged }
         isPerformingTransaction = true
         windowPhase = .closing
-        if let activeDestination {
-            deactivate(activeDestination, windowIsClosing: true)
+        if let lifecycleDestination {
+            deactivate(lifecycleDestination, windowIsClosing: true)
         }
         activeDestination = nil
+        lifecycleDestination = nil
         isPresented = false
         windowPhase = .hidden
         focusDebt = nil
@@ -444,21 +453,49 @@ package final class SettingsPresentationSession: ObservableObject {
     }
 
     private func applyAvailabilityProjection(_ projection: SettingsSoundPackShellProjection) {
-        let priorAvailability = availability
-        availability = projection.availability
         pendingSoundPackOwnerAnnouncement = projection.pendingAnnouncement
-        if priorAvailability != availability {
-            routeResolution = resolveSettingsRoute(
-                routeResolution.route,
-                availability: availability)
+        applyAvailability(projection.availability)
+    }
+
+    private func applyAvailability(_ replacement: SettingsRouteAvailability) {
+        let priorAvailability = availability
+        availability = replacement
+        guard priorAvailability != availability else {
+            synchronizePendingSoundPackAnnouncement()
+            publishProjection()
+            return
         }
+        let previousResolution = routeResolution
+        let resolved = resolveSettingsRoute(
+            previousResolution.route,
+            availability: availability)
+        guard resolved != previousResolution else {
+            synchronizePendingSoundPackAnnouncement()
+            publishProjection()
+            return
+        }
+
+        let wasPerformingTransaction = isPerformingTransaction
+        isPerformingTransaction = true
+        routeResolution = resolved
+        if previousResolution.failure != nil, resolved.failure == nil, isPresented {
+            applyRoute(resolved.route, eventShortcut: nil)
+            if let lifecycleDestination,
+                lifecycleDestination != resolved.destination
+            {
+                deactivate(lifecycleDestination)
+            }
+            lifecycleDestination = resolved.destination
+            activate(resolved.destination, route: resolved.route, requestsFocus: false)
+        }
+        isPerformingTransaction = wasPerformingTransaction
         synchronizePendingSoundPackAnnouncement()
         publishProjection()
     }
 
     private func synchronizeIntegrationsLifecycle() {
         let visible =
-            activeDestination == .integrations
+            lifecycleDestination == .integrations
             && (windowPhase == .visibleNonKey || windowPhase == .key)
         dependencies.integrationsModel.noteWindowVisibility(visible)
         dependencies.integrationsModel.noteWindowKeyState(visible && windowPhase == .key)
@@ -493,7 +530,9 @@ package final class SettingsPresentationSession: ObservableObject {
     }
 
     private func synchronizePendingSoundPackAnnouncement() {
-        let isEligible = windowPhase == .key && activeDestination == .sounds
+        let isEligible =
+            windowPhase == .key && activeDestination == .sounds
+            && lifecycleDestination == .sounds && routeResolution.failure == nil
         guard isEligible else {
             if pendingSoundPackAnnouncementID != nil {
                 pendingSoundPackAnnouncementID = nil

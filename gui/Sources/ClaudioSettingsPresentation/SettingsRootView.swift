@@ -89,23 +89,25 @@ package struct SettingsRootView: View {
             focusedTarget = SettingsWindowFocusTarget.sidebar(destination)
         }
         .onAppear {
-            synchronizeDestinationFocus()
+            synchronizeDestinationFocus(settingsPresentationSession.state)
         }
-        .onReceive(settingsPresentationSession.$state) { _ in
-            synchronizeDestinationFocus()
+        .onReceive(settingsPresentationSession.$state) { state in
+            synchronizeDestinationFocus(state)
         }
     }
 
-    private func synchronizeDestinationFocus() {
-        guard let debt = settingsPresentationSession.state.focusDebt,
+    private func synchronizeDestinationFocus(_ state: SettingsPresentationState) {
+        guard state.windowPhase == .key,
+            let debt = state.focusDebt,
             debt.revision > handledFocusDebtRevision
         else { return }
         handledFocusDebtRevision = debt.revision
-        if debt.destination != .integrations
-            && debt.destination != .eventsAndSounds
-            && debt.destination != .sounds
+        if state.routeResolution.failure != nil
+            || (debt.destination != .integrations
+                && debt.destination != .eventsAndSounds
+                && debt.destination != .sounds)
         {
-            focusedTarget = SettingsWindowFocusTarget.title(destination)
+            focusedTarget = SettingsWindowFocusTarget.title(state.routeResolution.destination)
         }
         _ = settingsPresentationSession.send(.acknowledgeFocus(revision: debt.revision))
     }

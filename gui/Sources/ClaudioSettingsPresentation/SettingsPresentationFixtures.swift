@@ -101,10 +101,15 @@ package enum SettingsPresentationFixtures {
         if generalState == .writeFailed {
             loginItemSettings.setEnabled(true)
         }
+        let settingsConfig = ClaudioConfig(
+            selectedPack: "settings-fixture-pack",
+            masterVolume: 0.7,
+            surfaceOverrides: [
+                HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
+                    selectedPack: "settings-fixture-workbuddy-pack")
+            ])
         let soundPacksEditor = SoundPacksEditorOwner.stateGalleryFixture(
-            previewConfig: ClaudioConfig(
-                selectedPack: "settings-fixture-pack",
-                masterVolume: 0.7),
+            previewConfig: settingsConfig,
             packCards: [
                 PackCard(
                     id: "settings-fixture-pack",
@@ -112,7 +117,14 @@ package enum SettingsPresentationFixtures {
                     isCC0: true,
                     presentEvents: Set(Event.allCases),
                     state: .complete,
-                    isSelected: true)
+                    isSelected: true),
+                PackCard(
+                    id: "settings-fixture-workbuddy-pack",
+                    name: "Settings Fixture WorkBuddy Pack",
+                    isCC0: true,
+                    presentEvents: Set(Event.allCases),
+                    state: .complete,
+                    isSelected: false),
             ],
             selectedPackID: "settings-fixture-pack",
             selectedEventRows: Event.allCases.map {
@@ -149,7 +161,7 @@ package enum SettingsPresentationFixtures {
             clipboardWriter: IntegrationDestinationClipboardWriter { _ in true })
         let eventSettingsModel = PanelConfigController(
             previewConfigState: .operational(
-                ClaudioConfig(selectedPack: "settings-fixture-pack", masterVolume: 0.7)),
+                settingsConfig),
             eventRows: Event.allCases.map {
                 EventRow(
                     event: $0,
@@ -163,7 +175,8 @@ package enum SettingsPresentationFixtures {
                 packsLockFile: temporaryRoot.appendingPathComponent("event-packs.lock")))
         let nativeEffects = SoundPacksEditorNativeEffectsDispatcher(
             adapter: SettingsPresentationFixtureNativeEffectsAdapter())
-        let aiCueViewModel = injectedAICueViewModel
+        let aiCueViewModel =
+            injectedAICueViewModel
             ?? AICueGenerationViewModel(
                 previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState)
         let session = SettingsPresentationSession(
