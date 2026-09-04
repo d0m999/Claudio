@@ -758,18 +758,34 @@ func runSettingsPresentationLifecycleSuites() async {
             expect(false, "key + active Sounds 必须生成唯一 native delivery debt")
             return
         }
-        _ = fixture.session.send(
-            .acknowledgeAnnouncement(id: delivery.id, didPost: false))
+        var nativePostResults = [false, true]
+        var attemptedDeliveryIDs: [UInt64] = []
+        @MainActor
+        func attemptNativeDelivery() -> Bool {
+            guard let current = fixture.session.state.pendingAnnouncement else { return false }
+            return SettingsAnnouncementDelivery.attempt(
+                current,
+                post: {
+                    attemptedDeliveryIDs.append(current.id)
+                    return nativePostResults.removeFirst()
+                },
+                acknowledgeSuccess: { id in
+                    _ = fixture.session.send(
+                        .acknowledgeAnnouncement(id: id, didPost: true))
+                })
+        }
+
+        expect(!attemptNativeDelivery(), "native adapter 报告失败时 delivery 必须如实返回 false")
         expect(
             fixture.session.state.pendingAnnouncement?.id == delivery.id
                 && fixture.soundPacksEditor.presentation.pendingAnnouncement?.id == ownerHead,
             "post false 必须同时保留 session debt 与 owner exact head")
-        _ = fixture.session.send(
-            .acknowledgeAnnouncement(id: delivery.id, didPost: true))
+        expect(attemptNativeDelivery(), "下一次合法重试成功时 delivery 必须返回 true")
         expect(
-            fixture.session.state.pendingAnnouncement == nil
+            attemptedDeliveryIDs == [delivery.id, delivery.id]
+                && fixture.session.state.pendingAnnouncement == nil
                 && fixture.soundPacksEditor.presentation.pendingAnnouncement == nil,
-            "单一 owner debt 的 post true exact ack 必须同时清空 session 与 owner，不得从 willSet 旧值重建 stale debt"
+            "失败不得消费 revision；同一 exact head 补发成功后才清空 session 与 owner debt"
         )
     }
 
@@ -870,6 +886,9 @@ private func settingsNativeAnnouncementAdapterIsSound(_ source: String) -> Bool 
         let delivery = settingsLifecycleBracedBlock(
             after: "private func deliverPendingSettingsPresentationAnnouncement()",
             in: scanned.code),
+        let nativePost = settingsLifecycleBracedBlock(
+            after: "private static func postAccessibilityAnnouncement(",
+            in: scanned.code),
         let didBecomeKey = settingsLifecycleBracedBlock(
             after: "func windowDidBecomeKey(",
             in: scanned.code),
@@ -896,14 +915,19 @@ private func settingsNativeAnnouncementAdapterIsSound(_ source: String) -> Bool 
             of: "settingsPresentationSession.state.pendingAnnouncement"),
         let visibleGate = delivery.range(of: "window.isVisible"),
         let keyGate = delivery.range(of: "window.isKeyWindow"),
-        let post = delivery.range(of: "NSAccessibility.post("),
+        let deliveryAttempt = delivery.range(of: "SettingsAnnouncementDelivery.attempt("),
+        let postAdapter = delivery.range(of: "postAccessibilityAnnouncement("),
         let exactAck = delivery.range(
-            of: ".acknowledgeAnnouncement(id: announcement.id, didPost: true)"),
+            of: ".acknowledgeAnnouncement(id: id, didPost: true)"),
         phaseGate.lowerBound < currentHead.lowerBound,
         currentHead.lowerBound < visibleGate.lowerBound,
         visibleGate.lowerBound < keyGate.lowerBound,
-        keyGate.lowerBound < post.lowerBound,
-        post.lowerBound < exactAck.lowerBound
+        keyGate.lowerBound < deliveryAttempt.lowerBound,
+        deliveryAttempt.lowerBound < postAdapter.lowerBound,
+        postAdapter.lowerBound < exactAck.lowerBound,
+        let nativePostCall = nativePost.range(of: "NSAccessibility.post("),
+        let nativeSuccess = nativePost.range(of: "return true"),
+        nativePostCall.lowerBound < nativeSuccess.lowerBound
     else { return false }
 
     return didBecomeKey.contains(".windowPhaseChanged(.key)")

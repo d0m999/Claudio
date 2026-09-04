@@ -11,6 +11,7 @@ import SwiftUI
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let settingsPresentationSession: SettingsPresentationSession
+    private let postAccessibilityAnnouncement: @MainActor (NSWindow, String, Int) -> Bool
     private var window: NSWindow?
     private var focusRestoration: (@MainActor (NSRunningApplication?) -> Void)?
     private var handbackTracker = RetainedWindowHandbackTracker<NSRunningApplication>()
@@ -18,8 +19,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var settingsPresentationCancellable: AnyCancellable?
     private var settingsPresentationAnnouncementDeliveryScheduled = false
 
-    init(session: SettingsPresentationSession) {
+    init(
+        session: SettingsPresentationSession,
+        postAccessibilityAnnouncement: @escaping @MainActor (NSWindow, String, Int) -> Bool =
+            SettingsWindowController.postAccessibilityAnnouncement
+    ) {
         settingsPresentationSession = session
+        self.postAccessibilityAnnouncement = postAccessibilityAnnouncement
         super.init()
 
         externalActivationCancellable = NSWorkspace.shared.notificationCenter
@@ -166,14 +172,32 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let sentence = announcement.meaning.localizedSentence(
             language: settingsPresentationSession.state.language)
         guard !sentence.isEmpty else { return }
+        _ = SettingsAnnouncementDelivery.attempt(
+            announcement,
+            post: {
+                postAccessibilityAnnouncement(
+                    window,
+                    sentence,
+                    announcement.meaning.priority)
+            },
+            acknowledgeSuccess: { [settingsPresentationSession] id in
+                _ = settingsPresentationSession.send(
+                    .acknowledgeAnnouncement(id: id, didPost: true))
+            })
+    }
+
+    private static func postAccessibilityAnnouncement(
+        window: NSWindow,
+        sentence: String,
+        priority: Int
+    ) -> Bool {
         NSAccessibility.post(
             element: window,
             notification: .announcementRequested,
             userInfo: [
                 .announcement: sentence,
-                .priority: announcement.meaning.priority,
+                .priority: priority,
             ])
-        _ = settingsPresentationSession.send(
-            .acknowledgeAnnouncement(id: announcement.id, didPost: true))
+        return true
     }
 }

@@ -641,7 +641,9 @@ func runSoundPacksWindowAccessibilitySuites() {
                 && controller.contains("NSAccessibility.post"),
             "窗口非 key 期间不得消费 semantic debt，重新成为 key 时必须补播且防止同一 ID 并发双播")
         expect(
-            controller.contains(".acknowledgeAnnouncement(id: announcement.id, didPost: true)"),
+            controller.contains("SettingsAnnouncementDelivery.attempt(")
+                && controller.contains(
+                    ".acknowledgeAnnouncement(id: id, didPost: true)"),
             "controller 只有真实 native post 后才能 exact-ack session debt")
     }
 }
