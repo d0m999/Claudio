@@ -99,26 +99,46 @@ func runSettingsPresentationLifecycleSuites() {
             "相同 explicit deep link 每次仍必须只推进一个 request/focus revision")
     }
 
-    suite("Settings session rejection：invalid/stale 保留当前 destination 且零 domain mutation") {
+    suite("Settings session rejection：invalid/stale 保留 requested destination 且零 target mutation") {
         let fixture = SettingsPresentationFixtures.generalLogin(
             route: .integrations(surface: .workBuddy),
             availability: PreviewFixtures.settingsRouteAvailability)
         let session = fixture.session
-        let priorState = session.state
+        _ = session.send(.windowPhaseChanged(.key))
         let priorHost = fixture.integrationsModel.selectedHost
         let priorSurface = fixture.eventSettingsModel.selectedSurface
         let priorSoundMode = fixture.soundPacksEditor.presentation.mode
+        let firstFailedRoute = SettingsRoute.integrations(surface: .chatGPTDesktopAX)
+        let firstFailedRevision = session.state.explicitRouteRequestRevision
 
         expect(
-            session.send(.route(.integrations(surface: .chatGPTDesktopAX)))
+            session.send(.route(firstFailedRoute))
                 == .rejected(.invalidSurface(.chatGPTDesktopAX))
-                && session.state == priorState
+                && session.state.routeResolution
+                    == SettingsRouteResolution(
+                        route: firstFailedRoute,
+                        failure: .invalidSurface(.chatGPTDesktopAX))
+                && session.state.activeDestination == .integrations
+                && session.state.explicitRouteRequestRevision == firstFailedRevision + 1
+                && session.state.focusDebt?.revision == firstFailedRevision + 1
+                && session.state.focusDebt?.destination == .integrations
                 && fixture.integrationsModel.selectedHost == priorHost
                 && fixture.eventSettingsModel.selectedSurface == priorSurface
                 && fixture.soundPacksEditor.presentation.mode == priorSoundMode,
-            "invalid route 不得替换当前 destination、推进 revision 或触碰任一 domain owner")
+            "visible invalid route 必须发布 requested destination/failure/focus，且不得选择失败 Host 或触碰其他 owner"
+        )
+        let repeatedFailureRevision = session.state.explicitRouteRequestRevision
+        expect(
+            session.send(.route(firstFailedRoute))
+                == .rejected(.invalidSurface(.chatGPTDesktopAX))
+                && session.state.routeResolution.route == firstFailedRoute
+                && session.state.explicitRouteRequestRevision == repeatedFailureRevision + 1
+                && session.state.focusDebt?.revision == repeatedFailureRevision + 1,
+            "同一 failed explicit route 每次仍必须形成一个新的可观察 revision/focus debt")
 
-        _ = session.send(.acknowledgeFocus(revision: priorState.explicitRouteRequestRevision))
+        _ = session.send(.route(.integrations(surface: .workBuddy)))
+        _ = session.send(
+            .acknowledgeFocus(revision: session.state.explicitRouteRequestRevision))
         let explicitRevision = session.state.explicitRouteRequestRevision
         fixture.session.replaceAvailabilityForTesting(
             SettingsRouteAvailability(
@@ -136,23 +156,67 @@ func runSettingsPresentationLifecycleSuites() {
                 && fixture.integrationsModel.selectedHost == priorHost,
             "availability 只可重解析当前 route；不得抢焦点、改 destination 或重做 domain mutation")
 
+        let staleSoundRoute = SettingsRoute.sounds(
+            .editEvent(surface: nil, packID: "missing-pack", event: .stop))
+        let staleRevision = session.state.explicitRouteRequestRevision
+        expect(
+            session.send(.route(staleSoundRoute))
+                == .rejected(.staleSoundPack("missing-pack"))
+                && session.state.routeResolution
+                    == SettingsRouteResolution(
+                        route: staleSoundRoute,
+                        failure: .staleSoundPack("missing-pack"))
+                && session.state.activeDestination == .sounds
+                && session.state.explicitRouteRequestRevision == staleRevision + 1
+                && session.state.focusDebt?.destination == .sounds
+                && fixture.integrationsModel.selectedHost == priorHost
+                && fixture.eventSettingsModel.selectedSurface == priorSurface
+                && fixture.soundPacksEditor.presentation.mode == priorSoundMode,
+            "visible stale deep link 必须挂载 requested Sounds failure，且不得激活 Sound owner")
+
         _ = session.send(.windowWillClose)
         let invalidWhileClosed = SettingsRoute.sounds(
             .editEvent(surface: nil, packID: "   ", event: .stop))
+        let closedRevision = session.state.explicitRouteRequestRevision
         let closedInvalidResult = session.send(.present(.route(invalidWhileClosed)))
         expect(
-            closedInvalidResult == .rejected(.invalidSoundPackID),
-            "closed + invalid explicit 必须保留精确 rejection")
+            closedInvalidResult == .rejected(.invalidSoundPackID)
+                && session.state.routeResolution
+                    == SettingsRouteResolution(
+                        route: invalidWhileClosed,
+                        failure: .invalidSoundPackID)
+                && session.state.activeDestination == .sounds
+                && session.state.windowPhase == .hidden
+                && session.state.explicitRouteRequestRevision == closedRevision + 1
+                && session.state.focusDebt?.revision == closedRevision + 1
+                && session.state.focusDebt?.destination == .sounds
+                && fixture.integrationsModel.selectedHost == priorHost
+                && fixture.eventSettingsModel.selectedSurface == priorSurface
+                && fixture.soundPacksEditor.presentation.mode == priorSoundMode,
+            "closed invalid explicit 必须发布 requested Sounds failure/focus，但在 native phase 前保持 hidden 且零 target mutation"
+        )
+        let repeatedClosedFailureRevision = session.state.explicitRouteRequestRevision
         expect(
-            session.state.routeResolution.route == .destination(.integrations)
-                && session.state.activeDestination == .integrations,
-            "closed + invalid explicit 必须恢复当前合法 top-level destination，不能留下 nil active state")
+            session.send(.present(.route(invalidWhileClosed)))
+                == .rejected(.invalidSoundPackID)
+                && session.state.explicitRouteRequestRevision
+                    == repeatedClosedFailureRevision + 1
+                && session.state.focusDebt?.revision == repeatedClosedFailureRevision + 1
+                && fixture.integrationsModel.selectedHost == priorHost
+                && fixture.eventSettingsModel.selectedSurface == priorSurface
+                && fixture.soundPacksEditor.presentation.mode == priorSoundMode,
+            "closed phase 的同一 failed explicit route 也必须可重复观察且不触碰 domain owner")
+
+        _ = session.send(.windowWillClose)
         expect(
-            session.state.windowPhase == .hidden,
-            "closed + invalid explicit 在 controller 转发真实 phase 前必须保持 hidden")
-        expect(
-            fixture.soundPacksEditor.presentation.mode == priorSoundMode,
-            "closed + invalid explicit 不得激活失败的 Sound Pack 目标"
+            session.send(.present(.route(nil))) == .presented(wasAlreadyPresented: false)
+                && session.state.routeResolution.route == .destination(.integrations)
+                && session.state.activeDestination == .integrations
+                && session.state.routeResolution.failure == nil
+                && fixture.integrationsModel.selectedHost == priorHost
+                && fixture.eventSettingsModel.selectedSurface == priorSurface
+                && fixture.soundPacksEditor.presentation.mode == priorSoundMode,
+            "failed explicit route 不得写入偏好；下次 generic open 必须恢复最近合法 top-level destination"
         )
     }
 
