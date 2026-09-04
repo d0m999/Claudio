@@ -338,11 +338,8 @@ package final class SoundPacksEditorOwner: ObservableObject {
         guard let binding else {
             return .rejected(.stalePermit)
         }
-        guard binding.context == context,
-            binding.actionEpoch == actionEpoch,
+        guard binding.freshness == makeFreshnessStamp(from: seed),
             binding.candidateGenerationEpoch == candidateGenerationEpoch,
-            binding.selectionGeneration == seed.selectionGeneration,
-            binding.snapshotRevision == seed.snapshotRevision,
             binding.candidateGenerationID == candidate.provenance.generationID,
             seed.library.isFresh
         else {
@@ -468,10 +465,8 @@ package final class SoundPacksEditorOwner: ObservableObject {
         model.refreshEditorConfigProjection()
         let current = model.editorProjectionSeed()
         let targetRemainsValid: Bool
-        if binding.context == context,
-            binding.actionEpoch == actionEpoch,
+        if binding.freshness.matchesInteraction(makeFreshnessStamp(from: current)),
             binding.candidateGenerationEpoch == candidateGenerationEpoch,
-            binding.selectionGeneration == current.selectionGeneration,
             freshness.snapshotRevision == current.snapshotRevision,
             current.library.isFresh,
             current.installedPackIDs.contains(binding.target.packID),
@@ -555,10 +550,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
         guard let binding else {
             return .rejected(.stalePermit)
         }
-        guard binding.context == context,
-            binding.actionEpoch == actionEpoch,
-            binding.selectionGeneration == seed.selectionGeneration,
-            binding.snapshotRevision == seed.snapshotRevision,
+        guard binding.freshness == makeFreshnessStamp(from: seed),
             binding.bindTo == bindTo,
             seed.library.isFresh
         else {
@@ -697,9 +689,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
         model.refreshEditorConfigProjection()
         let current = model.editorProjectionSeed()
         let remainsForeground =
-            binding.context == context
-            && binding.actionEpoch == actionEpoch
-            && binding.selectionGeneration == current.selectionGeneration
+            binding.freshness.matchesInteraction(makeFreshnessStamp(from: current))
             && freshness.snapshotRevision == current.snapshotRevision
             && current.library.isFresh
             && current.installedPackIDs.contains(binding.packID)
@@ -816,9 +806,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
         freshness: EditorImportMutationFreshness,
         seed: SoundPacksEditorModelSeed
     ) -> Bool {
-        guard binding.context == context,
-            binding.actionEpoch == actionEpoch,
-            binding.selectionGeneration == seed.selectionGeneration,
+        guard binding.freshness.matchesInteraction(makeFreshnessStamp(from: seed)),
             freshness.snapshotRevision == seed.snapshotRevision,
             seed.library.isFresh,
             seed.writesAllowed,
@@ -835,10 +823,8 @@ package final class SoundPacksEditorOwner: ObservableObject {
         freshness: EditorAdoptionMutationFreshness,
         seed: SoundPacksEditorModelSeed
     ) -> Bool {
-        guard binding.context == context,
-            binding.actionEpoch == actionEpoch,
+        guard binding.freshness.matchesInteraction(makeFreshnessStamp(from: seed)),
             binding.candidateGenerationEpoch == candidateGenerationEpoch,
-            binding.selectionGeneration == seed.selectionGeneration,
             freshness.snapshotRevision == seed.snapshotRevision,
             seed.library.isFresh,
             seed.writesAllowed,
@@ -916,11 +902,10 @@ package final class SoundPacksEditorOwner: ObservableObject {
             return action.kind == .confirm
                 ? .rejected(.staleConfirmation) : .rejected(.staleAction)
         }
-        guard let binding = actionLedger[action.id], binding.context == context,
-            binding.actionEpoch == actionEpoch,
-            binding.selectionGeneration == seed.selectionGeneration,
-            binding.intent.allowsSnapshotAdvance
-                || binding.snapshotRevision == seed.snapshotRevision
+        guard let binding = actionLedger[action.id],
+            binding.freshness.matches(
+                makeFreshnessStamp(from: seed),
+                allowingSnapshotAdvance: binding.intent.allowsSnapshotAdvance)
         else {
             switch action.kind {
             case .confirm, .cancelConfirmation:
@@ -1099,10 +1084,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
             packID: packID,
             fileName: fileName,
             target: target,
-            context: binding.context,
-            actionEpoch: binding.actionEpoch,
-            selectionGeneration: binding.selectionGeneration,
-            snapshotRevision: binding.snapshotRevision)
+            freshness: binding.freshness)
         publish(from: seed)
         guard let confirmation = presentation.pendingConfirmation else {
             return .rejected(.actionUnavailable)
@@ -1123,10 +1105,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
         // cross this synchronous MainActor boundary.
         clearPendingConfirmation()
         guard seed.library.isFresh,
-            confirmation.context == context,
-            confirmation.actionEpoch == actionEpoch,
-            confirmation.selectionGeneration == seed.selectionGeneration,
-            confirmation.snapshotRevision == seed.snapshotRevision
+            confirmation.freshness == makeFreshnessStamp(from: seed)
         else {
             publish(from: seed)
             return .rejected(.staleConfirmation)
@@ -1137,10 +1116,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
             event: confirmation.target.event,
             binding: EditorActionBinding(
                 intent: .confirm(confirmationID),
-                context: confirmation.context,
-                actionEpoch: confirmation.actionEpoch,
-                selectionGeneration: confirmation.selectionGeneration,
-                snapshotRevision: confirmation.snapshotRevision),
+                freshness: confirmation.freshness),
             work: confirmation.target)
     }
 
@@ -1187,11 +1163,9 @@ package final class SoundPacksEditorOwner: ObservableObject {
         let libraryPermitsExecution =
             current.library.isFresh
             || (current.library == .loading(previousAvailable: true)
-                && current.snapshotRevision == binding.snapshotRevision)
-        guard libraryPermitsExecution, current.writesAllowed, binding.context == context,
-            binding.actionEpoch == actionEpoch,
-            binding.selectionGeneration == current.selectionGeneration,
-            binding.snapshotRevision == current.snapshotRevision
+                && current.snapshotRevision == binding.freshness.snapshotRevision)
+        guard libraryPermitsExecution, current.writesAllowed,
+            binding.freshness == makeFreshnessStamp(from: current)
         else {
             let failure: SoundPackEditorFailure =
                 current.writesAllowed ? .staleAction : .scopeUnavailable
@@ -1345,16 +1319,12 @@ package final class SoundPacksEditorOwner: ObservableObject {
         let preservesPreBusyCapabilities = hasBusyOperation
         actionLedger = actionLedger.filter { _, binding in
             if preservesPreBusyCapabilities {
-                return binding.context == context
-                    && binding.actionEpoch == actionEpoch
-                    && binding.selectionGeneration == seed.selectionGeneration
-                    && (binding.intent.allowsSnapshotAdvance
-                        || binding.snapshotRevision == seed.snapshotRevision)
+                return binding.freshness.matches(
+                    makeFreshnessStamp(from: seed),
+                    allowingSnapshotAdvance: binding.intent.allowsSnapshotAdvance)
             }
             guard let packID = binding.intent.foregroundPreviewPackID else { return false }
-            return binding.context == context
-                && binding.actionEpoch == actionEpoch
-                && binding.selectionGeneration == seed.selectionGeneration
+            return binding.freshness.matchesInteraction(makeFreshnessStamp(from: seed))
                 && seed.installedPackIDs.contains(packID)
                 && !seed.builtinPackIDs.contains(packID)
         }
@@ -1467,39 +1437,16 @@ package final class SoundPacksEditorOwner: ObservableObject {
             packs: packs,
             selectedPack: selectedPack,
             eventRows: seed.selectedEventRows.map { row in
-                let derivedPreviewAvailability = eventPreviewAvailability(
-                    coverage: row.coverage,
-                    masterVolume: seed.config.masterVolume)
-                let previewAvailability: EventPreviewAvailability
-                if derivedPreviewAvailability.isAvailable,
-                    selectedNativeTargets?.eventAudioURLs[row.event] == nil
-                {
-                    switch row.coverage {
-                    case .present(let fileName), .broken(let fileName):
-                        previewAvailability = .missingOrDamaged(fileName: fileName)
-                    case .unmapped:
-                        previewAvailability = .unmapped
-                    }
-                } else {
-                    previewAvailability = derivedPreviewAvailability
-                }
-                let previewAction: SoundPackEditorAction?
-                if seed.library.isFresh, previewAvailability.isAvailable,
-                    let target = selectedNativeTargets?.eventAudioURLs[row.event]
-                {
-                    previewAction = makeAction(
-                        .preview,
-                        binding: .preview(fileURL: target),
-                        seed: seed)
-                } else {
-                    previewAction = nil
-                }
+                let preview = makePreviewAccess(
+                    row: row,
+                    nativeTargets: selectedNativeTargets,
+                    seed: seed)
                 return SoundPackEditorEventPresentation(
                     event: row.event,
                     coverage: row.coverage,
                     enabled: row.enabled,
                     audioDisplayName: row.audioDisplayName,
-                    previewAvailability: previewAvailability,
+                    previewAvailability: preview.availability,
                     importAction: selectedIsWritable
                         ? makeAction(
                             .requestImport,
@@ -1508,7 +1455,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
                                 bindTo: row.event),
                             seed: seed)
                         : nil,
-                    previewAction: previewAction,
+                    previewAction: preview.action,
                     clearAction: row.coverage.hasManifestBinding
                         ? writablePackID.map { packID in
                             makeAction(
@@ -1824,10 +1771,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
         importPermitLedger[permit.id] = EditorPermitBinding(
             packID: packID,
             bindTo: bindTo,
-            context: context,
-            actionEpoch: actionEpoch,
-            selectionGeneration: seed.selectionGeneration,
-            snapshotRevision: seed.snapshotRevision)
+            freshness: makeFreshnessStamp(from: seed))
         return permit
     }
 
@@ -1837,18 +1781,13 @@ package final class SoundPacksEditorOwner: ObservableObject {
             adoptionPermitLedger.removeAll(keepingCapacity: true)
             return
         }
+        let currentFreshness = makeFreshnessStamp(from: seed)
         importPermitLedger = importPermitLedger.filter { _, binding in
-            binding.context == context
-                && binding.actionEpoch == actionEpoch
-                && binding.selectionGeneration == seed.selectionGeneration
-                && binding.snapshotRevision == seed.snapshotRevision
+            binding.freshness == currentFreshness
         }
         adoptionPermitLedger = adoptionPermitLedger.filter { _, binding in
-            binding.context == context
-                && binding.actionEpoch == actionEpoch
+            binding.freshness == currentFreshness
                 && binding.candidateGenerationEpoch == candidateGenerationEpoch
-                && binding.selectionGeneration == seed.selectionGeneration
-                && binding.snapshotRevision == seed.snapshotRevision
         }
     }
 
@@ -2014,10 +1953,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
         let action = SoundPackEditorAction(id: nextCapabilityID, kind: kind)
         actionLedger[action.id] = EditorActionBinding(
             intent: intent,
-            context: context,
-            actionEpoch: actionEpoch,
-            selectionGeneration: seed.selectionGeneration,
-            snapshotRevision: seed.snapshotRevision)
+            freshness: makeFreshnessStamp(from: seed))
         return action
     }
 
@@ -2043,12 +1979,19 @@ package final class SoundPacksEditorOwner: ObservableObject {
         adoptionPermitLedger[permit.id] = EditorAdoptionBinding(
             target: target,
             candidateGenerationID: candidateGenerationID,
+            freshness: makeFreshnessStamp(from: seed),
+            candidateGenerationEpoch: candidateGenerationEpoch)
+        return permit
+    }
+
+    private func makeFreshnessStamp(
+        from seed: SoundPacksEditorModelSeed
+    ) -> EditorFreshnessStamp {
+        EditorFreshnessStamp(
             context: context,
             actionEpoch: actionEpoch,
-            candidateGenerationEpoch: candidateGenerationEpoch,
             selectionGeneration: seed.selectionGeneration,
             snapshotRevision: seed.snapshotRevision)
-        return permit
     }
 
     #if DEBUG
@@ -2094,31 +2037,43 @@ package final class SoundPacksEditorOwner: ObservableObject {
 
 }
 
-private struct EditorActionBinding {
-    let intent: EditorActionIntent
+private struct EditorFreshnessStamp: Equatable {
     let context: SoundPacksEditorContext
     let actionEpoch: UInt64
     let selectionGeneration: UInt64
     let snapshotRevision: UInt64?
+
+    func matches(
+        _ current: Self,
+        allowingSnapshotAdvance: Bool
+    ) -> Bool {
+        matchesInteraction(current)
+            && (allowingSnapshotAdvance || snapshotRevision == current.snapshotRevision)
+    }
+
+    func matchesInteraction(_ current: Self) -> Bool {
+        context == current.context
+            && actionEpoch == current.actionEpoch
+            && selectionGeneration == current.selectionGeneration
+    }
+}
+
+private struct EditorActionBinding {
+    let intent: EditorActionIntent
+    let freshness: EditorFreshnessStamp
 }
 
 private struct EditorPermitBinding {
     let packID: String
     let bindTo: Event?
-    let context: SoundPacksEditorContext
-    let actionEpoch: UInt64
-    let selectionGeneration: UInt64
-    let snapshotRevision: UInt64?
+    let freshness: EditorFreshnessStamp
 }
 
 private struct EditorAdoptionBinding {
     let target: AICueAdoptionTarget
     let candidateGenerationID: UUID
-    let context: SoundPacksEditorContext
-    let actionEpoch: UInt64
+    let freshness: EditorFreshnessStamp
     let candidateGenerationEpoch: UInt64
-    let selectionGeneration: UInt64
-    let snapshotRevision: UInt64?
 }
 
 private struct EditorImportMutationFreshness {
@@ -2137,10 +2092,7 @@ private struct EditorConfirmationState {
     let packID: String?
     let fileName: String?
     let target: EditorScheduledWork
-    let context: SoundPacksEditorContext
-    let actionEpoch: UInt64
-    let selectionGeneration: UInt64
-    let snapshotRevision: UInt64?
+    let freshness: EditorFreshnessStamp
 }
 
 private struct EditorOperationState {
