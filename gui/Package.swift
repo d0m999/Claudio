@@ -9,7 +9,7 @@ import PackageDescription
 //   - `ClaudioGUICore`: pure Foundation state/view-model logic (no SwiftUI import), so it
 //     can be exercised by the same dependency-free test harness `helper/` uses.
 //   - `ClaudioSettingsPresentation`: the importable Settings tree and its typed presentation
-//     transaction; it has no native system API or resource ownership.
+//     transaction; it has no native window, system-effect adapter, or resource ownership.
 //   - `ClaudioGUI`: the executable — SwiftUI `App`/`View` layer, depends on `ClaudioGUICore`.
 let package = Package(
     name: "claudio-gui",
@@ -76,8 +76,8 @@ let package = Package(
             ]
         ),
         // Importable Settings presentation seam. Its session owns typed route/focus/destination
-        // lifecycle and semantic announcement debt, while native window and system APIs stay in
-        // the executable. Production and the harness mount the same concrete presentation types.
+        // lifecycle and semantic announcement debt, while the native window and system-effect
+        // adapters stay in the executable. Production and the harness mount the same types.
         .target(
             name: "ClaudioSettingsPresentation",
             dependencies: [

@@ -48,6 +48,7 @@ struct UsageSettingsView: View {
             }
         }
         .frame(maxWidth: 700, alignment: .leading)
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.usage))
         .task { model.refresh() }
         .onReceive(model.$feedback.dropFirst().compactMap { $0 }) { feedback in
             onAnnouncement(feedbackText(feedback))

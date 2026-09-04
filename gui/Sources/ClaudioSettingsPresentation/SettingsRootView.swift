@@ -85,8 +85,8 @@ package struct SettingsRootView: View {
         .accessibilityLabel(l10n.text(.settingsWindowTitle))
         .accessibilityIdentifier(SettingsPresentationAccessibilityID.root)
         .environment(\.dynamicTypeSize, preferences.interfaceTextSize.dynamicTypeSize)
-        .onExitCommand {
-            focusedTarget = SettingsWindowFocusTarget.sidebar(destination)
+        .settingsExitInteraction(destination: destination) { target in
+            focusedTarget = target
         }
         .onAppear {
             synchronizeDestinationFocus(settingsPresentationSession.state)
@@ -192,15 +192,12 @@ package struct SettingsRootView: View {
         .buttonStyle(.plain)
         .font(.system(.body, design: .rounded).weight(item == destination ? .semibold : .regular))
         .focused($focusedTarget, equals: SettingsWindowFocusTarget.sidebar(item))
-        .onMoveCommand { direction in
-            switch direction {
-            case .up:
-                moveSidebarSelection(.previous, from: item)
-            case .down:
-                moveSidebarSelection(.next, from: item)
-            default:
-                break
-            }
+        .settingsSidebarInteraction(
+            item: item,
+            availableDestinations: preferences.availableSettingsDestinations
+        ) { next in
+            settingsPresentationSession.send(.route(.destination(next)))
+            focusedTarget = .sidebar(next)
         }
         .accessibilityLabel(item.localizedName(language: preferences.language))
         .accessibilityAddTraits(item == destination ? .isSelected : [])
@@ -248,7 +245,7 @@ package struct SettingsRootView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     destinationTitle
 
-                    EmbeddedSoundPacksEditorView(
+                    SettingsSoundsDestinationView(
                         editorOwner: soundPacksEditorOwner,
                         route: soundsRoute,
                         routeRequestRevision:
@@ -384,7 +381,7 @@ package struct SettingsRootView: View {
             }
         }
         .frame(maxWidth: 560, alignment: .leading)
-        .accessibilityIdentifier(SettingsPresentationAccessibilityID.general)
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.general))
     }
 
     private var displaySettings: some View {
@@ -456,6 +453,7 @@ package struct SettingsRootView: View {
             }
         }
         .frame(maxWidth: 560, alignment: .leading)
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.display))
     }
 
     private var notificationsSettings: some View {
@@ -554,7 +552,7 @@ package struct SettingsRootView: View {
         }
         .frame(maxWidth: 620, alignment: .leading)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("settings.notifications.dynamic-quiet-policy")
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.notifications))
         .onChange(of: dynamicQuietPolicy.presentation) { _ in
             onAnnouncement(dynamicQuietAnnouncement)
         }
@@ -761,16 +759,24 @@ package struct SettingsRootView: View {
         }
     }
 
-    private func moveSidebarSelection(
-        _ direction: SettingsSidebarMoveDirection,
-        from current: SettingsDestination
-    ) {
-        let next = settingsSidebarDestination(
-            moving: direction,
-            from: current,
-            availableDestinations: preferences.availableSettingsDestinations)
-        guard next != current else { return }
-        settingsPresentationSession.send(.route(.destination(next)))
-        focusedTarget = .sidebar(next)
+}
+
+@MainActor
+private struct SettingsSoundsDestinationView: View {
+    let editorOwner: SoundPacksEditorOwner
+    let route: SoundPacksWindowRoute
+    let routeRequestRevision: UInt64
+    let languageStore: ClaudioPreferences
+    let nativeEffects: SoundPacksEditorNativeEffectsDispatcher
+
+    var body: some View {
+        EmbeddedSoundPacksEditorView(
+            editorOwner: editorOwner,
+            route: route,
+            routeRequestRevision: routeRequestRevision,
+            languageStore: languageStore,
+            nativeEffects: nativeEffects
+        )
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.sounds))
     }
 }

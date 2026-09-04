@@ -122,6 +122,13 @@ package enum SettingsPresentationFixtures {
                     presentEvents: Set(Event.allCases),
                     state: .complete,
                     isSelected: false),
+                PackCard(
+                    id: "gallery-pack",
+                    name: "Gallery Pack",
+                    isCC0: true,
+                    presentEvents: Set(Event.allCases),
+                    state: .complete,
+                    isSelected: false),
             ],
             selectedPackID: "settings-fixture-pack",
             selectedEventRows: Event.allCases.map {
@@ -211,7 +218,25 @@ package enum SettingsPresentationFixtures {
         if let availability {
             session.replaceAvailabilityForTesting(availability)
         }
-        _ = session.send(.present(.route(route)))
+        let presentationRoute: SettingsRoute
+        if let aiSession = aiCueScenario?.previewState.session {
+            presentationRoute = .events(scope: aiSession.scope, event: aiSession.event)
+        } else {
+            presentationRoute = route
+        }
+        if case .events(let scope, let event) = presentationRoute,
+            aiCueScenario?.previewState.session != nil
+        {
+            session.eventSettingsSelection.select(
+                EventSettingsWindowRoute(scope: scope, event: event))
+        }
+        _ = session.send(.present(.route(presentationRoute)))
+        if aiCueScenario?.rendersCredentialSheet == true {
+            session.eventSettingsSelection.presentCredentialSheet()
+        }
+        if let playingCandidateID = aiCueScenario?.playingCandidateID {
+            session.eventSettingsSelection.beginCandidatePreview(id: playingCandidateID)
+        }
 
         return SettingsPresentationFixture(
             temporaryRoot: temporaryRoot,

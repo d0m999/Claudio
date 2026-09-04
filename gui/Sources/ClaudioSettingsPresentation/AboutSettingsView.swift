@@ -39,6 +39,7 @@ struct AboutSettingsView: View {
         }
         .font(ClaudioTheme.font(.body))
         .frame(maxWidth: 620, alignment: .leading)
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.about))
         .onReceive(model.$feedback.dropFirst().compactMap { $0 }) { feedback in
             onAnnouncement(feedbackText(feedback))
         }

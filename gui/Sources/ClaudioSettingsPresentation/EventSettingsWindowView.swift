@@ -29,9 +29,6 @@ struct EventSettingsWindowView: View {
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedTarget: EventSettingsFocusTarget?
     @State private var handledFocusRequestRevision: UInt64 = 0
-    @State private var playingCandidateID: UUID?
-    @State private var playingCandidateTitle: String?
-    @State private var showsCredentialSheet = false
     @State private var previewAllTask: Task<Void, Never>?
     @State private var previewAllFailureEvent: Event?
     @State private var previewAllCoordinator = EventPreviewSequenceCoordinator()
@@ -169,7 +166,7 @@ struct EventSettingsWindowView: View {
         }
         .onAppear {
             #if DEBUG
-            if reloadsOnAppear {
+            if reloadsOnAppear && !model.usesInjectedPreviewState {
                 model.reload()
             }
             #else
@@ -189,6 +186,7 @@ struct EventSettingsWindowView: View {
             selection.$presentationState
                 .map(\.previewStopRequestRevision)
                 .removeDuplicates()
+                .dropFirst()
         ) { _ in
             stopAllPreviews()
         }
@@ -196,9 +194,9 @@ struct EventSettingsWindowView: View {
             selection.$presentationState
                 .map(\.aiSessionEndRequestRevision)
                 .removeDuplicates()
+                .dropFirst()
         ) { _ in
             stopCandidatePreview()
-            showsCredentialSheet = false
         }
         .onChange(of: model.config.selectedPack) { _ in
             closeAICueComposer()
@@ -208,13 +206,13 @@ struct EventSettingsWindowView: View {
         }
         .onChange(of: aiCueViewModel.requiresCredentialConfiguration) { required in
             if required {
-                showsCredentialSheet = true
+                selection.presentCredentialSheet()
             }
         }
         .task {
             await aiCueViewModel.refreshCredentialStatus()
         }
-        .sheet(isPresented: $showsCredentialSheet) {
+        .sheet(isPresented: credentialSheetBinding) {
             EventSettingsAICueCredentialSheet(
                 viewModel: aiCueViewModel,
                 languageStore: languageStore)
@@ -223,6 +221,7 @@ struct EventSettingsWindowView: View {
             cancelPreviewSequenceState()
             stopCandidatePreview()
         }
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.eventsAndSounds))
     }
 
     private var scopeSidebar: some View {
@@ -336,7 +335,7 @@ struct EventSettingsWindowView: View {
             EventSettingsAICueServiceCard(
                 viewModel: aiCueViewModel,
                 languageStore: languageStore,
-                onManageCredential: { showsCredentialSheet = true }
+                onManageCredential: { selection.presentCredentialSheet() }
             )
             .padding(.horizontal, 24)
             .padding(.bottom, 18)
@@ -707,12 +706,15 @@ struct EventSettingsWindowView: View {
                                             viewModel: aiCueViewModel,
                                             languageStore: languageStore,
                                             eventTitle: event.title,
-                                            playingCandidateID: playingCandidateID,
+                                            playingCandidateID:
+                                                selection.presentationState.playingCandidateID,
                                             adoptionEnabled:
                                                 eventsEditorPresentation?.adoptionPermit != nil,
                                             adoptionUnavailableHint:
                                                 editorCapabilityUnavailableHint,
-                                            onConfigureCredential: { showsCredentialSheet = true },
+                                            onConfigureCredential: {
+                                                selection.presentCredentialSheet()
+                                            },
                                             onPreviewCandidate: previewAICueCandidate,
                                             onAdoptCandidate: adoptAICueCandidate,
                                             onClose: closeAICueComposer
@@ -893,8 +895,7 @@ struct EventSettingsWindowView: View {
     ) {
         guard case .eligible = eligibility else { return }
         soundPacksEditorNativeEffects.stopPreview(owner: soundPacksEditorOwner)
-        playingCandidateID = nil
-        playingCandidateTitle = nil
+        selection.noteCandidatePreviewStopped()
         selection.beginAISession(scope: selectedScope.scope, event: event)
         aiCueViewModel.begin(scope: selectedScope.scope, event: event)
     }
@@ -915,7 +916,8 @@ struct EventSettingsWindowView: View {
     }
 
     private func previewAICueCandidate(_ candidate: AICueCandidate) {
-        let togglesCurrentCandidate = playingCandidateID == candidate.id
+        let togglesCurrentCandidate =
+            selection.presentationState.playingCandidateID == candidate.id
         stopCandidatePreview()
         stopAllPreviews()
         if togglesCurrentCandidate {
@@ -933,11 +935,10 @@ struct EventSettingsWindowView: View {
             aiCueViewModel.reportCandidateUnavailable()
             return
         }
-        playingCandidateID = candidate.id
+        selection.beginCandidatePreview(id: candidate.id)
         let title = localizedAICueCandidateTitle(
             candidate.variant,
             language: languageStore.language)
-        playingCandidateTitle = title
         onAnnouncement(
             l10n.format(
                 .aiCueCandidatePlaybackStarted,
@@ -945,7 +946,7 @@ struct EventSettingsWindowView: View {
         let candidateID = candidate.id
         let resetDelay = Double(candidate.durationMilliseconds) / 1_000 + 0.15
         DispatchQueue.main.asyncAfter(deadline: .now() + resetDelay) {
-            guard playingCandidateID == candidateID else { return }
+            guard selection.presentationState.playingCandidateID == candidateID else { return }
             stopCandidatePreview()
         }
     }
@@ -968,16 +969,34 @@ struct EventSettingsWindowView: View {
     }
 
     private func stopCandidatePreview() {
-        let stoppedCandidateTitle = playingCandidateTitle
+        let stoppedCandidateTitle = selection.presentationState.playingCandidateID.flatMap {
+            candidateID in
+            aiCueViewModel.generation?.candidates.first(where: { $0.id == candidateID }).map {
+                localizedAICueCandidateTitle(
+                    $0.variant,
+                    language: languageStore.language)
+            }
+        }
         soundPacksEditorNativeEffects.stopPreview(owner: soundPacksEditorOwner)
-        playingCandidateID = nil
-        playingCandidateTitle = nil
+        selection.noteCandidatePreviewStopped()
         if let stoppedCandidateTitle {
             onAnnouncement(
                 l10n.format(
                     .aiCueCandidatePlaybackStopped,
                     stoppedCandidateTitle as NSString))
         }
+    }
+
+    private var credentialSheetBinding: Binding<Bool> {
+        Binding(
+            get: { selection.presentationState.credentialSheetIsPresented },
+            set: { isPresented in
+                if isPresented {
+                    selection.presentCredentialSheet()
+                } else {
+                    selection.dismissCredentialSheet()
+                }
+            })
     }
 
     private func aiCueGenerationIsEnabled(

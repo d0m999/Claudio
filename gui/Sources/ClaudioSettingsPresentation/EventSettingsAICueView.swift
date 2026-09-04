@@ -265,7 +265,7 @@ struct EventSettingsAICueComposerView: View {
                 .stroke(ClaudioTheme.clay(colorScheme).opacity(0.45), lineWidth: 1)
         )
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("event-settings.ai-cue.composer")
+        .settingsMountIdentity("event-settings.ai-cue.composer")
     }
 
     private var stageIndicator: some View {
@@ -663,7 +663,7 @@ struct EventSettingsAICueCredentialSheet: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(credentialTitle)
-        .accessibilityIdentifier("event-settings.ai-cue.credential-sheet")
+        .settingsMountIdentity("event-settings.ai-cue.credential-sheet")
     }
 
     private var credentialTitle: String {

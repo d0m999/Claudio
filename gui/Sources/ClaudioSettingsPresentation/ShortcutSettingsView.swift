@@ -33,6 +33,7 @@ struct ShortcutSettingsView: View {
             }
         }
         .frame(maxWidth: 640, alignment: .leading)
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.shortcuts))
         .background {
             LocalShortcutCaptureView(
                 isRecording: recordingAction != nil,

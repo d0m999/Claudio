@@ -98,6 +98,47 @@ func runSettingsPresentationLifecycleSuites() async {
             "gallery 必须只组合 target-owned SettingsStateGalleryView，不得直接重建 destination/model")
     }
 
+    suite("Settings native announcement adapter：deferred exact-head post/ack 与 key retry") {
+        let controllerURL = guiTestRepositoryRoot().appendingPathComponent(
+            "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
+        guard let controller = try? String(contentsOf: controllerURL, encoding: .utf8) else {
+            expect(false, "读不到唯一 Settings native announcement adapter")
+            return
+        }
+        let missingLatchGuard = controller.replacingOccurrences(
+            of: "guard !settingsPresentationAnnouncementDeliveryScheduled else { return }",
+            with: "")
+        let eagerHeadRead = controller.replacingOccurrences(
+            of:
+                "settingsPresentationAnnouncementDeliveryScheduled = true\n"
+                + "        DispatchQueue.main.async",
+            with:
+                "settingsPresentationAnnouncementDeliveryScheduled = true\n"
+                + "        _ = settingsPresentationSession.state.pendingAnnouncement\n"
+                + "        DispatchQueue.main.async")
+        let missingKeyGate = controller.replacingOccurrences(
+            of: "window.isKeyWindow\n        else { return }",
+            with: "true\n        else { return }")
+        let missingNativePost = controller.replacingOccurrences(
+            of: "NSAccessibility.post(",
+            with: "settingsNativePostWasDeleted(")
+        let missingKeyRetry = settingsReplacingFirstOccurrence(
+            in: controller,
+            of:
+                "_ = settingsPresentationSession.send(.windowPhaseChanged(.key))\n"
+                + "        scheduleSettingsPresentationAnnouncementDelivery()",
+            with: "_ = settingsPresentationSession.send(.windowPhaseChanged(.key))")
+
+        expect(
+            settingsNativeAnnouncementAdapterIsSound(controller)
+                && !settingsNativeAnnouncementAdapterIsSound(missingLatchGuard)
+                && !settingsNativeAnnouncementAdapterIsSound(eagerHeadRead)
+                && !settingsNativeAnnouncementAdapterIsSound(missingKeyGate)
+                && !settingsNativeAnnouncementAdapterIsSound(missingNativePost)
+                && !settingsNativeAnnouncementAdapterIsSound(missingKeyRetry),
+            "窄 adapter contract 必须 fail closed，并杀死 latch/head/gate/post/key-retry mutations")
+    }
+
     #if DEBUG
     suite("Settings session route：generic、explicit 与 repeated 请求保持单事务") {
         let fixture = SettingsPresentationFixtures.generalLogin(
@@ -748,4 +789,66 @@ private func settingsMenuRequestOwnsOnlyTypedRoute(_ source: String) -> Bool {
     return request.contains("host ?? integrationsModel.selectedHost ?? .claudeCode")
         && request.contains(".route(.integrations(surface: selectedHost.surfaceID))")
         && !request.contains("integrationsModel.selectHost")
+}
+
+private func settingsNativeAnnouncementAdapterIsSound(_ source: String) -> Bool {
+    let scanned = strippingComments(source)
+    guard scanned.unmodeledConstructs.isEmpty,
+        let scheduler = settingsLifecycleBracedBlock(
+            after: "private func scheduleSettingsPresentationAnnouncementDelivery()",
+            in: scanned.code),
+        let delivery = settingsLifecycleBracedBlock(
+            after: "private func deliverPendingSettingsPresentationAnnouncement()",
+            in: scanned.code),
+        let didBecomeKey = settingsLifecycleBracedBlock(
+            after: "func windowDidBecomeKey(",
+            in: scanned.code),
+        let showWindow = settingsLifecycleBracedBlock(
+            after: "func showWindow(",
+            in: scanned.code),
+        let dispatch = scheduler.range(of: "DispatchQueue.main.async"),
+        let latchGuard = scheduler.range(
+            of: "guard !settingsPresentationAnnouncementDeliveryScheduled"),
+        let latchSet = scheduler.range(
+            of: "settingsPresentationAnnouncementDeliveryScheduled = true"),
+        let latchClear = scheduler.range(
+            of: "settingsPresentationAnnouncementDeliveryScheduled = false"),
+        let deliver = scheduler.range(of: "deliverPendingSettingsPresentationAnnouncement()"),
+        latchGuard.lowerBound < latchSet.lowerBound,
+        latchSet.lowerBound < dispatch.lowerBound,
+        dispatch.lowerBound < latchClear.lowerBound,
+        latchClear.lowerBound < deliver.lowerBound,
+        !scheduler[..<dispatch.lowerBound].contains(
+            "settingsPresentationSession.state.pendingAnnouncement"),
+        let phaseGate = delivery.range(
+            of: "settingsPresentationSession.state.windowPhase == .key"),
+        let currentHead = delivery.range(
+            of: "settingsPresentationSession.state.pendingAnnouncement"),
+        let visibleGate = delivery.range(of: "window.isVisible"),
+        let keyGate = delivery.range(of: "window.isKeyWindow"),
+        let post = delivery.range(of: "NSAccessibility.post("),
+        let exactAck = delivery.range(
+            of: ".acknowledgeAnnouncement(id: announcement.id, didPost: true)"),
+        phaseGate.lowerBound < currentHead.lowerBound,
+        currentHead.lowerBound < visibleGate.lowerBound,
+        visibleGate.lowerBound < keyGate.lowerBound,
+        keyGate.lowerBound < post.lowerBound,
+        post.lowerBound < exactAck.lowerBound
+    else { return false }
+
+    return didBecomeKey.contains(".windowPhaseChanged(.key)")
+        && didBecomeKey.contains("scheduleSettingsPresentationAnnouncementDelivery()")
+        && showWindow.contains("makeKeyAndOrderFront")
+        && showWindow.contains("scheduleSettingsPresentationAnnouncementDelivery()")
+}
+
+private func settingsReplacingFirstOccurrence(
+    in source: String,
+    of target: String,
+    with replacement: String
+) -> String {
+    guard let range = source.range(of: target) else { return source }
+    var result = source
+    result.replaceSubrange(range, with: replacement)
+    return result
 }

@@ -109,7 +109,9 @@ struct IntegrationsSettingsDestinationView: View {
         }
         .animation(
             reduceMotion ? nil : .easeInOut(duration: 0.16),
-            value: model.feedback?.revision)
+            value: model.feedback?.revision
+        )
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.integrations))
     }
 
     private var pageHeader: some View {

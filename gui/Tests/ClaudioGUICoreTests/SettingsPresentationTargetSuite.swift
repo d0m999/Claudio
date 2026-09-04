@@ -362,35 +362,51 @@ func runSettingsPresentationSliceSuites() {
     suite("Settings presentation root：九个 destination 都经同一 compiled production root 挂载") {
         let destinationSubtreeIdentifiers: [SettingsDestination: String] = [
             .general: SettingsPresentationAccessibilityID.general,
-            .integrations: "integrations.destination.scroll",
-            .eventsAndSounds: "event-settings.header",
-            .notifications: "settings.notifications.dynamic-quiet-policy",
-            .display: "settings.display.text-size",
-            .sounds: "settings.sounds.editor",
-            .usage: "settings.usage.refresh",
-            .shortcuts: "settings.shortcuts.toggle-panel",
-            .about: "settings.about.identity",
+            .integrations: SettingsPresentationAccessibilityID.destination(.integrations),
+            .eventsAndSounds: SettingsPresentationAccessibilityID.destination(.eventsAndSounds),
+            .notifications: SettingsPresentationAccessibilityID.destination(.notifications),
+            .display: SettingsPresentationAccessibilityID.destination(.display),
+            .sounds: SettingsPresentationAccessibilityID.destination(.sounds),
+            .usage: SettingsPresentationAccessibilityID.destination(.usage),
+            .shortcuts: SettingsPresentationAccessibilityID.destination(.shortcuts),
+            .about: SettingsPresentationAccessibilityID.destination(.about),
         ]
-        var mountedDestinations: [SettingsDestination] = []
+        let expectedIdentifiers = SettingsDestination.allCases.compactMap {
+            destinationSubtreeIdentifiers[$0]
+        }
+        let canonicalMounts = zip(SettingsDestination.allCases, expectedIdentifiers).map {
+            destination, identifier in
+            SettingsDestinationMountObservation(
+                destination: destination,
+                mountedIdentifiers: [identifier])
+        }
+        var wrongChildMounts = canonicalMounts
+        wrongChildMounts[0] = SettingsDestinationMountObservation(
+            destination: .general,
+            mountedIdentifiers: [SettingsPresentationAccessibilityID.destination(.integrations)])
+        expect(
+            settingsDestinationMountsAreComplete(canonicalMounts)
+                && !settingsDestinationMountsAreComplete(Array(canonicalMounts.dropLast()))
+                && !settingsDestinationMountsAreComplete(wrongChildMounts),
+            "mount recorder contract 必须能杀死 EmptyView/missing marker 与 wrong-child/order mutation")
+        var productionMounts: [SettingsDestinationMountObservation] = []
         for scenario in PreviewFixtures.settingsRouteScenarios {
             let fixture = SettingsPresentationFixtures.generalLogin(
                 route: scenario.route,
                 availability: PreviewFixtures.settingsRouteAvailability)
-            let hostingView = NSHostingView(rootView: SettingsRootView(session: fixture.session))
-            hostingView.frame = NSRect(x: 0, y: 0, width: 980, height: 720)
-            hostingView.layoutSubtreeIfNeeded()
-            if hostingView.fittingSize.width > 0 && hostingView.fittingSize.height > 0,
-                fixture.session.state.routeResolution.destination == scenario.destination,
-                let identifier = destinationSubtreeIdentifiers[scenario.destination],
-                settingsAXDescendant(identifier: identifier, in: hostingView) != nil
-            {
-                mountedDestinations.append(scenario.destination)
-            }
+            SettingsMountRecorder.reset()
+            let probe = SettingsRootNativeProbe(session: fixture.session)
+            productionMounts.append(
+                SettingsDestinationMountObservation(
+                    destination: scenario.destination,
+                    mountedIdentifiers: SettingsMountRecorder.identifiers))
+            probe.close()
         }
 
         expect(
-            mountedDestinations == SettingsDestination.allCases,
-            "固定九个 destination 必须按 sidebar 顺序挂载可从真实 AX tree 观察的唯一 production subtree，实得 \(mountedDestinations)")
+            settingsDestinationMountsAreComplete(productionMounts),
+            "固定九个 destination 必须按 sidebar 顺序挂载唯一 compiled production subtree，实得 \(productionMounts.map { ($0.destination.rawValue, $0.mountedIdentifiers) })"
+        )
     }
 
     suite("Settings AI Cue gallery：credential/composer/playing 均进入 production root state") {
@@ -399,9 +415,8 @@ func runSettingsPresentationSliceSuites() {
                 route: .events(scope: .global, event: .stop),
                 availability: PreviewFixtures.settingsRouteAvailability,
                 aiCueScenario: scenario)
-            let hostingView = NSHostingView(rootView: SettingsRootView(session: fixture.session))
-            hostingView.frame = NSRect(x: 0, y: 0, width: 1_240, height: 820)
-            hostingView.layoutSubtreeIfNeeded()
+            SettingsMountRecorder.reset()
+            let probe = SettingsRootNativeProbe(session: fixture.session)
             let state = fixture.session.state.eventPresentation
             let scenarioSession = scenario.previewState.session
 
@@ -417,18 +432,22 @@ func runSettingsPresentationSliceSuites() {
                         && state.route.event == scenarioSession.event,
                     "\(scenario.rawValue) composer route 必须与 fixture session scope/Event 对齐")
                 expect(
-                    settingsAXDescendant(
-                        identifier: "event-settings.ai-cue.composer",
-                        in: hostingView) != nil,
-                    "\(scenario.rawValue) 必须经 production root AX subtree 挂载 composer")
+                    SettingsMountRecorder.identifiers.contains(
+                        "event-settings.ai-cue.composer"),
+                    "\(scenario.rawValue) 必须经 production root 挂载 compiled composer subtree")
             }
             if scenario.rendersCredentialSheet {
                 expect(
-                    settingsAXDescendant(
-                        identifier: "event-settings.ai-cue.credential-sheet",
-                        in: hostingView) != nil,
-                    "\(scenario.rawValue) 必须经 production root 实际呈现 credential sheet")
+                    probe.hasAttachedSheet
+                        && SettingsMountRecorder.identifiers.contains(
+                            "event-settings.ai-cue.credential-sheet"),
+                    "\(scenario.rawValue) 必须经 production root 实际呈现并 mount credential sheet")
+            } else {
+                expect(
+                    !probe.hasAttachedSheet,
+                    "\(scenario.rawValue) 非 credential 场景不得产生 native attached sheet")
             }
+            probe.close()
         }
     }
 
@@ -486,36 +505,22 @@ func runSettingsPresentationSliceSuites() {
     #endif
 }
 
-@MainActor
-private func settingsAXDescendant(identifier: String, in root: NSView) -> Any? {
-    var pending: [Any] = [root]
-    var visited = Set<ObjectIdentifier>()
-    while let current = pending.popLast() {
-        let object = current as AnyObject
-        let identity = ObjectIdentifier(object)
-        guard visited.insert(identity).inserted else { continue }
-        if settingsAXIdentifier(of: current) == identifier { return current }
-        pending.append(contentsOf: settingsAXChildren(of: current))
-    }
-    return nil
+private struct SettingsDestinationMountObservation {
+    let destination: SettingsDestination
+    let mountedIdentifiers: [String]
 }
 
-@MainActor
-private func settingsAXChildren(of element: Any) -> [Any] {
-    if let view = element as? NSView { return view.accessibilityChildren() ?? [] }
-    if let element = element as? NSAccessibilityElement {
-        return element.accessibilityChildren() ?? []
+private func settingsDestinationMountsAreComplete(
+    _ observations: [SettingsDestinationMountObservation]
+) -> Bool {
+    guard observations.map(\.destination) == SettingsDestination.allCases else { return false }
+    return observations.allSatisfy { observation in
+        let expected = SettingsPresentationAccessibilityID.destination(observation.destination)
+        return observation.mountedIdentifiers.filter { identifier in
+            identifier == SettingsPresentationAccessibilityID.general
+                || identifier.hasPrefix("settings.destination.")
+        } == [expected]
     }
-    return []
-}
-
-@MainActor
-private func settingsAXIdentifier(of element: Any) -> String? {
-    if let view = element as? NSView { return view.accessibilityIdentifier() }
-    if let element = element as? NSAccessibilityElement {
-        return element.accessibilityIdentifier()
-    }
-    return nil
 }
 
 @MainActor

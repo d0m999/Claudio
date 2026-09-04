@@ -31,6 +31,7 @@ bash scripts/verify-settings-experience.sh <BASE_SHA>
 | 合同 | 主要 executable suite |
 |---|---|
 | 九个 destination 恰好一次、production root 可挂载、nonoptional dependencies 与 target DAG | `SettingsPresentationTargetSuite`、`SettingsNavigationSuite` |
+| production root 的 sidebar 整行/行外 mouse route、真实 sidebar `Button`、Login `Toggle`、mounted child identity 与 AI credential sheet | `SettingsRootInteractionSuite`、`SettingsPresentationTargetSuite` |
 | typed route/failure、focus debt、window phase、destination lifecycle、announcement post/ack 与 gallery 共用 production root | `SettingsPresentationLifecycleSuite`、`EventSettingsWindowSelectionSuite` |
 | 唯一 retained window、controller→`SettingsRootView(session:)` composition、系统 adapter 与声音写入 owner 唯一 | `SettingsPresentationLifecycleSuite`、`SoundPacksEditorOwnerSuite`、`IntegrationDestinationPresentationSuite`、`IntegrationDestinationModelSuite`、`IntegrationDestinationWiringSuite` |
 | Host Surface 能力、receipt/current activation、Sound Scope 与 Effective Profile | `HostIntegrationModelSuite`、`HostIntegrationPresentationSuite`、`HostHookReceiptSuite`、`SurfaceSoundPreferencesSuite` |
@@ -51,6 +52,14 @@ Settings 的 route、lifecycle、focus、destination mount 与 gallery 行为由
 Events coordinator suites 已删除。长期 source audit 只保留 compiled seam 无法表达的 executable composition、唯一
 `@main`/controller/owner、native accessibility、SwiftPM/resource 与 release wiring，不再把视图源码
 形状当作行为证据。
+
+其中，真实 `NSWindow` + `NSHostingView` fixture 会用 AppKit mouse event 命中 sidebar 行、sidebar
+`Button` 与 Login `Toggle`，并观察 session/model 结果；九页实际 child 自身挂载的同一 SwiftUI
+modifier 同时设置稳定 accessibility identifier，并在 DEBUG compiled harness 报告 mounted subtree。
+AI credential 场景还观察真实 attached sheet。方向键与 Escape 会先尝试 raw `NSEvent`，在无 Full
+Keyboard Access 的 harness 环境中则调用该 mounted production modifier 注册的同一 handler。这些是
+synthetic event 与 compiled mount 证据，不是系统 AX/TCC、真实键盘焦点或 VoiceOver tree 证据；后者仍
+必须按下方清单手验。
 
 ## 安全与隐私判据
 

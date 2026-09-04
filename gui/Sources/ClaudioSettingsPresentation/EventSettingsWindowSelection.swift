@@ -1,6 +1,7 @@
 import ClaudioCore
 import ClaudioGUICore
 import Combine
+import Foundation
 
 /// App-lifetime typed selection shared by the unified Events & Sounds destination and its routes.
 @MainActor
@@ -27,8 +28,7 @@ package final class EventSettingsWindowSelection: ObservableObject {
 
     package func select(_ route: EventSettingsWindowRoute) {
         guard storage.route != route else { return }
-        storage.requestPreviewStop()
-        storage.requestAISessionEnd()
+        storage.leaveDestination()
         storage.route = route
         storage.routeRequestRevision &+= 1
         storage.focusTarget = nil
@@ -37,8 +37,7 @@ package final class EventSettingsWindowSelection: ObservableObject {
 
     package func markCurrentScopeUnavailable() {
         guard storage.route.unavailableRequestedScopeStoredValue == nil else { return }
-        storage.requestPreviewStop()
-        storage.requestAISessionEnd()
+        storage.leaveDestination()
         storage.route = EventSettingsWindowRoute(
             scope: storage.route.scope,
             event: storage.route.event,
@@ -104,9 +103,32 @@ package final class EventSettingsWindowSelection: ObservableObject {
         publishState()
     }
 
+    package func presentCredentialSheet() {
+        guard !storage.credentialSheetIsPresented else { return }
+        storage.credentialSheetIsPresented = true
+        publishState()
+    }
+
+    package func dismissCredentialSheet() {
+        guard storage.credentialSheetIsPresented else { return }
+        storage.credentialSheetIsPresented = false
+        publishState()
+    }
+
+    package func beginCandidatePreview(id: UUID) {
+        guard storage.playingCandidateID != id else { return }
+        storage.playingCandidateID = id
+        publishState()
+    }
+
+    package func noteCandidatePreviewStopped() {
+        guard storage.playingCandidateID != nil else { return }
+        storage.playingCandidateID = nil
+        publishState()
+    }
+
     package func leaveDestination() {
-        storage.requestPreviewStop()
-        storage.requestAISessionEnd()
+        storage.leaveDestination()
         publishState()
     }
 
@@ -134,6 +156,8 @@ package final class EventSettingsWindowSelection: ObservableObject {
         var previewStopRequestRevision: UInt64 = 0
         var aiSessionState: EventSettingsDestinationAISessionState = .idle
         var aiSessionEndRequestRevision: UInt64 = 0
+        var credentialSheetIsPresented = false
+        var playingCandidateID: UUID?
         var previewGeneration: UInt64 = 0
 
         var presentationState: SettingsEventPresentationState {
@@ -145,7 +169,9 @@ package final class EventSettingsWindowSelection: ObservableObject {
                 previewState: previewState,
                 previewStopRequestRevision: previewStopRequestRevision,
                 aiSessionState: aiSessionState,
-                aiSessionEndRequestRevision: aiSessionEndRequestRevision)
+                aiSessionEndRequestRevision: aiSessionEndRequestRevision,
+                credentialSheetIsPresented: credentialSheetIsPresented,
+                playingCandidateID: playingCandidateID)
         }
 
         mutating func requestPreviewStop() {
@@ -156,6 +182,13 @@ package final class EventSettingsWindowSelection: ObservableObject {
         mutating func requestAISessionEnd() {
             aiSessionState = .idle
             aiSessionEndRequestRevision &+= 1
+        }
+
+        mutating func leaveDestination() {
+            requestPreviewStop()
+            requestAISessionEnd()
+            credentialSheetIsPresented = false
+            playingCandidateID = nil
         }
     }
 }

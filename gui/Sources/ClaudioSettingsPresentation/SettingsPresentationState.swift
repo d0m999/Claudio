@@ -1,6 +1,7 @@
 import ClaudioCore
 import ClaudioGUICore
 import ClaudioLocalization
+import Foundation
 
 package struct SettingsPlatformActionFailure: Equatable, Sendable {
     package let action: SettingsPlatformAction
@@ -38,6 +39,8 @@ package struct SettingsEventPresentationState: Equatable, Sendable {
     package let previewStopRequestRevision: UInt64
     package let aiSessionState: EventSettingsDestinationAISessionState
     package let aiSessionEndRequestRevision: UInt64
+    package let credentialSheetIsPresented: Bool
+    package let playingCandidateID: UUID?
 }
 
 package enum SettingsPresentationRequest: Equatable, Sendable {

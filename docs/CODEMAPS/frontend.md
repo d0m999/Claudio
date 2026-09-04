@@ -70,8 +70,8 @@ composition root
   decisions; no SwiftUI dependency.
 - `ClaudioGUIComponents`: reusable SwiftUI visual primitives.
 - `ClaudioSettingsPresentation`: resource-free SwiftUI presentation for all nine Settings
-  destinations. It owns the Settings presentation transaction but no native window, system API,
-  resource bundle, Sound Pack disk fact, or host schema.
+  destinations. It owns the Settings presentation transaction but no native window or
+  system-effect adapter, resource bundle, Sound Pack disk fact, or host schema.
 - `ClaudioGUI`: executable composition plus native adapters and the retained AppKit window.
 - `SoundPacksWindow`: reusable editor rendering and native accessibility bridge; all editor facts
   and mutations remain behind `SoundPacksEditorOwner`.
