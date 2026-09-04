@@ -52,6 +52,46 @@ func runSettingsPresentationTargetSuites() {
                 },
             "四个下层 target 必须全部存在且零回指，保持 graph acyclic")
     }
+
+    suite("Settings presentation target：root 以下 child view 保持 module-local") {
+        let root = guiTestRepositoryRoot()
+        let childViews = [
+            "EventSettingsAICueServiceCard": "EventSettingsAICueView.swift",
+            "EventSettingsAICueComposerView": "EventSettingsAICueView.swift",
+            "EventSettingsAICueCredentialSheet": "EventSettingsAICueView.swift",
+            "EventSettingsWindowView": "EventSettingsWindowView.swift",
+            "IntegrationsSettingsDestinationView": "IntegrationsSettingsDestinationView.swift",
+            "LoginItemSettingsSection": "LoginItemSettingsSection.swift",
+        ]
+        var sources: [String: String] = [:]
+        for (_, file) in childViews {
+            let url = root.appendingPathComponent(
+                "gui/Sources/ClaudioSettingsPresentation/\(file)")
+            guard let source = try? String(contentsOf: url, encoding: .utf8) else {
+                expect(false, "读不到 Settings child view source：\(file)")
+                return
+            }
+            let scanned = strippingComments(source)
+            guard scanned.unmodeledConstructs.isEmpty else {
+                expect(false, "Settings child view access audit 遇到无法建模的构造：\(file)")
+                return
+            }
+            sources[file] = scanned.codeWithoutStringLiterals
+        }
+
+        expect(
+            settingsChildViewsAreModuleLocal(
+                childViews: ["LocalView": "Fixture.swift"],
+                sources: ["Fixture.swift": "struct LocalView: View {}"])
+                && !settingsChildViewsAreModuleLocal(
+                    childViews: ["LeakedView": "Fixture.swift"],
+                    sources: ["Fixture.swift": "package struct LeakedView: View {}"]),
+            "child view access audit 必须能区分 module-local 与 package-visible declaration")
+        expect(
+            settingsChildViewsAreModuleLocal(childViews: childViews, sources: sources),
+            "只有 SettingsRootView/SettingsStateGalleryView 是跨 target mount seam；child views 不得 package-visible"
+        )
+    }
 }
 
 @MainActor
@@ -407,6 +447,18 @@ private struct DumpedSettingsPackageTarget {
     let dependencyCount: Int
     let hasUnparsedDependencies: Bool
     let resourcesCount: Int
+}
+
+private func settingsChildViewsAreModuleLocal(
+    childViews: [String: String],
+    sources: [String: String]
+) -> Bool {
+    childViews.allSatisfy { type, file in
+        guard let source = sources[file] else { return false }
+        return source.contains("struct \(type): View")
+            && !source.contains("package struct \(type): View")
+            && !source.contains("public struct \(type): View")
+    }
 }
 
 private func dumpedSettingsPackageTargets(
