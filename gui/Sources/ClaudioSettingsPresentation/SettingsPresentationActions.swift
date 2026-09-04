@@ -15,20 +15,21 @@ package enum SettingsPlatformActionResult: Equatable, Sendable {
 @MainActor
 package struct SettingsPresentationActions {
     private let handler: @MainActor (SettingsPlatformAction) -> SettingsPlatformActionResult
-    package let onEventAudibilityInputsChanged: @MainActor () -> Void
-    package let announce: @MainActor (String) -> Void
+    private let onEventAudibilityInputsChanged: @MainActor () -> Void
 
     package init(
         handler: @escaping @MainActor (SettingsPlatformAction) -> SettingsPlatformActionResult,
-        onEventAudibilityInputsChanged: @escaping @MainActor () -> Void,
-        announce: @escaping @MainActor (String) -> Void
+        onEventAudibilityInputsChanged: @escaping @MainActor () -> Void
     ) {
         self.handler = handler
         self.onEventAudibilityInputsChanged = onEventAudibilityInputsChanged
-        self.announce = announce
     }
 
     package func perform(_ action: SettingsPlatformAction) -> SettingsPlatformActionResult {
         handler(action)
+    }
+
+    package func notifyEventAudibilityInputsChanged() {
+        onEventAudibilityInputsChanged()
     }
 }

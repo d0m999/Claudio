@@ -508,8 +508,8 @@ func runGlobalShortcutsSuites() {
             "gui/Sources/ClaudioSettingsPresentation/ShortcutSettingsView.swift")
         let menuURL = root.appendingPathComponent(
             "gui/Sources/ClaudioGUI/MenuBarController.swift")
-        let settingsControllerURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
+        let settingsSessionURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift")
         let eventsURL = root.appendingPathComponent(
             "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift")
         let coreURL = root.appendingPathComponent(
@@ -517,8 +517,8 @@ func runGlobalShortcutsSuites() {
         guard let carbon = try? String(contentsOf: carbonURL, encoding: .utf8),
             let recorder = try? String(contentsOf: recorderURL, encoding: .utf8),
             let menu = try? String(contentsOf: menuURL, encoding: .utf8),
-            let settingsController = try? String(
-                contentsOf: settingsControllerURL,
+            let settingsSession = try? String(
+                contentsOf: settingsSessionURL,
                 encoding: .utf8),
             let events = try? String(contentsOf: eventsURL, encoding: .utf8),
             let core = try? String(contentsOf: coreURL, encoding: .utf8)
@@ -562,7 +562,7 @@ func runGlobalShortcutsSuites() {
                 && menu.contains("NSWorkspace.willSleepNotification")
                 && menu.contains("NSWorkspace.didWakeNotification")
                 && menu.contains("requestCurrentScopeEventsFromShortcut()")
-                && menu.contains("settingsWindowController.prepareEventSettingsRoute(route)"),
+                && menu.contains("request: .eventShortcut(route)"),
             "注册与三项 action 必须由 MenuBarController 生命周期持有")
         expect(
             menu.contains("private func globalShortcutHandbackApplication()")
@@ -572,9 +572,9 @@ func runGlobalShortcutsSuites() {
                 ).count - 1 == 2,
             "通用设置与当前 Sound Scope 两个入口必须接入同一已测试 handback 规则")
         expect(
-            settingsController.contains("func prepareEventSettingsRoute(")
-                && settingsController.contains(".destination(.eventsAndSounds)"),
-            "快捷键必须进入唯一 retained Settings owner，非法 scope 仍落在 Events destination")
+            settingsSession.contains("case .eventShortcut(let route)")
+                && settingsSession.contains(".destination(.eventsAndSounds)"),
+            "快捷键必须进入唯一 Settings session，非法 raw scope 仍落在 Events destination")
         expect(
             events.contains("selection.unavailableRequestedScopeStoredValue")
                 && events.contains("ClaudioTheme.error(colorScheme)")

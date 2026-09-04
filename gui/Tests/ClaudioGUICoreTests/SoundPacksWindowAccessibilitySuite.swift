@@ -563,8 +563,8 @@ func runSoundPacksWindowAccessibilitySuites() {
             forbiddenSites.isEmpty,
             "窗口不得编译耦合面板专用 a11y 类型，实得 \(forbiddenSites)")
         expect(
-            announcementPosts == 1,
-            "窗口播报必须收口到自己的唯一 bridge，实得 \(announcementPosts) 处")
+            announcementPosts == 0,
+            "SoundPacksWindow 只提供语义 renderer，不得保留第二个 native post owner")
 
         let sourceByName = Dictionary(
             uniqueKeysWithValues: scannedSources.map { ($0.name, $0.code) })
@@ -612,7 +612,7 @@ func runSoundPacksWindowAccessibilitySuites() {
         guard
             let responderIndex = controller.range(of: "makeFirstResponder")?.lowerBound,
             let announcementIndex = controller.range(
-                of: "announcePendingSoundPackEditorAnnouncementIfNeeded",
+                of: "scheduleSettingsPresentationAnnouncementDelivery",
                 range: responderIndex..<controller.endIndex)?.lowerBound
         else {
             expect(false, "Settings 展示必须先进入 responder chain，再处理 Sounds 公告")
@@ -622,13 +622,11 @@ func runSoundPacksWindowAccessibilitySuites() {
             responderIndex < announcementIndex,
             "Settings 展示必须先进入 responder chain，再处理 Sounds 公告")
         expect(
-            bridge.contains("DispatchQueue.main.async")
-                && bridge.contains("window.isKeyWindow")
-                && bridge.contains("NSAccessibility.post")
-                && bridge.contains("language: ClaudioAppLanguage")
+            bridge.contains("language: ClaudioAppLanguage")
                 && bridge.contains("soundPacksEditorAccessibilityRequest(")
-                && bridge.contains("announcement.priority == .failure ? .high : .medium"),
-            "播报必须延后一趟等窗口进入 AX 树，并在真正 post 前重新确认仍是 key window")
+                && bridge.contains("announcement.priority == .failure ? .high : .medium")
+                && !bridge.contains("NSAccessibility.post"),
+            "SoundPacksWindow 必须只解析 semantic request；native post 统一留给 Settings adapter")
         expect(
             controller.contains("SettingsWindowGeometry.defaultWidth")
                 && controller.contains("SettingsWindowGeometry.minimumWidth"),
@@ -636,14 +634,14 @@ func runSoundPacksWindowAccessibilitySuites() {
         expect(
             controller.contains("func windowDidBecomeKey")
                 && controller.contains(
-                    "announcePendingSoundPackEditorAnnouncementIfNeeded(in: keyWindow)")
-                && controller.contains("soundPackAnnouncementDelivery")
+                    "scheduleSettingsPresentationAnnouncementDelivery()")
+                && controller.contains("settingsPresentationAnnouncementDeliveryScheduled")
                 && controller.contains("window.isVisible")
-                && controller.contains("window.isKeyWindow"),
+                && controller.contains("window.isKeyWindow")
+                && controller.contains("NSAccessibility.post"),
             "窗口非 key 期间不得消费 semantic debt，重新成为 key 时必须补播且防止同一 ID 并发双播")
         expect(
-            bridge.contains("completion(false)")
-                && bridge.contains("completion(true)"),
-            "bridge 必须把异步 key-window 复核后的真实 post 结果回传，不能提前消费 revision")
+            controller.contains(".acknowledgeAnnouncement(id: announcement.id, didPost: true)"),
+            "controller 只有真实 native post 后才能 exact-ack session debt")
     }
 }

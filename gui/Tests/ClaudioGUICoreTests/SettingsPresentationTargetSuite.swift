@@ -123,11 +123,11 @@ func runSettingsPresentationTargetSuites() {
                 after: "private var slider: some View", in: panel),
             let eventSliderScope = settingsBracedBlock(
                 after: "private struct EventSettingsMasterVolumeControl: View", in: events),
-            let refresh = settingsBracedBlock(after: "package func refreshLoginItem", in: session),
+            let refresh = settingsBracedBlock(after: "private func refreshLoginItem", in: session),
             let setEnabled = settingsBracedBlock(
-                after: "package func setLoginItemEnabled", in: session),
+                after: "private func setLoginItemEnabled", in: session),
             let retry = settingsBracedBlock(
-                after: "package func retryLoginItemOperation", in: session)
+                after: "private func retryLoginItemOperation", in: session)
         else {
             expect(false, "必须能解析 slider/Login deletion wiring")
             return
@@ -248,10 +248,10 @@ func runSettingsPresentationTargetSuites() {
         let code = scanned.codeWithoutStringLiterals
         guard scanned.unmodeledConstructs.isEmpty,
             let subscriptionBody = settingsBracedBlock(
-                after: "settingsPresentationCancellable = settingsPresentationSession.$state",
+                after: "settingsPresentationCancellable = session.$state",
                 in: code),
             let subscriptionPrefix = settingsSinkStatementPrefix(
-                after: "settingsPresentationCancellable = settingsPresentationSession.$state",
+                after: "settingsPresentationCancellable = session.$state",
                 in: code),
             let scheduler = settingsBracedBlock(
                 after: "private func scheduleSettingsPresentationAnnouncementDelivery",
@@ -261,7 +261,7 @@ func runSettingsPresentationTargetSuites() {
                 in: code),
             let showWindow = settingsBracedBlock(after: "func showWindow", in: code),
             let didBecomeKey = settingsBracedBlock(after: "func windowDidBecomeKey", in: code),
-            let unlatch = showWindow.range(of: "isPresentingWindow = false"),
+            let makeKey = showWindow.range(of: "presentedWindow.makeKeyAndOrderFront"),
             let showRetry = showWindow.range(
                 of: "scheduleSettingsPresentationAnnouncementDelivery()"),
             let deferredTurn = scheduler.range(of: "DispatchQueue.main.async"),
@@ -277,15 +277,15 @@ func runSettingsPresentationTargetSuites() {
                 of: "deliverPendingSettingsPresentationAnnouncement()"),
             let currentHead = delivery.range(
                 of: "settingsPresentationSession.state.pendingAnnouncement"),
-            let post = delivery.range(of: "announceBasicSettingsUpdate(sentence)"),
-            let acknowledgement = delivery.range(of: "acknowledgeAnnouncement")
+            let post = delivery.range(of: "NSAccessibility.post("),
+            let acknowledgement = delivery.range(of: ".acknowledgeAnnouncement")
         else {
             expect(false, "必须能完整解析 Settings semantic announcement native delivery")
             return
         }
 
         expect(
-            subscriptionBody.contains("guard state.pendingAnnouncement != nil")
+            subscriptionBody.contains("state.pendingAnnouncement != nil")
                 && subscriptionBody.contains("scheduleSettingsPresentationAnnouncementDelivery()")
                 && !subscriptionBody.contains("acknowledgeAnnouncement")
                 && !subscriptionPrefix.contains(".map(")
@@ -299,17 +299,17 @@ func runSettingsPresentationTargetSuites() {
                     "settingsPresentationSession.state.pendingAnnouncement"),
             "scheduler 必须先 guard/set latch，deferred 内先清 latch 再 delivery，且 async 前不读旧 head")
         expect(
-            delivery.contains("!isPresentingWindow")
+            delivery.contains("settingsPresentationSession.state.windowPhase == .key")
                 && delivery.contains("window.isVisible")
                 && delivery.contains("window.isKeyWindow")
                 && currentHead.lowerBound < post.lowerBound
                 && post.lowerBound < acknowledgement.lowerBound,
             "实际 post 前必须重读 exact current head 与 key/visible window，成功后才能 ack")
         expect(
-            unlatch.lowerBound < showRetry.lowerBound
-                && didBecomeKey.contains("settingsPresentationSession.refreshLoginItem()")
+            makeKey.lowerBound < showRetry.lowerBound
+                && didBecomeKey.contains(".windowPhaseChanged(.key)")
                 && didBecomeKey.contains("scheduleSettingsPresentationAnnouncementDelivery()"),
-            "pre-key debt 必须在 showWindow 清 latch 后及真实 didBecomeKey 中显式重试")
+            "pre-key debt 必须在 showWindow 结束及真实 didBecomeKey 中显式重试")
     }
 
     suite("Settings native announcement source audit：operator prefix 解析自证有牙") {
@@ -593,29 +593,31 @@ func runSettingsPresentationSliceSuites() {
             session.state.loginItemRegistration == .disabled
                 && session.state.language == preferences.language,
             "session 初始投影必须来自两个必填 owner，而不是 placeholder")
+        _ = session.send(.present(.route(nil)))
         adapterState.registration = .requiresApproval
-        session.refreshLoginItem()
+        _ = session.send(.windowPhaseChanged(.key))
         expect(
             session.state.loginItemRegistration == .requiresApproval
                 && session.state.pendingAnnouncement?.meaning
                     == .loginItemStatus(.requiresApproval),
             "重获 key 后的 refresh 必须投影最新系统事实并留下语义 announcement debt")
         if let announcement = session.state.pendingAnnouncement {
-            session.acknowledgeAnnouncement(id: announcement.id, didPost: true)
+            _ = session.send(.acknowledgeAnnouncement(id: announcement.id, didPost: true))
         }
         adapterState.registration = .disabled
-        session.refreshLoginItem()
+        _ = session.send(.windowPhaseChanged(.visibleNonKey))
+        _ = session.send(.windowPhaseChanged(.key))
         if let announcement = session.state.pendingAnnouncement {
-            session.acknowledgeAnnouncement(id: announcement.id, didPost: true)
+            _ = session.send(.acknowledgeAnnouncement(id: announcement.id, didPost: true))
         }
-        session.setLoginItemEnabled(true)
+        _ = session.send(.setLoginItemEnabled(true))
         expect(
             adapterState.requests == [true]
                 && session.state.loginItemRegistration == .disabled
                 && session.state.loginItemFailure?.reason == .systemRejected,
             "失败必须保留旧系统事实并在同一 presentation state 可见")
         adapterState.shouldFail = false
-        session.retryLoginItemOperation()
+        _ = session.send(.retryLoginItemOperation)
         expect(
             adapterState.requests == [true, true]
                 && session.state.loginItemRegistration == .requiresApproval
@@ -623,8 +625,10 @@ func runSettingsPresentationSliceSuites() {
             "重试必须重复精确意图并采用 adapter 重读的系统事实")
 
         expect(
-            session.perform(.openLoginItemsSettings) == .performed
-                && session.perform(.openCalendarPrivacySettings) == .performed
+            session.send(.performPlatformAction(.openLoginItemsSettings))
+                == .platformAction(.performed)
+                && session.send(.performPlatformAction(.openCalendarPrivacySettings))
+                    == .platformAction(.performed)
                 && platformActions == [.openLoginItemsSettings, .openCalendarPrivacySettings],
             "两个 Settings-only system effect 必须走穷尽 typed dispatcher")
     }
@@ -644,16 +648,18 @@ func runSettingsPresentationSliceSuites() {
                 loginItemSettings: login),
             actions: SettingsPresentationActions { _ in .performed })
 
-        session.setLoginItemEnabled(true)
+        _ = session.send(.setLoginItemEnabled(true))
         expect(
             session.state.loginItemRegistration == .disabled
                 && session.state.loginItemFailure?.reason == .systemRejected,
             "失败请求必须保留旧 registration 并公开 failure")
         if let failureAnnouncement = session.state.pendingAnnouncement {
-            session.acknowledgeAnnouncement(id: failureAnnouncement.id, didPost: true)
+            _ = session.send(
+                .acknowledgeAnnouncement(id: failureAnnouncement.id, didPost: true))
         }
 
-        session.refreshLoginItem()
+        _ = session.send(.present(.route(nil)))
+        _ = session.send(.windowPhaseChanged(.key))
         expect(
             session.state.loginItemRegistration == .disabled
                 && session.state.loginItemFailure == nil
@@ -673,22 +679,24 @@ func runSettingsPresentationSliceSuites() {
                 loginItemSettings: login),
             actions: SettingsPresentationActions { _ in .unavailable })
 
-        expect(session.perform(.openLoginItemsSettings) == .unavailable, "typed result 必须无损返回")
+        expect(
+            session.send(.performPlatformAction(.openLoginItemsSettings))
+                == .platformAction(.unavailable),
+            "typed result 必须无损返回")
         guard let announcement = session.state.pendingAnnouncement else {
             expect(false, "不可用 platform action 必须产生语义 announcement debt")
             return
         }
-        session.acknowledgeAnnouncement(id: announcement.id, didPost: false)
+        _ = session.send(.acknowledgeAnnouncement(id: announcement.id, didPost: false))
         expect(
             session.state.pendingAnnouncement?.id == announcement.id,
             "native post 失败不得消费 announcement debt")
-        session.acknowledgeAnnouncement(
-            id: announcement.id + 1,
-            didPost: true)
+        _ = session.send(
+            .acknowledgeAnnouncement(id: announcement.id + 1, didPost: true))
         expect(
             session.state.pendingAnnouncement?.id == announcement.id,
             "陈旧 acknowledgement 不得消费当前 head")
-        session.acknowledgeAnnouncement(id: announcement.id, didPost: true)
+        _ = session.send(.acknowledgeAnnouncement(id: announcement.id, didPost: true))
         expect(session.state.pendingAnnouncement == nil, "只有 exact-head 成功回执可消费 debt")
     }
 
@@ -706,11 +714,15 @@ func runSettingsPresentationSliceSuites() {
             MainActor.assumeIsolated {
                 guard let announcement = state.pendingAnnouncement else { return }
                 synchronouslyAcknowledgedIDs.append(announcement.id)
-                session.acknowledgeAnnouncement(id: announcement.id, didPost: true)
+                _ = session.send(
+                    .acknowledgeAnnouncement(id: announcement.id, didPost: true))
             }
         }
 
-        expect(session.perform(.openLoginItemsSettings) == .unavailable, "先产生一条真实 debt")
+        expect(
+            session.send(.performPlatformAction(.openLoginItemsSettings))
+                == .platformAction(.unavailable),
+            "先产生一条真实 debt")
         expect(
             synchronouslyAcknowledgedIDs == [1]
                 && session.state.pendingAnnouncement == nil
@@ -718,9 +730,9 @@ func runSettingsPresentationSliceSuites() {
             "@Published willSet 内同步 ack 后 public projection 不得被外层 stale state 覆盖")
         cancellable.cancel()
 
-        _ = session.perform(.openLoginItemsSettings)
+        _ = session.send(.performPlatformAction(.openLoginItemsSettings))
         let replacedID = session.state.pendingAnnouncement?.id
-        _ = session.perform(.openCalendarPrivacySettings)
+        _ = session.send(.performPlatformAction(.openCalendarPrivacySettings))
         guard let current = session.state.pendingAnnouncement else {
             expect(false, "head replacement 后必须保留最新 debt")
             return
@@ -731,16 +743,16 @@ func runSettingsPresentationSliceSuites() {
                     == .platformAction(.openCalendarPrivacySettings, .unavailable),
             "新 debt 必须以新稳定 ID 替换旧 head")
         if let replacedID {
-            session.acknowledgeAnnouncement(id: replacedID, didPost: true)
+            _ = session.send(.acknowledgeAnnouncement(id: replacedID, didPost: true))
         }
         expect(
             session.state.pendingAnnouncement?.id == current.id,
             "旧 head 的成功回执不得消费 replacement")
-        session.acknowledgeAnnouncement(id: current.id, didPost: false)
+        _ = session.send(.acknowledgeAnnouncement(id: current.id, didPost: false))
         expect(
             session.state.pendingAnnouncement?.id == current.id,
             "post false 不得消费 exact current head")
-        session.acknowledgeAnnouncement(id: current.id, didPost: true)
+        _ = session.send(.acknowledgeAnnouncement(id: current.id, didPost: true))
         expect(
             session.state.pendingAnnouncement == nil,
             "只有成功的 exact-current acknowledgement 才能清空最终 projection")
@@ -817,12 +829,15 @@ func runSettingsPresentationSliceSuites() {
                 "每个 fixture 必须在 supplied parent 下使用不同 UUID child root")
             expect(
                 first.session.state.loginItemRegistration == .requiresApproval
-                    && first.session.perform(.openCalendarPrivacySettings) == .performed
+                    && first.session.send(
+                        .performPlatformAction(.openCalendarPrivacySettings))
+                        == .platformAction(.performed)
                     && first.actionRecorder.actions == [.openCalendarPrivacySettings],
                 "fixture 必须通过真实 session 与 recording typed action seam 工作")
             expect(
-                first.soundPacksEditor.presentation.mode != .inactive,
-                "fixture 必须只交付 SoundPacksEditorOwner/presentation seam")
+                first.soundPacksEditor.presentation.mode == .inactive,
+                "General fixture 的 shared editor 必须保持 inactive，activation 只由 session route transaction 驱动"
+            )
 
             let hostingView = NSHostingView(rootView: first.rootView)
             hostingView.frame = NSRect(x: 0, y: 0, width: 620, height: 520)

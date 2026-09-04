@@ -4,97 +4,9 @@ import ClaudioLocalization
 
 /// One render-ready request at the AppKit accessibility seam. The semantic editor owner remains
 /// independent of AppKit and localization; the system poster only executes these supplied values.
-package struct SoundPacksEditorAccessibilityRequest: Equatable {
+package struct SoundPacksEditorAccessibilityRequest: Equatable, Sendable {
     package let sentence: String
     package let priority: Int
-}
-
-/// Replaceable native boundary for posting one announcement in the retained Settings window.
-/// Implementations must re-evaluate `isEligible` at the actual post point and report whether the
-/// request reached `NSAccessibility.post`.
-@MainActor
-package protocol SoundPacksEditorAccessibilityPosting: AnyObject {
-    func post(
-        _ request: SoundPacksEditorAccessibilityRequest,
-        window: NSWindow,
-        isEligible: @escaping @MainActor @Sendable () -> Bool,
-        completion: @escaping @MainActor @Sendable (Bool) -> Void)
-}
-
-/// Production accessibility adapter. Eligibility is deliberately checked inside the deferred
-/// block so a route or key-window change cannot consume an announcement that never reached AX.
-@MainActor
-package final class SystemSoundPacksEditorAccessibilityPoster:
-    SoundPacksEditorAccessibilityPosting
-{
-    package init() {}
-
-    package func post(
-        _ request: SoundPacksEditorAccessibilityRequest,
-        window: NSWindow,
-        isEligible: @escaping @MainActor @Sendable () -> Bool,
-        completion: @escaping @MainActor @Sendable (Bool) -> Void
-    ) {
-        DispatchQueue.main.async { [weak window] in
-            MainActor.assumeIsolated {
-                guard
-                    let window,
-                    window.isVisible,
-                    window.isKeyWindow,
-                    isEligible()
-                else {
-                    completion(false)
-                    return
-                }
-                NSAccessibility.post(
-                    element: window,
-                    notification: .announcementRequested,
-                    userInfo: [
-                        .announcement: request.sentence,
-                        .priority: request.priority,
-                    ])
-                completion(true)
-            }
-        }
-    }
-}
-
-/// Owns only the in-flight native delivery attempt. Queue ordering and acknowledgement identity
-/// remain in `SoundPacksEditorOwner`; this coordinator prevents duplicate native posts while one
-/// asynchronous eligibility check is pending.
-@MainActor
-package final class SoundPacksEditorAnnouncementDelivery {
-    private let poster: any SoundPacksEditorAccessibilityPosting
-    private var inFlightAnnouncementID: SoundPackEditorAnnouncement.ID?
-
-    package init(poster: any SoundPacksEditorAccessibilityPosting) {
-        self.poster = poster
-    }
-
-    package func attempt(
-        _ announcement: SoundPackEditorAnnouncement,
-        language: ClaudioAppLanguage,
-        window: NSWindow,
-        isEligible: @escaping @MainActor @Sendable () -> Bool,
-        acknowledge:
-            @escaping @MainActor @Sendable (SoundPackEditorAnnouncement.ID, Bool) -> Void
-    ) {
-        guard inFlightAnnouncementID == nil, isEligible() else { return }
-        let id = announcement.id
-        let request = soundPacksEditorAccessibilityRequest(
-            announcement,
-            language: language)
-        inFlightAnnouncementID = id
-        poster.post(
-            request,
-            window: window,
-            isEligible: isEligible
-        ) { [weak self] didPost in
-            guard let self, self.inFlightAnnouncementID == id else { return }
-            self.inFlightAnnouncementID = nil
-            acknowledge(id, didPost)
-        }
-    }
 }
 
 /// Resolves the owner's semantic announcement without inspecting raw model state, paths, pack

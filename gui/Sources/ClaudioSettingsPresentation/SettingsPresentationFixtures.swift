@@ -3,6 +3,7 @@ import AppKit
 import ClaudioCore
 import ClaudioGUICore
 import ClaudioLocalization
+import Combine
 import Foundation
 import SoundPacksWindow
 
@@ -11,6 +12,7 @@ import SoundPacksWindow
 @MainActor
 package final class SettingsPresentationActionRecorder {
     package private(set) var actions: [SettingsPlatformAction] = []
+    package private(set) var eventAudibilityChangeCount = 0
     private let result: SettingsPlatformActionResult
 
     package init(result: SettingsPlatformActionResult) {
@@ -21,6 +23,10 @@ package final class SettingsPresentationActionRecorder {
         actions.append(action)
         return result
     }
+
+    package func noteEventAudibilityInputsChanged() {
+        eventAudibilityChangeCount += 1
+    }
 }
 
 /// Production-shape DEBUG fixture composed only from the public presentation seams. The sound
@@ -30,6 +36,9 @@ package struct SettingsPresentationFixture {
     package let temporaryRoot: URL
     package let session: SettingsPresentationSession
     package let soundPacksEditor: SoundPacksEditorOwner
+    package let eventSettingsModel: PanelConfigController
+    package let integrationsModel: IntegrationDestinationModel
+    package let aiCueViewModel: AICueGenerationViewModel
     package let actionRecorder: SettingsPresentationActionRecorder
 
     package var rootView: SettingsRootView {
@@ -37,7 +46,24 @@ package struct SettingsPresentationFixture {
     }
 
     package var selectedDestination: SettingsDestination {
-        session.dependencies.navigation.resolution.destination
+        session.state.routeResolution.destination
+    }
+
+    package var lastSettingsDestination: SettingsDestination {
+        session.dependencies.preferences.lastSettingsDestination
+    }
+
+    package var previewStopRequestRevisions: AnyPublisher<UInt64, Never> {
+        session.eventSettingsSelection.$previewStopRequestRevision.eraseToAnyPublisher()
+    }
+
+    package func beginEventTransientActivity(
+        scope: PanelSoundScopeID = .global,
+        event: Event = .stop
+    ) {
+        _ = session.eventSettingsSelection.beginPreviewSequence()
+        session.eventSettingsSelection.beginAISession(scope: scope, event: event)
+        aiCueViewModel.begin(scope: scope, event: event)
     }
 }
 
@@ -51,7 +77,8 @@ package enum SettingsPresentationFixtures {
         route: SettingsRoute = .destination(.general),
         availability: SettingsRouteAvailability? = nil,
         textSize: ClaudioInterfaceTextSize = .standard,
-        experienceProfile: PreviewFixtures.SettingsExperienceProfile? = nil
+        experienceProfile: PreviewFixtures.SettingsExperienceProfile? = nil,
+        aiCueViewModel injectedAICueViewModel: AICueGenerationViewModel? = nil
     ) -> SettingsPresentationFixture {
         let temporaryRoot = temporaryParent.appendingPathComponent(
             "claudio-settings-presentation-fixture-\(UUID().uuidString)",
@@ -74,10 +101,15 @@ package enum SettingsPresentationFixtures {
         if generalState == .writeFailed {
             loginItemSettings.setEnabled(true)
         }
+        let settingsConfig = ClaudioConfig(
+            selectedPack: "settings-fixture-pack",
+            masterVolume: 0.7,
+            surfaceOverrides: [
+                HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
+                    selectedPack: "settings-fixture-workbuddy-pack")
+            ])
         let soundPacksEditor = SoundPacksEditorOwner.stateGalleryFixture(
-            previewConfig: ClaudioConfig(
-                selectedPack: "settings-fixture-pack",
-                masterVolume: 0.7),
+            previewConfig: settingsConfig,
             packCards: [
                 PackCard(
                     id: "settings-fixture-pack",
@@ -85,7 +117,14 @@ package enum SettingsPresentationFixtures {
                     isCC0: true,
                     presentEvents: Set(Event.allCases),
                     state: .complete,
-                    isSelected: true)
+                    isSelected: true),
+                PackCard(
+                    id: "settings-fixture-workbuddy-pack",
+                    name: "Settings Fixture WorkBuddy Pack",
+                    isCC0: true,
+                    presentEvents: Set(Event.allCases),
+                    state: .complete,
+                    isSelected: false),
             ],
             selectedPackID: "settings-fixture-pack",
             selectedEventRows: Event.allCases.map {
@@ -98,18 +137,12 @@ package enum SettingsPresentationFixtures {
                 userPacksDirectory: temporaryRoot.appendingPathComponent(
                     "packs", isDirectory: true),
                 durationProbe: SettingsPresentationFixtureDurationProbe(),
-                packsLockFile: temporaryRoot.appendingPathComponent("packs.lock")))
+                packsLockFile: temporaryRoot.appendingPathComponent("packs.lock")),
+            activation: nil)
         let hostState = PreviewFixtures.workBuddyVisualScenarios.first {
             $0.phase == .allImplementedBindingsCurrent
         }!.state
         let hostIntegrations = HostIntegrationPresentationStore(state: hostState)
-        let shellProjection = SettingsSoundPackShellProjection(
-            editorPresentation: soundPacksEditor.presentation,
-            sourceRows: hostIntegrations.content.sourceRows)
-        let navigation = SettingsWindowPresentationModel<NSRunningApplication>(
-            initialRoute: route,
-            preferences: preferences,
-            availability: availability ?? shellProjection.availability)
         let dynamicQuietPolicy = makeSettingsFixtureDynamicQuietPolicy(
             for: experienceProfile)
         let usageSettings = makeSettingsFixtureUsageSettings(for: experienceProfile)
@@ -128,7 +161,7 @@ package enum SettingsPresentationFixtures {
             clipboardWriter: IntegrationDestinationClipboardWriter { _ in true })
         let eventSettingsModel = PanelConfigController(
             previewConfigState: .operational(
-                ClaudioConfig(selectedPack: "settings-fixture-pack", masterVolume: 0.7)),
+                settingsConfig),
             eventRows: Event.allCases.map {
                 EventRow(
                     event: $0,
@@ -142,9 +175,12 @@ package enum SettingsPresentationFixtures {
                 packsLockFile: temporaryRoot.appendingPathComponent("event-packs.lock")))
         let nativeEffects = SoundPacksEditorNativeEffectsDispatcher(
             adapter: SettingsPresentationFixtureNativeEffectsAdapter())
+        let aiCueViewModel =
+            injectedAICueViewModel
+            ?? AICueGenerationViewModel(
+                previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState)
         let session = SettingsPresentationSession(
             dependencies: SettingsPresentationDependencies(
-                navigation: navigation,
                 preferences: preferences,
                 loginItemSettings: loginItemSettings,
                 dynamicQuietPolicy: dynamicQuietPolicy,
@@ -154,21 +190,27 @@ package enum SettingsPresentationFixtures {
                 soundPacksEditorOwner: soundPacksEditor,
                 soundPacksEditorNativeEffects: nativeEffects,
                 eventSettingsModel: eventSettingsModel,
-                eventSettingsSelection: EventSettingsWindowSelection(),
                 hostIntegrations: hostIntegrations,
                 integrationsModel: integrationsModel,
-                integrationsFocusCoordinator: IntegrationDestinationFocusCoordinator(),
-                aiCueViewModel: AICueGenerationViewModel(
-                    previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState)),
+                aiCueViewModel: aiCueViewModel),
             actions: SettingsPresentationActions(
                 handler: { actionRecorder.perform($0) },
-                onEventAudibilityInputsChanged: {},
-                announce: { _ in }))
+                onEventAudibilityInputsChanged: {
+                    actionRecorder.noteEventAudibilityInputsChanged()
+                }))
+
+        if let availability {
+            session.replaceAvailabilityForTesting(availability)
+        }
+        _ = session.send(.present(.route(route)))
 
         return SettingsPresentationFixture(
             temporaryRoot: temporaryRoot,
             session: session,
             soundPacksEditor: soundPacksEditor,
+            eventSettingsModel: eventSettingsModel,
+            integrationsModel: integrationsModel,
+            aiCueViewModel: aiCueViewModel,
             actionRecorder: actionRecorder)
     }
 }
@@ -179,8 +221,7 @@ extension SettingsPresentationActions {
     ) {
         self.init(
             handler: handler,
-            onEventAudibilityInputsChanged: {},
-            announce: { _ in })
+            onEventAudibilityInputsChanged: {})
     }
 }
 
@@ -202,22 +243,17 @@ extension SettingsPresentationDependencies {
             packCards: [],
             selectedPackID: nil,
             selectedEventRows: [],
-            environment: environment)
+            environment: environment,
+            activation: nil)
         let hostState = PreviewFixtures.workBuddyVisualScenarios.first {
             $0.phase == .allImplementedBindingsCurrent
         }!.state
         let hostIntegrations = HostIntegrationPresentationStore(state: hostState)
-        let shellProjection = SettingsSoundPackShellProjection(
-            editorPresentation: soundPacksEditorOwner.presentation,
-            sourceRows: hostIntegrations.content.sourceRows)
         let integrationOutcome = IntegrationDestinationActionOutcome(
             content: hostIntegrations.content,
             feedbackKind: .success,
             feedbackMessage: "fixture complete")
         self.init(
-            navigation: SettingsWindowPresentationModel<NSRunningApplication>(
-                preferences: preferences,
-                availability: shellProjection.availability),
             preferences: preferences,
             loginItemSettings: loginItemSettings,
             dynamicQuietPolicy: makeSettingsFixtureDynamicQuietPolicy(for: nil),
@@ -231,13 +267,11 @@ extension SettingsPresentationDependencies {
                 previewConfigState: .operational(
                     ClaudioConfig(selectedPack: "settings-fixture-pack")),
                 environment: environment),
-            eventSettingsSelection: EventSettingsWindowSelection(),
             hostIntegrations: hostIntegrations,
             integrationsModel: IntegrationDestinationModel(
                 content: hostIntegrations.content,
                 refreshHandler: IntegrationDestinationRefreshHandler { integrationOutcome },
                 actionHandler: IntegrationDestinationActionHandler { _ in integrationOutcome }),
-            integrationsFocusCoordinator: IntegrationDestinationFocusCoordinator(),
             aiCueViewModel: AICueGenerationViewModel(
                 previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState))
     }

@@ -40,27 +40,15 @@ public struct EmbeddedSoundPacksEditorView: View {
             nativeEffects: nativeEffects
         )
         .onAppear {
-            activate(route, requestsInitialFocus: true)
+            applyFocusFromPresentation(requestsInitialFocus: true)
         }
         .onChange(of: routeRequestRevision) { _ in
-            activate(route, requestsInitialFocus: false)
+            applyFocusFromPresentation(requestsInitialFocus: false)
         }
         .onChange(of: focusProjection) { _ in
             applyFocusFromPresentation(requestsInitialFocus: false)
         }
-        .onDisappear {
-            nativeEffects.handleLifecycle(.soundsViewDisappeared, owner: editorOwner)
-        }
         .accessibilityIdentifier("settings.sounds.editor")
-    }
-
-    private func activate(
-        _ route: SoundPacksWindowRoute,
-        requestsInitialFocus: Bool
-    ) {
-        _ = editorOwner.send(
-            .activate(.sounds(route: route, requestRevision: routeRequestRevision)))
-        applyFocusFromPresentation(requestsInitialFocus: requestsInitialFocus)
     }
 
     private func applyFocusFromPresentation(requestsInitialFocus: Bool) {

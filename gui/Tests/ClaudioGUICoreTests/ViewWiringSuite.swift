@@ -2696,6 +2696,8 @@ func runViewWiringSuites() {
                 "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let settingsController = codeWithoutStrings(
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
+            let settingsSession = codeWithoutStrings(
+                "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift"),
             let previewSequence = codeWithoutStrings(
                 "gui/Sources/ClaudioGUICore/EventPreviewSequence.swift"),
             let menu = codeWithoutStrings("gui/Sources/ClaudioGUI/MenuBarController.swift")
@@ -2709,6 +2711,7 @@ func runViewWiringSuites() {
         let flatAIViewWithStrings = collapsingWhitespace(aiViewWithStrings)
         let flatSettingsView = collapsingWhitespace(settingsView)
         let flatSettingsController = collapsingWhitespace(settingsController)
+        let flatSettingsSession = collapsingWhitespace(settingsSession)
         let flatPreviewSequence = collapsingWhitespace(previewSequence)
         let flatMenu = collapsingWhitespace(menu)
         expect(
@@ -2753,12 +2756,10 @@ func runViewWiringSuites() {
         expect(
             flatSettingsController.contains("private var window: NSWindow?")
                 && flatSettingsController.contains("window.isReleasedWhenClosed = false")
-                && flatSettingsController.contains("private let eventSettingsModel:")
-                && flatSettingsController.contains("private let eventSettingsSelection:")
-                && flatSettingsController.contains("applyEmbeddedRoute(route)")
-                && flatSettingsController.contains(
-                    "eventSettingsSelection.leaveDestination()"),
-            "事件设置必须由唯一 app-lifetime Settings window 承载并预应用 typed deep link")
+                && !flatSettingsController.contains("EventSettingsWindowSelection")
+                && flatSettingsSession.contains("eventSettingsSelection.select(eventRoute)")
+                && flatSettingsSession.contains("eventSettingsSelection.leaveDestination()"),
+            "事件设置必须由唯一 retained window 与 session lifecycle 承载 typed deep link")
         expect(
             flatView.contains(".onReceive(selection.$focusRequestRevision)")
                 && flatView.contains("focusedTarget = selection.focusTarget")
@@ -2770,23 +2771,23 @@ func runViewWiringSuites() {
             "事件设置窗口必须在每次路由时聚焦精确 scope/Event，并说明禁用动作的原因")
         expect(
             flatMenu.components(separatedBy: "makeEventSettingsConfigController(").count - 1 == 1
-                && flatMenu.components(separatedBy: "EventSettingsWindowSelection()").count - 1
+                && flatMenu.components(separatedBy: "SettingsPresentationSession(").count - 1
                     == 1
                 && !flatMenu.contains("EventSettingsWindowController(")
                 && flatMenu.contains("eventSettingsModel: eventSettingsModel")
-                && flatMenu.contains("eventSettingsSelection: eventSettingsSelection")
                 && flatMenu.contains("onOpenEventSettings:")
                 && flatMenu.contains("requestEventsSettings("),
             "MenuBar composition root 必须只保留一个事件写入/selection owner 并把面板入口接到 Settings")
         expect(
             flatSettingsView.contains("EventSettingsWindowView(")
                 && !flatSettingsView.contains("presentationContext:")
-                && flatSettingsView.contains("onConfigureSound: { model.request(.sounds($0)) }")
-                && flatSettingsView.contains("if let failure = model.resolution.failure")
-                && flatSettingsView.contains("eventSettingsSelection.requestInitialFocus(scopes:")
-                && flatSettingsController.contains("eventSettingsModel: eventSettingsModel")
-                && flatSettingsController.contains("eventSettingsSelection: eventSettingsSelection")
-                && flatSettingsController.contains("case .events(let scope, let event):"),
+                && flatSettingsView.contains(
+                    "settingsPresentationSession.send(.route(.sounds($0)))")
+                && flatSettingsView.contains(
+                    "settingsPresentationSession.state.routeResolution.failure")
+                && flatSettingsSession.contains(
+                    "eventSettingsSelection.requestInitialFocus(scopes:")
+                && flatSettingsSession.contains("case .events(let scope, let event):"),
             "统一设置必须嵌入同一事件事实/selection、预应用深链并内部路由 Sounds")
         expect(
             !flatView.contains("EventSettingsPresentationContext")
@@ -2832,7 +2833,9 @@ func runViewWiringSuites() {
                 && flatView.contains("EventSettingsAICueComposerView(")
                 && flatView.contains(
                     "adoptionEnabled: eventsEditorPresentation?.adoptionPermit != nil")
-                && flatView.contains("route: editorRoute")
+                && flatSettingsSession.contains(
+                    "EventSettingsWindowRoute(scope: aiSession.scope, event: aiSession.event)")
+                && flatSettingsSession.contains("self.activateEventsEditor()")
                 && flatView.contains("eventAccess.first(where:")
                 && flatView.contains("?.adoptionAvailability")
                 && !flatView.contains("AICueAdoptionTarget")
@@ -2888,7 +2891,8 @@ func runViewWiringSuites() {
             flatView.contains("stopCandidatePreview()")
                 && flatView.contains(
                     "aiCueViewModel.adopt(candidateID: candidateID, permit: permit)")
-                && flatSettingsController.contains("aiCueViewModel.endSession()"),
+                && flatSettingsSession.contains("dependencies.aiCueViewModel.endSession()")
+                && !flatSettingsController.contains("aiCueViewModel"),
             "采用、离开页面、关闭唯一 retained Settings 和作用域变化必须清理未采用候选")
         expect(
             flatView.contains("soundPacksEditorOwner.perform( .adoptAICue(")
@@ -3337,8 +3341,8 @@ func runViewWiringSuites() {
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
             let nativeEffects = codeWithoutStrings(
                 "gui/Sources/SoundPacksWindow/SoundPacksEditorNativeEffects.swift"),
-            let settingsController = codeWithoutStrings(
-                "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
+            let settingsSession = codeWithoutStrings(
+                "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift"),
             let settingsView = codeWithoutStrings(
                 "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let menuBar = codeWithoutStrings(
@@ -3379,10 +3383,8 @@ func runViewWiringSuites() {
                 "package final class SoundPacksEditorNativeEffectsDispatcher: ObservableObject")
                 && !window.contains("@StateObject private var nativeEffects")
                 && !window.contains("SystemSoundPacksEditorNativeEffectsAdapter()")
-                && settingsController.contains(
-                    "private let soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher"
-                )
-                && settingsController.contains(
+                && settingsSession.contains("dependencies.soundPacksEditorNativeEffects")
+                && settingsView.contains(
                     "soundPacksEditorNativeEffects: soundPacksEditorNativeEffects")
                 && settingsView.contains(
                     "let soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher")
@@ -3392,18 +3394,16 @@ func runViewWiringSuites() {
                     - 1 == 2
                 && window.contains("let presentation: SoundPacksEditorPresentation")
                 && window.contains("presentation: presentation"),
-            "dispatcher/player 必须由 Settings controller 持有并 required 注入整个 production view tree；"
+            "dispatcher/player 必须由 Settings session 持有并 required 注入整个 production view tree；"
                 + "root 只观察 owner 一次并把同 revision 的 presentation 传给不观察 owner 的 child")
         expect(
-            settingsController.contains(
+            settingsSession.contains(
                 "soundPacksEditorNativeEffects.handleLifecycle(")
-                && settingsController.contains(
-                    ".settingsWindowWillClose, owner: soundPacksEditorOwner)")
-                && window.contains(
-                    "nativeEffects.handleLifecycle(.soundsViewDisappeared, owner: editorOwner)")
-                && nativeEffects.contains("case settingsWindowWillClose")
+                && settingsSession.contains(".soundsViewDisappeared")
+                && settingsSession.contains(".eventsViewDisappeared")
+                && !window.contains(".soundsViewDisappeared")
                 && nativeEffects.contains("case soundsViewDisappeared"),
-            "retained NSWindow close 与 SwiftUI disappear 必须进入同一 compiled lifecycle seam，"
+            "retained Settings session 必须成为唯一 compiled lifecycle seam，"
                 + "由同一 dispatcher 消费 owner-signed stop")
         expect(
             !window.contains(".onChange(of: editorOwner.presentation.revision)")

@@ -296,8 +296,8 @@ func runDynamicQuietPolicySuites() {
                 "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let owner = dynamicQuietSource(
                 "gui/Sources/ClaudioGUI/DynamicQuietSystemObserver.swift"),
-            let settingsController = dynamicQuietSource(
-                "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
+            let menu = dynamicQuietSource(
+                "gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let settingsActions = dynamicQuietSource(
                 "gui/Sources/ClaudioGUI/SettingsPlatformActionsAdapter.swift"),
             let preview = dynamicQuietSource(
@@ -326,8 +326,9 @@ func runDynamicQuietPolicySuites() {
                 && !view.contains("ForEach(Event.allCases)"),
             "通知页必须提供两条策略与 Calendar 恢复动作，不得复制 Event 开关")
         expect(
-            settingsController.contains("private let dynamicQuietObserver")
-                && settingsController.contains("DynamicQuietSystemObserver()")
+            menu.contains("private let dynamicQuietObserver")
+                && menu.contains("let dynamicQuietObserver = DynamicQuietSystemObserver()")
+                && menu.contains("dynamicQuietPolicy: dynamicQuietObserver.policy")
                 && owner.contains("DynamicQuietSnapshotPublisher(")
                 && owner.components(separatedBy: "DynamicQuietSnapshotPublisher(").count - 1 == 1,
             "Focus 与 Calendar 必须共用一个 app-lifetime owner 和 publisher")
