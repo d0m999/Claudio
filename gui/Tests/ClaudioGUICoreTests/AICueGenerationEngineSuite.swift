@@ -206,18 +206,56 @@ private actor GenerationIgnoringCancellationProviderFixture: AICueProvider {
     }
 }
 
-private final class GenerationSlowThirdDurationProbe: AudioDurationProbing, @unchecked Sendable {
+private final class GenerationControlledThirdDurationProbe:
+    AudioDurationProbing, @unchecked Sendable
+{
     private let lock = NSLock()
     private var invocationCount = 0
+    private var thirdProbeEntered = false
+    private var thirdProbeCompleted = false
+    private let thirdProbeRelease = DispatchSemaphore(value: 0)
+
+    var didEnterThirdProbe: Bool { lock.withLock { thirdProbeEntered } }
+    var didCompleteThirdProbe: Bool { lock.withLock { thirdProbeCompleted } }
 
     func probeDuration(of fileURL: URL) -> TimeInterval? {
         let invocation = lock.withLock {
             invocationCount += 1
             return invocationCount
         }
-        if invocation == 3 { Thread.sleep(forTimeInterval: 0.3) }
+        if invocation == 3 {
+            lock.withLock { thirdProbeEntered = true }
+            thirdProbeRelease.wait()
+            lock.withLock { thirdProbeCompleted = true }
+        }
         return 1
     }
+
+    func releaseThirdProbe() {
+        thirdProbeRelease.signal()
+    }
+}
+
+@MainActor
+private func waitForThirdDurationProbeToEnter(
+    _ probe: GenerationControlledThirdDurationProbe
+) async -> Bool {
+    for _ in 0..<2_000 {
+        if probe.didEnterThirdProbe { return true }
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+    return probe.didEnterThirdProbe
+}
+
+@MainActor
+private func waitForThirdDurationProbeToComplete(
+    _ probe: GenerationControlledThirdDurationProbe
+) async {
+    for _ in 0..<2_000 {
+        if probe.didCompleteThirdProbe { return }
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+    expect(false, "释放后的第三次 duration probe 必须在 safety deadline 内完成")
 }
 
 private actor GenerationSlowRetrySleeperFixture: AICueRetrySleeping {

@@ -108,7 +108,9 @@ func runSoundPacksEditorMutationImpactGapRedSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 101)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "stop.mp3" }
+            }
             guard case .sounds(let sounds) = owner.presentation.mode,
                 case .ready(let files) = sounds.inventory,
                 let assign = files.first(where: { $0.fileName == "stop.mp3" })?
@@ -353,7 +355,9 @@ func runSoundPacksEditorMutationImpactGapRedSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 104)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "orphan.mp3" }
+            }
             guard case .sounds(let sounds) = owner.presentation.mode,
                 case .ready(let files) = sounds.inventory,
                 let request = files.first(where: { $0.fileName == "orphan.mp3" })?.deleteAction,

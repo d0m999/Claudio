@@ -1506,7 +1506,9 @@ func runSoundPacksEditorAsyncOperationSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 242)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "fast-delete.mp3" }
+            }
             drainSoundEditorObservationAnnouncements(owner)
             guard let importPermit = soundEditorImportPermit(owner: owner, bindTo: nil) else {
                 expect(false, "out-of-order fixture 必须先取得 import permit")

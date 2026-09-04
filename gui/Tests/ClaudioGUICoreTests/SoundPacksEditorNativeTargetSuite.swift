@@ -50,7 +50,7 @@ private func activateNativeTargetFixture(
         .activate(.sounds(route: .overview, requestRevision: requestRevision)))
     await waitForSoundEditorReady(fixture.owner, library: fixture.library)
     if waitsForInventory {
-        await waitForSoundEditorInventory(fixture.owner)
+        await waitForSoundEditorInventory(fixture.owner) { _ in true }
     }
     guard case .sounds(let sounds) = fixture.owner.presentation.mode else { return nil }
     return sounds

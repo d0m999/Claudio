@@ -149,7 +149,9 @@ func runSoundPacksEditorAnnouncementGapRedSuites() async {
                 return
             }
             _ = owner.send(.invoke(inspectB))
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "stop.mp3" }
+            }
             announcementGapDrain(owner)
             guard case .sounds(let inspected) = owner.presentation.mode,
                 let useB = inspected.selectedPack?.useAction,
@@ -163,7 +165,9 @@ func runSoundPacksEditorAnnouncementGapRedSuites() async {
                 expect(false, "[129-ANN-RED] successful use 必须形成 notice debt")
                 return
             }
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "stop.mp3" }
+            }
             guard let assign = announcementGapAssignment(owner, event: .notification),
                 await announcementGapFailUnderLock(
                     owner: owner,

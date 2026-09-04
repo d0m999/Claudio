@@ -200,7 +200,9 @@ func runSoundPacksEditorInterfaceSuites() async {
             let context = SoundPacksEditorContext.sounds(route: .overview, requestRevision: 9)
             _ = owner.send(.activate(context))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "stop.mp3" }
+            }
             guard case .sounds(let beforeSounds) = owner.presentation.mode,
                 let oldInspectB = beforeSounds.packs.first(where: { $0.id == "pack-b" })?
                     .inspectAction
@@ -233,7 +235,9 @@ func runSoundPacksEditorInterfaceSuites() async {
                 }
                 await Task.yield()
             }
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "stop.mp3" }
+            }
             let afterRefresh = owner.presentation
             guard case .sounds(let refreshedSounds) = afterRefresh.mode,
                 let refreshedInspectB = refreshedSounds.packs.first(where: { $0.id == "pack-b" })?
@@ -549,7 +553,9 @@ func runSoundPacksEditorInterfaceSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 25)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "stop.mp3" }
+            }
             guard case .sounds(let ready) = owner.presentation.mode,
                 let inspectB = ready.packs.first(where: { $0.id == "pack-b" })?.inspectAction
             else {
@@ -614,7 +620,9 @@ func runSoundPacksEditorInterfaceSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 27)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "stop.mp3" }
+            }
             guard case .sounds(let fresh) = owner.presentation.mode,
                 let oldUse = fresh.packs.first(where: { $0.id == "pack-b" })?.useAction
             else {

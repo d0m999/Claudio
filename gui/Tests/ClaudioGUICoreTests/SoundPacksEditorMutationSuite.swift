@@ -1977,16 +1977,20 @@ func waitForSoundEditorReady(
 
 @MainActor
 @discardableResult
-func waitForSoundEditorInventory(_ owner: SoundPacksEditorOwner) async -> Bool {
+func waitForSoundEditorInventory(
+    _ owner: SoundPacksEditorOwner,
+    satisfying predicate: ([SoundPackEditorAudioPresentation]) -> Bool
+) async -> Bool {
     for _ in 0..<512 {
         if case .sounds(let sounds) = owner.presentation.mode,
-            case .ready = sounds.inventory
+            case .ready(let inventory) = sounds.inventory,
+            predicate(inventory)
         {
             return true
         }
         await Task.yield()
     }
-    expect(false, "等待 sound editor inventory ready 超时")
+    expect(false, "等待 sound editor inventory 收敛到精确事实超时")
     return false
 }
 
