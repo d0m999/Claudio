@@ -352,7 +352,9 @@ func runAICueGenerationEngineSuites() async {
                 locale: "zh-Hans",
                 providerProfileID: .elevenLabsGlobal,
                 deadline: .startingNow())
-            expect(generation.candidates.map(\.variant) == [.clear, .brisk, .restrained], "候选必须稳定按 A/B/C 返回")
+            expect(
+                generation.candidates.map(\.variant) == [.clear, .brisk, .restrained],
+                "候选必须稳定按 A/B/C 返回")
             expect(generation.candidates.count == 3, "不能展示少于或多于三个候选")
             expect(generation.profileID == .elevenLabsGlobal, "generation 必须冻结 profile identity")
             expect(
@@ -373,7 +375,9 @@ func runAICueGenerationEngineSuites() async {
             expect(posixPermissions(at: tempRoot) == 0o700, "临时根目录必须是 0700")
             expect(posixPermissions(at: directory) == 0o700, "generation 目录必须是 0700")
             expect(
-                generation.candidates.allSatisfy { posixPermissions(at: $0.asset.fileURL) == 0o600 },
+                generation.candidates.allSatisfy {
+                    posixPermissions(at: $0.asset.fileURL) == 0o600
+                },
                 "每个临时候选必须是 0600")
         }
     }
@@ -802,10 +806,14 @@ func runAICueGenerationEngineSuites() async {
                 deadline: .startingNow())
             await engine.discard(generationID: first.id)
             expect(
-                first.candidates.allSatisfy { !FileManager.default.fileExists(atPath: $0.asset.fileURL.path) },
+                first.candidates.allSatisfy {
+                    !FileManager.default.fileExists(atPath: $0.asset.fileURL.path)
+                },
                 "丢弃必须删除该 generation 的全部候选")
             expect(
-                second.candidates.allSatisfy { FileManager.default.fileExists(atPath: $0.asset.fileURL.path) },
+                second.candidates.allSatisfy {
+                    FileManager.default.fileExists(atPath: $0.asset.fileURL.path)
+                },
                 "丢弃一个 generation 不能误删另一个")
         }
     }
