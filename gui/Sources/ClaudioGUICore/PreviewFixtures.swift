@@ -306,7 +306,8 @@ public enum PreviewFixtures {
 
     /// Production basic-destination states used by the unified Settings visual/AX matrix. Each
     /// case names a real semantic state owned by the destination model; the gallery only injects
-    /// deterministic adapters and continues to render ``SettingsWindowView`` itself.
+    /// deterministic adapters and continues to render the ``ClaudioSettingsPresentation``
+    /// module's `SettingsRootView` seam itself.
     public enum SettingsGeneralGalleryState: Sendable, Equatable {
         case ready
         case permissionRequired
@@ -450,9 +451,10 @@ public enum PreviewFixtures {
 
     public static let settingsExperienceScenarios = SettingsExperienceScenario.allCases
 
-    /// Exhaustive visual/AX roster for the allowlisted AI Cue profiles, credential states,
-    /// composer lifecycle and the failure families required by the Settings acceptance matrix.
-    /// The gallery renders production service-card, credential-sheet and composer views directly.
+    /// Exhaustive visual roster for the allowlisted AI Cue profiles, credential states, composer
+    /// lifecycle and failure families required by the Settings acceptance matrix. The gallery
+    /// routes every scenario through SettingsStateGalleryView into the production
+    /// SettingsRootView/session mount.
     public enum AICueGalleryScenario: String, CaseIterable, Identifiable, Sendable {
         case elevenLabsMissing = "elevenlabs.missing"
         case elevenLabsVerified = "elevenlabs.verified"
@@ -492,7 +494,7 @@ public enum PreviewFixtures {
         }
 
         public var previewState: AICueGenerationPreviewState {
-            let target = rendersCredentialSheet ? nil : PreviewFixtures.aiCueTarget
+            let session = rendersCredentialSheet ? nil : PreviewFixtures.aiCueSession
             let generation = facts.needsGeneration ? PreviewFixtures.aiCueGeneration : nil
             let outcome = self == .applied ? PreviewFixtures.aiCueAdoptionOutcome : nil
             return AICueGenerationPreviewState(
@@ -503,9 +505,9 @@ public enum PreviewFixtures {
                 phase: facts.composerPhase,
                 adoptingCandidateID: self == .adopting
                     ? PreviewFixtures.aiCueCandidateIDs[1] : nil,
-                soundDescription: target == nil ? "" : PreviewFixtures.aiCueDescription,
+                soundDescription: session == nil ? "" : PreviewFixtures.aiCueDescription,
                 displayName: generation == nil ? "" : PreviewFixtures.aiCueDisplayName,
-                target: target,
+                session: session,
                 generation: self == .applied ? nil : generation,
                 failure: facts.composerFailure,
                 adoptionOutcome: outcome)
@@ -620,15 +622,14 @@ public enum PreviewFixtures {
                 Facts(
                     composerPhase: .candidatesReady,
                     needsGeneration: true,
-                    composerFailure: .adoption(.ineligible(.targetChanged)))
+                    composerFailure: .adoption(.targetChanged))
             case .adoptionRollback:
                 Facts(
                     composerPhase: .candidatesReady,
                     needsGeneration: true,
                     composerFailure: .adoption(
                         .importedButNotBound(
-                            imported: PreviewFixtures.sampleImportedAudioFile,
-                            reason: .manifest(.lockBusy))))
+                            fileName: PreviewFixtures.sampleImportedAudioFile.fileName)))
             }
         }
 
@@ -677,10 +678,9 @@ public enum PreviewFixtures {
         UUID(uuidString: "A1000000-0000-0000-0000-000000000012")!,
         UUID(uuidString: "A1000000-0000-0000-0000-000000000013")!,
     ]
-    private static let aiCueTarget = try! AICueAdoptionTarget(
-        surface: .workBuddy,
-        event: .stop,
-        packID: "workbuddy-private")
+    private static let aiCueSession = AICueComposerSession(
+        scope: .surface(.workBuddy),
+        event: .stop)
     private static let aiCuePlan = AICueSoundPlan(
         suggestedDisplayName: aiCueDisplayName,
         modality: .speech,
@@ -714,9 +714,7 @@ public enum PreviewFixtures {
                     providerRequestID: "gallery-\(variant.ordinal)"))
         },
         generatedAt: Date(timeIntervalSince1970: 1_700_000_000))
-    private static let aiCueAdoptionOutcome = AICueAdoptionOutcome(
-        target: aiCueTarget,
-        importedFile: sampleImportedAudioFile,
+    private static let aiCueAdoptionOutcome = AICueComposerAdoptionOutcome(
         finalDisplayName: aiCueDisplayName)
 
     public static let settingsRouteAvailability = SettingsRouteAvailability(

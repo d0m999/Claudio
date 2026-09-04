@@ -2,7 +2,9 @@ import AppKit
 import ClaudioCore
 import ClaudioGUICore
 import ClaudioLocalization
+import ClaudioSettingsPresentation
 import Combine
+import SoundPacksWindow
 import SwiftUI
 
 /// Breaks the pre-`super.init()` construction cycle: `PanelView` needs an action closure before
@@ -48,7 +50,7 @@ private final class MenuBarActionRouter {
 }
 
 private struct PendingSettingsPresentation {
-    let route: SettingsRoute?
+    let request: SettingsPresentationRequest
     let panelFocusTarget: PanelFocusTarget?
     let handbackApplication: NSRunningApplication?
 }
@@ -83,6 +85,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let hostIntegrations: HostIntegrationPresentationStore
     private let hostIntegrationMatrixProvider: HostIntegrationMatrixProvider
     private let bootstrapReports: BootstrapReportPresentationStore
+    private let dynamicQuietObserver: DynamicQuietSystemObserver
     private var hostIntegrationRefreshTask: Task<Void, Never>?
     private var appActivationCancellable: AnyCancellable?
     private var menuBarIconCancellable: AnyCancellable?
@@ -225,41 +228,29 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let aiCueViewModel = AICueGenerationViewModel(
             credentialManager: aiCueCredentialManager,
             generator: aiCueGenerator)
-        let eventSettingsSelection = EventSettingsWindowSelection()
-        let adoptAICue:
-            @MainActor (AICueAdoptionRequest) async -> Result<
-                AICueAdoptionOutcome, AICueAdoptionError
-            > = {
-                [
-                    weak soundPacksEditorOwner, weak eventSettingsModel, weak actionRouter,
-                ]
-                request in
-                guard let soundPacksEditorOwner else {
-                    return .failure(.ineligible(.writesStopped))
-                }
-                let result = await soundPacksEditorOwner.adoptAICue(request)
-                if case .success = result {
-                    eventSettingsModel?.reload()
+        let dynamicQuietObserver = DynamicQuietSystemObserver()
+        let settingsPresentationSession = SettingsPresentationSession(
+            dependencies: SettingsPresentationDependencies(
+                preferences: languageStore,
+                loginItemSettings: loginItemSettings,
+                dynamicQuietPolicy: dynamicQuietObserver.policy,
+                usageSettings: makeUsageSettingsModel(),
+                globalShortcutSettings: globalShortcutSettings,
+                aboutSettings: makeSystemAboutSettingsModel(
+                    surfaceFacts: hostIntegrations.safeSurfaceFacts),
+                soundPacksEditorOwner: soundPacksEditorOwner,
+                soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher(
+                    adapter: SystemSoundPacksEditorNativeEffectsAdapter()),
+                eventSettingsModel: eventSettingsModel,
+                hostIntegrations: hostIntegrations,
+                integrationsModel: integrationsModel,
+                aiCueViewModel: aiCueViewModel),
+            actions: makeSystemSettingsPresentationActions(
+                onEventAudibilityInputsChanged: { [weak actionRouter] in
                     actionRouter?.audibilityInputsChanged()
-                }
-                return result
-            }
+                }))
         let settingsWindowController = SettingsWindowController(
-            preferences: languageStore,
-            loginItemSettings: loginItemSettings,
-            usageSettings: makeUsageSettingsModel(),
-            globalShortcutSettings: globalShortcutSettings,
-            soundPacksEditorOwner: soundPacksEditorOwner,
-            eventSettingsModel: eventSettingsModel,
-            eventSettingsSelection: eventSettingsSelection,
-            hostIntegrations: hostIntegrations,
-            integrationsModel: integrationsModel,
-            aiCueViewModel: aiCueViewModel,
-            audioEnvironment: audioEnvironment,
-            onEventAudibilityInputsChanged: { [weak actionRouter] in
-                actionRouter?.audibilityInputsChanged()
-            },
-            onAdoptAICue: adoptAICue)
+            session: settingsPresentationSession)
 
         // Built BEFORE the panel so the panel's width callback can capture it (the callback can't
         // capture `self` — we're still pre-`super.init()` here).
@@ -332,6 +323,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         self.hostIntegrations = hostIntegrations
         self.hostIntegrationMatrixProvider = integrationMatrixProvider
         self.bootstrapReports = bootstrapReports
+        self.dynamicQuietObserver = dynamicQuietObserver
         // `.transient`: AppKit closes the popover on a click outside it, on an app switch,
         // and — ONLY once the popover's window is key — on Esc. That last clause is the whole
         // catch: `.transient` alone does NOT buy "Esc 关闭", because a status-item popover in
@@ -544,7 +536,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         returnFocusTo target: PanelFocusTarget
     ) {
         requestSettingsPresentation(
-            route: .sounds(route),
+            request: .route(.sounds(route)),
             returnFocusTo: target)
     }
 
@@ -554,7 +546,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         returnFocusTo target: PanelFocusTarget
     ) {
         requestSettingsPresentation(
-            route: .events(scope: route.scope, event: route.event),
+            request: .route(.events(scope: route.scope, event: route.event)),
             returnFocusTo: target)
     }
 
@@ -594,7 +586,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             scopes: scopes)
 
         requestSettingsPresentation(
-            route: settingsWindowController.prepareEventSettingsRoute(route),
+            request: .eventShortcut(route),
             returnFocusTo: nil,
             handbackApplication: globalShortcutHandbackApplication())
     }
@@ -606,12 +598,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         preselect host: HostID?,
         returnFocusTo target: PanelFocusTarget
     ) {
-        if let host {
-            _ = integrationsModel.selectHost(host)
-        }
         let selectedHost = host ?? integrationsModel.selectedHost ?? .claudeCode
         requestSettingsPresentation(
-            route: .integrations(surface: selectedHost.surfaceID),
+            request: .route(.integrations(surface: selectedHost.surfaceID)),
             returnFocusTo: target)
     }
 
@@ -619,18 +608,18 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// restores the last legal top-level destination from the shared typed preferences.
     func requestSettingsWindowPresentation() {
         requestSettingsPresentation(
-            route: nil,
+            request: .route(nil),
             returnFocusTo: nil,
             handbackApplication: globalShortcutHandbackApplication())
     }
 
     private func requestSettingsPresentation(
-        route: SettingsRoute?,
+        request: SettingsPresentationRequest,
         returnFocusTo target: PanelFocusTarget?,
         handbackApplication explicitHandback: NSRunningApplication? = nil
     ) {
         let presentation = PendingSettingsPresentation(
-            route: route,
+            request: request,
             panelFocusTarget: target,
             handbackApplication: explicitHandback ?? previousApp)
         previousApp = nil
@@ -647,7 +636,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
     private func presentSettings(_ presentation: PendingSettingsPresentation) {
         settingsWindowController.showWindow(
-            route: presentation.route,
+            request: presentation.request,
             returnFocusTo: presentation.handbackApplication
         ) { [weak self] latestHandbackApplication in
             guard let self else { return }

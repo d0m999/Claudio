@@ -1,14 +1,9 @@
 import AppKit
 import ClaudioGUICore
-import Combine
 import ServiceManagement
 
 @MainActor
-func makeSystemLoginItemServiceAdapter(bundle: Bundle = .main) -> (
-    status: () -> LoginItemRegistrationState,
-    setEnabled: (Bool) throws -> LoginItemRegistrationState,
-    openSystemSettings: (() -> Void)?
-) {
+func makeSystemLoginItemServiceAdapter(bundle: Bundle = .main) -> LoginItemServiceAdapter {
     if #available(macOS 13.0, *) {
         let service = SMAppService.mainApp
         return makeModernLoginItemServiceAdapter(
@@ -18,10 +13,7 @@ func makeSystemLoginItemServiceAdapter(bundle: Bundle = .main) -> (
             requiresApprovalValue: SMAppService.Status.requiresApproval.rawValue,
             notFoundValue: SMAppService.Status.notFound.rawValue,
             register: { try service.register() },
-            unregister: { try service.unregister() },
-            openSystemSettings: {
-                SMAppService.openSystemSettingsLoginItems()
-            })
+            unregister: { try service.unregister() })
     }
 
     let embeddedBundleURL = bundle.bundleURL
@@ -45,55 +37,4 @@ private func legacyLoginItemIsRegistered(_ identifier: String) -> Bool? {
         return nil
     }
     return jobs.contains { $0["Label"] as? String == identifier }
-}
-
-/// SwiftUI observation stays in the executable target; the Foundation-only projector remains the
-/// single owner of registration, failure-preservation, and retry behavior.
-@MainActor
-final class LoginItemSettingsModel: ObservableObject {
-    @Published private(set) var projection:
-        (
-            registration: LoginItemRegistrationState,
-            failure: (
-                requestedEnabled: Bool,
-                reason: LoginItemOperationFailureReason
-            )?
-        )
-    private let adapter:
-        (
-            status: () -> LoginItemRegistrationState,
-            setEnabled: (Bool) throws -> LoginItemRegistrationState,
-            openSystemSettings: (() -> Void)?
-        )
-
-    init(
-        adapter: (
-            status: () -> LoginItemRegistrationState,
-            setEnabled: (Bool) throws -> LoginItemRegistrationState,
-            openSystemSettings: (() -> Void)?
-        )
-    ) {
-        self.adapter = adapter
-        projection = makeLoginItemSettingsProjection(registration: adapter.status())
-    }
-
-    func refresh() {
-        projection = makeLoginItemSettingsProjection(registration: adapter.status())
-    }
-
-    func setEnabled(_ enabled: Bool) {
-        projection = projectLoginItemRequest(enabled, from: projection, using: adapter)
-    }
-
-    func retryFailedOperation() {
-        guard let failure = projection.failure else { return }
-        projection = projectLoginItemRequest(
-            failure.requestedEnabled,
-            from: makeLoginItemSettingsProjection(registration: projection.registration),
-            using: adapter)
-    }
-
-    func openSystemSettings() {
-        adapter.openSystemSettings?()
-    }
 }

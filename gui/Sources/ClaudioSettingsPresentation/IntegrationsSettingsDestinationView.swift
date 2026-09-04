@@ -4,15 +4,15 @@ import ClaudioGUICore
 import ClaudioLocalization
 import SwiftUI
 
-/// Prototype-aligned Integrations destination. It owns no host configuration or capability-matrix
+/// Production Integrations destination. It owns no host configuration or capability-matrix
 /// state; all facts and asynchronous lifecycle behavior come from the Core model.
 @MainActor
 struct IntegrationsSettingsDestinationView: View {
     @ObservedObject var model: IntegrationDestinationModel
     @ObservedObject var focusCoordinator: IntegrationDestinationFocusCoordinator
     @ObservedObject var languageStore: ClaudioPreferences
-    let onManageEvents: (@MainActor (HostID) -> Void)?
-    let onAnnouncement: (@MainActor (String) -> Void)?
+    let onManageEvents: @MainActor (HostID) -> Void
+    let onAnnouncement: @MainActor (String) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
@@ -21,6 +21,20 @@ struct IntegrationsSettingsDestinationView: View {
     @State private var feedbackAnnouncer = IntegrationsFeedbackAnnouncementModel()
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
+
+    init(
+        model: IntegrationDestinationModel,
+        focusCoordinator: IntegrationDestinationFocusCoordinator,
+        languageStore: ClaudioPreferences,
+        onManageEvents: @escaping @MainActor (HostID) -> Void,
+        onAnnouncement: @escaping @MainActor (String) -> Void
+    ) {
+        self.model = model
+        self.focusCoordinator = focusCoordinator
+        self.languageStore = languageStore
+        self.onManageEvents = onManageEvents
+        self.onAnnouncement = onAnnouncement
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -95,7 +109,9 @@ struct IntegrationsSettingsDestinationView: View {
         }
         .animation(
             reduceMotion ? nil : .easeInOut(duration: 0.16),
-            value: model.feedback?.revision)
+            value: model.feedback?.revision
+        )
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.integrations))
     }
 
     private var pageHeader: some View {
@@ -285,7 +301,7 @@ struct IntegrationsSettingsDestinationView: View {
                 .accessibilityIdentifier("integrations.destination.copy-source.\(host.rawValue)")
             case .manageEvents(let host):
                 Button(l10n.text(.settingsIntegrationsManageEvents)) {
-                    onManageEvents?(host)
+                    onManageEvents(host)
                 }
                 .accessibilityHint(l10n.text(.settingsIntegrationsManageEventsHint))
                 .accessibilityIdentifier("integrations.destination.manage-events.\(host.rawValue)")
@@ -455,7 +471,7 @@ struct IntegrationsSettingsDestinationView: View {
                 model.feedback,
                 language: languageStore.language)
         else { return }
-        onAnnouncement?(sentence)
+        onAnnouncement(sentence)
     }
 
     private func localizedAgentStatus(_ status: HostSourceRowStatus) -> String {

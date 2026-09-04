@@ -9,7 +9,7 @@ struct UsageSettingsView: View {
     @ObservedObject var model: UsageSettingsModel
     @ObservedObject var preferences: ClaudioPreferences
     let focusedTarget: FocusState<SettingsWindowFocusTarget?>.Binding
-    let onAnnouncement: (@MainActor (String) -> Void)?
+    let onAnnouncement: @MainActor (String) -> Void
 
     @State private var confirmation: UsageClearConfirmation?
 
@@ -48,9 +48,10 @@ struct UsageSettingsView: View {
             }
         }
         .frame(maxWidth: 700, alignment: .leading)
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.usage))
         .task { model.refresh() }
         .onReceive(model.$feedback.dropFirst().compactMap { $0 }) { feedback in
-            onAnnouncement?(feedbackText(feedback))
+            onAnnouncement(feedbackText(feedback))
         }
         .alert(item: $confirmation) { target in
             switch target {

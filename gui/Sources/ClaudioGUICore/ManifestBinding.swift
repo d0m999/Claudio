@@ -64,6 +64,52 @@ public enum ManifestBindError: Error, Sendable, Equatable {
     /// 取包锁时撞上一个**真的**系统错误（不是争用）—— 坏掉的文件系统、权限、路径被占。
     /// 与 ``lockBusy`` 分开，理由同 ``FileLock``：把真错误当成「忙，重试」会让用户永远重试下去。
     case lockFailed(errno: Int32)
+    /// The Event mapping no longer matches the value captured before an asynchronous import.
+    /// The comparison runs under `packs.lock`, before the transform, so no external manifest
+    /// update or unknown sibling is overwritten.
+    case targetChanged
+}
+
+public enum ManifestEventBindingExpectation: Sendable, Equatable {
+    case unmapped
+    case mapped(fileName: String)
+}
+
+/// Carries the optional Event compare-and-set condition through the existing single locked
+/// read-modify-write body. Keeping this policy beside the transform preserves one manifest read
+/// path and lets the body abort before encoding when an async target has drifted.
+@MainActor
+private final class LockedManifestTransform {
+    private let expectedEventBinding: (event: Event, binding: ManifestEventBindingExpectation)?
+    private let body: (inout [String: Any]) -> Void
+    private(set) var failure: ManifestBindError?
+
+    init(
+        expectedEventBinding: (event: Event, binding: ManifestEventBindingExpectation)?,
+        body: @escaping (inout [String: Any]) -> Void
+    ) {
+        self.expectedEventBinding = expectedEventBinding
+        self.body = body
+    }
+
+    fileprivate func callAsFunction(_ json: inout [String: Any]) {
+        if let expectedEventBinding {
+            let events = (json["events"] as? [String: Any]) ?? [:]
+            let current = events[expectedEventBinding.event.manifestKey] as? String
+            let matches: Bool
+            switch expectedEventBinding.binding {
+            case .unmapped:
+                matches = current == nil
+            case .mapped(let fileName):
+                matches = current == fileName
+            }
+            guard matches else {
+                failure = .targetChanged
+                return
+            }
+        }
+        body(&json)
+    }
 }
 
 // MARK: - The shared read-modify-write primitive (PLAN-SOUND-MANAGER.md §2.1, T3)
@@ -131,6 +177,7 @@ public func mutateManifestJSON(
     at packDirectory: URL,
     lockFile: URL,
     expectedManifestID: String? = nil,
+    expectedEventBinding: (event: Event, binding: ManifestEventBindingExpectation)? = nil,
     _ transform: (inout [String: Any]) -> Void
 ) -> Result<Void, ManifestBindError> {
     // 整段读-改-写都在锁里。**别把锁收窄到只包最后那次 `write`** —— 那样两个写者仍然可以各自
@@ -143,14 +190,19 @@ public func mutateManifestJSON(
     // 字节没动 —— 四条新断言全绿，而丢更新的窗口原地打开。今天挡着它的只有「临界区是一个
     // 函数体」这个形状（`performManifestMutation` 是 `private`、只有这一个调用点），那是可读性
     // 保护，不是断言。见 TODOS。
-    let outcome = withNonBlockingLock(path: lockFile.path) {
-        performManifestMutation(
-            at: packDirectory, expectedManifestID: expectedManifestID, transform)
-    }
-    switch outcome {
-    case .ran(let result): return result
-    case .skipped: return .failure(.lockBusy)
-    case .failed(let errno): return .failure(.lockFailed(errno: errno))
+    return withoutActuallyEscaping(transform) { body in
+        let transform = LockedManifestTransform(
+            expectedEventBinding: expectedEventBinding,
+            body: body)
+        let outcome = withNonBlockingLock(path: lockFile.path) {
+            performManifestMutation(
+                at: packDirectory, expectedManifestID: expectedManifestID, transform)
+        }
+        switch outcome {
+        case .ran(let result): return result
+        case .skipped: return .failure(.lockBusy)
+        case .failed(let errno): return .failure(.lockFailed(errno: errno))
+        }
     }
 }
 
@@ -162,7 +214,7 @@ public func mutateManifestJSON(
 private func performManifestMutation(
     at packDirectory: URL,
     expectedManifestID: String?,
-    _ transform: (inout [String: Any]) -> Void
+    _ transform: LockedManifestTransform
 ) -> Result<Void, ManifestBindError> {
     let manifestData: Data
     switch loadPackManifestData(in: packDirectory) {
@@ -219,8 +271,8 @@ private func performManifestMutation(
                 reason:
                     "manifest.json 的 id「\(id)」与目标声音包「\(expectedManifestID)」不一致"))
     }
-
     transform(&json)
+    if let failure = transform.failure { return .failure(failure) }
 
     let manifestFile = packDirectory.appendingPathComponent("manifest.json")
 
@@ -314,7 +366,8 @@ public func bindEventToManifest(
     event: Event,
     fileName: String,
     packID: String,
-    environment: AudioImportEnvironment
+    environment: AudioImportEnvironment,
+    expectedEventBinding: ManifestEventBindingExpectation? = nil
 ) -> Result<Void, ManifestBindError> {
     let userPackDirectory: URL
     switch resolveUserPackDirectory(packID: packID, environment: environment) {
@@ -331,8 +384,12 @@ public func bindEventToManifest(
         return .failure(.fileNotFound(fileName: fileName))
     }
 
-    return mutateManifestJSON(at: userPackDirectory, lockFile: environment.packsLockFile) {
-        json in
+    return mutateManifestJSON(
+        at: userPackDirectory,
+        lockFile: environment.packsLockFile,
+        expectedManifestID: packID,
+        expectedEventBinding: expectedEventBinding.map { (event, $0) }
+    ) { json in
         var events = (json["events"] as? [String: Any]) ?? [:]
         events[event.manifestKey] = fileName
         json["events"] = events
@@ -359,7 +416,8 @@ public func bindAICueToManifest(
     fileName: String,
     displayName: AICueDisplayName,
     packID: String,
-    environment: AudioImportEnvironment
+    environment: AudioImportEnvironment,
+    expectedEventBinding: ManifestEventBindingExpectation? = nil
 ) -> Result<AICueManifestBindingOutcome, ManifestBindError> {
     let userPackDirectory: URL
     switch resolveUserPackDirectory(packID: packID, environment: environment) {
@@ -377,7 +435,8 @@ public func bindAICueToManifest(
     let result = mutateManifestJSON(
         at: userPackDirectory,
         lockFile: environment.packsLockFile,
-        expectedManifestID: packID
+        expectedManifestID: packID,
+        expectedEventBinding: expectedEventBinding.map { (event, $0) }
     ) { json in
         var events = (json["events"] as? [String: Any]) ?? [:]
         var audioNames = (json["audio_names"] as? [String: Any]) ?? [:]

@@ -2530,6 +2530,48 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在检查「%@」。" } }
       }
     },
+    "sound-packs.announcement.operation.unchanged" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ made no changes." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@未产生更改。" } }
+      }
+    },
+    "sound-packs.announcement.operation.succeeded" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ completed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@已完成。" } }
+      }
+    },
+    "sound-packs.announcement.operation.partial" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ partially completed: %@ succeeded, %@ failed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@部分完成：成功 %@，失败 %@。" } }
+      }
+    },
+    "sound-packs.announcement.operation.failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ failed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@失败。" } }
+      }
+    },
+    "sound-packs.announcement.operation.cancelled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ was cancelled." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@已取消。" } }
+      }
+    },
+    "sound-packs.announcement.operation.cancelled-after-changes" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ was cancelled after some changes were saved." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@已取消，但部分更改已保存。" } }
+      }
+    },
+    "sound-packs.announcement.operation.orphan" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ could not finish. Imported audio was retained for recovery." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@未能完成。已保留导入音频以供恢复。" } }
+      }
+    },
     "sound-packs.announcement.window.empty" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound Packs window. No sound packs are available to manage." } },

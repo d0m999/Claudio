@@ -1,6 +1,7 @@
 import AppKit
 import ClaudioCore
 import ClaudioGUICore
+import ClaudioSettingsPresentation
 import SwiftUI
 
 /// The real menu-bar app entry point (ENGINEERING.md T15 D2) — replaces T7's temporary

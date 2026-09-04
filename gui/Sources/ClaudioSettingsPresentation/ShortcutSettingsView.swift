@@ -9,7 +9,7 @@ struct ShortcutSettingsView: View {
     @ObservedObject var model: GlobalShortcutSettingsModel
     @ObservedObject var preferences: ClaudioPreferences
     let focusedTarget: FocusState<SettingsWindowFocusTarget?>.Binding
-    let onAnnouncement: (@MainActor (String) -> Void)?
+    let onAnnouncement: @MainActor (String) -> Void
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var recordingAction: GlobalShortcutAction?
@@ -33,6 +33,7 @@ struct ShortcutSettingsView: View {
             }
         }
         .frame(maxWidth: 640, alignment: .leading)
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.shortcuts))
         .background {
             LocalShortcutCaptureView(
                 isRecording: recordingAction != nil,
@@ -192,7 +193,7 @@ struct ShortcutSettingsView: View {
     private func announceState(_ action: GlobalShortcutAction) {
         let state = model.state(for: action)
         let value = state.failure.map(shortcutFailureText) ?? currentValue(state)
-        onAnnouncement?(
+        onAnnouncement(
             l10n.format(
                 .settingsAnnouncementValue,
                 actionTitle(action) as NSString,
@@ -238,7 +239,9 @@ private struct LocalShortcutCaptureView: NSViewRepresentable {
     let onCancel: @MainActor () -> Void
 
     func makeNSView(context: Context) -> LocalShortcutCaptureNSView {
-        LocalShortcutCaptureNSView()
+        LocalShortcutCaptureNSView(
+            onCapture: onCapture,
+            onCancel: onCancel)
     }
 
     func updateNSView(_ view: LocalShortcutCaptureNSView, context: Context) {
@@ -259,8 +262,22 @@ private struct LocalShortcutCaptureView: NSViewRepresentable {
 @MainActor
 private final class LocalShortcutCaptureNSView: NSView {
     var isRecording = false
-    var onCapture: (@MainActor (UInt32, GlobalShortcutModifiers) -> Void)?
-    var onCancel: (@MainActor () -> Void)?
+    var onCapture: @MainActor (UInt32, GlobalShortcutModifiers) -> Void
+    var onCancel: @MainActor () -> Void
+
+    init(
+        onCapture: @escaping @MainActor (UInt32, GlobalShortcutModifiers) -> Void,
+        onCancel: @escaping @MainActor () -> Void
+    ) {
+        self.onCapture = onCapture
+        self.onCancel = onCancel
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -271,10 +288,10 @@ private final class LocalShortcutCaptureNSView: NSView {
         }
         isRecording = false
         if event.keyCode == 53 {
-            onCancel?()
+            onCancel()
             return
         }
-        onCapture?(UInt32(event.keyCode), shortcutModifiers(event.modifierFlags))
+        onCapture(UInt32(event.keyCode), shortcutModifiers(event.modifierFlags))
     }
 }
 

@@ -3,6 +3,7 @@ import AppKit
 import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
+import ClaudioSettingsPresentation
 import ClaudioLocalization
 import SoundPacksWindow
 import SwiftUI
@@ -149,7 +150,10 @@ private enum EventSettingsGalleryWidth: String, CaseIterable, Identifiable {
     case standard
 
     var id: String { rawValue }
-    var value: CGFloat { self == .minimum ? 680 : 820 }
+    var value: CGFloat {
+        self == .minimum
+            ? SettingsWindowGeometry.minimumWidth : SettingsWindowGeometry.defaultWidth
+    }
 }
 
 private enum SettingsGalleryAppearance: String, CaseIterable, Identifiable {
@@ -173,7 +177,9 @@ struct EventSettingsLayoutGalleryView: View {
                                 caption:
                                     "\(language.selfName) · \(textSize.rawValue) · \(appearance.rawValue) · \(width.rawValue)"
                             ) {
-                                EventSettingsLayoutFrame(
+                                SettingsWindowRouteFrame(
+                                    route: .events(scope: .surface(.workBuddy), event: .stop),
+                                    availability: PreviewFixtures.settingsRouteAvailability,
                                     language: language,
                                     textSize: textSize,
                                     width: width.value
@@ -195,14 +201,18 @@ struct ComplexAccessibilityEnvironmentGalleryView: View {
         ) {
             GalleryFrame(caption: "Increase Contrast") {
                 AccessibilityHighContrastGalleryMount(
-                    content: EventSettingsLayoutFrame(
+                    content: SettingsWindowRouteFrame(
+                        route: .events(scope: .surface(.workBuddy), event: .stop),
+                        availability: PreviewFixtures.settingsRouteAvailability,
                         language: .english,
                         textSize: .standard,
                         width: EventSettingsGalleryWidth.minimum.value
                     ))
             }
             GalleryFrame(caption: "Reduce Transparency") {
-                EventSettingsLayoutFrame(
+                SettingsWindowRouteFrame(
+                    route: .events(scope: .surface(.workBuddy), event: .stop),
+                    availability: PreviewFixtures.settingsRouteAvailability,
                     language: .zhHans,
                     textSize: .standard,
                     width: EventSettingsGalleryWidth.minimum.value
@@ -210,7 +220,9 @@ struct ComplexAccessibilityEnvironmentGalleryView: View {
                 .environment(\.settingsReduceTransparencyOverride, true)
             }
             GalleryFrame(caption: "Reduce Motion") {
-                EventSettingsLayoutFrame(
+                SettingsWindowRouteFrame(
+                    route: .events(scope: .surface(.workBuddy), event: .stop),
+                    availability: PreviewFixtures.settingsRouteAvailability,
                     language: .english,
                     textSize: .maximum,
                     width: EventSettingsGalleryWidth.minimum.value
@@ -242,121 +254,6 @@ private struct AccessibilityHighContrastGalleryMount<Content: View>: NSViewRepre
     }
 }
 
-@MainActor
-private struct EventSettingsLayoutFrame: View {
-    @StateObject private var selection: EventSettingsWindowSelection
-    @StateObject private var hostIntegrations: HostIntegrationPresentationStore
-    @StateObject private var languageStore: ClaudioPreferences
-    @StateObject private var aiCueViewModel: AICueGenerationViewModel
-    @StateObject private var soundPacksModel: SoundPacksWindowModel
-    private let panelModel: PanelConfigController
-    private let width: CGFloat
-
-    init(
-        language: ClaudioAppLanguage,
-        textSize: ClaudioInterfaceTextSize,
-        width: CGFloat
-    ) {
-        self.width = width
-        let preferences = ClaudioPreferences(previewLanguage: language)
-        preferences.setInterfaceTextSize(textSize)
-        _languageStore = StateObject(wrappedValue: preferences)
-        _selection = StateObject(
-            wrappedValue: EventSettingsWindowSelection(
-                route: EventSettingsWindowRoute(
-                    scope: .surface(.workBuddy),
-                    event: .stop)))
-
-        let hostState = PreviewFixtures.workBuddyVisualScenarios.first {
-            $0.phase == .allImplementedBindingsCurrent
-        }!.state
-        _hostIntegrations = StateObject(
-            wrappedValue: HostIntegrationPresentationStore(
-                state: hostState,
-                configurationSources: [:]))
-
-        var enabledEvents = Dictionary(
-            uniqueKeysWithValues: Event.allCases.map { ($0.cliName, true) })
-        enabledEvents[Event.notification.cliName] = false
-        let baseConfig = ClaudioConfig(
-            selectedPack: "global-pack",
-            masterVolume: 0.75,
-            eventsEnabled: enabledEvents,
-            surfaceOverrides: [
-                HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
-                    selectedPack: "workbuddy-private",
-                    eventsEnabled: [Event.notification.cliName: true])
-            ])
-        let effectiveConfig = ClaudioConfig(
-            selectedPack: "workbuddy-private",
-            masterVolume: 0.75,
-            eventsEnabled: Dictionary(
-                uniqueKeysWithValues: Event.allCases.map { ($0.cliName, true) }))
-        let packCards = [
-            PackCard(
-                id: "global-pack",
-                name: "Global Signals",
-                isCC0: false,
-                presentEvents: Set(Event.allCases),
-                state: .complete,
-                isSelected: false),
-            PackCard(
-                id: "workbuddy-private",
-                name: "WorkBuddy Private",
-                isCC0: false,
-                presentEvents: Set(Event.allCases),
-                state: .complete,
-                isSelected: true),
-        ]
-        let rows = Event.allCases.map {
-            EventRow(
-                event: $0,
-                coverage: .present(fileName: "\($0.cliName).mp3"),
-                enabled: true)
-        }
-        panelModel = PanelConfigController(
-            previewConfigState: .operational(baseConfig),
-            effectiveConfig: effectiveConfig,
-            selectedSurface: .workBuddy,
-            eventRows: rows,
-            packCards: packCards,
-            selectedPackMetadata: SelectedPackMetadata(
-                id: "workbuddy-private",
-                name: "WorkBuddy Private"),
-            environment: previewAudioImportEnvironment)
-        _soundPacksModel = StateObject(
-            wrappedValue: SoundPacksWindowModel(
-                previewConfig: baseConfig,
-                packCards: packCards,
-                selectedPackID: "workbuddy-private",
-                selectedEventRows: rows,
-                environment: previewAudioImportEnvironment,
-                refreshCoordinator: SoundPacksRefreshCoordinator()))
-        _aiCueViewModel = StateObject(
-            wrappedValue: AICueGenerationViewModel(
-                previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState))
-    }
-
-    var body: some View {
-        EventSettingsWindowView(
-            model: panelModel,
-            selection: selection,
-            hostIntegrations: hostIntegrations,
-            languageStore: languageStore,
-            aiCueViewModel: aiCueViewModel,
-            soundPacksModel: soundPacksModel,
-            audioEnvironment: previewAudioImportEnvironment,
-            onConfigureSound: { _ in },
-            onAudibilityInputsChanged: {},
-            onPackSwitch: { _ in },
-            onAnnouncement: { _ in },
-            reloadsOnAppear: false,
-            onAdoptAICue: { _ in .failure(.ineligible(.targetChanged)) }
-        )
-        .frame(width: width, height: 640)
-    }
-}
-
 struct AICueExperienceGalleryView: View {
     var body: some View {
         GallerySection(
@@ -371,10 +268,12 @@ struct AICueExperienceGalleryView: View {
                                 caption:
                                     "\(language.selfName) · \(textSize.rawValue) · \(appearance.rawValue) · \(scenario.rawValue)"
                             ) {
-                                AICueExperienceStateFrame(
-                                    scenario: scenario,
+                                SettingsWindowRouteFrame(
+                                    route: .events(scope: .global, event: .stop),
+                                    availability: PreviewFixtures.settingsRouteAvailability,
                                     language: language,
-                                    textSize: textSize
+                                    textSize: textSize,
+                                    aiCueScenario: scenario
                                 )
                                 .environment(\.colorScheme, appearance.colorScheme)
                             }
@@ -387,297 +286,55 @@ struct AICueExperienceGalleryView: View {
 }
 
 @MainActor
-private struct AICueExperienceStateFrame: View {
-    let scenario: PreviewFixtures.AICueGalleryScenario
-    @StateObject private var languageStore: ClaudioPreferences
-    @StateObject private var viewModel: AICueGenerationViewModel
-
-    init(
-        scenario: PreviewFixtures.AICueGalleryScenario,
-        language: ClaudioAppLanguage,
-        textSize: ClaudioInterfaceTextSize
-    ) {
-        self.scenario = scenario
-        let preferences = ClaudioPreferences(previewLanguage: language)
-        preferences.setInterfaceTextSize(textSize)
-        _languageStore = StateObject(wrappedValue: preferences)
-        _viewModel = StateObject(
-            wrappedValue: AICueGenerationViewModel(previewState: scenario.previewState))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            EventSettingsAICueServiceCard(
-                viewModel: viewModel,
-                languageStore: languageStore,
-                onManageCredential: {})
-
-            if scenario.rendersCredentialSheet {
-                EventSettingsAICueCredentialSheet(
-                    viewModel: viewModel,
-                    languageStore: languageStore)
-            } else {
-                EventSettingsAICueComposerView(
-                    viewModel: viewModel,
-                    languageStore: languageStore,
-                    eventTitle: localizedEventName(.stop, language: languageStore.language),
-                    playingCandidateID: scenario.playingCandidateID,
-                    onConfigureCredential: {},
-                    onPreviewCandidate: { _ in },
-                    onAdoptCandidate: { _ in },
-                    onClose: {})
-            }
-        }
-        .frame(width: 720, alignment: .leading)
-        .padding(18)
-        .environment(\.dynamicTypeSize, languageStore.interfaceTextSize.dynamicTypeSize)
-    }
-}
-
-@MainActor
 private struct SettingsWindowRouteFrame: View {
-    @StateObject private var model: SettingsWindowPresentationModel<NSRunningApplication>
-    @StateObject private var languageStore: ClaudioPreferences
-    @StateObject private var dynamicQuietPolicy: DynamicQuietPolicyController
-    @StateObject private var loginItemSettings: LoginItemSettingsModel
-    @StateObject private var usageSettings: UsageSettingsModel
-    @StateObject private var globalShortcutSettings: GlobalShortcutSettingsModel
-    @StateObject private var aboutSettings: AboutSettingsModel
+    let route: SettingsRoute
+    let availability: SettingsRouteAvailability
+    let language: ClaudioAppLanguage
+    let textSize: ClaudioInterfaceTextSize
+    let experienceProfile: PreviewFixtures.SettingsExperienceProfile?
+    let width: CGFloat
+    let aiCueScenario: PreviewFixtures.AICueGalleryScenario?
+    let integrationScenario: PreviewFixtures.HostIntegrationScenario?
+    let integrationInFlightAction: HostIntegrationUserAction?
 
     init(
         route: SettingsRoute,
         availability: SettingsRouteAvailability,
         language: ClaudioAppLanguage,
         textSize: ClaudioInterfaceTextSize = .standard,
-        experienceScenario: PreviewFixtures.SettingsExperienceScenario? = nil
+        experienceScenario: PreviewFixtures.SettingsExperienceScenario? = nil,
+        width: CGFloat = SettingsWindowGeometry.minimumWidth,
+        aiCueScenario: PreviewFixtures.AICueGalleryScenario? = nil,
+        integrationScenario: PreviewFixtures.HostIntegrationScenario? = nil,
+        integrationInFlightAction: HostIntegrationUserAction? = nil
     ) {
-        let preferences = ClaudioPreferences(previewLanguage: language)
-        let experienceProfile = experienceScenario?.profile
-        preferences.setInterfaceTextSize(textSize)
-        _model = StateObject(
-            wrappedValue: SettingsWindowPresentationModel(
-                initialRoute: route,
-                preferences: preferences,
-                availability: availability))
-        _languageStore = StateObject(wrappedValue: preferences)
-        _dynamicQuietPolicy = StateObject(
-            wrappedValue: Self.makeDynamicQuietPolicy(for: experienceProfile))
-        _loginItemSettings = StateObject(
-            wrappedValue: Self.makeLoginItemSettings(for: experienceProfile))
-        _usageSettings = StateObject(
-            wrappedValue: Self.makeUsageSettings(for: experienceProfile))
-        _globalShortcutSettings = StateObject(
-            wrappedValue: Self.makeShortcutSettings(for: experienceProfile))
-        _aboutSettings = StateObject(
-            wrappedValue: Self.makeAboutSettings(for: experienceProfile))
+        self.route = route
+        self.availability = availability
+        self.language = language
+        self.textSize = textSize
+        experienceProfile = experienceScenario?.profile
+        self.width = width
+        self.aiCueScenario = aiCueScenario
+        self.integrationScenario = integrationScenario
+        self.integrationInFlightAction = integrationInFlightAction
     }
 
     var body: some View {
-        SettingsWindowView(
-            model: model,
-            preferences: languageStore,
-            dynamicQuietPolicy: dynamicQuietPolicy,
-            loginItemSettings: loginItemSettings,
-            usageSettings: usageSettings,
-            globalShortcutSettings: globalShortcutSettings,
-            aboutSettings: aboutSettings
+        SettingsStateGalleryView(
+            route: route,
+            availability: availability,
+            language: language,
+            textSize: textSize,
+            experienceProfile: experienceProfile,
+            aiCueScenario: aiCueScenario,
+            integrationScenario: integrationScenario,
+            integrationInFlightAction: integrationInFlightAction
         )
         .frame(
-            width: SettingsWindowGeometry.minimumWidth,
+            width: width,
             height: SettingsWindowGeometry.minimumHeight)
     }
 
-    private static func makeLoginItemSettings(
-        for profile: PreviewFixtures.SettingsExperienceProfile?
-    ) -> LoginItemSettingsModel {
-        let state = profile?.general ?? .ready
-        let status: LoginItemRegistrationState =
-            state == .permissionRequired ? .requiresApproval : .disabled
-        let model = LoginItemSettingsModel(
-            adapter: makeLoginItemServiceAdapter(
-                status: { status },
-                setEnabled: { enabled in
-                    if state == .writeFailed {
-                        throw LoginItemOperationFailureReason.systemRejected
-                    }
-                    return enabled ? .enabled : .disabled
-                },
-                openSystemSettings: {}))
-        if state == .writeFailed {
-            model.setEnabled(true)
-        }
-        return model
-    }
-
-    private static func makeDynamicQuietPolicy(
-        for profile: PreviewFixtures.SettingsExperienceProfile?
-    ) -> DynamicQuietPolicyController {
-        let state = profile?.notifications ?? .ready
-        let suiteName = "Claudio.SettingsGallery.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        let policyEnabled = profile?.destination == .notifications
-        if policyEnabled {
-            defaults.setVolatileDomain(
-                [
-                    DynamicQuietPolicyController.focusDefaultsKey: true,
-                    DynamicQuietPolicyController.calendarDefaultsKey: true,
-                ],
-                forName: suiteName)
-        }
-        let permissionDenied = state == .permissionRequired
-        let publicationGate = SettingsPreviewPublicationGate()
-        let focusState = FocusQuietSystemState(
-            authorization: permissionDenied ? .denied : .authorized,
-            isFocused: permissionDenied ? nil : false)
-        let calendarState = CalendarQuietSystemState(
-            authorization: permissionDenied ? .denied : .authorized,
-            events: permissionDenied ? nil : [])
-        let model = DynamicQuietPolicyController(
-            defaults: defaults,
-            readFocusState: { focusState },
-            requestFocusAuthorization: { $0(focusState) },
-            readCalendarState: { _ in calendarState },
-            requestCalendarAuthorization: { $0(calendarState) },
-            publish: { _, _, now in
-                guard publicationGate.succeeds else { return nil }
-                return state == .stale
-                    ? now : now.addingTimeInterval(12)
-            })
-        if state == .writeFailed {
-            publicationGate.succeeds = false
-            model.refresh()
-        }
-        return model
-    }
-
-    private static func makeUsageSettings(
-        for profile: PreviewFixtures.SettingsExperienceProfile?
-    ) -> UsageSettingsModel {
-        let state = profile?.usage ?? .empty
-        let empty = usagePresentation(state: .missing, hasEvents: false)
-        let presentation: UsageActivityPresentation
-        switch state {
-        case .ready, .stale:
-            presentation = usagePresentation(state: .available, hasEvents: true)
-        case .unreadable:
-            presentation = usagePresentation(state: .unreadable, hasEvents: false)
-        case .loading, .empty, .writeFailed:
-            presentation = empty
-        }
-        let feedback: UsageSettingsFeedback? =
-            switch state {
-            case .stale:
-                UsageSettingsFeedback(action: .clearHistory, failure: .historyClearFailed)
-            case .writeFailed:
-                UsageSettingsFeedback(action: .copyLogPath, failure: .clipboardFailed)
-            case .loading, .ready, .empty, .unreadable:
-                nil
-            }
-        return UsageSettingsModel(
-            previewPresentation: presentation,
-            isRefreshing: state == .loading,
-            feedback: feedback)
-    }
-
-    private static func usagePresentation(
-        state: UsageHistorySourceState,
-        hasEvents: Bool
-    ) -> UsageActivityPresentation {
-        let events =
-            hasEvents
-            ? [
-                UsageEventActivity(
-                    event: .stop,
-                    resultCounts: [
-                        UsagePlaybackResultCount(result: .played, count: 4),
-                        UsagePlaybackResultCount(result: .muted, count: 1),
-                    ])
-            ] : []
-        return UsageActivityPresentation(
-            surfaces: HostID.productVisibleCases.map {
-                UsageSurfaceActivity(
-                    host: $0,
-                    retainedCount: hasEvents ? 5 : 0,
-                    events: events,
-                    sourceState: state)
-            },
-            log: UsageDiagnosticLogSnapshot(
-                path: "/Users/example/.claudio/claudio.log",
-                state: state == .unreadable
-                    ? .unreadable : (hasEvents ? .available(sizeBytes: 512) : .missing),
-                failures: []))
-    }
-
-    private static func makeShortcutSettings(
-        for profile: PreviewFixtures.SettingsExperienceProfile?
-    ) -> GlobalShortcutSettingsModel {
-        let state = profile?.shortcuts ?? .empty
-        let readyShortcut = GlobalShortcut(
-            shortcutID: .togglePanel,
-            keyCode: 0,
-            modifiers: [.command, .control])
-        let persisted = try? JSONEncoder().encode(readyShortcut)
-        let model = GlobalShortcutSettingsModel(
-            adapter: GlobalHotKeyAdapter(
-                register: { _ in
-                    if state == .writeFailed {
-                        throw GlobalShortcutAdapterError.conflict
-                    }
-                },
-                unregister: { _ in },
-                setActionHandler: { _ in }),
-            persistence: GlobalShortcutPersistenceAdapter(
-                read: { action in
-                    state == .ready && action == .togglePanel
-                        ? persisted : nil
-                },
-                persist: { _, _ in }),
-            actionHandler: { _ in })
-        if state == .writeFailed {
-            model.replace(.togglePanel, keyCode: 0, modifiers: [.command, .control])
-        }
-        return model
-    }
-
-    private static func makeAboutSettings(
-        for profile: PreviewFixtures.SettingsExperienceProfile?
-    ) -> AboutSettingsModel {
-        let state = profile?.about ?? .ready
-        let empty = state == .empty
-        let model = AboutSettingsModel(
-            bundleFacts: empty
-                ? projectAboutBundleFacts(
-                    AboutBundleFactsInput(
-                        brandName: nil,
-                        productName: nil,
-                        version: nil,
-                        build: nil,
-                        architecture: nil,
-                        minimumSystemVersion: nil,
-                        operatingSystemVersion: "15.6.1"))
-                : PreviewFixtures.aboutBundleFacts,
-            resources: empty
-                ? AboutBundledResourceKind.allCases.map {
-                    AboutBundledResource(kind: $0, url: nil)
-                } : PreviewFixtures.aboutBundledResources,
-            pathFacts: empty
-                ? AboutPathKind.allCases.map {
-                    AboutPathExistenceFact(kind: $0, exists: false)
-                } : PreviewFixtures.aboutPathFacts,
-            surfaceFacts: empty ? [] : PreviewFixtures.aboutSurfaceFacts,
-            actions: AboutSettingsActions(
-                copy: { _ in state != .writeFailed },
-                open: { _ in state != .writeFailed }))
-        if state == .writeFailed {
-            model.copyDiagnostics()
-        }
-        return model
-    }
-}
-
-@MainActor
-private final class SettingsPreviewPublicationGate {
-    var succeeds = true
 }
 
 // MARK: - Production Agent panel (2 languages × 4 sizes × critical states)
@@ -1326,10 +983,14 @@ struct HostIntegrationGalleryView: View {
                     ForEach(SettingsGalleryAppearance.allCases) { appearance in
                         ForEach(PreviewFixtures.hostIntegrationScenarios) { scenario in
                             GalleryFrame(
-                                caption:
-                                    "\(language.selfName) · \(textSize.rawValue) · \(appearance.rawValue) · \(scenario.id) · \(scenario.title)"
+                                caption: hostIntegrationGalleryCaption(
+                                    language: language,
+                                    textSize: textSize,
+                                    appearance: appearance,
+                                    id: scenario.id,
+                                    title: scenario.title)
                             ) {
-                                HostIntegrationStateFrame(
+                                HostIntegrationSettingsFrame(
                                     scenario: scenario,
                                     language: language,
                                     textSize: textSize
@@ -1339,10 +1000,14 @@ struct HostIntegrationGalleryView: View {
                         }
                         ForEach(PreviewFixtures.workBuddyVisualScenarios) { scenario in
                             GalleryFrame(
-                                caption:
-                                    "\(language.selfName) · \(textSize.rawValue) · \(appearance.rawValue) · \(scenario.id) · \(scenario.title)"
+                                caption: hostIntegrationGalleryCaption(
+                                    language: language,
+                                    textSize: textSize,
+                                    appearance: appearance,
+                                    id: scenario.id,
+                                    title: scenario.title)
                             ) {
-                                HostIntegrationStateFrame(
+                                HostIntegrationSettingsFrame(
                                     scenario: PreviewFixtures.HostIntegrationScenario(
                                         id: scenario.id,
                                         title: scenario.title,
@@ -1357,17 +1022,22 @@ struct HostIntegrationGalleryView: View {
                             where: { $0.phase == .taskStartCurrent })
                         {
                             GalleryFrame(
-                                caption:
-                                    "\(language.selfName) · \(textSize.rawValue) · \(appearance.rawValue) · workbuddy.disconnect-in-flight · WorkBuddy 断开中"
+                                caption: hostIntegrationGalleryCaption(
+                                    language: language,
+                                    textSize: textSize,
+                                    appearance: appearance,
+                                    id: "workbuddy.disconnect-in-flight",
+                                    title: "WorkBuddy 断开中")
                             ) {
-                                HostIntegrationStateFrame(
+                                HostIntegrationSettingsFrame(
                                     scenario: PreviewFixtures.HostIntegrationScenario(
                                         id: "workbuddy.disconnect-in-flight",
                                         title: "WorkBuddy 断开中",
                                         state: disconnectScenario.state),
+                                    selectedSurface: .workBuddy,
                                     language: language,
                                     textSize: textSize,
-                                    previewInFlightAction: .disconnect(.workBuddy)
+                                    integrationInFlightAction: .disconnect(.workBuddy)
                                 )
                                 .environment(\.colorScheme, appearance.colorScheme)
                             }
@@ -1379,54 +1049,48 @@ struct HostIntegrationGalleryView: View {
     }
 }
 
-private struct HostIntegrationStateFrame: View {
-    @StateObject private var model: IntegrationDestinationModel
-    @StateObject private var focusCoordinator = IntegrationDestinationFocusCoordinator()
-    @StateObject private var languageStore: ClaudioPreferences
+private func hostIntegrationGalleryCaption(
+    language: ClaudioAppLanguage,
+    textSize: ClaudioInterfaceTextSize,
+    appearance: SettingsGalleryAppearance,
+    id: String,
+    title: String
+) -> String {
+    [language.selfName, textSize.rawValue, appearance.rawValue, id, title]
+        .joined(separator: " · ")
+}
+
+@MainActor
+private struct HostIntegrationSettingsFrame: View {
+    let scenario: PreviewFixtures.HostIntegrationScenario
+    let selectedSurface: HostSurfaceID?
+    let language: ClaudioAppLanguage
+    let textSize: ClaudioInterfaceTextSize
+    let integrationInFlightAction: HostIntegrationUserAction?
 
     init(
         scenario: PreviewFixtures.HostIntegrationScenario,
+        selectedSurface: HostSurfaceID? = nil,
         language: ClaudioAppLanguage,
-        textSize: ClaudioInterfaceTextSize = .standard,
-        previewInFlightAction: HostIntegrationUserAction? = nil
+        textSize: ClaudioInterfaceTextSize,
+        integrationInFlightAction: HostIntegrationUserAction? = nil
     ) {
-        let languageStore = ClaudioPreferences(defaults: UserDefaults())
-        languageStore.setLanguage(language)
-        languageStore.setInterfaceTextSize(textSize)
-        _languageStore = StateObject(wrappedValue: languageStore)
-        let store = HostIntegrationPresentationStore(
-            state: scenario.state,
-            configurationSources: [
-                .claudeCode: "~/.claude/settings.json",
-                .codex: "~/.codex/hooks.json",
-                .workBuddy: "~/.workbuddy/settings.json",
-            ])
-        let content = store.content
-        let unchanged = IntegrationDestinationActionOutcome(
-            content: content,
-            feedbackKind: .information,
-            feedbackMessage: "预览不会修改配置")
-        let model = IntegrationDestinationModel(
-            content: content,
-            refreshHandler: IntegrationDestinationRefreshHandler { unchanged },
-            actionHandler: IntegrationDestinationActionHandler { _ in unchanged },
-            preferences: languageStore,
-            clipboardWriter: IntegrationDestinationClipboardWriter { _ in true })
-        if let previewInFlightAction {
-            model.pinPreviewInFlight(previewInFlightAction)
-        }
-        _model = StateObject(wrappedValue: model)
+        self.scenario = scenario
+        self.selectedSurface = selectedSurface
+        self.language = language
+        self.textSize = textSize
+        self.integrationInFlightAction = integrationInFlightAction
     }
 
     var body: some View {
-        IntegrationsSettingsDestinationView(
-            model: model,
-            focusCoordinator: focusCoordinator,
-            languageStore: languageStore,
-            onManageEvents: nil,
-            onAnnouncement: nil
-        )
-        .frame(width: 820, height: 700)
+        SettingsWindowRouteFrame(
+            route: selectedSurface.map { SettingsRoute.integrations(surface: $0) }
+                ?? .destination(.integrations),
+            availability: PreviewFixtures.settingsRouteAvailability,
+            language: language,
+            textSize: textSize,
+            integrationScenario: scenario,
+            integrationInFlightAction: integrationInFlightAction)
     }
 }
 
@@ -1494,7 +1158,7 @@ private struct GalleryFrame<Content: View>: View {
     }
 }
 
-// MARK: - Preview-only support environment (never touches disk)
+// MARK: - Preview-only support environment (never touches user data)
 
 /// A fixed-duration stub — the gallery never actually imports a file (every drop-zone
 /// frame's state is pinned via `previewState:`, not produced by running the pipeline),
@@ -1504,17 +1168,25 @@ private struct PreviewDurationProbe: AudioDurationProbing {
     func probeDuration(of fileURL: URL) -> TimeInterval? { 1.0 }
 }
 
-/// `userPacksDirectory` is a placeholder, never-resolved path — mirrors
-/// `OnboardingViewModel(previewState:)`'s own placeholder `environment`; nothing in this
-/// gallery ever performs a real import, so nothing ever reads it.
+/// One isolated temporary root backs every DEBUG gallery dependency. Production initializers can
+/// therefore exercise their normal scan/refresh contracts without reading Claudio's user data.
+private let previewStateGalleryRoot = FileManager.default.temporaryDirectory
+    .appendingPathComponent("claudio-state-gallery-\(UUID().uuidString)", isDirectory: true)
+
 private let previewAudioImportEnvironment = AudioImportEnvironment(
-    userPacksDirectory: URL(fileURLWithPath: "/dev/null/claudio-preview-packs"),
+    userPacksDirectory: previewStateGalleryRoot.appendingPathComponent(
+        "packs",
+        isDirectory: true),
     durationProbe: PreviewDurationProbe(),
-    // 与 `userPacksDirectory` 同一个理由：一条**永不解析**的占位路径。gallery 从不写 manifest，
-    // 所以这把锁从不会被打开 —— 但它必须显式写出来（形参没有默认值），而写出来的绝不能是
-    // 真实路径：一个 preview 不该有能力去碰用户 home 上的锁。
-    packsLockFile: URL(fileURLWithPath: "/dev/null/claudio-preview-packs.lock")
+    packsLockFile: previewStateGalleryRoot.appendingPathComponent("packs.lock")
 )
+
+@MainActor
+private let previewStateGallerySoundPackLibrary = SoundPackLibrary(
+    environment: previewAudioImportEnvironment)
+
+@MainActor
+private let previewStateGalleryRefreshCoordinator = SoundPacksRefreshCoordinator()
 
 // MARK: - Preview providers (classic `PreviewProvider` ONLY — `#Preview` does not
 // compile under CommandLineTools, see this file's header doc comment)

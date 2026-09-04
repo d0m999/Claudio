@@ -14,6 +14,16 @@ struct EventSettingsAICueServiceCard: View {
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
 
+    init(
+        viewModel: AICueGenerationViewModel,
+        languageStore: ClaudioPreferences,
+        onManageCredential: @escaping () -> Void
+    ) {
+        self.viewModel = viewModel
+        self.languageStore = languageStore
+        self.onManageCredential = onManageCredential
+    }
+
     var body: some View {
         let status = statusPresentation
         VStack(alignment: .leading, spacing: 10) {
@@ -183,6 +193,8 @@ struct EventSettingsAICueComposerView: View {
     @ObservedObject var languageStore: ClaudioPreferences
     let eventTitle: String
     let playingCandidateID: UUID?
+    let adoptionEnabled: Bool
+    let adoptionUnavailableHint: String
     let onConfigureCredential: () -> Void
     let onPreviewCandidate: (AICueCandidate) -> Void
     let onAdoptCandidate: (UUID) -> Void
@@ -191,6 +203,30 @@ struct EventSettingsAICueComposerView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
+
+    init(
+        viewModel: AICueGenerationViewModel,
+        languageStore: ClaudioPreferences,
+        eventTitle: String,
+        playingCandidateID: UUID?,
+        adoptionEnabled: Bool,
+        adoptionUnavailableHint: String,
+        onConfigureCredential: @escaping () -> Void,
+        onPreviewCandidate: @escaping (AICueCandidate) -> Void,
+        onAdoptCandidate: @escaping (UUID) -> Void,
+        onClose: @escaping () -> Void
+    ) {
+        self.viewModel = viewModel
+        self.languageStore = languageStore
+        self.eventTitle = eventTitle
+        self.playingCandidateID = playingCandidateID
+        self.adoptionEnabled = adoptionEnabled
+        self.adoptionUnavailableHint = adoptionUnavailableHint
+        self.onConfigureCredential = onConfigureCredential
+        self.onPreviewCandidate = onPreviewCandidate
+        self.onAdoptCandidate = onAdoptCandidate
+        self.onClose = onClose
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -229,7 +265,7 @@ struct EventSettingsAICueComposerView: View {
                 .stroke(ClaudioTheme.clay(colorScheme).opacity(0.45), lineWidth: 1)
         )
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("event-settings.ai-cue.composer")
+        .settingsMountIdentity("event-settings.ai-cue.composer")
     }
 
     private var stageIndicator: some View {
@@ -436,8 +472,11 @@ struct EventSettingsAICueComposerView: View {
                 onAdoptCandidate(candidate.id)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(viewModel.phase == .adopting)
+            .disabled(viewModel.phase == .adopting || !adoptionEnabled)
             .accessibilityLabel(l10n.text(.aiCueUseForEvent))
+            .accessibilityHint(
+                adoptionEnabled ? l10n.text(.aiCueUseForEvent) : adoptionUnavailableHint
+            )
             .accessibilityIdentifier(
                 "event-settings.ai-cue.candidate.\(candidate.variant.rawValue).use")
         }
@@ -516,6 +555,14 @@ struct EventSettingsAICueCredentialSheet: View {
     @State private var confirmsDeletion = false
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
+
+    init(
+        viewModel: AICueGenerationViewModel,
+        languageStore: ClaudioPreferences
+    ) {
+        self.viewModel = viewModel
+        self.languageStore = languageStore
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -616,7 +663,7 @@ struct EventSettingsAICueCredentialSheet: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(credentialTitle)
-        .accessibilityIdentifier("event-settings.ai-cue.credential-sheet")
+        .settingsMountIdentity("event-settings.ai-cue.credential-sheet")
     }
 
     private var credentialTitle: String {
@@ -768,7 +815,7 @@ private func aiCueFailureText(
         return l10n.text(.aiCueErrorNameInvalid)
     case .adoption(.importedButNotBound):
         return l10n.text(.aiCueErrorAdoptionPartial)
-    case .adoption(.ineligible):
+    case .adoption(.targetChanged):
         return l10n.text(.aiCueErrorAdoptionTarget)
     case .adoption:
         return l10n.text(.aiCueErrorAdoption)

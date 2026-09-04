@@ -6,92 +6,105 @@ import ClaudioLocalization
 import SwiftUI
 import UniformTypeIdentifiers
 
-private struct PermanentAudioDeletionRequest: Identifiable {
-    let packID: String
-    let file: PackAudioFile
-
-    var id: String { "\(packID)/\(file.fileName)" }
-}
-
-private struct FactoryPackRestoreRequest: Identifiable {
-    enum Kind {
-        case selectedPack
-        case failedPublishRetry
-        case allFactoryPacks
-    }
-
-    let packID: String
-    let displayName: String
-    let kind: Kind
-
-    var id: String { packID }
-}
-
 /// Unified Settings presentation of the app-lifetime editor owner. Route/focus state is local to
-/// the embedded destination; every disk/config mutation still goes through the owner's single
-/// ``SoundPacksWindowModel``.
+/// the embedded destination; every disk/config mutation stays behind `SoundPacksEditorOwner`.
 @MainActor
 public struct EmbeddedSoundPacksEditorView: View {
-    private let editorOwner: SoundPacksEditorOwner
+    @ObservedObject private var editorOwner: SoundPacksEditorOwner
     private let route: SoundPacksWindowRoute
     private let routeRequestRevision: UInt64
+    private let nativeEffects: SoundPacksEditorNativeEffectsDispatcher
     @ObservedObject private var languageStore: ClaudioPreferences
-    @ObservedObject private var model: SoundPacksWindowModel
     @StateObject private var focusCoordinator = SoundPacksWindowFocusCoordinator()
-    @State private var pendingRoute: SoundPacksWindowRoute?
+    @State private var focusApplicationTracker = SoundPacksEditorFocusApplicationTracker()
 
-    public init(
+    package init(
         editorOwner: SoundPacksEditorOwner,
         route: SoundPacksWindowRoute,
         routeRequestRevision: UInt64,
-        languageStore: ClaudioPreferences
+        languageStore: ClaudioPreferences,
+        nativeEffects: SoundPacksEditorNativeEffectsDispatcher
     ) {
         self.editorOwner = editorOwner
         self.route = route
         self.routeRequestRevision = routeRequestRevision
         self.languageStore = languageStore
-        model = editorOwner.model
+        self.nativeEffects = nativeEffects
     }
 
     public var body: some View {
         SoundPacksWindowView(
-            model: model,
-            userPacksDirectory: editorOwner.userPacksDirectory,
+            editorOwner: editorOwner,
             focusCoordinator: focusCoordinator,
-            languageStore: languageStore
+            languageStore: languageStore,
+            nativeEffects: nativeEffects
         )
         .onAppear {
-            applyRoute(route, requestsInitialFocus: true)
+            applyFocusFromPresentation(requestsInitialFocus: true)
         }
         .onChange(of: routeRequestRevision) { _ in
-            applyRoute(route, requestsInitialFocus: false)
+            applyFocusFromPresentation(requestsInitialFocus: false)
         }
-        .onChange(of: model.libraryPresentationState) { _ in
-            guard let pendingRoute else { return }
-            applyRoute(pendingRoute, requestsInitialFocus: false)
+        .onChange(of: focusProjection) { _ in
+            applyFocusFromPresentation(requestsInitialFocus: false)
         }
         .accessibilityIdentifier("settings.sounds.editor")
     }
 
-    private func applyRoute(
-        _ route: SoundPacksWindowRoute,
-        requestsInitialFocus: Bool
-    ) {
-        switch editorOwner.apply(route: route) {
-        case .pending(let pending):
-            pendingRoute = pending
-            if requestsInitialFocus {
-                focusCoordinator.requestInitialFocus(
-                    route: .overview(surface: pending.surface))
-            }
+    private func applyFocusFromPresentation(requestsInitialFocus: Bool) {
+        guard case .sounds(let sounds) = editorOwner.presentation.mode else { return }
+        let projection = SoundPacksEditorFocusProjection(
+            requestRevision: sounds.requestRevision,
+            routeState: sounds.routeState)
+        guard
+            focusApplicationTracker.recordAndShouldApply(
+                projection,
+                force: requestsInitialFocus)
+        else { return }
+        let focusRoute: SoundPacksWindowRoute
+        switch sounds.routeState {
         case .resolved(let resolved):
-            pendingRoute = nil
-            if requestsInitialFocus {
-                focusCoordinator.requestInitialFocus(route: resolved)
-            } else {
-                focusCoordinator.requestRoute(resolved)
-            }
+            focusRoute = resolved
+        case .pendingFreshSnapshot, .staleTarget:
+            focusRoute = .overview(surface: sounds.route.surface)
         }
+        if requestsInitialFocus {
+            focusCoordinator.requestInitialFocus(route: focusRoute)
+        } else {
+            focusCoordinator.requestRoute(focusRoute)
+        }
+    }
+
+    private var focusProjection: SoundPacksEditorFocusProjection? {
+        guard case .sounds(let sounds) = editorOwner.presentation.mode else { return nil }
+        return SoundPacksEditorFocusProjection(
+            requestRevision: sounds.requestRevision,
+            routeState: sounds.routeState)
+    }
+}
+
+package struct SoundPacksEditorFocusProjection: Equatable {
+    package let requestRevision: UInt64
+    package let routeState: SoundPacksEditorRouteState
+
+    package init(requestRevision: UInt64, routeState: SoundPacksEditorRouteState) {
+        self.requestRevision = requestRevision
+        self.routeState = routeState
+    }
+}
+
+package struct SoundPacksEditorFocusApplicationTracker {
+    private var lastApplied: SoundPacksEditorFocusProjection?
+
+    package init() {}
+
+    package mutating func recordAndShouldApply(
+        _ projection: SoundPacksEditorFocusProjection,
+        force: Bool
+    ) -> Bool {
+        let changed = lastApplied != projection
+        lastApplied = projection
+        return force || changed
     }
 }
 
@@ -100,54 +113,80 @@ public struct EmbeddedSoundPacksEditorView: View {
 /// T9 adds a window-owned focus/VoiceOver/Dynamic Type layer. T11 adds selected-pack audio
 /// inventory, existing-audio assignment, and explicit confirmed orphan deletion.
 @MainActor
-struct SoundPacksWindowView: View {
-    @ObservedObject var model: SoundPacksWindowModel
-    let userPacksDirectory: URL
+package struct SoundPacksWindowView: View {
+    @ObservedObject private var editorOwner: SoundPacksEditorOwner
+    private let focusCoordinator: SoundPacksWindowFocusCoordinator
+    @ObservedObject private var languageStore: ClaudioPreferences
+    private let nativeEffects: SoundPacksEditorNativeEffectsDispatcher
+
+    package init(
+        editorOwner: SoundPacksEditorOwner,
+        focusCoordinator: SoundPacksWindowFocusCoordinator,
+        languageStore: ClaudioPreferences,
+        nativeEffects: SoundPacksEditorNativeEffectsDispatcher
+    ) {
+        self.editorOwner = editorOwner
+        self.focusCoordinator = focusCoordinator
+        self.languageStore = languageStore
+        self.nativeEffects = nativeEffects
+    }
+
+    package var body: some View {
+        let presentation = editorOwner.presentation
+        Group {
+            if case .sounds(let sounds) = presentation.mode {
+                SoundPacksWindowContentView(
+                    editorOwner: editorOwner,
+                    presentation: presentation,
+                    sounds: sounds,
+                    focusCoordinator: focusCoordinator,
+                    languageStore: languageStore,
+                    nativeEffects: nativeEffects)
+            } else {
+                ProgressView()
+                    .frame(minWidth: 640, minHeight: 480)
+                    .accessibilityLabel(
+                        ClaudioL10n(language: languageStore.language).text(
+                            .soundPacksLibraryLoading))
+            }
+        }
+    }
+}
+
+@MainActor
+private struct SoundPacksWindowContentView: View {
+    private let editorOwner: SoundPacksEditorOwner
+    let presentation: SoundPacksEditorPresentation
+    let sounds: SoundsEditorPresentation
     @ObservedObject var focusCoordinator: SoundPacksWindowFocusCoordinator
     @ObservedObject var languageStore: ClaudioPreferences
+    private let nativeEffects: SoundPacksEditorNativeEffectsDispatcher
 
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedTarget: SoundPacksWindowFocusTarget?
     @State private var handledFocusRequestRevision = 0
-    @State private var pendingPermanentDeletion: PermanentAudioDeletionRequest?
-    @State private var pendingUserPackDeletion: PackCard?
-    @State private var pendingFactoryPackRestore: FactoryPackRestoreRequest?
-    @State private var previewPlayer = NSSoundAudioPreviewPlayer()
-    @State private var isImportingAudio = false
-    @State private var isPerformingWrite = false
     @State private var dropTargetEvent: Event?
     @State private var requestedRoute: SoundPacksWindowRoute = .overview
 
     init(
-        model: SoundPacksWindowModel,
-        userPacksDirectory: URL,
-        focusCoordinator: SoundPacksWindowFocusCoordinator,
-        languageStore: ClaudioPreferences
-    ) {
-        self.model = model
-        self.userPacksDirectory = userPacksDirectory
-        self.focusCoordinator = focusCoordinator
-        self.languageStore = languageStore
-    }
-
-    #if DEBUG
-    init(
-        model: SoundPacksWindowModel,
-        userPacksDirectory: URL,
+        editorOwner: SoundPacksEditorOwner,
+        presentation: SoundPacksEditorPresentation,
+        sounds: SoundsEditorPresentation,
         focusCoordinator: SoundPacksWindowFocusCoordinator,
         languageStore: ClaudioPreferences,
-        previewIsPerformingWrite: Bool
+        nativeEffects: SoundPacksEditorNativeEffectsDispatcher
     ) {
-        self.init(
-            model: model,
-            userPacksDirectory: userPacksDirectory,
-            focusCoordinator: focusCoordinator,
-            languageStore: languageStore)
-        _isPerformingWrite = State(initialValue: previewIsPerformingWrite)
+        self.editorOwner = editorOwner
+        self.presentation = presentation
+        self.sounds = sounds
+        self.focusCoordinator = focusCoordinator
+        self.languageStore = languageStore
+        self.nativeEffects = nativeEffects
     }
-    #endif
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
+
+    private var activeSounds: SoundsEditorPresentation { sounds }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -192,127 +231,111 @@ struct SoundPacksWindowView: View {
             handledFocusRequestRevision = revision
             applyInitialFocus()
         }
-        .onChange(of: model.packCards.map(\.id)) { _ in
+        .onChange(of: activeSounds.packs.map(\.id)) { _ in
             reconcileFocusWithVisibleControls()
         }
-        .onChange(of: model.selectedPackID) { _ in
+        .onChange(of: activeSounds.selectedPack?.id) { _ in
             reconcileFocusWithVisibleControls()
         }
-        .onChange(of: model.selectedAudioInventoryState) { _ in
+        .onChange(of: activeSounds.inventory) { _ in
             reconcileFocusWithVisibleControls()
         }
-        .onChange(of: model.selectedEventRows) { _ in
+        .onChange(of: activeSounds.eventRows) { _ in
             reconcileFocusWithVisibleControls()
         }
-        .onChange(of: model.factoryRestoreRetryPackIDs) { _ in
-            if model.packCards.isEmpty, let packID = model.factoryRestoreRetryPackIDs.first {
+        .onChange(of: activeSounds.recoveryActions.map(\.packID)) { _ in
+            if activeSounds.packs.isEmpty,
+                let packID = activeSounds.recoveryActions.first?.packID
+            {
                 focusedTarget = .retryFactoryRestore(packID: packID)
             } else {
                 reconcileFocusWithVisibleControls()
             }
         }
-        .onChange(of: model.libraryPresentationState) { _ in
+        .onChange(of: presentation.library) { _ in
             reconcileFocusWithVisibleControls(assignFirstIfNil: true)
         }
         .confirmationDialog(
-            pendingPermanentDeletion.map {
-                l10n.format(.soundPacksDeleteTitle, $0.file.fileName)
+            deleteOrphanConfirmation.map {
+                l10n.format(.soundPacksDeleteTitle, $0.fileName ?? "")
             } ?? l10n.text(.soundPacksDeleteButton),
             isPresented: Binding(
-                get: { pendingPermanentDeletion != nil },
-                set: { if !$0 { pendingPermanentDeletion = nil } }),
+                get: { deleteOrphanConfirmation != nil },
+                set: { if !$0 { cancelConfirmation(deleteOrphanConfirmation) } }),
             titleVisibility: .visible,
-            presenting: pendingPermanentDeletion
-        ) { request in
+            presenting: deleteOrphanConfirmation
+        ) { confirmation in
+            let fileName = confirmation.fileName ?? ""
             Button(l10n.text(.soundPacksDeleteButton), role: .destructive) {
-                performVisibleWrite {
-                    model.deleteSelectedOrphanAudioFileAfterConfirmation(
-                        request.file.fileName,
-                        expectedPackID: request.packID)
-                }
-                pendingPermanentDeletion = nil
+                invoke(confirmation.confirmAction)
             }
-            .accessibilityLabel(l10n.format(.soundPacksOrphanDeleteLabel, request.file.fileName))
+            .accessibilityLabel(l10n.format(.soundPacksOrphanDeleteLabel, fileName))
             .accessibilityHint(l10n.text(.soundPacksDeleteHint))
             .accessibilityIdentifier("sound-packs.confirm-delete")
             Button(l10n.text(.commonCancel), role: .cancel) {
-                pendingPermanentDeletion = nil
+                invoke(confirmation.cancelAction)
             }
             .accessibilityLabel(l10n.text(.commonCancel))
             .accessibilityIdentifier("sound-packs.cancel-delete")
-        } message: { request in
-            Text(l10n.format(.soundPacksDeleteMessage, request.file.fileName))
+        } message: { confirmation in
+            Text(l10n.format(.soundPacksDeleteMessage, confirmation.fileName ?? ""))
         }
         .confirmationDialog(
-            pendingUserPackDeletion.map {
+            deletePackConfirmation.map {
                 l10n.format(
                     .soundPacksPackDeleteTitle,
-                    SelectedPackMetadata(id: $0.id, name: $0.name).displayName)
+                    confirmationPackDisplayName($0))
             } ?? l10n.text(.soundPacksPackDelete),
             isPresented: Binding(
-                get: { pendingUserPackDeletion != nil },
-                set: { if !$0 { pendingUserPackDeletion = nil } }),
+                get: { deletePackConfirmation != nil },
+                set: { if !$0 { cancelConfirmation(deletePackConfirmation) } }),
             titleVisibility: .visible,
-            presenting: pendingUserPackDeletion
-        ) { card in
+            presenting: deletePackConfirmation
+        ) { confirmation in
+            let displayName = confirmationPackDisplayName(confirmation)
             Button(l10n.text(.soundPacksPackDelete), role: .destructive) {
-                performVisibleWrite {
-                    model.deleteSelectedUserPackAfterConfirmation(expectedPackID: card.id)
-                }
-                pendingUserPackDeletion = nil
+                invoke(confirmation.confirmAction)
             }
             .accessibilityLabel(
-                l10n.format(
-                    .soundPacksPackDeleteLabel,
-                    SelectedPackMetadata(id: card.id, name: card.name).displayName)
+                l10n.format(.soundPacksPackDeleteLabel, displayName)
             )
             .accessibilityHint(l10n.text(.soundPacksPackDeleteHint))
             .accessibilityIdentifier("sound-packs.confirm-pack-delete")
             Button(l10n.text(.commonCancel), role: .cancel) {
-                pendingUserPackDeletion = nil
+                invoke(confirmation.cancelAction)
             }
+            .accessibilityLabel(l10n.text(.commonCancel))
             .accessibilityIdentifier("sound-packs.cancel-pack-delete")
-        } message: { card in
+        } message: { confirmation in
             Text(
-                l10n.format(
-                    .soundPacksPackDeleteMessage,
-                    SelectedPackMetadata(id: card.id, name: card.name).displayName))
+                l10n.format(.soundPacksPackDeleteMessage, confirmationPackDisplayName(confirmation))
+            )
         }
         .confirmationDialog(
-            pendingFactoryPackRestore.map {
-                l10n.format(.soundPacksRestoreTitle, $0.displayName)
+            restoreConfirmation.map {
+                l10n.format(.soundPacksRestoreTitle, confirmationPackDisplayName($0))
             } ?? l10n.text(.soundPacksRestore),
             isPresented: Binding(
-                get: { pendingFactoryPackRestore != nil },
-                set: { if !$0 { pendingFactoryPackRestore = nil } }),
+                get: { restoreConfirmation != nil },
+                set: { if !$0 { cancelConfirmation(restoreConfirmation) } }),
             titleVisibility: .visible,
-            presenting: pendingFactoryPackRestore
-        ) { request in
+            presenting: restoreConfirmation
+        ) { confirmation in
             Button(l10n.text(.soundPacksRestoreButton), role: .destructive) {
-                performVisibleWrite {
-                    switch request.kind {
-                    case .selectedPack:
-                        model.restoreSelectedFactoryPackAfterConfirmation(
-                            expectedPackID: request.packID)
-                    case .failedPublishRetry:
-                        model.retryFailedFactoryPackRestoreAfterConfirmation(
-                            expectedPackID: request.packID)
-                    case .allFactoryPacks:
-                        model.restoreAllFactoryPacksAfterConfirmation()
-                    }
-                }
-                pendingFactoryPackRestore = nil
+                invoke(confirmation.confirmAction)
             }
-            .accessibilityLabel(l10n.format(.soundPacksRestoreLabel, request.displayName))
+            .accessibilityLabel(
+                l10n.format(.soundPacksRestoreLabel, confirmationPackDisplayName(confirmation))
+            )
             .accessibilityHint(l10n.text(.soundPacksRestoreHint))
             .accessibilityIdentifier("sound-packs.confirm-factory-restore")
             Button(l10n.text(.commonCancel), role: .cancel) {
-                pendingFactoryPackRestore = nil
+                invoke(confirmation.cancelAction)
             }
             .accessibilityLabel(l10n.text(.commonCancel))
             .accessibilityIdentifier("sound-packs.cancel-factory-restore")
-        } message: { request in
-            Text(factoryRestoreConfirmationMessage(request))
+        } message: { confirmation in
+            Text(factoryRestoreConfirmationMessage(confirmation))
         }
         .disabled(isPerformingWrite)
     }
@@ -320,7 +343,7 @@ struct SoundPacksWindowView: View {
     private var managedScopeBar: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 7) {
-                Image(systemName: model.managedSurface == nil ? "globe" : "square.stack.3d.up.fill")
+                Image(systemName: managedSurface == nil ? "globe" : "square.stack.3d.up.fill")
                     .foregroundColor(ClaudioTheme.clay(colorScheme))
                     .accessibilityHidden(true)
                 Text(l10n.format(.soundPacksManagingScope, managedScopeName))
@@ -337,12 +360,13 @@ struct SoundPacksWindowView: View {
         .background(ClaudioTheme.elevated(colorScheme))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            l10n.format(.soundPacksManagingScope, managedScopeName))
+            l10n.format(.soundPacksManagingScope, managedScopeName)
+        )
         .accessibilityIdentifier("sound-packs.managed-scope")
     }
 
     private var managedScopeName: String {
-        guard let surface = model.managedSurface else {
+        guard let surface = managedSurface else {
             return l10n.text(.panelGlobalName)
         }
         return HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?.displayName
@@ -350,9 +374,8 @@ struct SoundPacksWindowView: View {
     }
 
     private var localizedManagedScopeFailure: String? {
-        guard let reason = model.managedScopeFailureReason else { return nil }
-        return model.managedScopeFailureStatusText?.resolve(language: languageStore.language)
-            ?? reason
+        guard case .unavailable = activeSounds.scope else { return nil }
+        return l10n.format(.soundPacksDamagedScope, managedScopeName)
     }
 
     @ViewBuilder
@@ -372,8 +395,8 @@ struct SoundPacksWindowView: View {
             .accessibilityLabel(l10n.text(.soundPacksWritingChanges))
             .accessibilityIdentifier("sound-packs.write-in-progress")
         } else {
-            switch model.libraryPresentationState {
-            case .loading:
+            switch presentation.library {
+            case .unloaded, .loading(previousAvailable: false):
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
@@ -389,7 +412,7 @@ struct SoundPacksWindowView: View {
                     l10n.text(.soundPacksLibraryLoading).replacingOccurrences(of: "…", with: "")
                 )
                 .accessibilityIdentifier("sound-packs.library.loading")
-            case .refreshing:
+            case .loading(previousAvailable: true):
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
@@ -403,15 +426,17 @@ struct SoundPacksWindowView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(l10n.text(.soundPacksLibraryRefreshing))
                 .accessibilityIdentifier("sound-packs.library.refreshing")
-            case .refreshFailed(let reason), .loadFailed(let reason):
+            case .failed(let previousAvailable, let reason):
                 HStack(alignment: .center, spacing: 10) {
                     FailureRow(
-                        message: model.libraryPresentationState == .refreshFailed(reason: reason)
-                            ? l10n.format(.soundPacksLibraryRefreshFailed, reason)
-                            : reason)
+                        message: previousAvailable
+                            ? l10n.format(
+                                .soundPacksLibraryRefreshFailed,
+                                localizedLibraryFailure(reason))
+                            : localizedLibraryFailure(reason))
                     Spacer(minLength: 8)
                     Button(l10n.text(.commonRetry)) {
-                        model.retrySoundPackLibraryRefresh()
+                        invoke(activeSounds.retryLibraryAction)
                     }
                     .accessibilityLabel(l10n.text(.soundPacksLibraryRetryLabel))
                     .accessibilityHint(l10n.text(.soundPacksLibraryRetryHint))
@@ -435,7 +460,7 @@ struct SoundPacksWindowView: View {
                 .padding(.top, 10)
 
             List(selection: selection) {
-                ForEach(model.packCards, id: \.id) { card in
+                ForEach(activeSounds.packs) { card in
                     HStack(spacing: 6) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(SelectedPackMetadata(id: card.id, name: card.name).displayName)
@@ -443,7 +468,7 @@ struct SoundPacksWindowView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: 4)
-                        if card.isSelected {
+                        if card.isActiveForScope {
                             ClaudioStatusCapsule(l10n.text(.soundPacksUsing), isEmphasized: true)
                         }
                     }
@@ -456,10 +481,10 @@ struct SoundPacksWindowView: View {
                     .accessibilityHint(l10n.text(.soundPacksCardHint))
                     .accessibilityIdentifier("sound-packs.pack.\(card.id)")
                     .accessibilityAddTraits(
-                        model.selectedPackID == card.id ? .isSelected : [])
+                        card.isInspected ? .isSelected : [])
                 }
             }
-            .focusable(!model.packCards.isEmpty)
+            .focusable(!activeSounds.packs.isEmpty)
             .focused($focusedTarget, equals: .packList)
             .accessibilityLabel(l10n.text(.soundPacksSidebarLabel))
             .accessibilityValue(
@@ -485,65 +510,65 @@ struct SoundPacksWindowView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
                             Color.clear.frame(height: 0).id("detail-top")
-                        if !model.windowStatuses.isEmpty {
-                            windowStatusRegion
-                                .padding(.horizontal, 20)
-                                .padding(.top, 20)
-                        }
+                            if !activeSounds.windowStatuses.isEmpty {
+                                windowStatusRegion
+                                    .padding(.horizontal, 20)
+                                    .padding(.top, 20)
+                            }
 
-                        if let card = selectedCard {
-                            VStack(alignment: .leading, spacing: 16) {
-                                detailHeader(card, stacks: stacksDetail)
+                            if let card = selectedCard {
+                                VStack(alignment: .leading, spacing: 16) {
+                                    detailHeader(card, stacks: stacksDetail)
 
-                                if model.selectedPackIsBuiltinReadOnly {
-                                    builtinCopyExplanation(card)
-                                }
+                                    if card.isBuiltinReadOnly {
+                                        builtinCopyExplanation(card)
+                                    }
 
-                                Divider()
+                                    Divider()
 
-                                VStack(alignment: .leading, spacing: 10) {
-                                    ForEach(model.selectedEventRows, id: \.event) { row in
-                                        eventMappingRow(
-                                            row,
-                                            stacks: layoutAdaptation.stacksEventRows
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        ForEach(activeSounds.eventRows) { row in
+                                            eventMappingRow(
+                                                row,
+                                                stacks: layoutAdaptation.stacksEventRows
                                                     || stacksDetail
                                             )
                                             .id("event-\(row.event.rawValue)")
+                                        }
                                     }
-                                }
 
-                                if model.selectedAudioInventoryState.isLoading {
-                                    HStack(spacing: 8) {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                        Text(l10n.text(.soundPacksAudioLoading))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                    if inventoryIsLoading {
+                                        HStack(spacing: 8) {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                            Text(l10n.text(.soundPacksAudioLoading))
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        .accessibilityElement(children: .combine)
+                                        .accessibilityLabel(l10n.text(.soundPacksAudioLoadingLabel))
                                     }
-                                    .accessibilityElement(children: .combine)
-                                    .accessibilityLabel(l10n.text(.soundPacksAudioLoadingLabel))
-                                }
 
-                                if let error = model.audioInventoryError {
-                                    windowFailureRow(
-                                        action: l10n.text(.soundPacksAudioLoadingLabel),
-                                        reason: inventoryErrorMessage(error))
-                                }
+                                    if let error = inventoryFailure {
+                                        windowFailureRow(
+                                            action: l10n.text(.soundPacksAudioLoadingLabel),
+                                            reason: inventoryErrorMessage(error))
+                                    }
 
-                                orphanAudioSection
+                                    orphanAudioSection
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(20)
+                            } else {
+                                emptyState
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(20)
-                        } else {
-                            emptyState
                         }
-                    }
                         .frame(
                             maxWidth: .infinity,
                             minHeight: selectedCard == nil ? geometry.size.height : nil,
                             alignment: .topLeading)
                     }
-                    .onChange(of: model.selectedPackID) { _ in
+                    .onChange(of: activeSounds.selectedPack?.id) { _ in
                         withAnimation(.easeOut(duration: 0.14)) {
                             proxy.scrollTo("detail-top", anchor: .top)
                         }
@@ -570,7 +595,7 @@ struct SoundPacksWindowView: View {
 
     private var windowStatusRegion: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(model.windowStatuses) { status in
+            ForEach(activeSounds.windowStatuses) { status in
                 windowStatusRow(status)
             }
         }
@@ -578,7 +603,10 @@ struct SoundPacksWindowView: View {
     }
 
     @ViewBuilder
-    private func detailHeader(_ card: PackCard, stacks: Bool) -> some View {
+    private func detailHeader(
+        _ card: SoundPackEditorPackPresentation,
+        stacks: Bool
+    ) -> some View {
         if stacks {
             VStack(alignment: .leading, spacing: 10) {
                 detailIdentity(card)
@@ -593,7 +621,7 @@ struct SoundPacksWindowView: View {
         }
     }
 
-    private func detailIdentity(_ card: PackCard) -> some View {
+    private func detailIdentity(_ card: SoundPackEditorPackPresentation) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(SelectedPackMetadata(id: card.id, name: card.name).displayName)
@@ -605,7 +633,7 @@ struct SoundPacksWindowView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            if model.selectedPackIsBuiltinReadOnly {
+            if card.isBuiltinReadOnly {
                 ClaudioStatusCapsule(l10n.text(.soundPacksBuiltinBadge))
                     .accessibilityLabel(l10n.text(.soundPacksBuiltinLabel))
             }
@@ -614,11 +642,9 @@ struct SoundPacksWindowView: View {
         .accessibilityAddTraits(.isHeader)
     }
 
-    private func revealButton(_ card: PackCard) -> some View {
+    private func revealButton(_ card: SoundPackEditorPackPresentation) -> some View {
         Button {
-            NSWorkspace.shared.activateFileViewerSelecting([
-                userPacksDirectory.appendingPathComponent(card.id)
-            ])
+            invoke(card.revealAction)
         } label: {
             Text(l10n.text(.soundPacksReveal))
                 .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
@@ -630,21 +656,18 @@ struct SoundPacksWindowView: View {
                 .soundPacksRevealLabel,
                 SelectedPackMetadata(id: card.id, name: card.name).displayName)
         )
-        .accessibilityValue(userPacksDirectory.appendingPathComponent(card.id).path)
+        .accessibilityValue(card.revealDisplayValue ?? "")
         .accessibilityHint(l10n.text(.soundPacksRevealHint))
         .accessibilityIdentifier("sound-packs.reveal-selected")
-        .disabled(card.availability == .missingSelectedPlaceholder)
+        .disabled(card.revealAction == nil)
     }
 
-    private func factoryRestoreButton(_ card: PackCard) -> some View {
+    private func factoryRestoreButton(_ card: SoundPackEditorPackPresentation) -> some View {
         let displayName = SelectedPackMetadata(id: card.id, name: card.name).displayName
         return Button(l10n.text(.soundPacksRestore)) {
-            pendingFactoryPackRestore = FactoryPackRestoreRequest(
-                packID: card.id,
-                displayName: displayName,
-                kind: .selectedPack)
+            invoke(card.restoreAction)
         }
-        .disabled(!model.writesAllowed)
+        .disabled(card.restoreAction == nil)
         .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
         .focused($focusedTarget, equals: .restoreFactoryPack)
         .accessibilityLabel(l10n.format(.soundPacksRestorePackLabel, displayName))
@@ -653,7 +676,7 @@ struct SoundPacksWindowView: View {
         .accessibilityIdentifier("sound-packs.restore-selected-factory-pack")
     }
 
-    private func builtinCopyExplanation(_ card: PackCard) -> some View {
+    private func builtinCopyExplanation(_ card: SoundPackEditorPackPresentation) -> some View {
         let message = l10n.text(.soundPacksBuiltinCopyExplanation)
         return Text(message)
             .font(.callout)
@@ -664,7 +687,10 @@ struct SoundPacksWindowView: View {
     }
 
     @ViewBuilder
-    private func packActionBar(_ card: PackCard, stacks: Bool) -> some View {
+    private func packActionBar(
+        _ card: SoundPackEditorPackPresentation,
+        stacks: Bool
+    ) -> some View {
         if stacks {
             VStack(alignment: .leading, spacing: 8) {
                 packActions(card, includeFlexibleSpace: false)
@@ -678,19 +704,20 @@ struct SoundPacksWindowView: View {
     }
 
     @ViewBuilder
-    private func packActions(_ card: PackCard, includeFlexibleSpace: Bool) -> some View {
+    private func packActions(
+        _ card: SoundPackEditorPackPresentation,
+        includeFlexibleSpace: Bool
+    ) -> some View {
         let displayName = SelectedPackMetadata(id: card.id, name: card.name).displayName
-        if model.selectedPackIsMissingPlaceholder {
-            if model.selectedPackCanRestoreFactory {
+        if card.availability == .missingSelectedPlaceholder {
+            if card.restoreAction != nil {
                 factoryRestoreButton(card)
             }
-        } else if model.selectedPackIsBuiltinReadOnly {
+        } else if card.isBuiltinReadOnly {
             Button(l10n.text(.soundPacksCopy)) {
-                performVisibleWrite {
-                    model.forkSelectedFactoryPack()
-                }
+                invoke(card.forkAction)
             }
-            .disabled(!model.writesAllowed)
+            .disabled(card.forkAction == nil)
             .buttonStyle(.borderedProminent)
             .tint(ClaudioSharedColor.clay(colorScheme))
             .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
@@ -709,7 +736,7 @@ struct SoundPacksWindowView: View {
                     ? l10n.text(.soundPacksAddingAudio)
                     : l10n.text(.soundPacksAddAudio)
             ) {
-                chooseAndImportAudio()
+                invoke(activeSounds.requestImportAction)
             }
             .disabled(isImportingAudio || !canEditSelectedPack)
             .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
@@ -725,7 +752,7 @@ struct SoundPacksWindowView: View {
             .accessibilityIdentifier("sound-packs.add-audio")
 
             Button(l10n.text(.soundPacksPackDelete), role: .destructive) {
-                pendingUserPackDeletion = card
+                invoke(card.deleteAction)
             }
             .disabled(!canDeleteSelectedPack)
             .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
@@ -733,7 +760,7 @@ struct SoundPacksWindowView: View {
             .focused($focusedTarget, equals: .deleteUserPack)
             .accessibilityLabel(l10n.format(.soundPacksPackDeleteLabel, displayName))
             .accessibilityValue(
-                model.selectedPackIsReferenced
+                card.isReferencedByAnyScope
                     ? l10n.text(.soundPacksPackDeleteActive)
                     : l10n.text(.soundPacksPackDeleteAvailable)
             )
@@ -745,16 +772,14 @@ struct SoundPacksWindowView: View {
             Spacer(minLength: 8)
         }
 
-        if card.isSelected {
+        if card.isActiveForScope {
             ClaudioStatusCapsule(l10n.text(.soundPacksUsing), isEmphasized: true)
                 .accessibilityLabel(l10n.text(.soundPacksUsing))
-        } else if model.selectedPackIsBuiltinReadOnly {
+        } else if card.isBuiltinReadOnly {
             Button(l10n.text(.soundPacksUse)) {
-                performVisibleWrite {
-                    model.useSelectedPack()
-                }
+                invoke(card.useAction)
             }
-            .disabled(!model.writesAllowed)
+            .disabled(card.useAction == nil)
             .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
             .focused($focusedTarget, equals: .useSelectedPack)
             .accessibilityLabel(l10n.format(.soundPacksUseLabel, displayName))
@@ -763,11 +788,9 @@ struct SoundPacksWindowView: View {
             .accessibilityIdentifier("sound-packs.use-selected-pack")
         } else {
             Button(l10n.text(.soundPacksUse)) {
-                performVisibleWrite {
-                    model.useSelectedPack()
-                }
+                invoke(card.useAction)
             }
-            .disabled(!model.writesAllowed)
+            .disabled(card.useAction == nil)
             .buttonStyle(.borderedProminent)
             .tint(ClaudioSharedColor.clay(colorScheme))
             .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
@@ -779,7 +802,7 @@ struct SoundPacksWindowView: View {
         }
     }
 
-    private func builtinCopyHelp(_ card: PackCard) -> String {
+    private func builtinCopyHelp(_ card: SoundPackEditorPackPresentation) -> String {
         if card.factoryIntegrity == false {
             return l10n.text(.soundPacksBuiltinCopyHelp)
         }
@@ -791,84 +814,9 @@ struct SoundPacksWindowView: View {
         }
     }
 
-    private func chooseAndImportAudio() {
-        guard canEditSelectedPack, let expectedPackID = model.selectedPackID else { return }
-        let requests = runAudioOpenPanel(allowsMultipleSelection: true).map {
-            AudioImportRequest(sourceURL: $0, suggestedFileName: $0.lastPathComponent)
-        }
-        guard !requests.isEmpty else { return }
-        isImportingAudio = true
-        Task {
-            defer { isImportingAudio = false }
-            let result = await model.importSelectedAudioFiles(
-                requests,
-                expectedPackID: expectedPackID)
-            guard
-                case .success(let completion) = result,
-                let previewFile = completion.previewFile
-            else { return }
-            if previewVolume(for: model.config) > 0 {
-                previewPlayer.play(
-                    fileAt: previewFile.destinationURL,
-                    volume: Float(previewVolume(for: model.config)))
-            }
-        }
-    }
-
-    /// Gives SwiftUI one main-actor turn to publish a visible, disabling progress state before a
-    /// synchronous audited write starts. ADR-0003 keeps these writes on MainActor; this wrapper
-    /// changes presentation timing only and never moves the mutation outside its existing locks.
-    private func performVisibleWrite(_ action: @escaping @MainActor () -> Void) {
-        guard !isPerformingWrite, !isImportingAudio else { return }
-        isPerformingWrite = true
-        Task { @MainActor in
-            await Task.yield()
-            action()
-            isPerformingWrite = false
-        }
-    }
-
-    private func chooseAndBindAudio(to event: Event) {
-        guard
-            let sourceURL = runAudioOpenPanel(allowsMultipleSelection: false).first,
-            let expectedPackID = model.selectedPackID
-        else { return }
-        let request = AudioImportRequest(
-            sourceURL: sourceURL,
-            suggestedFileName: sourceURL.lastPathComponent)
-        importAndBind(request, to: event, expectedPackID: expectedPackID)
-    }
-
-    private func importAndBind(
-        _ request: AudioImportRequest,
-        to event: Event,
-        expectedPackID: String
-    ) {
-        guard canEditSelectedPack, !isImportingAudio else { return }
-        isImportingAudio = true
-        Task {
-            defer { isImportingAudio = false }
-            let result = await model.importSelectedAudioFiles(
-                [request],
-                expectedPackID: expectedPackID)
-            guard
-                case .success(let completion) = result,
-                let imported = completion.result.accepted.last,
-                !completion.completedInBackground,
-                completion.targetPackID == model.selectedPackID,
-                case .success = model.assignImportedAudioFile(imported, to: event)
-            else { return }
-            if previewVolume(for: model.config) > 0 {
-                previewPlayer.play(
-                    fileAt: imported.destinationURL,
-                    volume: Float(previewVolume(for: model.config)))
-            }
-        }
-    }
-
-    private func revealMappedAudio(for event: Event) {
-        guard let fileURL = model.previewFileForSelectedEvent(event) else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+    private func invoke(_ action: SoundPackEditorAction?) {
+        guard let action else { return }
+        nativeEffects.consume(editorOwner.send(.invoke(action)), owner: editorOwner)
     }
 
     private func dropTargetBinding(for event: Event) -> Binding<Bool> {
@@ -885,18 +833,17 @@ struct SoundPacksWindowView: View {
 
     private func handleAudioDrop(_ providers: [NSItemProvider], onto event: Event) -> Bool {
         guard
-            canEditSelectedPack,
             !isImportingAudio,
-            let expectedPackID = model.selectedPackID,
-            let provider = providers.first(where: {
+            let importAction = activeSounds.eventRows.first(where: { $0.event == event })?
+                .importAction,
+            providers.contains(where: {
                 $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
             })
         else { return false }
-
-        Task { @MainActor in
-            guard let request = await loadSoundPacksDropRequest(from: provider) else { return }
-            importAndBind(request, to: event, expectedPackID: expectedPackID)
-        }
+        nativeEffects.consumeDrop(
+            providers,
+            action: importAction,
+            owner: editorOwner)
         return true
     }
 
@@ -906,25 +853,25 @@ struct SoundPacksWindowView: View {
             Text(emptyLibraryTitle)
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
-            if model.libraryPresentationState == .loading {
+            if presentation.library == .unloaded
+                || presentation.library == .loading(previousAvailable: false)
+            {
                 Text(l10n.text(.soundPacksEmptyLoadingMessage))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            } else if case .loadFailed = model.libraryPresentationState {
+            } else if case .failed(previousAvailable: false, _) =
+                presentation.library
+            {
                 Text(l10n.text(.soundPacksEmptyLoadFailedMessage))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            } else if model.hasFactoryPacks {
+            } else if case .restoreFactory(let action) = activeSounds.emptyLibraryRecovery {
                 Text(l10n.text(.soundPacksEmptyFactoryMessage))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button(l10n.text(.soundPacksEmptyRestore)) {
-                    pendingFactoryPackRestore = FactoryPackRestoreRequest(
-                        packID: "all-factory-packs",
-                        displayName: l10n.text(.soundPacksEmptyRestoreLabel),
-                        kind: .allFactoryPacks)
+                    invoke(action)
                 }
-                .disabled(!model.writesAllowed)
                 .buttonStyle(.borderedProminent)
                 .tint(ClaudioSharedColor.clay(colorScheme))
                 .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
@@ -933,17 +880,19 @@ struct SoundPacksWindowView: View {
                 .accessibilityValue(l10n.text(.soundPacksEmptyRestoreValue))
                 .accessibilityHint(l10n.text(.soundPacksEmptyRestoreHint))
                 .accessibilityIdentifier("sound-packs.restore-all-factory-packs")
-            } else {
+            } else if case .revealRoot(let displayValue, let action) =
+                activeSounds.emptyLibraryRecovery
+            {
                 Text(l10n.text(.soundPacksEmptyNoFactoryMessage))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button(l10n.text(.soundPacksEmptyReveal)) {
-                    revealPacksDirectory()
+                    invoke(action)
                 }
                 .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
                 .focused($focusedTarget, equals: .revealPacksDirectory)
                 .accessibilityLabel(l10n.text(.soundPacksEmptyRevealLabel))
-                .accessibilityValue(userPacksDirectory.path)
+                .accessibilityValue(displayValue)
                 .accessibilityHint(l10n.text(.soundPacksEmptyRevealHint))
                 .accessibilityIdentifier("sound-packs.reveal-packs-directory")
             }
@@ -953,23 +902,13 @@ struct SoundPacksWindowView: View {
     }
 
     private var emptyLibraryTitle: String {
-        switch model.libraryPresentationState {
-        case .loading: return l10n.text(.soundPacksLibraryLoading).replacingOccurrences(of: "…", with: "")
-        case .loadFailed: return l10n.text(.panelPacksReadFailed)
-        case .ready, .refreshing, .refreshFailed: return l10n.text(.panelPacksNoneTitle)
-        }
-    }
-
-    private func revealPacksDirectory() {
-        var isDirectory: ObjCBool = false
-        if FileManager.default.fileExists(
-            atPath: userPacksDirectory.path,
-            isDirectory: &isDirectory),
-            isDirectory.boolValue
-        {
-            NSWorkspace.shared.open(userPacksDirectory)
-        } else {
-            NSWorkspace.shared.open(userPacksDirectory.deletingLastPathComponent())
+        switch presentation.library {
+        case .unloaded, .loading(previousAvailable: false):
+            return l10n.text(.soundPacksLibraryLoading).replacingOccurrences(of: "…", with: "")
+        case .failed(previousAvailable: false, _):
+            return l10n.text(.panelPacksReadFailed)
+        case .loading(previousAvailable: true), .ready, .failed(previousAvailable: true, _):
+            return l10n.text(.panelPacksNoneTitle)
         }
     }
 
@@ -994,15 +933,14 @@ struct SoundPacksWindowView: View {
                 .accessibilityLabel(message)
             }
             if case .retryFactoryRestores(let packIDs)? = status.recovery {
-                ForEach(packIDs, id: \.self) { packID in
+                ForEach(
+                    activeSounds.recoveryActions.filter { packIDs.contains($0.packID) }
+                ) { recovery in
+                    let packID = recovery.packID
                     let displayName = SelectedPackMetadata(id: packID, name: nil).displayName
                     Button(l10n.format(.soundPacksRetryRestore, displayName)) {
-                        pendingFactoryPackRestore = FactoryPackRestoreRequest(
-                            packID: packID,
-                            displayName: displayName,
-                            kind: .failedPublishRetry)
+                        invoke(recovery.retryAction)
                     }
-                    .disabled(!model.writesAllowed)
                     .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
                     .focused(
                         $focusedTarget,
@@ -1018,7 +956,10 @@ struct SoundPacksWindowView: View {
     }
 
     @ViewBuilder
-    private func eventMappingRow(_ row: EventRow, stacks: Bool) -> some View {
+    private func eventMappingRow(
+        _ row: SoundPackEditorEventPresentation,
+        stacks: Bool
+    ) -> some View {
         Group {
             if stacks {
                 VStack(alignment: .leading, spacing: 8) {
@@ -1072,7 +1013,7 @@ struct SoundPacksWindowView: View {
         .accessibilityIdentifier("sound-packs.event.\(row.event.rawValue)")
     }
 
-    private func eventIdentity(_ row: EventRow) -> some View {
+    private func eventIdentity(_ row: SoundPackEditorEventPresentation) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 7) {
                 ClaudioEventGlyph(event: row.event, size: 24)
@@ -1092,19 +1033,19 @@ struct SoundPacksWindowView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func eventControls(_ row: EventRow) -> some View {
-        let availability = previewAvailability(for: row)
+    private func eventControls(_ row: SoundPackEditorEventPresentation) -> some View {
+        let availability = row.previewAvailability
         return HStack(spacing: 8) {
             eventAudioControl(row)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button {
-                playPreview(for: row)
+                invoke(row.previewAction)
             } label: {
                 Label(l10n.text(.soundPacksPreview), systemImage: "play.fill")
             }
             .fixedSize(horizontal: true, vertical: false)
             .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
-            .disabled(!availability.isAvailable)
+            .disabled(row.previewAction == nil)
             .focused($focusedTarget, equals: .eventPreview(row.event))
             .accessibilityLabel(
                 l10n.format(
@@ -1121,26 +1062,24 @@ struct SoundPacksWindowView: View {
     }
 
     @ViewBuilder
-    private func eventAudioControl(_ row: EventRow) -> some View {
+    private func eventAudioControl(_ row: SoundPackEditorEventPresentation) -> some View {
         if canEditSelectedPack {
             Menu {
                 Section(l10n.text(.soundPacksExistingFiles)) {
-                    if model.selectedAudioInventoryState.isLoading
-                        && model.selectedAudioFiles.isEmpty
-                    {
+                    if inventoryIsLoading && inventoryFiles.isEmpty {
                         Text(l10n.text(.soundPacksAudioLoading))
-                    } else if model.selectedAudioFiles.isEmpty {
+                    } else if inventoryFiles.isEmpty {
                         Text(l10n.text(.soundPacksEmptyAudio))
                     } else {
-                        ForEach(model.selectedAudioFiles) { file in
+                        ForEach(inventoryFiles) { file in
                             Button(
                                 file.isOrphan
                                     ? l10n.format(.soundPacksOrphanUnused, file.fileName)
                                     : file.fileName
                             ) {
-                                performVisibleWrite {
-                                    model.assignSelectedAudioFile(file.fileName, to: row.event)
-                                }
+                                invoke(
+                                    file.assignments.first(where: { $0.event == row.event })?
+                                        .action)
                             }
                             .accessibilityLabel(
                                 l10n.format(
@@ -1156,7 +1095,7 @@ struct SoundPacksWindowView: View {
                 }
                 Divider()
                 Button(l10n.text(.soundPacksChooseBind)) {
-                    chooseAndBindAudio(to: row.event)
+                    invoke(row.importAction)
                 }
                 .accessibilityLabel(
                     l10n.format(
@@ -1167,11 +1106,9 @@ struct SoundPacksWindowView: View {
                 .accessibilityIdentifier(
                     "sound-packs.event.\(row.event.rawValue).choose-and-bind")
                 Button(l10n.text(.soundPacksClearBinding), role: .destructive) {
-                    performVisibleWrite {
-                        model.clearSelectedEventBinding(row.event)
-                    }
+                    invoke(row.clearAction)
                 }
-                .disabled(!hasBinding(row.coverage))
+                .disabled(row.clearAction == nil)
                 .accessibilityLabel(
                     l10n.format(
                         .soundPacksClearBindingLabel,
@@ -1181,9 +1118,9 @@ struct SoundPacksWindowView: View {
                 .accessibilityIdentifier(
                     "sound-packs.event.\(row.event.rawValue).clear-binding")
                 Button(l10n.text(.soundPacksRevealMapping)) {
-                    revealMappedAudio(for: row.event)
+                    invoke(mappedAudio(for: row)?.revealAction)
                 }
-                .disabled(!row.coverage.previewEnabled)
+                .disabled(mappedAudio(for: row)?.revealAction == nil)
                 .accessibilityLabel(
                     l10n.format(
                         .soundPacksRevealMappingLabel,
@@ -1222,7 +1159,7 @@ struct SoundPacksWindowView: View {
 
     @ViewBuilder
     private var orphanAudioSection: some View {
-        let orphanFiles = model.selectedAudioFiles.filter(\.isOrphan)
+        let orphanFiles = inventoryFiles.filter(\.isOrphan)
         if !orphanFiles.isEmpty {
             Divider()
             VStack(alignment: .leading, spacing: 10) {
@@ -1242,7 +1179,7 @@ struct SoundPacksWindowView: View {
         }
     }
 
-    private func orphanAudioRow(_ file: PackAudioFile) -> some View {
+    private func orphanAudioRow(_ file: SoundPackEditorAudioPresentation) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.secondary)
@@ -1253,11 +1190,10 @@ struct SoundPacksWindowView: View {
             Spacer(minLength: 8)
             if canEditSelectedPack {
                 Menu(l10n.text(.soundPacksOrphanAssign)) {
-                    ForEach(Event.allCases, id: \.self) { event in
+                    ForEach(file.assignments) { assignment in
+                        let event = assignment.event
                         Button(localizedEventName(event, language: languageStore.language)) {
-                            performVisibleWrite {
-                                model.assignSelectedAudioFile(file.fileName, to: event)
-                            }
+                            invoke(assignment.action)
                         }
                         .accessibilityLabel(
                             l10n.format(
@@ -1281,12 +1217,9 @@ struct SoundPacksWindowView: View {
                 .accessibilityIdentifier("sound-packs.orphan.\(file.fileName).assign")
 
                 Button(l10n.text(.soundPacksOrphanDelete)) {
-                    if let selectedPackID = model.selectedPackID {
-                        pendingPermanentDeletion = PermanentAudioDeletionRequest(
-                            packID: selectedPackID,
-                            file: file)
-                    }
+                    invoke(file.deleteAction)
                 }
+                .disabled(file.deleteAction == nil)
                 .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
                 .focused(
                     $focusedTarget,
@@ -1303,94 +1236,198 @@ struct SoundPacksWindowView: View {
 
     private func windowFailureRow(action: String, reason: String) -> some View {
         FailureRow(message: reason)
-        .accessibilityLabel(
-            localizedSoundPacksFailureAccessibilityLabel(
-                action: action,
-                reason: reason,
-                language: languageStore.language))
+            .accessibilityLabel(
+                localizedSoundPacksFailureAccessibilityLabel(
+                    action: action,
+                    reason: reason,
+                    language: languageStore.language))
+    }
+
+    private var deleteOrphanConfirmation: SoundPackEditorConfirmation? {
+        guard let confirmation = presentation.pendingConfirmation,
+            confirmation.kind == .deleteOrphan
+        else { return nil }
+        return confirmation
+    }
+
+    private var deletePackConfirmation: SoundPackEditorConfirmation? {
+        guard let confirmation = presentation.pendingConfirmation,
+            confirmation.kind == .deletePack
+        else { return nil }
+        return confirmation
+    }
+
+    private var restoreConfirmation: SoundPackEditorConfirmation? {
+        guard let confirmation = presentation.pendingConfirmation else { return nil }
+        switch confirmation.kind {
+        case .restoreFactory, .retryRestore, .restoreAllFactory:
+            return confirmation
+        case .deletePack, .deleteOrphan:
+            return nil
+        }
+    }
+
+    private func cancelConfirmation(_ confirmation: SoundPackEditorConfirmation?) {
+        guard let confirmation,
+            presentation.pendingConfirmation?.id == confirmation.id
+        else { return }
+        invoke(confirmation.cancelAction)
+    }
+
+    private func confirmationPackDisplayName(
+        _ confirmation: SoundPackEditorConfirmation
+    ) -> String {
+        guard let packID = confirmation.packID else {
+            return l10n.text(.soundPacksEmptyRestoreLabel)
+        }
+        let name = activeSounds.packs.first(where: { $0.id == packID })?.name
+        return SelectedPackMetadata(id: packID, name: name).displayName
+    }
+
+    private func localizedLibraryFailure(
+        _ reason: SoundPackEditorLibraryFailureReason
+    ) -> String {
+        switch reason {
+        case .locationUnavailable:
+            return l10n.text(.soundPacksEmptyLoadFailedMessage)
+        case .scanFailed:
+            return l10n.text(.panelPacksReadFailed)
+        }
     }
 
     private func factoryRestoreConfirmationMessage(
-        _ request: FactoryPackRestoreRequest
+        _ confirmation: SoundPackEditorConfirmation
     ) -> String {
-        switch request.kind {
-        case .selectedPack:
+        switch confirmation.kind {
+        case .restoreFactory:
             return l10n.text(.soundPacksRestoreSelectedMessage)
-        case .failedPublishRetry:
+        case .retryRestore:
             return l10n.text(.soundPacksRestoreRetryMessage)
-        case .allFactoryPacks:
+        case .restoreAllFactory:
             return l10n.text(.soundPacksRestoreAllMessage)
+        case .deletePack, .deleteOrphan:
+            return ""
         }
     }
 
-    private func inventoryErrorMessage(_ error: PackAudioInventoryError) -> String {
+    private func inventoryErrorMessage(
+        _ error: SoundPackEditorInventoryFailureReason
+    ) -> String {
         switch error {
-        case .packNotFound(let packID):
-            return l10n.format(.soundPacksInventoryPackNotFound, packID)
-        case .manifestUnreadable(let reason):
+        case .packUnavailable:
+            return l10n.format(
+                .soundPacksInventoryPackNotFound,
+                selectedCard?.id ?? "")
+        case .manifestUnreadable:
             return l10n.format(
                 .soundPacksInventoryManifestUnreadable,
-                localizedSoundPackLibraryReason(reason, language: languageStore.language))
-        case .directoryUnreadable(let reason):
-            return l10n.format(.soundPacksInventoryDirectoryUnreadable, reason)
+                l10n.text(.panelPacksReadFailed))
+        case .directoryUnavailable:
+            return l10n.format(
+                .soundPacksInventoryDirectoryUnreadable,
+                l10n.text(.panelPacksReadFailed))
         }
     }
 
-    private func previewAvailability(for row: EventRow) -> EventPreviewAvailability {
-        eventPreviewAvailability(
-            coverage: row.coverage,
-            masterVolume: model.config.masterVolume)
+    private var managedSurface: HostSurfaceID? {
+        switch activeSounds.scope {
+        case .available(let scope), .unavailable(scope: let scope, reason: _):
+            return scope.surface
+        }
     }
 
-    private func playPreview(for row: EventRow) {
-        guard let resolvedFile = model.previewFileForSelectedEvent(row.event) else { return }
-        previewPlayer.play(
-            fileAt: resolvedFile,
-            volume: Float(previewVolume(for: model.config)))
+    private var isImportingAudio: Bool {
+        presentation.activities.contains {
+            guard case .busy = $0.phase else { return false }
+            return $0.kind == .importAudio
+        }
+    }
+
+    private var isPerformingWrite: Bool {
+        return presentation.activities.contains {
+            guard case .busy = $0.phase else { return false }
+            return $0.kind != .importAudio
+        }
+    }
+
+    private var inventoryFiles: [SoundPackEditorAudioPresentation] {
+        switch activeSounds.inventory {
+        case .idle:
+            return []
+        case .loading(let previous), .failed(let previous, _):
+            return previous ?? []
+        case .ready(let files):
+            return files
+        }
+    }
+
+    private var inventoryIsLoading: Bool {
+        if case .loading = activeSounds.inventory { return true }
+        return false
+    }
+
+    private var inventoryFailure: SoundPackEditorInventoryFailureReason? {
+        guard case .failed(_, let reason) = activeSounds.inventory else { return nil }
+        return reason
+    }
+
+    private func mappedAudio(
+        for row: SoundPackEditorEventPresentation
+    ) -> SoundPackEditorAudioPresentation? {
+        let fileName: String
+        switch row.coverage {
+        case .present(let value), .broken(let value):
+            fileName = value
+        case .unmapped:
+            return nil
+        }
+        return inventoryFiles.first(where: { $0.fileName == fileName })
     }
 
     private var selection: Binding<String?> {
         Binding(
-            get: { model.selectedPackID },
+            get: { activeSounds.selectedPack?.id },
             set: { newValue in
-                if let newValue {
-                    model.selectPackForInspection(newValue)
-                }
+                invoke(activeSounds.packs.first(where: { $0.id == newValue })?.inspectAction)
             })
     }
 
-    private var selectedCard: PackCard? {
-        guard let selectedPackID = model.selectedPackID else { return nil }
-        return model.packCards.first(where: { $0.id == selectedPackID })
-    }
+    private var selectedCard: SoundPackEditorPackPresentation? { activeSounds.selectedPack }
 
     private var focusScope: SoundPacksWindowFocusScope {
-        let allowsEmptyLibraryActions = model.libraryPresentationState.hasUsableSnapshot
+        let emptyRecovery = activeSounds.emptyLibraryRecovery
+        let canRestoreAllFactoryPacks: Bool
+        let canRevealPacksDirectory: Bool
+        switch emptyRecovery {
+        case .restoreFactory:
+            canRestoreAllFactoryPacks = true
+            canRevealPacksDirectory = false
+        case .revealRoot:
+            canRestoreAllFactoryPacks = false
+            canRevealPacksDirectory = true
+        case .none:
+            canRestoreAllFactoryPacks = false
+            canRevealPacksDirectory = false
+        }
         return SoundPacksWindowFocusScope(
-            packIDs: model.packCards.map(\.id),
-            selectedPackID: model.selectedPackID,
-            editableEvents: canEditSelectedPack ? model.selectedEventRows.map(\.event) : [],
-            previewableEvents: model.selectedEventRows.filter {
-                previewAvailability(for: $0).isAvailable
+            packIDs: activeSounds.packs.map(\.id),
+            selectedPackID: activeSounds.selectedPack?.id,
+            editableEvents: canEditSelectedPack ? activeSounds.eventRows.map(\.event) : [],
+            previewableEvents: activeSounds.eventRows.filter {
+                $0.previewAction != nil
             }.map(\.event),
             orphanFileNames: canEditSelectedPack
-                ? model.selectedAudioFiles.filter(\.isOrphan).map(\.fileName) : [],
+                ? inventoryFiles.filter(\.isOrphan).map(\.fileName) : [],
             canEditSelectedPack: canEditSelectedPack,
-            canForkFactoryPack:
-                model.writesAllowed && model.selectedPackIsBuiltinReadOnly
-                && !model.selectedPackIsMissingPlaceholder,
-            canAddAudio: canEditSelectedPack,
-            canDeleteUserPack: canDeleteSelectedPack,
-            canRestoreFactoryPack: model.writesAllowed && model.selectedPackCanRestoreFactory,
-            canUseSelectedPack: model.writesAllowed && selectedCard?.isSelected == false,
-            canRestoreAllFactoryPacks:
-                model.writesAllowed && allowsEmptyLibraryActions && model.packCards.isEmpty
-                && model.hasFactoryPacks,
-            canRevealPacksDirectory:
-                allowsEmptyLibraryActions && model.packCards.isEmpty && !model.hasFactoryPacks,
-            canRetryLibraryLoad: model.libraryPresentationState.canRetry,
-            retryFactoryRestorePackIDs:
-                model.writesAllowed ? model.factoryRestoreRetryPackIDs : [])
+            canForkFactoryPack: selectedCard?.forkAction != nil,
+            canAddAudio: activeSounds.requestImportAction != nil,
+            canDeleteUserPack: selectedCard?.deleteAction != nil,
+            canRestoreFactoryPack: selectedCard?.restoreAction != nil,
+            canUseSelectedPack: selectedCard?.useAction != nil,
+            canRestoreAllFactoryPacks: canRestoreAllFactoryPacks,
+            canRevealPacksDirectory: canRevealPacksDirectory,
+            canRetryLibraryLoad: activeSounds.retryLibraryAction != nil,
+            retryFactoryRestorePackIDs: activeSounds.recoveryActions.map(\.packID))
     }
 
     private func applyInitialFocus() {
@@ -1442,12 +1479,11 @@ struct SoundPacksWindowView: View {
     }
 
     private var canEditSelectedPack: Bool {
-        selectedCard?.availability == .installed && !model.selectedPackIsBuiltinReadOnly
-            && model.writesAllowed
+        activeSounds.requestImportAction != nil
     }
 
     private var canDeleteSelectedPack: Bool {
-        canEditSelectedPack && !model.selectedPackIsReferenced
+        selectedCard?.deleteAction != nil
     }
 
     private func licenseBadgeLabel(_ badge: PackRowLicenseBadge) -> String? {
@@ -1469,15 +1505,12 @@ struct SoundPacksWindowView: View {
         }
     }
 
-    private func hasBinding(_ coverage: CoverageState) -> Bool {
-        if case .unmapped = coverage { return false }
-        return true
-    }
-
-    private func packAccessibilityLabel(_ card: PackCard) -> String {
+    private func packAccessibilityLabel(
+        _ card: SoundPackEditorPackPresentation
+    ) -> String {
         localizedSoundPacksPackAccessibilityLabel(
             displayName: SelectedPackMetadata(id: card.id, name: card.name).displayName,
-            isActivePack: card.isSelected,
+            isActivePack: card.isActiveForScope,
             state: card.state,
             license: packRowMetaSlots(
                 isCC0: card.isCC0,
@@ -1487,14 +1520,19 @@ struct SoundPacksWindowView: View {
             language: languageStore.language)
     }
 
-    private func packAccessibilityValue(_ card: PackCard) -> String {
+    private func packAccessibilityValue(
+        _ card: SoundPackEditorPackPresentation
+    ) -> String {
         var values: [String] = []
-        if model.selectedPackID == card.id {
-            values.append(l10n.format(
-                .soundPacksSidebarViewing,
-                SelectedPackMetadata(id: card.id, name: card.name).displayName))
+        if card.isInspected {
+            values.append(
+                l10n.format(
+                    .soundPacksSidebarViewing,
+                    SelectedPackMetadata(id: card.id, name: card.name).displayName))
         }
-        if card.isSelected { values.append(l10n.text(.soundPacksUsing)) }
-        return values.isEmpty ? l10n.text(.soundPacksPackNotUsed) : values.joined(separator: languageStore.language == .english ? ", " : "，")
+        if card.isActiveForScope { values.append(l10n.text(.soundPacksUsing)) }
+        return values.isEmpty
+            ? l10n.text(.soundPacksPackNotUsed)
+            : values.joined(separator: languageStore.language == .english ? ", " : "，")
     }
 }

@@ -394,30 +394,12 @@ func runUsageActivitySuites() async {
             "清理完成后只能发布该 revision 的最终快照和反馈")
     }
 
-    suite("Usage production wiring：真实目的页、双确认和安全 composition 已进入生产") {
+    suite("Usage production wiring：安全 system composition 留在 executable") {
         let root = guiTestRepositoryRoot()
-        let view = try? String(
-            contentsOf: root.appendingPathComponent(
-                "gui/Sources/ClaudioGUI/UsageSettingsView.swift"),
-            encoding: .utf8)
-        let settings = try? String(
-            contentsOf: root.appendingPathComponent(
-                "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
-            encoding: .utf8)
         let adapter = try? String(
             contentsOf: root.appendingPathComponent(
                 "gui/Sources/ClaudioGUI/UsageActivityAdapter.swift"),
             encoding: .utf8)
-        expect(
-            view?.contains("confirmation = .history") == true
-                && view?.contains("confirmation = .log") == true
-                && view?.contains("settings.usage.clear-history") == true
-                && view?.contains("settings.usage.clear-log") == true,
-            "历史与日志必须有两个独立确认入口和稳定 AX 标识")
-        expect(
-            settings?.contains("else if destination == .usage") == true
-                && settings?.contains("UsageSettingsView(") == true,
-            "Usage destination 必须渲染 production 内容而非 debug route")
         expect(
             adapter?.contains("UsageActivityStore.production()") == true
                 && adapter?.contains("AICueKeychainCredentialVault") == false,

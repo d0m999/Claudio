@@ -8,6 +8,8 @@ import PackageDescription
 // The target split keeps the menu-bar shell and retained unified Settings destinations testable:
 //   - `ClaudioGUICore`: pure Foundation state/view-model logic (no SwiftUI import), so it
 //     can be exercised by the same dependency-free test harness `helper/` uses.
+//   - `ClaudioSettingsPresentation`: the importable Settings tree and its typed presentation
+//     transaction; it has no native window, system-effect adapter, or resource ownership.
 //   - `ClaudioGUI`: the executable — SwiftUI `App`/`View` layer, depends on `ClaudioGUICore`.
 let package = Package(
     name: "claudio-gui",
@@ -45,7 +47,7 @@ let package = Package(
             name: "ClaudioGUICore",
             dependencies: [
                 "ClaudioLocalization",
-                .product(name: "ClaudioCore", package: "helper")
+                .product(name: "ClaudioCore", package: "helper"),
             ],
             linkerSettings: [
                 .linkedFramework("Security")
@@ -73,9 +75,22 @@ let package = Package(
                 .product(name: "ClaudioCore", package: "helper"),
             ]
         ),
-        // The SwiftUI app shell owns the status-item panel and one retained unified Settings
-        // window. Its embedded Integrations destination consumes `ClaudioGUICore` presentation
-        // values and never opens host config itself, so cutover creates no second truth source.
+        // Importable Settings presentation seam. Its session owns typed route/focus/destination
+        // lifecycle and semantic announcement debt, while the native window and system-effect
+        // adapters stay in the executable. Production and the harness mount the same types.
+        .target(
+            name: "ClaudioSettingsPresentation",
+            dependencies: [
+                "ClaudioLocalization",
+                "ClaudioGUICore",
+                "ClaudioGUIComponents",
+                "SoundPacksWindow",
+                .product(name: "ClaudioCore", package: "helper"),
+            ]
+        ),
+        // The SwiftUI app shell owns the status-item panel, native adapters, and one retained
+        // Settings window. The imported presentation target consumes `ClaudioGUICore` values and
+        // never opens host config itself, so composition creates no second truth source.
         //
         // Depends on `ClaudioCore` directly (not just transitively via `ClaudioGUICore`,
         // same reasoning as `claudio-gui-tests` below) since `EventRowView`/`DesignTokens`
@@ -89,12 +104,13 @@ let package = Package(
                 "ClaudioGUICore",
                 "ClaudioGUIComponents",
                 "SoundPacksWindow",
+                "ClaudioSettingsPresentation",
                 .product(name: "ClaudioCore", package: "helper"),
             ],
             resources: [
                 // Template PDFs keep the macOS 12 runtime independent of OS-version-specific
                 // SVG decoding. Bundle assembly must copy the generated *_ClaudioGUI.bundle.
-                .process("Resources/HostIcons"),
+                .process("Resources/HostIcons")
             ],
             linkerSettings: [
                 .linkedFramework("Carbon")
@@ -125,6 +141,8 @@ let package = Package(
                 "ClaudioLocalization",
                 "ClaudioGUICore",
                 "ClaudioGUIComponents",
+                "SoundPacksWindow",
+                "ClaudioSettingsPresentation",
                 .product(name: "ClaudioCore", package: "helper"),
             ],
             path: "Tests/ClaudioGUICoreTests"

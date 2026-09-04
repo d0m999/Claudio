@@ -6,96 +6,60 @@ import ClaudioLocalization
 import SoundPacksWindow
 import SwiftUI
 
-/// Unified Settings navigation shell. Production preferences expose only migrated destinations;
-/// DEBUG previews inject all destinations to validate typed routing and failure presentation.
+/// Unified Settings navigation shell shared by production and the compiled harness.
 @MainActor
-struct SettingsWindowView: View {
-    @ObservedObject var model: SettingsWindowPresentationModel<NSRunningApplication>
+package struct SettingsRootView: View {
     @ObservedObject var preferences: ClaudioPreferences
     @ObservedObject var dynamicQuietPolicy: DynamicQuietPolicyController
-    @ObservedObject var loginItemSettings: LoginItemSettingsModel
+    @ObservedObject var settingsPresentationSession: SettingsPresentationSession
     @ObservedObject var usageSettings: UsageSettingsModel
     @ObservedObject var globalShortcutSettings: GlobalShortcutSettingsModel
     @ObservedObject var aboutSettings: AboutSettingsModel
-    let soundPacksEditorOwner: SoundPacksEditorOwner?
-    let eventSettingsModel: PanelConfigController?
-    let eventSettingsSelection: EventSettingsWindowSelection?
-    let hostIntegrations: HostIntegrationPresentationStore?
-    let integrationsModel: IntegrationDestinationModel?
-    let integrationsFocusCoordinator: IntegrationDestinationFocusCoordinator?
-    let aiCueViewModel: AICueGenerationViewModel?
-    let audioEnvironment: AudioImportEnvironment?
-    let onEventAudibilityInputsChanged: (@MainActor () -> Void)?
-    let onEventPackSwitch: (@MainActor (PanelPackSwitchOutcome) -> Void)?
-    let onAnnouncement: (@MainActor (String) -> Void)?
-    let onAdoptAICue:
-        (
-            @MainActor (AICueAdoptionRequest) async -> Result<
-                AICueAdoptionOutcome, AICueAdoptionError
-            >
-        )?
+    let soundPacksEditorOwner: SoundPacksEditorOwner
+    let soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher
+    let eventSettingsModel: PanelConfigController
+    let eventSettingsSelection: EventSettingsWindowSelection
+    let hostIntegrations: HostIntegrationPresentationStore
+    let integrationsModel: IntegrationDestinationModel
+    let integrationsFocusCoordinator: IntegrationDestinationFocusCoordinator
+    let aiCueViewModel: AICueGenerationViewModel
+    let onEventAudibilityInputsChanged: @MainActor () -> Void
+    let onAnnouncement: @MainActor (String) -> Void
 
     @FocusState private var focusedTarget: SettingsWindowFocusTarget?
+    @State private var handledFocusDebtRevision: UInt64 = 0
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: preferences.language) }
-    private var destination: SettingsDestination { model.resolution.destination }
-    private var eventSettingsFocusScopes: [PanelSoundScopeID] {
-        guard let eventSettingsModel, let hostIntegrations else { return [.global] }
-        return panelSoundScopePresentations(
-            sourceRows: hostIntegrations.content.sourceRows,
-            config: eventSettingsModel.configState.resolvedConfig,
-            language: preferences.language
-        ).map(\.scope)
+    private var destination: SettingsDestination {
+        settingsPresentationSession.state.routeResolution.destination
     }
 
-    init(
-        model: SettingsWindowPresentationModel<NSRunningApplication>,
-        preferences: ClaudioPreferences,
-        dynamicQuietPolicy: DynamicQuietPolicyController,
-        loginItemSettings: LoginItemSettingsModel,
-        usageSettings: UsageSettingsModel,
-        globalShortcutSettings: GlobalShortcutSettingsModel,
-        aboutSettings: AboutSettingsModel,
-        soundPacksEditorOwner: SoundPacksEditorOwner? = nil,
-        eventSettingsModel: PanelConfigController? = nil,
-        eventSettingsSelection: EventSettingsWindowSelection? = nil,
-        hostIntegrations: HostIntegrationPresentationStore? = nil,
-        integrationsModel: IntegrationDestinationModel? = nil,
-        integrationsFocusCoordinator: IntegrationDestinationFocusCoordinator? = nil,
-        aiCueViewModel: AICueGenerationViewModel? = nil,
-        audioEnvironment: AudioImportEnvironment? = nil,
-        onEventAudibilityInputsChanged: (@MainActor () -> Void)? = nil,
-        onEventPackSwitch: (@MainActor (PanelPackSwitchOutcome) -> Void)? = nil,
-        onAnnouncement: (@MainActor (String) -> Void)? = nil,
-        onAdoptAICue:
-            (
-                @MainActor (AICueAdoptionRequest) async -> Result<
-                    AICueAdoptionOutcome, AICueAdoptionError
-                >
-            )? = nil
-    ) {
-        self.model = model
-        self.preferences = preferences
-        self.dynamicQuietPolicy = dynamicQuietPolicy
-        self.loginItemSettings = loginItemSettings
-        self.usageSettings = usageSettings
-        self.globalShortcutSettings = globalShortcutSettings
-        self.aboutSettings = aboutSettings
-        self.soundPacksEditorOwner = soundPacksEditorOwner
-        self.eventSettingsModel = eventSettingsModel
-        self.eventSettingsSelection = eventSettingsSelection
-        self.hostIntegrations = hostIntegrations
-        self.integrationsModel = integrationsModel
-        self.integrationsFocusCoordinator = integrationsFocusCoordinator
-        self.aiCueViewModel = aiCueViewModel
-        self.audioEnvironment = audioEnvironment
-        self.onEventAudibilityInputsChanged = onEventAudibilityInputsChanged
-        self.onEventPackSwitch = onEventPackSwitch
-        self.onAnnouncement = onAnnouncement
-        self.onAdoptAICue = onAdoptAICue
+    package init(session: SettingsPresentationSession) {
+        let dependencies = session.dependencies
+        _preferences = ObservedObject(wrappedValue: dependencies.preferences)
+        _dynamicQuietPolicy = ObservedObject(wrappedValue: dependencies.dynamicQuietPolicy)
+        _settingsPresentationSession = ObservedObject(wrappedValue: session)
+        _usageSettings = ObservedObject(wrappedValue: dependencies.usageSettings)
+        _globalShortcutSettings = ObservedObject(
+            wrappedValue: dependencies.globalShortcutSettings)
+        _aboutSettings = ObservedObject(wrappedValue: dependencies.aboutSettings)
+        soundPacksEditorOwner = dependencies.soundPacksEditorOwner
+        soundPacksEditorNativeEffects = dependencies.soundPacksEditorNativeEffects
+        eventSettingsModel = dependencies.eventSettingsModel
+        eventSettingsSelection = session.eventSettingsSelection
+        hostIntegrations = dependencies.hostIntegrations
+        integrationsModel = dependencies.integrationsModel
+        integrationsFocusCoordinator = session.integrationsFocusCoordinator
+        aiCueViewModel = dependencies.aiCueViewModel
+        onEventAudibilityInputsChanged = {
+            _ = session.send(.eventAudibilityInputsChanged)
+        }
+        onAnnouncement = {
+            _ = session.send(.announceDestinationUpdate($0))
+        }
     }
 
-    var body: some View {
+    package var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
                 sidebar
@@ -119,58 +83,33 @@ struct SettingsWindowView: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.settingsWindowTitle))
+        .accessibilityIdentifier(SettingsPresentationAccessibilityID.root)
         .environment(\.dynamicTypeSize, preferences.interfaceTextSize.dynamicTypeSize)
-        .onExitCommand {
-            focusedTarget = SettingsWindowFocusTarget.sidebar(destination)
+        .settingsExitInteraction(destination: destination) { target in
+            focusedTarget = target
         }
         .onAppear {
-            synchronizeDestinationFocus()
+            synchronizeDestinationFocus(settingsPresentationSession.state)
         }
-        .onReceive(model.$routeRequestRevision) { _ in
-            synchronizeDestinationFocus()
+        .onReceive(settingsPresentationSession.$state) { state in
+            synchronizeDestinationFocus(state)
         }
     }
 
-    private func synchronizeDestinationFocus() {
-        if let failure = model.resolution.failure {
-            eventSettingsSelection?.leaveDestination()
-            focusedTarget = SettingsWindowFocusTarget.title(destination)
-            onAnnouncement?(settingsFailureMessage(failure))
-            return
-        }
-        if destination != .eventsAndSounds {
-            eventSettingsSelection?.leaveDestination()
-        }
-        if destination == .integrations,
-            let integrationsModel,
-            let integrationsFocusCoordinator
+    private func synchronizeDestinationFocus(_ state: SettingsPresentationState) {
+        guard state.windowPhase == .key,
+            let debt = state.focusDebt,
+            debt.revision > handledFocusDebtRevision
+        else { return }
+        handledFocusDebtRevision = debt.revision
+        if state.routeResolution.failure != nil
+            || (debt.destination != .integrations
+                && debt.destination != .eventsAndSounds
+                && debt.destination != .sounds)
         {
-            if case .integrations(let surface) = model.resolution.route,
-                let host = HostID.productVisibleCases.first(where: {
-                    $0.surfaceID == surface
-                })
-            {
-                if integrationsModel.selectHost(host) {
-                    integrationsFocusCoordinator.requestFocus(.agent(host))
-                } else {
-                    integrationsFocusCoordinator.requestFocus(.title)
-                }
-            } else {
-                integrationsModel.restorePreferredHost()
-                integrationsFocusCoordinator.requestFocus(.title)
-            }
-        } else if destination == .eventsAndSounds,
-            let eventSettingsSelection,
-            let eventSettingsModel
-        {
-            if let route = eventSettingsRoute {
-                eventSettingsSelection.select(route)
-                eventSettingsModel.selectSoundSurface(route.surface)
-            }
-            eventSettingsSelection.requestInitialFocus(scopes: eventSettingsFocusScopes)
-        } else if destination != .sounds {
-            focusedTarget = SettingsWindowFocusTarget.title(destination)
+            focusedTarget = SettingsWindowFocusTarget.title(state.routeResolution.destination)
         }
+        _ = settingsPresentationSession.send(.acknowledgeFocus(revision: debt.revision))
     }
 
     private var sidebar: some View {
@@ -218,7 +157,7 @@ struct SettingsWindowView: View {
 
     private func sidebarButton(_ item: SettingsDestination) -> some View {
         Button {
-            model.request(.destination(item))
+            settingsPresentationSession.send(.route(.destination(item)))
         } label: {
             HStack(spacing: 9) {
                 Image(systemName: icon(item))
@@ -253,15 +192,12 @@ struct SettingsWindowView: View {
         .buttonStyle(.plain)
         .font(.system(.body, design: .rounded).weight(item == destination ? .semibold : .regular))
         .focused($focusedTarget, equals: SettingsWindowFocusTarget.sidebar(item))
-        .onMoveCommand { direction in
-            switch direction {
-            case .up:
-                moveSidebarSelection(.previous, from: item)
-            case .down:
-                moveSidebarSelection(.next, from: item)
-            default:
-                break
-            }
+        .settingsSidebarInteraction(
+            item: item,
+            availableDestinations: preferences.availableSettingsDestinations
+        ) { next in
+            settingsPresentationSession.send(.route(.destination(next)))
+            focusedTarget = .sidebar(next)
         }
         .accessibilityLabel(item.localizedName(language: preferences.language))
         .accessibilityAddTraits(item == destination ? .isSelected : [])
@@ -271,99 +207,94 @@ struct SettingsWindowView: View {
 
     @ViewBuilder
     private var routeSlot: some View {
-        if destination == .integrations,
-            model.resolution.failure == nil,
-            let integrationsModel,
-            let integrationsFocusCoordinator
-        {
-            IntegrationsSettingsDestinationView(
-                model: integrationsModel,
-                focusCoordinator: integrationsFocusCoordinator,
-                languageStore: preferences,
-                onManageEvents: { host in
-                    model.request(.events(scope: .surface(host.surfaceID), event: nil))
-                },
-                onAnnouncement: onAnnouncement)
-        } else if destination == .eventsAndSounds,
-            model.resolution.failure == nil,
-            let soundPacksEditorOwner,
-            let eventSettingsModel,
-            let eventSettingsSelection,
-            let hostIntegrations,
-            let aiCueViewModel,
-            let audioEnvironment,
-            let onEventAudibilityInputsChanged,
-            let onEventPackSwitch,
-            let onAdoptAICue
-        {
-            EventSettingsWindowView(
-                model: eventSettingsModel,
-                selection: eventSettingsSelection,
-                hostIntegrations: hostIntegrations,
-                languageStore: preferences,
-                aiCueViewModel: aiCueViewModel,
-                soundPacksModel: soundPacksEditorOwner.model,
-                audioEnvironment: audioEnvironment,
-                onConfigureSound: { model.request(.sounds($0)) },
-                onAudibilityInputsChanged: onEventAudibilityInputsChanged,
-                onPackSwitch: onEventPackSwitch,
-                onAnnouncement: onAnnouncement,
-                onAdoptAICue: onAdoptAICue)
-        } else if destination == .sounds,
-            model.resolution.failure == nil,
-            let soundPacksEditorOwner
-        {
-            VStack(alignment: .leading, spacing: 16) {
-                destinationTitle
-
-                EmbeddedSoundPacksEditorView(
-                    editorOwner: soundPacksEditorOwner,
-                    route: soundsRoute,
-                    routeRequestRevision: model.routeRequestRevision,
-                    languageStore: preferences)
-            }
-            .padding(.horizontal, 28)
-            .padding(.top, 28)
-            .padding(.bottom, 20)
+        if let failure = settingsPresentationSession.state.routeResolution.failure {
+            standardDestination { routeFailure(failure) }
         } else {
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 24) {
+            switch destination {
+            case .general:
+                standardDestination { generalSettings }
+            case .integrations:
+                IntegrationsSettingsDestinationView(
+                    model: integrationsModel,
+                    focusCoordinator: integrationsFocusCoordinator,
+                    languageStore: preferences,
+                    onManageEvents: { host in
+                        settingsPresentationSession.send(
+                            .route(.events(scope: .surface(host.surfaceID), event: nil)))
+                    },
+                    onAnnouncement: onAnnouncement)
+            case .eventsAndSounds:
+                EventSettingsWindowView(
+                    model: eventSettingsModel,
+                    selection: eventSettingsSelection,
+                    hostIntegrations: hostIntegrations,
+                    languageStore: preferences,
+                    aiCueViewModel: aiCueViewModel,
+                    soundPacksEditorOwner: soundPacksEditorOwner,
+                    soundPacksEditorNativeEffects: soundPacksEditorNativeEffects,
+                    onConfigureSound: {
+                        settingsPresentationSession.send(.route(.sounds($0)))
+                    },
+                    onAudibilityInputsChanged: onEventAudibilityInputsChanged,
+                    onAnnouncement: onAnnouncement)
+            case .notifications:
+                standardDestination { notificationsSettings }
+            case .display:
+                standardDestination { displaySettings }
+            case .sounds:
+                VStack(alignment: .leading, spacing: 16) {
                     destinationTitle
 
-                    if let failure = model.resolution.failure {
-                        routeFailure(failure)
-                    } else if destination == .general {
-                        generalSettings
-                    } else if destination == .notifications {
-                        notificationsSettings
-                    } else if destination == .display {
-                        displaySettings
-                    } else if destination == .usage {
-                        UsageSettingsView(
-                            model: usageSettings,
-                            preferences: preferences,
-                            focusedTarget: $focusedTarget,
-                            onAnnouncement: onAnnouncement)
-                    } else if destination == .shortcuts {
-                        ShortcutSettingsView(
-                            model: globalShortcutSettings,
-                            preferences: preferences,
-                            focusedTarget: $focusedTarget,
-                            onAnnouncement: onAnnouncement)
-                    } else if destination == .about {
-                        AboutSettingsView(
-                            model: aboutSettings,
-                            preferences: preferences,
-                            focusedTarget: $focusedTarget,
-                            onAnnouncement: onAnnouncement)
-                    } else {
-                        debugRouteContent
-                    }
+                    SettingsSoundsDestinationView(
+                        editorOwner: soundPacksEditorOwner,
+                        route: soundsRoute,
+                        routeRequestRevision:
+                            settingsPresentationSession.state.explicitRouteRequestRevision,
+                        languageStore: preferences,
+                        nativeEffects: soundPacksEditorNativeEffects)
                 }
-                .frame(maxWidth: 820, alignment: .leading)
-                .padding(.horizontal, 52)
-                .padding(.vertical, 60)
+                .padding(.horizontal, 28)
+                .padding(.top, 28)
+                .padding(.bottom, 20)
+            case .usage:
+                standardDestination {
+                    UsageSettingsView(
+                        model: usageSettings,
+                        preferences: preferences,
+                        focusedTarget: $focusedTarget,
+                        onAnnouncement: onAnnouncement)
+                }
+            case .shortcuts:
+                standardDestination {
+                    ShortcutSettingsView(
+                        model: globalShortcutSettings,
+                        preferences: preferences,
+                        focusedTarget: $focusedTarget,
+                        onAnnouncement: onAnnouncement)
+                }
+            case .about:
+                standardDestination {
+                    AboutSettingsView(
+                        model: aboutSettings,
+                        preferences: preferences,
+                        focusedTarget: $focusedTarget,
+                        onAnnouncement: onAnnouncement)
+                }
             }
+        }
+    }
+
+    private func standardDestination<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 24) {
+                destinationTitle
+                content()
+            }
+            .frame(maxWidth: 820, alignment: .leading)
+            .padding(.horizontal, 52)
+            .padding(.vertical, 60)
         }
     }
 
@@ -381,13 +312,10 @@ struct SettingsWindowView: View {
     }
 
     private var soundsRoute: SoundPacksWindowRoute {
-        guard case .sounds(let route) = model.resolution.route else { return .overview }
+        guard
+            case .sounds(let route) = settingsPresentationSession.state.routeResolution.route
+        else { return .overview }
         return route
-    }
-
-    private var eventSettingsRoute: EventSettingsWindowRoute? {
-        guard case .events(let scope, let event) = model.resolution.route else { return nil }
-        return EventSettingsWindowRoute(scope: scope, event: event)
     }
 
     private var generalSettings: some View {
@@ -435,10 +363,7 @@ struct SettingsWindowView: View {
             }
 
             SettingsSectionCard {
-                LoginItemSettingsSection(
-                    model: loginItemSettings,
-                    l10n: l10n,
-                    onAnnouncement: onAnnouncement)
+                LoginItemSettingsSection(session: settingsPresentationSession)
             }
 
             if !preferences.recoveryIssues.isEmpty {
@@ -456,6 +381,7 @@ struct SettingsWindowView: View {
             }
         }
         .frame(maxWidth: 560, alignment: .leading)
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.general))
     }
 
     private var displaySettings: some View {
@@ -527,33 +453,7 @@ struct SettingsWindowView: View {
             }
         }
         .frame(maxWidth: 560, alignment: .leading)
-    }
-
-    private var debugRouteContent: some View {
-        Group {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(l10n.text(.settingsRouteIdentity))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Text(model.resolution.route.stableIdentityComponents.joined(separator: " / "))
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-            }
-
-            Label(l10n.text(.settingsRouteReady), systemImage: "checkmark.circle.fill")
-                .foregroundColor(.secondary)
-                .accessibilityIdentifier("settings.route.ready")
-
-            Button(l10n.text(.settingsRouteReturnToSidebar)) {
-                focusedTarget = SettingsWindowFocusTarget.sidebar(destination)
-            }
-            .focused(
-                $focusedTarget,
-                equals: SettingsWindowFocusTarget.firstAction(destination)
-            )
-            .accessibilitySortPriority(1)
-            .accessibilityIdentifier("settings.first-action.\(destination.rawValue)")
-        }
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.display))
     }
 
     private var notificationsSettings: some View {
@@ -604,7 +504,8 @@ struct SettingsWindowView: View {
                         || dynamicQuietPolicy.presentation.calendarAuthorization == .restricted
                     {
                         Button(l10n.text(.settingsNotificationsOpenCalendarPrivacy)) {
-                            openCalendarPrivacySettings()
+                            settingsPresentationSession.send(
+                                .performPlatformAction(.openCalendarPrivacySettings))
                         }
                         .accessibilityIdentifier("settings.notifications.calendar-privacy")
                     }
@@ -645,15 +546,15 @@ struct SettingsWindowView: View {
             }
 
             Button(l10n.text(.settingsNotificationsOpenEvents)) {
-                model.request(.destination(.eventsAndSounds))
+                settingsPresentationSession.send(.route(.destination(.eventsAndSounds)))
             }
             .accessibilityIdentifier("settings.notifications.open-events")
         }
         .frame(maxWidth: 620, alignment: .leading)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("settings.notifications.dynamic-quiet-policy")
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.notifications))
         .onChange(of: dynamicQuietPolicy.presentation) { _ in
-            onAnnouncement?(dynamicQuietAnnouncement)
+            onAnnouncement(dynamicQuietAnnouncement)
         }
     }
 
@@ -668,7 +569,7 @@ struct SettingsWindowView: View {
             get: { preferences.interfaceTextSize },
             set: {
                 preferences.setInterfaceTextSize($0)
-                onAnnouncement?(
+                onAnnouncement(
                     l10n.format(
                         .settingsAnnouncementValue,
                         l10n.text(.interfaceTextSize) as NSString,
@@ -682,7 +583,7 @@ struct SettingsWindowView: View {
             get: { preferences.panelWidthPreference },
             set: {
                 preferences.setPanelWidthPreference($0)
-                onAnnouncement?(
+                onAnnouncement(
                     l10n.format(
                         .settingsAnnouncementValue,
                         l10n.text(.settingsDisplay.panelWidthTitle) as NSString,
@@ -696,7 +597,7 @@ struct SettingsWindowView: View {
             get: { preferences.showsMenuBarStatusDot },
             set: {
                 preferences.setShowsMenuBarStatusDot($0)
-                onAnnouncement?(
+                onAnnouncement(
                     l10n.text(
                         $0
                             ? .settingsDisplayStatusDotEnabled
@@ -766,14 +667,6 @@ struct SettingsWindowView: View {
             snapshotHealthText as NSString)
     }
 
-    private func openCalendarPrivacySettings() {
-        guard
-            let url = URL(
-                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")
-        else { return }
-        NSWorkspace.shared.open(url)
-    }
-
     private func settingsStatusRow(title: String, value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 16) {
             Text(title)
@@ -790,7 +683,7 @@ struct SettingsWindowView: View {
             get: { preferences.languageMode },
             set: {
                 preferences.setLanguageMode($0)
-                onAnnouncement?(
+                onAnnouncement(
                     l10n.format(
                         .settingsAnnouncementValue,
                         l10n.text(.settingsGeneralLanguageTitle) as NSString,
@@ -866,109 +759,24 @@ struct SettingsWindowView: View {
         }
     }
 
-    private func moveSidebarSelection(
-        _ direction: SettingsSidebarMoveDirection,
-        from current: SettingsDestination
-    ) {
-        let next = settingsSidebarDestination(
-            moving: direction,
-            from: current,
-            availableDestinations: preferences.availableSettingsDestinations)
-        guard next != current else { return }
-        model.request(.destination(next))
-        focusedTarget = .sidebar(next)
-    }
 }
 
 @MainActor
-private struct LoginItemSettingsSection: View {
-    @ObservedObject var model: LoginItemSettingsModel
-    let l10n: ClaudioL10n
-    let onAnnouncement: (@MainActor (String) -> Void)?
+private struct SettingsSoundsDestinationView: View {
+    let editorOwner: SoundPacksEditorOwner
+    let route: SoundPacksWindowRoute
+    let routeRequestRevision: UInt64
+    let languageStore: ClaudioPreferences
+    let nativeEffects: SoundPacksEditorNativeEffectsDispatcher
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(l10n.text(.settingsGeneralLoginItem.description))
-                .foregroundColor(.secondary)
-
-            Toggle(
-                l10n.text(.settingsGeneralLoginItem.toggle),
-                isOn: enabledBinding
-            )
-            .disabled(!model.projection.registration.canToggle)
-            .accessibilityHint(l10n.text(.settingsGeneralLoginItem.hint))
-            .accessibilityValue(statusText)
-            .accessibilityIdentifier("settings.general.login-item.toggle")
-
-            Text(statusText)
-                .foregroundColor(.secondary)
-
-            if model.projection.registration == .requiresApproval {
-                Button(l10n.text(.settingsGeneralLoginItem.openSettings)) {
-                    model.openSystemSettings()
-                }
-                .accessibilityHint(l10n.text(.settingsGeneralLoginItem.openSettingsHint))
-            }
-
-            if let failure = model.projection.failure {
-                VStack(alignment: .leading, spacing: 8) {
-                    FailureRow(
-                        message: failureText(
-                            failure.reason,
-                            requestedEnabled: failure.requestedEnabled))
-
-                    Button(l10n.text(.commonRetry)) {
-                        model.retryFailedOperation()
-                        announceFailureIfPresent()
-                    }
-                }
-            }
-        }
-        .onChange(of: model.projection.registration) { _ in
-            onAnnouncement?(statusText)
-        }
-    }
-
-    private var enabledBinding: Binding<Bool> {
-        Binding(
-            get: { model.projection.registration.isOn },
-            set: {
-                model.setEnabled($0)
-                announceFailureIfPresent()
-            })
-    }
-
-    private var statusText: String {
-        switch model.projection.registration {
-        case .disabled: l10n.text(.settingsGeneralLoginItem.disabled)
-        case .enabled: l10n.text(.settingsGeneralLoginItem.enabled)
-        case .requiresApproval: l10n.text(.settingsGeneralLoginItem.requiresApproval)
-        case .unavailable: l10n.text(.settingsGeneralLoginItem.unavailable)
-        }
-    }
-
-    private func failureText(
-        _ reason: LoginItemOperationFailureReason,
-        requestedEnabled: Bool
-    ) -> String {
-        switch reason {
-        case .embeddedLoginItemMissing:
-            l10n.text(.settingsGeneralLoginItem.failureMissing)
-        case .systemRejected:
-            l10n.text(
-                requestedEnabled
-                    ? .settingsGeneralLoginItem.failureEnable
-                    : .settingsGeneralLoginItem.failureDisable)
-        }
-    }
-
-    private func announceFailureIfPresent() {
-        if let failure = model.projection.failure {
-            onAnnouncement?(
-                failureText(
-                    failure.reason,
-                    requestedEnabled: failure.requestedEnabled)
-            )
-        }
+        EmbeddedSoundPacksEditorView(
+            editorOwner: editorOwner,
+            route: route,
+            routeRequestRevision: routeRequestRevision,
+            languageStore: languageStore,
+            nativeEffects: nativeEffects
+        )
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.sounds))
     }
 }

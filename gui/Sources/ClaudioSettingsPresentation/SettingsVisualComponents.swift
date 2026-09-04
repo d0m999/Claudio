@@ -10,7 +10,7 @@ private struct SettingsReduceTransparencyOverrideKey: EnvironmentKey {
 extension EnvironmentValues {
     /// Controlled visual-environment seam. Production leaves this nil and follows AppKit;
     /// deterministic render and snapshot hosts may inject the same platform fact explicitly.
-    var settingsReduceTransparencyOverride: Bool? {
+    package var settingsReduceTransparencyOverride: Bool? {
         get { self[SettingsReduceTransparencyOverrideKey.self] }
         set { self[SettingsReduceTransparencyOverrideKey.self] = newValue }
     }
@@ -19,17 +19,17 @@ extension EnvironmentValues {
 
 /// One shared native Settings surface. It keeps the approved 13 pt group radius and strengthens
 /// its boundary under Increase Contrast without replacing the system control background.
-struct SettingsSectionCard<Content: View>: View {
+struct SettingsSectionCard: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     #if DEBUG
     @Environment(\.settingsReduceTransparencyOverride) private var reduceTransparencyOverride
     #endif
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
-    private let content: Content
+    private let content: AnyView
 
-    init(@ViewBuilder content: () -> Content) {
-        self.content = content()
+    init<Content: View>(@ViewBuilder content: () -> Content) {
+        self.content = AnyView(content())
     }
 
     var body: some View {

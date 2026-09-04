@@ -54,7 +54,8 @@ public enum SettingsRoute: Sendable, Equatable, Hashable {
         }
     }
 
-    /// Debug and test projection that deliberately exposes only stable route tokens.
+    #if DEBUG
+    /// Test projection that deliberately exposes only stable route tokens.
     public var stableIdentityComponents: [String] {
         switch self {
         case .destination(let destination):
@@ -74,6 +75,7 @@ public enum SettingsRoute: Sendable, Equatable, Hashable {
             ]
         }
     }
+    #endif
 }
 
 /// Current stable identities that a Settings deep link may target. Absence means stale, not an
@@ -112,6 +114,50 @@ public struct SettingsRouteAvailability: Sendable, Equatable {
         soundPackIDs: [],
         soundPackSnapshotIsFresh: false,
         events: Set(Event.allCases))
+}
+
+/// The Settings shell's immutable projection of Sound Pack editor and host presentation facts.
+/// It carries no cache or mutable ownership: route resolution and native announcement delivery
+/// consume the same coherent editor root through this package-local adapter.
+package struct SettingsSoundPackShellProjection: Equatable {
+    package let availability: SettingsRouteAvailability
+    package let pendingAnnouncement: SoundPackEditorAnnouncement?
+
+    package init(
+        editorPresentation: SoundPacksEditorPresentation,
+        sourceRows: [HostSourceRowPresentation]
+    ) {
+        let publishedSurfaces = Set(sourceRows.map { $0.host.surfaceID })
+        let productScopes = HostID.productVisibleCases.map {
+            PanelSoundScopeID.surface($0.surfaceID)
+        }
+        availability = SettingsRouteAvailability(
+            integrationSurfaces: publishedSurfaces,
+            eventScopes: Set(panelSoundScopeIDs(sourceRows: sourceRows)),
+            soundScopes: Set([PanelSoundScopeID.global] + productScopes),
+            soundPackIDs: editorPresentation.installedPackIDs,
+            soundPackSnapshotIsFresh: editorPresentation.library.isFresh,
+            events: Set(Event.allCases))
+        pendingAnnouncement = editorPresentation.pendingAnnouncement
+    }
+}
+
+/// One production publisher seam for every Sound Pack fact the retained Settings shell consumes.
+/// Both upstreams already publish immutable presentation values on the main actor.
+@MainActor
+package func settingsSoundPackShellProjections(
+    editor: SoundPacksEditorOwner,
+    hostIntegrations: HostIntegrationPresentationStore
+) -> AnyPublisher<SettingsSoundPackShellProjection, Never> {
+    editor.$presentation
+        .combineLatest(hostIntegrations.$content)
+        .map { editorPresentation, integrationContent in
+            SettingsSoundPackShellProjection(
+                editorPresentation: editorPresentation,
+                sourceRows: integrationContent.sourceRows)
+        }
+        .removeDuplicates()
+        .eraseToAnyPublisher()
 }
 
 public enum SettingsRouteFailure: Sendable, Equatable {
@@ -207,159 +253,6 @@ private func settingsSurfaceFailure(
         return .invalidSurface(surface)
     }
     return availableSurfaces.contains(surface) ? nil : .staleSurface(surface)
-}
-
-/// Observable decisions for an app-lifetime retained Settings owner. Re-showing a visible window
-/// without a route is idempotent; every explicit route request (including an identical deep link)
-/// gets a new revision. Closing consumes the most recent handback exactly once.
-public struct SettingsWindowLifecycle<Handback> {
-    public private(set) var isPresented = false
-    public private(set) var presentationRevision: UInt64 = 0
-    public private(set) var routeRequestRevision: UInt64 = 0
-    public private(set) var resolution: SettingsRouteResolution
-
-    private var pendingHandback: Handback?
-
-    public init(initialRoute: SettingsRoute = .destination(.general)) {
-        resolution = resolveSettingsRoute(initialRoute, availability: .empty)
-    }
-
-    @discardableResult
-    public mutating func present(
-        route: SettingsRoute? = nil,
-        availability: SettingsRouteAvailability,
-        handback: Handback? = nil
-    ) -> SettingsWindowPresentation {
-        let wasAlreadyPresented = isPresented
-        isPresented = true
-        presentationRevision &+= 1
-        if let handback {
-            pendingHandback = handback
-        }
-
-        let requestedRoute = route ?? resolution.route
-        resolution = resolveSettingsRoute(requestedRoute, availability: availability)
-        if route != nil || !wasAlreadyPresented {
-            routeRequestRevision &+= 1
-        }
-        return SettingsWindowPresentation(
-            wasAlreadyPresented: wasAlreadyPresented,
-            presentationRevision: presentationRevision,
-            routeRequestRevision: routeRequestRevision,
-            resolution: resolution)
-    }
-
-    public mutating func refresh(availability: SettingsRouteAvailability) {
-        resolution = resolveSettingsRoute(resolution.route, availability: availability)
-    }
-
-    @discardableResult
-    public mutating func request(
-        route: SettingsRoute,
-        availability: SettingsRouteAvailability
-    ) -> SettingsWindowPresentation {
-        resolution = resolveSettingsRoute(route, availability: availability)
-        routeRequestRevision &+= 1
-        return SettingsWindowPresentation(
-            wasAlreadyPresented: isPresented,
-            presentationRevision: presentationRevision,
-            routeRequestRevision: routeRequestRevision,
-            resolution: resolution)
-    }
-
-    public mutating func close() -> Handback? {
-        guard isPresented else { return nil }
-        isPresented = false
-        let handback = pendingHandback
-        pendingHandback = nil
-        return handback
-    }
-}
-
-public struct SettingsWindowPresentation: Sendable, Equatable {
-    public let wasAlreadyPresented: Bool
-    public let presentationRevision: UInt64
-    public let routeRequestRevision: UInt64
-    public let resolution: SettingsRouteResolution
-}
-
-/// Combine adapter around ``SettingsWindowLifecycle``. Publishing is equality-guarded so an
-/// idempotent re-show cannot emit an unchanged revision and steal keyboard focus back to content.
-@MainActor
-public final class SettingsWindowPresentationModel<Handback>: ObservableObject {
-    @Published public private(set) var resolution: SettingsRouteResolution
-    @Published public private(set) var routeRequestRevision: UInt64 = 0
-
-    private var availability: SettingsRouteAvailability
-    private let preferences: ClaudioPreferences?
-    private var lifecycle: SettingsWindowLifecycle<Handback>
-
-    public init(
-        initialRoute: SettingsRoute? = nil,
-        preferences: ClaudioPreferences? = nil,
-        availability: SettingsRouteAvailability
-    ) {
-        self.availability = availability
-        self.preferences = preferences
-        let restoredRoute =
-            initialRoute
-            ?? .destination(preferences?.lastSettingsDestination ?? .general)
-        lifecycle = SettingsWindowLifecycle(initialRoute: restoredRoute)
-        resolution = resolveSettingsRoute(restoredRoute, availability: availability)
-    }
-
-    @discardableResult
-    public func present(
-        route: SettingsRoute? = nil,
-        handback: Handback? = nil
-    ) -> SettingsWindowPresentation {
-        let restoredRoute =
-            route == nil && !lifecycle.isPresented
-            ? SettingsRoute.destination(preferences?.lastSettingsDestination ?? .general)
-            : route
-        let presentation = lifecycle.present(
-            route: restoredRoute,
-            availability: availability,
-            handback: handback)
-        if let route, presentation.resolution.failure == nil {
-            preferences?.setLastSettingsDestination(route.destination)
-        }
-        publish(presentation)
-        return presentation
-    }
-
-    public func request(_ route: SettingsRoute) {
-        let presentation = lifecycle.request(route: route, availability: availability)
-        if presentation.resolution.failure == nil {
-            preferences?.setLastSettingsDestination(route.destination)
-        }
-        publish(presentation)
-    }
-
-    /// Re-resolves the retained stable route against newly published app facts. This never
-    /// increments the explicit route-request revision, so a background library refresh cannot
-    /// steal keyboard focus; it only changes visible pending/failure state in place.
-    public func updateAvailability(_ availability: SettingsRouteAvailability) {
-        guard self.availability != availability else { return }
-        self.availability = availability
-        lifecycle.refresh(availability: availability)
-        if resolution != lifecycle.resolution {
-            resolution = lifecycle.resolution
-        }
-    }
-
-    public func close() -> Handback? {
-        lifecycle.close()
-    }
-
-    private func publish(_ presentation: SettingsWindowPresentation) {
-        if resolution != presentation.resolution {
-            resolution = presentation.resolution
-        }
-        if routeRequestRevision != presentation.routeRequestRevision {
-            routeRequestRevision = presentation.routeRequestRevision
-        }
-    }
 }
 
 public enum SettingsWindowGeometry {

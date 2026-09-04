@@ -7,12 +7,12 @@ public struct RetainedWindowHandbackTracker<Application> {
 
     public init() {}
 
-    /// Starts a real hidden-to-visible presentation. Re-showing an already visible retained window
-    /// must not call this: doing so would erase an external activation that the current presentation
-    /// still owes a handback to.
-    public mutating func beginPresentation() {
+    /// Starts a real hidden-to-visible presentation with the application active before the window
+    /// took focus. A later external activation supersedes that fallback. Re-showing an already
+    /// visible retained window must not call this because it would erase the current handback debt.
+    public mutating func beginPresentation(returnTo application: Application? = nil) {
         isClosingWindow = false
-        latestExternalApplication = nil
+        latestExternalApplication = application
     }
 
     /// Records only an external activation observed while this presentation is genuinely visible.

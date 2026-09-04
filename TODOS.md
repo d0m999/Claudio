@@ -926,13 +926,23 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P3
 **Depends on:** 阶段 A′（路由态本身落地之后才有东西可画）
 
-### `ClaudioGUI` 整个 target 在 harness 里一行都跑不到（视图层接线零回归网）
+### `ClaudioGUI` 的 panel 与 native composition 仍不能由 harness import
 
-**What:** `claudio-gui-tests` 只依赖 `ClaudioGUICore` + `ClaudioCore`。`ClaudioGUI` 是带 `@main` 的 **executableTarget**，Swift 里 import 不了。于是整棵 SwiftUI 视图树上的每一行接线，对这套测试都是不可见的。
+**What:** `ClaudioGUI` 是带 `@main` 的 **executableTarget**，其 `PanelView`、AppDelegate、
+`MenuBarController` 与 native window adapter 不能由 harness 直接 import。Settings 这一半已经解决：
+`claudio-gui-tests` 与 app 现在都直接依赖 `ClaudioSettingsPresentation`，compiled tests 会挂载同一个
+`SettingsRootView(session:)` 并验证 route、lifecycle、focus、九页 destination 与 gallery。剩余缺口只限
+panel/executable/native composition，不再是「整棵 SwiftUI 视图树零回归网」。
 
-**Why:** T17 的 diff 评审实测了两次变异，**两次都全绿**：① 删掉 `PanelView` 里那句 `.onChange(of: onboardingViewModel.state) { refresh(); … }` —— 也就是让「接管成功」真正兑现的那一行（没有它，用户在成功的那一秒看到的是四行「未配置」+ 空画廊）—— 652 项测试全绿、release 构建零告警；② 把 `actionRunner` 改回可选 + 静默 guard（= 逐字重建 T17 之前那个死 CTA）—— 652 项全绿，唯一信号是一条无关的 unused-variable 警告。**两次变异都重新制造了 T17 要修的那个 bug，绿灯一次都没灭。**
+**Why:** T17 的 diff 评审曾对 panel 实测两次变异，**两次都全绿**：① 删掉
+`PanelView` 里接管成功后的 refresh 接线；② 把 `actionRunner` 改回可选 + 静默 guard。两次都重建了
+T17 要修的 bug，而编译与当时 652 项测试没有发现。Settings 的 importable target 不修复这些 panel
+接线；它只说明这条 TODO 的原范围已经显著收窄。
 
-**Context:** 2026-07-12 T17b diff 对抗评审。当前的缓解是 `ViewWiringSuite`（读源码文本的绊线）—— 它挡得住「顺手删掉 / 重构漏掉」，但**证明不了那行代码做对了，只能证明它还在**。真正的修法：把 `ClaudioGUI` 的视图拆进一个可被 import 的 library target（`ClaudioGUIViews`），executable 只剩 `@main` + AppDelegate；或引入 ViewInspector。前者不需要新依赖，且与本仓库「视图里不留判定逻辑」的既有纪律同向。
+**Context:** 2026-07-12 T17b diff 对抗评审；2026-09-04 随 Settings presentation target
+收窄。当前只为无法 compiled 表达的 `@main`、controller mount、owner/native accessibility/resource wiring
+保留窄 source audit。若要关闭剩余 panel 缺口，应把 panel presentation 移入可 import 的 library target；
+不要把已经删除的 Settings 源码形状扫描重新扩回来。
 
 **Effort:** M
 **Priority:** P2

@@ -2,21 +2,6 @@ import ClaudioCore
 import Combine
 import Foundation
 
-/// 一次声音包管理面与面板之间的可观察刷新效果。
-///
-/// UI 面不互持彼此的 view-model：窗口写成功只发布 ``panelReloadRevision``；面板切包
-/// 成功发布 ``windowReloadRevision``（窗口跟随 active pack）；面板音频/import/manifest 或
-/// `master_volume` 等非切包 config 真变化发布 ``windowContentReloadRevision``（只重读窗口当前检查项）。
-/// 多个 `PanelConfigController` projection 通过 ``configFactRevision`` 共享 config 落盘事实，
-/// source token 只跳过已完成本地重读的写者，不合并各自的 Surface selection。
-/// 两侧在自己的 `@MainActor` 上重读 config 并投影同一个不可变 library snapshot；真正的包读取由
-/// app-lifetime ``SoundPackLibrary`` 在后台完成。写入仍同步留在 MainActor，没有后台写或第二份缓存。
-public enum SoundPacksRefreshEffect: Equatable, Sendable {
-    case none
-    case panelFullReload
-    case windowReload
-}
-
 /// 管理窗口里一次同步写操作的落盘结局。
 public enum SoundPacksWindowWriteOutcome: Equatable, Sendable {
     case succeeded
@@ -93,11 +78,10 @@ public final class SoundPacksRefreshCoordinator: ObservableObject {
 
     public init() {}
 
-    @discardableResult
     public func completeWindowWrite(
         _ outcome: SoundPacksWindowWriteOutcome
-    ) -> SoundPacksRefreshEffect {
-        guard outcome != .failed else { return .none }
+    ) {
+        guard outcome != .failed else { return }
         // `SoundPacksWindowModel.completeSynchronousWrite` owns any required invalidation and
         // refresh before publishing this revision. Asking the panel to request it again can overlap
         // the first scan and is indistinguishable from a genuinely later external observation,
@@ -105,7 +89,6 @@ public final class SoundPacksRefreshCoordinator: ObservableObject {
         // it. Config-only writes use the same projection-only recipient path.
         panelReloadRequiresLibraryRefresh = false
         panelReloadRevision += 1
-        return .panelFullReload
     }
 
     /// Shared runtime bootstrap may create the default config, copy packs, or salvage a damaged
@@ -113,72 +96,60 @@ public final class SoundPacksRefreshCoordinator: ObservableObject {
     /// completion is therefore an unconditional full-reload boundary, including partial/failure
     /// outcomes: the bootstrap manager reports those through host state, while the panel must still
     /// render whatever disk truth the attempt left behind.
-    @discardableResult
-    public func completeSharedRuntimeBootstrap() -> SoundPacksRefreshEffect {
+    public func completeSharedRuntimeBootstrap() {
         panelReloadRequiresLibraryRefresh = true
         panelReloadRevision += 1
         windowContentReloadRequiresLibraryRefresh = false
         windowContentReloadRevision += 1
-        return .panelFullReload
     }
 
     /// External config writers are not required to publish our in-process revision. App activation
     /// is therefore an explicit config projection boundary for a retained management window.
-    @discardableResult
-    public func refreshWindowConfigProjection() -> SoundPacksRefreshEffect {
+    public func refreshWindowConfigProjection() {
         windowContentReloadRequiresLibraryRefresh = false
         windowContentReloadRevision += 1
-        return .windowReload
     }
 
-    @discardableResult
     public func completePanelPackSwitch(
         _ outcome: PanelPackSwitchOutcome
-    ) -> SoundPacksRefreshEffect {
-        guard outcome == .succeeded else { return .none }
+    ) {
+        guard outcome == .succeeded else { return }
         windowReloadRequiresLibraryRefresh = false
         windowReloadRevision += 1
-        return .windowReload
     }
 
     /// Publishes a config fact to sibling `PanelConfigController` projections. A pack switch uses
     /// this directly because its management-window route is the separate active-pack revision;
     /// ordinary Event/volume writes publish through ``completePanelConfigChange(_:source:)``.
-    @discardableResult
     public func completeConfigFactChange(
         _ outcome: PanelConfigChangeOutcome,
         source: PanelConfigProjectionToken? = nil
-    ) -> Bool {
-        guard outcome == .changed else { return false }
+    ) {
+        guard outcome == .changed else { return }
         configFactSource = source
         configFactRevision += 1
-        return true
     }
 
     /// Publishes a selected-pack content reload without changing which sidebar item the retained
     /// management window is inspecting.
-    @discardableResult
     public func completePanelPackAudioChange(
         _ outcome: PanelPackAudioChangeOutcome
-    ) -> SoundPacksRefreshEffect {
-        guard outcome == .changed else { return .none }
+    ) {
+        guard outcome == .changed else { return }
         windowContentReloadRequiresLibraryRefresh = true
         windowContentReloadRevision += 1
-        return .windowReload
     }
 
     /// Publishes a config-only refresh without changing which sidebar item the retained
     /// management window is inspecting. The panel already reloaded its own read model, so this
     /// deliberately never advances `panelReloadRevision`.
-    @discardableResult
     public func completePanelConfigChange(
         _ outcome: PanelConfigChangeOutcome,
         source: PanelConfigProjectionToken? = nil
-    ) -> SoundPacksRefreshEffect {
-        guard outcome == .changed else { return .none }
+    ) {
+        guard outcome == .changed else { return }
         completeConfigFactChange(outcome, source: source)
         windowContentReloadRequiresLibraryRefresh = false
         windowContentReloadRevision += 1
-        return .windowReload
     }
 }
