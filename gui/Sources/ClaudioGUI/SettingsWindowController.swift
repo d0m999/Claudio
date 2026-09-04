@@ -27,8 +27,6 @@ private final class SettingsPresentationNativeCallbacks {
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let preferences: ClaudioPreferences
     private let settingsPresentationSession: SettingsPresentationSession
-    private let usageSettings: UsageSettingsModel
-    private let globalShortcutSettings: GlobalShortcutSettingsModel
     private let aboutSettings: AboutSettingsModel
     private let model: SettingsWindowPresentationModel<NSRunningApplication>
     private let soundPacksEditorOwner: SoundPacksEditorOwner
@@ -38,9 +36,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let eventSettingsSelection: EventSettingsWindowSelection
     private let hostIntegrations: HostIntegrationPresentationStore
     private let integrationsModel: IntegrationDestinationModel
-    private let integrationsFocusCoordinator: IntegrationDestinationFocusCoordinator
     private let aiCueViewModel: AICueGenerationViewModel
-    private let onEventAudibilityInputsChanged: @MainActor () -> Void
     private let dynamicQuietObserver: DynamicQuietSystemObserver
     private let presentationCallbacks: SettingsPresentationNativeCallbacks
     private var window: NSWindow?
@@ -73,8 +69,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         onEventAudibilityInputsChanged: @escaping @MainActor () -> Void
     ) {
         self.preferences = preferences
-        self.usageSettings = usageSettings
-        self.globalShortcutSettings = globalShortcutSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner
         self.soundPacksEditorNativeEffects = soundPacksEditorNativeEffects
         soundPackAnnouncementDelivery = SoundPacksEditorAnnouncementDelivery(
@@ -84,9 +78,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.hostIntegrations = hostIntegrations
         self.integrationsModel = integrationsModel
         let integrationsFocusCoordinator = IntegrationDestinationFocusCoordinator()
-        self.integrationsFocusCoordinator = integrationsFocusCoordinator
         self.aiCueViewModel = aiCueViewModel
-        self.onEventAudibilityInputsChanged = onEventAudibilityInputsChanged
         let dynamicQuietObserver = DynamicQuietSystemObserver()
         self.dynamicQuietObserver = dynamicQuietObserver
         let aboutSettings = makeSystemAboutSettingsModel(

@@ -306,7 +306,8 @@ public enum PreviewFixtures {
 
     /// Production basic-destination states used by the unified Settings visual/AX matrix. Each
     /// case names a real semantic state owned by the destination model; the gallery only injects
-    /// deterministic adapters and continues to render ``SettingsWindowView`` itself.
+    /// deterministic adapters and continues to render the ``ClaudioSettingsPresentation``
+    /// module's `SettingsRootView` seam itself.
     public enum SettingsGeneralGalleryState: Sendable, Equatable {
         case ready
         case permissionRequired

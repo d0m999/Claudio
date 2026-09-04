@@ -85,6 +85,7 @@ package struct SettingsRootView: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.settingsWindowTitle))
+        .accessibilityIdentifier(SettingsPresentationAccessibilityID.root)
         .environment(\.dynamicTypeSize, preferences.interfaceTextSize.dynamicTypeSize)
         .onExitCommand {
             focusedTarget = SettingsWindowFocusTarget.sidebar(destination)
@@ -404,6 +405,7 @@ package struct SettingsRootView: View {
             }
         }
         .frame(maxWidth: 560, alignment: .leading)
+        .accessibilityIdentifier(SettingsPresentationAccessibilityID.general)
     }
 
     private var displaySettings: some View {

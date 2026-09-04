@@ -387,7 +387,14 @@ func runViewWiringSuites() {
         // 位置感知是必须的：`ClaudioColorHex.swift:206` / `ContrastRatio.swift:27` 里的
         // `hasPrefix("#")` 逐字包含 `#"` —— 一条纯文本的 `#"` 守卫会在它们身上当场假红，然后被
         // 下一个人删掉，洞原样回来。
-        let scanned = guiSources() + guiCoreSources()
+        let scanned = repositoryRelativeSources([
+            (root: "gui/Sources/ClaudioGUI", sources: guiSources()),
+            (root: "gui/Sources/ClaudioGUICore", sources: guiCoreSources()),
+            (
+                root: "gui/Sources/ClaudioSettingsPresentation",
+                sources: sourcesUnder("gui/Sources/ClaudioSettingsPresentation")
+            ),
+        ])
         expect(
             scanned.count >= 10,
             "三个 target 加起来一个 Swift 文件都没数到（实得 \(scanned.count)）—— 这条是**普查**，"
