@@ -460,6 +460,63 @@ func runSettingsPresentationTargetSuites() {
                 && !normalizedGallery.contains("SettingsPresentationDependencies("),
             "executable gallery 只能挂载 target-owned Settings gallery，不得复制 fixture composition")
     }
+
+    suite("Settings production root：root 与 General identity 挂在各自唯一顶层容器") {
+        let rootURL = guiTestRepositoryRoot().appendingPathComponent(
+            "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift")
+        guard let source = try? String(contentsOf: rootURL, encoding: .utf8) else {
+            expect(false, "读不到 production SettingsRootView.swift")
+            return
+        }
+        let scan = strippingComments(source)
+        guard scan.unmodeledConstructs.isEmpty,
+            let rootBody = settingsBracedBlock(
+                after: "package var body: some View", in: scan.codeWithoutStringLiterals),
+            let generalBody = settingsBracedBlock(
+                after: "private var generalSettings: some View",
+                in: scan.codeWithoutStringLiterals)
+        else {
+            expect(false, "Settings root identity source audit 必须 fail closed")
+            return
+        }
+        expect(
+            settingsAccessibilityIdentityContract(
+                rootBody: rootBody,
+                generalBody: generalBody,
+                source: scan.codeWithoutStringLiterals),
+            "真实 SettingsRootView 顶层 root 与 General 内容容器必须各挂唯一 typed AX identity")
+
+        let rootIdentity =
+            ".accessibilityIdentifier(SettingsPresentationAccessibilityID.root)"
+        let generalIdentity =
+            ".accessibilityIdentifier(SettingsPresentationAccessibilityID.general)"
+        let validRoot = "{ GeometryReader { EmptyView() } \(rootIdentity) }"
+        let validGeneral = "{ VStack { EmptyView() } \(generalIdentity) }"
+        let nestedRoot = "{ GeometryReader { EmptyView() \(rootIdentity) } }"
+        let duplicateGeneral =
+            "{ VStack { EmptyView() } \(generalIdentity) \(generalIdentity) }"
+        let fixtures = [validRoot, validGeneral, nestedRoot, duplicateGeneral].map(
+            strippingComments)
+        guard fixtures.allSatisfy({ $0.unmodeledConstructs.isEmpty }) else {
+            expect(false, "Settings root identity mutation fixtures 必须可由 scanner 完整建模")
+            return
+        }
+        let fixtureCode = fixtures.map(\.codeWithoutStringLiterals)
+        expect(
+            settingsAccessibilityIdentityContract(
+                rootBody: fixtureCode[0],
+                generalBody: fixtureCode[1],
+                source: fixtureCode[0] + fixtureCode[1])
+                && !settingsAccessibilityIdentityContract(
+                    rootBody: fixtureCode[2],
+                    generalBody: fixtureCode[1],
+                    source: fixtureCode[2] + fixtureCode[1])
+                && !settingsAccessibilityIdentityContract(
+                    rootBody: fixtureCode[0],
+                    generalBody: fixtureCode[3],
+                    source: fixtureCode[0] + fixtureCode[3]),
+            "AX identity 审计必须接受各自顶层唯一 modifier，并拒绝嵌套或重复 mutation")
+    }
 }
 
 @MainActor
@@ -868,6 +925,43 @@ private func settingsAnnouncementSchedulerHasLatchContract(_ source: String) -> 
     return latchGuard.lowerBound < latchSet.lowerBound
         && latchSet.lowerBound < deferredTurn.lowerBound
         && latchReset.lowerBound < delivery.lowerBound
+}
+
+private func settingsAccessibilityIdentityContract(
+    rootBody: String,
+    generalBody: String,
+    source: String
+) -> Bool {
+    let rootIdentity =
+        ".accessibilityIdentifier(SettingsPresentationAccessibilityID.root)"
+    let generalIdentity =
+        ".accessibilityIdentifier(SettingsPresentationAccessibilityID.general)"
+    let normalizedRoot = collapsingWhitespace(rootBody)
+    let normalizedGeneral = collapsingWhitespace(generalBody)
+    let normalizedSource = collapsingWhitespace(source)
+    return settingsHasSingleTopLevelMarker(rootIdentity, in: normalizedRoot)
+        && settingsHasSingleTopLevelMarker(generalIdentity, in: normalizedGeneral)
+        && normalizedSource.components(separatedBy: rootIdentity).count - 1 == 1
+        && normalizedSource.components(separatedBy: generalIdentity).count - 1 == 1
+        && !normalizedRoot.contains(generalIdentity)
+        && !normalizedGeneral.contains(rootIdentity)
+}
+
+private func settingsHasSingleTopLevelMarker(_ marker: String, in scope: String) -> Bool {
+    guard scope.components(separatedBy: marker).count - 1 == 1,
+        let markerRange = scope.range(of: marker)
+    else {
+        return false
+    }
+    var braceDepth = 0
+    for character in scope[..<markerRange.lowerBound] {
+        if character == "{" {
+            braceDepth += 1
+        } else if character == "}" {
+            braceDepth -= 1
+        }
+    }
+    return braceDepth == 1
 }
 
 private struct DumpedSettingsPackageTarget {
