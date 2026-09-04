@@ -92,6 +92,81 @@ func runSettingsPresentationTargetSuites() {
             "只有 SettingsRootView/SettingsStateGalleryView 是跨 target mount seam；child views 不得 package-visible"
         )
     }
+
+    suite("Settings presentation target：Release view tree 不携带 DEBUG recorder modifier") {
+        let root = guiTestRepositoryRoot()
+        let mountURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioSettingsPresentation/SettingsMountIdentity.swift")
+        let interactionURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioSettingsPresentation/SettingsRootInteraction.swift")
+        guard
+            let mountSource = try? String(contentsOf: mountURL, encoding: .utf8),
+            let interactionSource = try? String(contentsOf: interactionURL, encoding: .utf8)
+        else {
+            expect(false, "读不到 Settings mount/interaction source")
+            return
+        }
+
+        let shallowMountFixture = """
+            extension View {
+                @ViewBuilder
+                func settingsMountIdentity(_ identifier: String) -> some View {
+                    #if DEBUG
+                    modifier(SettingsMountIdentityModifier(identifier: identifier))
+                    #else
+                    accessibilityIdentifier(identifier)
+                    #endif
+                }
+            }
+            #if DEBUG
+            private struct SettingsMountIdentityModifier: ViewModifier {}
+            #endif
+            """
+        let shallowInteractionFixture = """
+            extension View {
+                @ViewBuilder
+                func settingsSidebarInteraction() -> some View {
+                    #if DEBUG
+                    modifier(SettingsSidebarInteractionModifier())
+                    #else
+                    onMoveCommand { _ in }
+                    #endif
+                }
+                @ViewBuilder
+                func settingsExitInteraction() -> some View {
+                    #if DEBUG
+                    modifier(SettingsExitInteractionModifier())
+                    #else
+                    onExitCommand {}
+                    #endif
+                }
+            }
+            #if DEBUG
+            private struct SettingsSidebarInteractionModifier: ViewModifier {}
+            private struct SettingsExitInteractionModifier: ViewModifier {}
+            #endif
+            """
+        expect(
+            settingsReleasePresentationSourcesAreShallow(
+                mountSource: shallowMountFixture,
+                interactionSource: shallowInteractionFixture)
+                && !settingsReleasePresentationSourcesAreShallow(
+                    mountSource: shallowMountFixture
+                        + "\nprivate struct SettingsMountIdentityModifier: ViewModifier {}",
+                    interactionSource: shallowInteractionFixture)
+                && !settingsReleasePresentationSourcesAreShallow(
+                    mountSource: shallowMountFixture,
+                    interactionSource:
+                        shallowInteractionFixture
+                        .replacingOccurrences(of: "onMoveCommand", with: "debugOnlyMove")),
+            "Release branch scanner 必须识别 leaked modifier metadata 与缺失 native handler mutation")
+        expect(
+            settingsReleasePresentationSourcesAreShallow(
+                mountSource: mountSource,
+                interactionSource: interactionSource),
+            "Release Settings view tree 必须直接使用 native modifiers，DEBUG recorder modifier 不得进入 production generic shape"
+        )
+    }
 }
 
 @MainActor
@@ -548,6 +623,59 @@ private func settingsChildViewsAreModuleLocal(
             && !source.contains("package struct \(type): View")
             && !source.contains("public struct \(type): View")
     }
+}
+
+private func settingsReleasePresentationSourcesAreShallow(
+    mountSource: String,
+    interactionSource: String
+) -> Bool {
+    guard let mountRelease = swiftSourceTakingReleaseBranches(mountSource),
+        let interactionRelease = swiftSourceTakingReleaseBranches(interactionSource)
+    else {
+        return false
+    }
+
+    return mountRelease.contains("accessibilityIdentifier(identifier)")
+        && !mountRelease.contains("SettingsMountIdentityModifier")
+        && !mountRelease.contains("SettingsMountReportingView")
+        && interactionRelease.contains("onMoveCommand")
+        && interactionRelease.contains("onExitCommand")
+        && !interactionRelease.contains("SettingsSidebarInteractionModifier")
+        && !interactionRelease.contains("SettingsExitInteractionModifier")
+        && !interactionRelease.contains("SettingsSidebarInteractionReportingView")
+        && !interactionRelease.contains("SettingsExitInteractionReportingView")
+}
+
+private func swiftSourceTakingReleaseBranches(_ source: String) -> String? {
+    let scanned = strippingComments(source)
+    guard scanned.unmodeledConstructs.isEmpty else { return nil }
+
+    var result: [String] = []
+    var debugBranches: [Bool] = []
+    for line in scanned.code.split(separator: "\n", omittingEmptySubsequences: false) {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        switch trimmed {
+        case "#if DEBUG":
+            debugBranches.append(false)
+        case "#else":
+            guard !debugBranches.isEmpty, debugBranches[debugBranches.count - 1] == false else {
+                return nil
+            }
+            debugBranches[debugBranches.count - 1] = true
+        case "#endif":
+            guard !debugBranches.isEmpty else { return nil }
+            debugBranches.removeLast()
+        default:
+            if trimmed.hasPrefix("#if ") || trimmed.hasPrefix("#elseif ") {
+                return nil
+            }
+            if debugBranches.allSatisfy({ $0 }) || debugBranches.isEmpty {
+                result.append(String(line))
+            }
+        }
+    }
+    guard debugBranches.isEmpty else { return nil }
+    return result.joined(separator: "\n")
 }
 
 private func dumpedSettingsPackageTargets(
