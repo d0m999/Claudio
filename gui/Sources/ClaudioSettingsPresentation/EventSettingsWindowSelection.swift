@@ -13,6 +13,7 @@ package final class EventSettingsWindowSelection: ObservableObject {
     @Published private(set) var previewStopRequestRevision: UInt64
     @Published private(set) var aiSessionState: EventSettingsDestinationAISessionState
     @Published private(set) var aiSessionEndRequestRevision: UInt64
+    @Published private(set) var stateRevision: UInt64 = 0
 
     private var coordinator: EventSettingsDestinationCoordinator
 
@@ -90,7 +91,20 @@ package final class EventSettingsWindowSelection: ObservableObject {
         publishCoordinatorState()
     }
 
+    package var presentationState: SettingsEventPresentationState {
+        SettingsEventPresentationState(
+            route: route,
+            routeRequestRevision: routeRequestRevision,
+            focusRequestRevision: focusRequestRevision,
+            focusTarget: focusTarget,
+            previewState: previewState,
+            previewStopRequestRevision: previewStopRequestRevision,
+            aiSessionState: aiSessionState,
+            aiSessionEndRequestRevision: aiSessionEndRequestRevision)
+    }
+
     private func publishCoordinatorState() {
+        let previous = presentationState
         if route != coordinator.route { route = coordinator.route }
         if routeRequestRevision != coordinator.routeRequestRevision {
             routeRequestRevision = coordinator.routeRequestRevision
@@ -108,6 +122,9 @@ package final class EventSettingsWindowSelection: ObservableObject {
         }
         if focusRequestRevision != coordinator.focusRequestRevision {
             focusRequestRevision = coordinator.focusRequestRevision
+        }
+        if presentationState != previous {
+            stateRevision &+= 1
         }
     }
 }

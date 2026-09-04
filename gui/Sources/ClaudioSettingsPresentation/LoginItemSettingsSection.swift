@@ -42,7 +42,7 @@ package struct LoginItemSettingsSection: View {
 
             if session.state.loginItemRegistration == .requiresApproval {
                 Button(l10n.text(.settingsGeneralLoginItem.openSettings)) {
-                    session.perform(.openLoginItemsSettings)
+                    session.send(.performPlatformAction(.openLoginItemsSettings))
                 }
                 .accessibilityHint(l10n.text(.settingsGeneralLoginItem.openSettingsHint))
                 .accessibilityIdentifier("settings.general.login-item.open-settings")
@@ -57,7 +57,7 @@ package struct LoginItemSettingsSection: View {
                     )
 
                     Button(l10n.text(.commonRetry)) {
-                        session.retryLoginItemOperation()
+                        session.send(.retryLoginItemOperation)
                     }
                     .accessibilityIdentifier("settings.general.login-item.retry")
                 }
@@ -73,7 +73,7 @@ package struct LoginItemSettingsSection: View {
     private var enabledBinding: Binding<Bool> {
         Binding(
             get: { session.state.loginItemRegistration.isOn },
-            set: { session.setLoginItemEnabled($0) })
+            set: { _ = session.send(.setLoginItemEnabled($0)) })
     }
 
 }

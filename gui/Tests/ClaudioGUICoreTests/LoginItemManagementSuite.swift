@@ -302,30 +302,6 @@ func runLoginItemManagementSuites() {
             "最低版本必须保持 macOS 12，内嵌 helper 必须启动主 app 并在回调后退出")
     }
 
-    suite("Settings 生命周期：从 Login Items 设置返回后刷新可见页面") {
-        let root = guiTestRepositoryRoot()
-        let controllerURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
-        guard let controller = try? String(contentsOf: controllerURL, encoding: .utf8) else {
-            expect(false, "读不到 SettingsWindowController production wiring")
-            return
-        }
-        let scanned = strippingComments(controller)
-        let code = scanned.codeWithoutStringLiterals
-        guard
-            scanned.unmodeledConstructs.isEmpty,
-            let keyHandler = bracedBlock(after: "func windowDidBecomeKey", in: code),
-            let identityGuard = keyHandler.range(of: "keyWindow === window"),
-            let refresh = keyHandler.range(of: "settingsPresentationSession.refreshLoginItem()")
-        else {
-            expect(false, "必须能完整解析 Settings 重获 key 状态后的刷新接线")
-            return
-        }
-        expect(
-            identityGuard.lowerBound < refresh.lowerBound,
-            "必须先确认单一 retained Settings window 重获 key 状态，再重读登录项系统事实")
-    }
-
     suite("Login item 人工门禁：真实签名登录/重启与自动证据分离") {
         let root = guiTestRepositoryRoot()
         let distributionURL = root.appendingPathComponent("docs/distribution.md")

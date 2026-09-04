@@ -2141,7 +2141,7 @@ func runSoundPacksRefreshSuites() async {
                 && settingsController.contains(
                     "RetainedWindowHandbackTracker<NSRunningApplication>")
                 && settingsController.contains(
-                    "handbackTracker.consumeOnClose() ?? originalHandback")
+                    "let handback = handbackTracker.consumeOnClose()")
                 && settingsController.contains("focusRestoration = nil"),
             "Sounds 必须共享统一 retained 窗口，关闭一次消费最新 handback")
         expect(
@@ -2181,7 +2181,8 @@ func runSoundPacksRefreshSuites() async {
             panel.contains(".focused($focusedTarget, equals: .openSoundSettings)"),
             "打开设置必须认领 .openSoundSettings 焦点契约")
         expect(
-            requestBody.contains("route: .events(scope: route.scope, event: route.event)")
+            requestBody.contains(
+                "request: .route(.events(scope: route.scope, event: route.event))")
                 && requestBody.contains("returnFocusTo: target")
                 && sharedRequestBody.contains("pendingSettingsPresentation = presentation")
                 && sharedRequestBody.contains("popover.close()"),

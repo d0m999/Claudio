@@ -9,7 +9,6 @@ import SwiftUI
 /// Unified Settings navigation shell shared by production and the compiled harness.
 @MainActor
 package struct SettingsRootView: View {
-    @ObservedObject var model: SettingsWindowPresentationModel<NSRunningApplication>
     @ObservedObject var preferences: ClaudioPreferences
     @ObservedObject var dynamicQuietPolicy: DynamicQuietPolicyController
     @ObservedObject var settingsPresentationSession: SettingsPresentationSession
@@ -28,20 +27,15 @@ package struct SettingsRootView: View {
     let onAnnouncement: @MainActor (String) -> Void
 
     @FocusState private var focusedTarget: SettingsWindowFocusTarget?
+    @State private var handledFocusDebtRevision: UInt64 = 0
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: preferences.language) }
-    private var destination: SettingsDestination { model.resolution.destination }
-    private var eventSettingsFocusScopes: [PanelSoundScopeID] {
-        panelSoundScopePresentations(
-            sourceRows: hostIntegrations.content.sourceRows,
-            config: eventSettingsModel.configState.resolvedConfig,
-            language: preferences.language
-        ).map(\.scope)
+    private var destination: SettingsDestination {
+        settingsPresentationSession.state.routeResolution.destination
     }
 
     package init(session: SettingsPresentationSession) {
         let dependencies = session.dependencies
-        _model = ObservedObject(wrappedValue: dependencies.navigation)
         _preferences = ObservedObject(wrappedValue: dependencies.preferences)
         _dynamicQuietPolicy = ObservedObject(wrappedValue: dependencies.dynamicQuietPolicy)
         _settingsPresentationSession = ObservedObject(wrappedValue: session)
@@ -52,13 +46,17 @@ package struct SettingsRootView: View {
         soundPacksEditorOwner = dependencies.soundPacksEditorOwner
         soundPacksEditorNativeEffects = dependencies.soundPacksEditorNativeEffects
         eventSettingsModel = dependencies.eventSettingsModel
-        eventSettingsSelection = dependencies.eventSettingsSelection
+        eventSettingsSelection = session.eventSettingsSelection
         hostIntegrations = dependencies.hostIntegrations
         integrationsModel = dependencies.integrationsModel
-        integrationsFocusCoordinator = dependencies.integrationsFocusCoordinator
+        integrationsFocusCoordinator = session.integrationsFocusCoordinator
         aiCueViewModel = dependencies.aiCueViewModel
-        onEventAudibilityInputsChanged = session.actions.onEventAudibilityInputsChanged
-        onAnnouncement = session.actions.announce
+        onEventAudibilityInputsChanged = {
+            _ = session.send(.eventAudibilityInputsChanged)
+        }
+        onAnnouncement = {
+            _ = session.send(.announceDestinationUpdate($0))
+        }
     }
 
     package var body: some View {
@@ -93,45 +91,23 @@ package struct SettingsRootView: View {
         .onAppear {
             synchronizeDestinationFocus()
         }
-        .onReceive(model.$routeRequestRevision) { _ in
+        .onReceive(settingsPresentationSession.$state) { _ in
             synchronizeDestinationFocus()
         }
     }
 
     private func synchronizeDestinationFocus() {
-        if let failure = model.resolution.failure {
-            eventSettingsSelection.leaveDestination()
-            focusedTarget = SettingsWindowFocusTarget.title(destination)
-            onAnnouncement(settingsFailureMessage(failure))
-            return
-        }
-        if destination != .eventsAndSounds {
-            eventSettingsSelection.leaveDestination()
-        }
-        if destination == .integrations {
-            if case .integrations(let surface) = model.resolution.route,
-                let host = HostID.productVisibleCases.first(where: {
-                    $0.surfaceID == surface
-                })
-            {
-                if integrationsModel.selectHost(host) {
-                    integrationsFocusCoordinator.requestFocus(.agent(host))
-                } else {
-                    integrationsFocusCoordinator.requestFocus(.title)
-                }
-            } else {
-                integrationsModel.restorePreferredHost()
-                integrationsFocusCoordinator.requestFocus(.title)
-            }
-        } else if destination == .eventsAndSounds {
-            if let route = eventSettingsRoute {
-                eventSettingsSelection.select(route)
-                eventSettingsModel.selectSoundSurface(route.surface)
-            }
-            eventSettingsSelection.requestInitialFocus(scopes: eventSettingsFocusScopes)
-        } else if destination != .sounds {
+        guard let debt = settingsPresentationSession.state.focusDebt,
+            debt.revision > handledFocusDebtRevision
+        else { return }
+        handledFocusDebtRevision = debt.revision
+        if debt.destination != .integrations
+            && debt.destination != .eventsAndSounds
+            && debt.destination != .sounds
+        {
             focusedTarget = SettingsWindowFocusTarget.title(destination)
         }
+        _ = settingsPresentationSession.send(.acknowledgeFocus(revision: debt.revision))
     }
 
     private var sidebar: some View {
@@ -179,7 +155,7 @@ package struct SettingsRootView: View {
 
     private func sidebarButton(_ item: SettingsDestination) -> some View {
         Button {
-            model.request(.destination(item))
+            settingsPresentationSession.send(.route(.destination(item)))
         } label: {
             HStack(spacing: 9) {
                 Image(systemName: icon(item))
@@ -232,7 +208,7 @@ package struct SettingsRootView: View {
 
     @ViewBuilder
     private var routeSlot: some View {
-        if let failure = model.resolution.failure {
+        if let failure = settingsPresentationSession.state.routeResolution.failure {
             standardDestination { routeFailure(failure) }
         } else {
             switch destination {
@@ -244,7 +220,8 @@ package struct SettingsRootView: View {
                     focusCoordinator: integrationsFocusCoordinator,
                     languageStore: preferences,
                     onManageEvents: { host in
-                        model.request(.events(scope: .surface(host.surfaceID), event: nil))
+                        settingsPresentationSession.send(
+                            .route(.events(scope: .surface(host.surfaceID), event: nil)))
                     },
                     onAnnouncement: onAnnouncement)
             case .eventsAndSounds:
@@ -256,7 +233,9 @@ package struct SettingsRootView: View {
                     aiCueViewModel: aiCueViewModel,
                     soundPacksEditorOwner: soundPacksEditorOwner,
                     soundPacksEditorNativeEffects: soundPacksEditorNativeEffects,
-                    onConfigureSound: { model.request(.sounds($0)) },
+                    onConfigureSound: {
+                        settingsPresentationSession.send(.route(.sounds($0)))
+                    },
                     onAudibilityInputsChanged: onEventAudibilityInputsChanged,
                     onAnnouncement: onAnnouncement)
             case .notifications:
@@ -270,7 +249,8 @@ package struct SettingsRootView: View {
                     EmbeddedSoundPacksEditorView(
                         editorOwner: soundPacksEditorOwner,
                         route: soundsRoute,
-                        routeRequestRevision: model.routeRequestRevision,
+                        routeRequestRevision:
+                            settingsPresentationSession.state.explicitRouteRequestRevision,
                         languageStore: preferences,
                         nativeEffects: soundPacksEditorNativeEffects)
                 }
@@ -333,13 +313,10 @@ package struct SettingsRootView: View {
     }
 
     private var soundsRoute: SoundPacksWindowRoute {
-        guard case .sounds(let route) = model.resolution.route else { return .overview }
+        guard
+            case .sounds(let route) = settingsPresentationSession.state.routeResolution.route
+        else { return .overview }
         return route
-    }
-
-    private var eventSettingsRoute: EventSettingsWindowRoute? {
-        guard case .events(let scope, let event) = model.resolution.route else { return nil }
-        return EventSettingsWindowRoute(scope: scope, event: event)
     }
 
     private var generalSettings: some View {
@@ -527,7 +504,8 @@ package struct SettingsRootView: View {
                         || dynamicQuietPolicy.presentation.calendarAuthorization == .restricted
                     {
                         Button(l10n.text(.settingsNotificationsOpenCalendarPrivacy)) {
-                            settingsPresentationSession.perform(.openCalendarPrivacySettings)
+                            settingsPresentationSession.send(
+                                .performPlatformAction(.openCalendarPrivacySettings))
                         }
                         .accessibilityIdentifier("settings.notifications.calendar-privacy")
                     }
@@ -568,7 +546,7 @@ package struct SettingsRootView: View {
             }
 
             Button(l10n.text(.settingsNotificationsOpenEvents)) {
-                model.request(.destination(.eventsAndSounds))
+                settingsPresentationSession.send(.route(.destination(.eventsAndSounds)))
             }
             .accessibilityIdentifier("settings.notifications.open-events")
         }
@@ -790,7 +768,7 @@ package struct SettingsRootView: View {
             from: current,
             availableDestinations: preferences.availableSettingsDestinations)
         guard next != current else { return }
-        model.request(.destination(next))
+        settingsPresentationSession.send(.route(.destination(next)))
         focusedTarget = .sidebar(next)
     }
 }

@@ -52,8 +52,8 @@ func runIntegrationDestinationWiringSuites() {
         guard
             let settings = integrationDestinationSource(
                 "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
-            let controller = integrationDestinationSource(
-                "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
+            let session = integrationDestinationSource(
+                "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift"),
             let menu = integrationDestinationSource(
                 "gui/Sources/ClaudioGUI/MenuBarController.swift")
         else {
@@ -66,12 +66,11 @@ func runIntegrationDestinationWiringSuites() {
                 && settings.contains(".events(scope: .surface(host.surfaceID), event: nil)"),
             "统一 Settings 必须直接挂载新 destination，并把事件管理路由到当前 Surface")
         expect(
-            controller.contains("private let integrationsModel: IntegrationDestinationModel")
-                && controller.contains("integrationsModel.noteWindowVisibility")
-                && controller.contains("integrationsModel.noteWindowKeyState"),
-            "retained Settings controller 必须复用一个 Core destination model")
+            session.contains("dependencies.integrationsModel.noteWindowVisibility")
+                && session.contains("dependencies.integrationsModel.noteWindowKeyState"),
+            "retained Settings session 必须复用一个 Core destination model")
         expect(
-            !controller.contains("IntegrationsWindowController")
+            !session.contains("IntegrationsWindowController")
                 && !menu.contains("IntegrationsWindowController")
                 && !menu.contains("private let integrationsWindowController"),
             "生产 wiring 不得保留第二窗口/controller")
@@ -126,8 +125,8 @@ func runIntegrationDestinationWiringSuites() {
         expect(
             settings.components(
                 separatedBy: "integrationsFocusCoordinator.requestFocus(.title)"
-            ).count - 1 == 2,
-            "通用入口与失效 Surface 必须继续请求 typed Integration destination title")
+            ).count - 1 == 0,
+            "Root 不得拥有 generic/invalid Integration route 的第二 focus 决策")
 
         let code = strippingComments(view).codeWithoutStringLiterals
         guard

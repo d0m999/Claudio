@@ -65,9 +65,9 @@ func runWorkBuddyKeyboardAccessibilitySuites() {
                     "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift"
                 ),
                 encoding: .utf8),
-            let controller = try? String(
+            let session = try? String(
                 contentsOf: root.appendingPathComponent(
-                    "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
+                    "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift"),
                 encoding: .utf8)
         else {
             expect(false, "读不到集成 destination accessibility wiring")
@@ -94,9 +94,10 @@ func runWorkBuddyKeyboardAccessibilitySuites() {
                 && view.contains("onAnnouncement?(sentence)"),
             "VoiceOver 反馈只允许在 destination 可见且窗口为 key 时播报")
         expect(
-            controller.contains("integrationsModel.noteWindowVisibility")
-                && controller.contains("integrationsModel.noteWindowKeyState"),
-            "统一 Settings controller 必须注入真实窗口生命周期事实")
+            session.contains("synchronizeIntegrationsLifecycle()")
+                && session.contains("dependencies.integrationsModel.noteWindowVisibility")
+                && session.contains("dependencies.integrationsModel.noteWindowKeyState"),
+            "统一 Settings session 必须把真实窗口 phase 投影给 Integration owner")
         expect(
             !view.contains("NSSound") && !view.contains("AVAudio") && !view.contains("readLine"),
             "展示层不得自行试听、访问宿主文件或启动额外输入链")

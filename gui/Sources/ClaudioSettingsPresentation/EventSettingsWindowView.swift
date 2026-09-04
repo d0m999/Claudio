@@ -34,7 +34,6 @@ package struct EventSettingsWindowView: View {
     @State private var previewAllTask: Task<Void, Never>?
     @State private var previewAllFailureEvent: Event?
     @State private var previewAllCoordinator = EventPreviewSequenceCoordinator()
-    @State private var isEventsDestinationActive = false
 
     package init(
         model: PanelConfigController,
@@ -167,7 +166,6 @@ package struct EventSettingsWindowView: View {
             focusedTarget = selection.focusTarget
         }
         .onAppear {
-            isEventsDestinationActive = true
             #if DEBUG
             if reloadsOnAppear {
                 model.reload()
@@ -176,12 +174,10 @@ package struct EventSettingsWindowView: View {
             model.reload()
             #endif
             reconcileScopeSelection()
-            activateEventsEditor()
         }
         .onChange(of: selection.route) { _ in
             stopAllPreviews()
             reconcileScopeSelection()
-            activateEventsEditor()
         }
         .onChange(of: scopes.map(\.scope)) { _ in
             stopAllPreviews()
@@ -191,16 +187,14 @@ package struct EventSettingsWindowView: View {
             stopAllPreviews()
         }
         .onReceive(selection.$aiSessionEndRequestRevision) { _ in
-            closeAICueComposer()
+            stopCandidatePreview()
+            showsCredentialSheet = false
         }
         .onChange(of: model.config.selectedPack) { _ in
             closeAICueComposer()
         }
         .onChange(of: aiCueViewModel.providerProfileID) { _ in
             stopCandidatePreview()
-        }
-        .onChange(of: aiCueViewModel.generation?.id) { _ in
-            activateEventsEditor()
         }
         .onChange(of: aiCueViewModel.requiresCredentialConfiguration) { required in
             if required {
@@ -216,13 +210,8 @@ package struct EventSettingsWindowView: View {
                 languageStore: languageStore)
         }
         .onDisappear {
-            isEventsDestinationActive = false
-            selection.leaveDestination()
             cancelPreviewSequenceState()
-            closeAICueComposer()
-            soundPacksEditorNativeEffects.handleLifecycle(
-                .eventsViewDisappeared,
-                owner: soundPacksEditorOwner)
+            stopCandidatePreview()
         }
     }
 
@@ -604,12 +593,11 @@ package struct EventSettingsWindowView: View {
             guard selection.completePreviewSequence(generation: generation) else { return }
             switch result {
             case .empty:
-                activateEventsEditor()
+                break
             case .failed(let event):
                 soundPacksEditorNativeEffects.stopPreview(owner: soundPacksEditorOwner)
                 previewAllFailureEvent = event
                 onAnnouncement?(previewAllFailureMessage(for: event))
-                activateEventsEditor()
             case .completed, .cancelled:
                 break
             }
@@ -885,7 +873,6 @@ package struct EventSettingsWindowView: View {
                 action,
                 owner: soundPacksEditorOwner) != nil
         else {
-            activateEventsEditor()
             return
         }
     }
@@ -900,7 +887,6 @@ package struct EventSettingsWindowView: View {
         playingCandidateTitle = nil
         selection.beginAISession(scope: selectedScope.scope, event: event)
         aiCueViewModel.begin(scope: selectedScope.scope, event: event)
-        activateEventsEditor()
     }
 
     private func closeAICueComposer() {
@@ -909,7 +895,6 @@ package struct EventSettingsWindowView: View {
         stopCandidatePreview()
         aiCueViewModel.endSession()
         selection.noteAISessionEnded()
-        activateEventsEditor()
         if hadSession {
             onAnnouncement?(
                 l10n.text(
@@ -970,16 +955,6 @@ package struct EventSettingsWindowView: View {
             }
             return result
         }
-    }
-
-    private func activateEventsEditor() {
-        guard isEventsDestinationActive else { return }
-        _ = soundPacksEditorOwner.send(
-            .activate(
-                .events(
-                    route: editorRoute,
-                    requestRevision: selection.routeRequestRevision,
-                    candidateGenerationID: aiCueViewModel.generation?.id)))
     }
 
     private func stopCandidatePreview() {

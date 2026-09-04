@@ -7,8 +7,7 @@ import ServiceManagement
 /// typed results.
 @MainActor
 func makeSystemSettingsPresentationActions(
-    onEventAudibilityInputsChanged: @escaping @MainActor () -> Void,
-    announce: @escaping @MainActor (String) -> Void
+    onEventAudibilityInputsChanged: @escaping @MainActor () -> Void
 ) -> SettingsPresentationActions {
     SettingsPresentationActions(
         handler: { action in
@@ -27,6 +26,5 @@ func makeSystemSettingsPresentationActions(
                 return NSWorkspace.shared.open(url) ? .performed : .failed
             }
         },
-        onEventAudibilityInputsChanged: onEventAudibilityInputsChanged,
-        announce: announce)
+        onEventAudibilityInputsChanged: onEventAudibilityInputsChanged)
 }

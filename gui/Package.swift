@@ -8,6 +8,8 @@ import PackageDescription
 // The target split keeps the menu-bar shell and retained unified Settings destinations testable:
 //   - `ClaudioGUICore`: pure Foundation state/view-model logic (no SwiftUI import), so it
 //     can be exercised by the same dependency-free test harness `helper/` uses.
+//   - `ClaudioSettingsPresentation`: the importable Settings tree and its typed presentation
+//     transaction; it has no native system API or resource ownership.
 //   - `ClaudioGUI`: the executable — SwiftUI `App`/`View` layer, depends on `ClaudioGUICore`.
 let package = Package(
     name: "claudio-gui",
@@ -73,8 +75,9 @@ let package = Package(
                 .product(name: "ClaudioCore", package: "helper"),
             ]
         ),
-        // Importable Settings presentation seam. It owns no resources or native system APIs;
-        // production and the compiled harness mount the same concrete presentation types.
+        // Importable Settings presentation seam. Its session owns typed route/focus/destination
+        // lifecycle and semantic announcement debt, while native window and system APIs stay in
+        // the executable. Production and the harness mount the same concrete presentation types.
         .target(
             name: "ClaudioSettingsPresentation",
             dependencies: [
