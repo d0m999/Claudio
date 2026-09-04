@@ -22,29 +22,99 @@ private enum SettingsRootInteractionDriver {
 }
 
 extension View {
+    @ViewBuilder
     func settingsSidebarInteraction(
         item: SettingsDestination,
         availableDestinations: [SettingsDestination],
         onSelect: @escaping @MainActor (SettingsDestination) -> Void
     ) -> some View {
+        #if DEBUG
         modifier(
             SettingsSidebarInteractionModifier(
                 item: item,
                 availableDestinations: availableDestinations,
                 onSelect: onSelect))
+        #else
+        onMoveCommand { direction in
+            performSettingsSidebarMoveCommand(
+                direction,
+                item: item,
+                availableDestinations: availableDestinations,
+                onSelect: onSelect)
+        }
+        #endif
     }
 
+    @ViewBuilder
     func settingsExitInteraction(
         destination: SettingsDestination,
         onFocus: @escaping @MainActor (SettingsWindowFocusTarget) -> Void
     ) -> some View {
+        #if DEBUG
         modifier(
             SettingsExitInteractionModifier(
                 destination: destination,
                 onFocus: onFocus))
+        #else
+        onExitCommand {
+            performSettingsExit(
+                destination: destination,
+                onFocus: onFocus)
+        }
+        #endif
     }
 }
 
+@MainActor
+private func performSettingsSidebarMoveCommand(
+    _ direction: MoveCommandDirection,
+    item: SettingsDestination,
+    availableDestinations: [SettingsDestination],
+    onSelect: @escaping @MainActor (SettingsDestination) -> Void
+) {
+    let move: SettingsSidebarMoveDirection?
+    switch direction {
+    case .up: move = .previous
+    case .down: move = .next
+    default: move = nil
+    }
+    guard let move else { return }
+    performSettingsSidebarMove(
+        move,
+        item: item,
+        availableDestinations: availableDestinations,
+        onSelect: onSelect)
+}
+
+@MainActor
+private func performSettingsSidebarMove(
+    _ move: SettingsSidebarMoveDirection,
+    item: SettingsDestination,
+    availableDestinations: [SettingsDestination],
+    onSelect: @escaping @MainActor (SettingsDestination) -> Void
+) {
+    guard
+        let next = SettingsRootInteractionDriver.movedDestination(
+            move,
+            from: item,
+            availableDestinations: availableDestinations)
+    else { return }
+    onSelect(next)
+}
+
+@MainActor
+private func performSettingsExit(
+    destination: SettingsDestination,
+    onFocus: @escaping @MainActor (SettingsWindowFocusTarget) -> Void
+) {
+    let target = SettingsRootInteractionDriver.exitFocusTarget(destination: destination)
+    #if DEBUG
+    SettingsRootInteractionRecorder.noteExit(target)
+    #endif
+    onFocus(target)
+}
+
+#if DEBUG
 private struct SettingsSidebarInteractionModifier: ViewModifier {
     let item: SettingsDestination
     let availableDestinations: [SettingsDestination]
@@ -53,33 +123,27 @@ private struct SettingsSidebarInteractionModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onMoveCommand { direction in
-                let move: SettingsSidebarMoveDirection?
-                switch direction {
-                case .up: move = .previous
-                case .down: move = .next
-                default: move = nil
-                }
-                if let move { performMove(move) }
+                performSettingsSidebarMoveCommand(
+                    direction,
+                    item: item,
+                    availableDestinations: availableDestinations,
+                    onSelect: onSelect)
             }
-            #if DEBUG
-        .background(
-            SettingsSidebarInteractionReportingView(
-                item: item,
-                performMove: performMove
-            )
-            .frame(width: 0, height: 0)
-            .accessibilityHidden(true))
-            #endif
+            .background(
+                SettingsSidebarInteractionReportingView(
+                    item: item,
+                    performMove: performMove
+                )
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true))
     }
 
     private func performMove(_ move: SettingsSidebarMoveDirection) {
-        guard
-            let next = SettingsRootInteractionDriver.movedDestination(
-                move,
-                from: item,
-                availableDestinations: availableDestinations)
-        else { return }
-        onSelect(next)
+        performSettingsSidebarMove(
+            move,
+            item: item,
+            availableDestinations: availableDestinations,
+            onSelect: onSelect)
     }
 }
 
@@ -90,24 +154,17 @@ private struct SettingsExitInteractionModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onExitCommand(perform: performExit)
-            #if DEBUG
-        .background(
-            SettingsExitInteractionReportingView(performExit: performExit)
-                .frame(width: 0, height: 0)
-                .accessibilityHidden(true))
-            #endif
+            .background(
+                SettingsExitInteractionReportingView(performExit: performExit)
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true))
     }
 
     private func performExit() {
-        let target = SettingsRootInteractionDriver.exitFocusTarget(destination: destination)
-        #if DEBUG
-        SettingsRootInteractionRecorder.noteExit(target)
-        #endif
-        onFocus(target)
+        performSettingsExit(destination: destination, onFocus: onFocus)
     }
 }
 
-#if DEBUG
 @MainActor
 package enum SettingsRootInteractionRecorder {
     private static var moveHandlers: [SettingsDestination: (SettingsSidebarMoveDirection) -> Void] =

@@ -9,30 +9,30 @@ extension SettingsPresentationAccessibilityID {
 }
 
 extension View {
+    @ViewBuilder
     func settingsMountIdentity(_ identifier: String) -> some View {
+        #if DEBUG
         modifier(SettingsMountIdentityModifier(identifier: identifier))
+        #else
+        accessibilityIdentifier(identifier)
+        #endif
     }
 }
 
+#if DEBUG
 private struct SettingsMountIdentityModifier: ViewModifier {
     let identifier: String
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        #if DEBUG
         content
             .accessibilityIdentifier(identifier)
             .background(
                 SettingsMountReportingView(identifier: identifier)
                     .frame(width: 0, height: 0)
                     .accessibilityHidden(true))
-        #else
-        content.accessibilityIdentifier(identifier)
-        #endif
     }
 }
 
-#if DEBUG
 @MainActor
 package enum SettingsMountRecorder {
     package private(set) static var identifiers: [String] = []
