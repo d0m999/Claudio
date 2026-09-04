@@ -224,6 +224,28 @@ private func scannedFixture(path: String, text: String) -> ScannedSource {
     return (path: path, code: scanned.code, unmodeled: scanned.unmodeledConstructs)
 }
 
+private func repositoryRelativeSources(
+    _ groups: [(root: String, sources: [ScannedSource])]
+) -> [ScannedSource] {
+    groups.flatMap { group in
+        group.sources.map { source in
+            (
+                path: "\(group.root)/\(source.path)",
+                code: source.code,
+                unmodeled: source.unmodeled
+            )
+        }
+    }
+}
+
+private func unmodeledConstructCensus(in sources: [ScannedSource]) -> [String: [String]] {
+    var census: [String: [String]] = [:]
+    for source in sources where !source.unmodeled.isEmpty {
+        census[source.path] = source.unmodeled
+    }
+    return census
+}
+
 @MainActor
 private func guiSources() -> [ScannedSource] {
     sourcesUnder("gui/Sources/ClaudioGUI")
@@ -343,7 +365,7 @@ func runViewWiringSuites() {
             "菜单栏必须使用同源 Orbit Zero 减法几何，并保持 template image 自动适配亮暗菜单栏")
     }
 
-    suite("扫描器的前提：ClaudioGUI / ClaudioGUICore 里没有一处它自己不认识的构造") {
+    suite("扫描器的前提：三个 GUI production targets 没有一处它自己不认识的构造") {
         // ## GUI 这一半此前**一条守卫都没有**（`/codex review be332ff` 的 P3）
         //
         // 本文件下面的兜底全是**负向**断言（除 PanelView 外不许出现锁、ClaudioGUICore 里不许出现
@@ -368,18 +390,51 @@ func runViewWiringSuites() {
         let scanned = guiSources() + guiCoreSources()
         expect(
             scanned.count >= 10,
-            "两个 target 加起来一个 Swift 文件都没数到（实得 \(scanned.count)）—— 这条是**普查**，"
+            "三个 target 加起来一个 Swift 文件都没数到（实得 \(scanned.count)）—— 这条是**普查**，"
                 + "普查不到任何文件就永远等不到红，只会安静地绿下去")
-        var unmodeled: [String: [String]] = [:]
-        for file in scanned where !file.unmodeled.isEmpty {
-            unmodeled[file.path] = file.unmodeled
-        }
+        let expectedTargetRoots = [
+            "gui/Sources/ClaudioGUI/",
+            "gui/Sources/ClaudioGUICore/",
+            "gui/Sources/ClaudioSettingsPresentation/",
+        ]
+        expect(
+            expectedTargetRoots.allSatisfy { root in
+                scanned.contains { $0.path.hasPrefix(root) }
+            },
+            "fail-closed census 必须以 repository-relative path 覆盖三个 production target")
+        let unmodeled = unmodeledConstructCensus(in: scanned)
         expect(
             unmodeled.isEmpty,
             "这些文件里出现了扫描器不建模的词法构造：\(unmodeled) —— 它剥出来的「代码」从此不可信，"
                 + "而本文件的兜底全是负向断言：一段被误判成字符串 / 注释而消失的代码只会让它们**更绿**，"
                 + "一句藏在里面的 `ClaudioPaths.playLockFile` 或 `\"play.lock\"` 会对整套锁普查"
                 + "**永久隐身**。要么把这个构造挪走，要么先教 `strippingComments` 认识它")
+
+        let duplicateBasenameFixtures = repositoryRelativeSources([
+            (
+                root: "gui/Sources/ClaudioGUI",
+                sources: [
+                    scannedFixture(
+                        path: "Duplicate.swift", text: "let pattern = ##\"a//b\"##")
+                ]
+            ),
+            (
+                root: "gui/Sources/ClaudioSettingsPresentation",
+                sources: [
+                    scannedFixture(
+                        path: "Duplicate.swift", text: "let pattern = ##\"c//d\"##")
+                ]
+            ),
+        ])
+        let mutationCensus = unmodeledConstructCensus(in: duplicateBasenameFixtures)
+        expect(
+            Set(mutationCensus.keys)
+                == [
+                    "gui/Sources/ClaudioGUI/Duplicate.swift",
+                    "gui/Sources/ClaudioSettingsPresentation/Duplicate.swift",
+                ]
+                && mutationCensus.values.allSatisfy { !$0.isEmpty },
+            "同 basename 的不建模 mutation 必须保留两个 relative-path findings，不能覆盖成一个")
     }
 
     suite("主动播报出口按 surface 唯一：Panel、Integrations 与统一 Settings 各一个") {
