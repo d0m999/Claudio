@@ -246,6 +246,27 @@ private func unmodeledConstructCensus(in sources: [ScannedSource]) -> [String: [
     return census
 }
 
+private func settingsAnnouncementSurfaceSources(
+    executable: [ScannedSource],
+    presentation: [ScannedSource]
+) -> [ScannedSource] {
+    executable + presentation
+}
+
+private func settingsAnnouncementSurfaceCensus(
+    in sources: [ScannedSource]
+) -> (posts: [String: Int], consumes: [String: Int]) {
+    var posts: [String: Int] = [:]
+    var consumes: [String: Int] = [:]
+    for file in sources {
+        let postCount = file.code.components(separatedBy: "NSAccessibility.post").count - 1
+        let consumeCount = file.code.components(separatedBy: "announcer.consume(").count - 1
+        if postCount > 0 { posts[file.path] = postCount }
+        if consumeCount > 0 { consumes[file.path] = consumeCount }
+    }
+    return (posts: posts, consumes: consumes)
+}
+
 @MainActor
 private func guiSources() -> [ScannedSource] {
     sourcesUnder("gui/Sources/ClaudioGUI")
@@ -445,7 +466,9 @@ func runViewWiringSuites() {
     }
 
     suite("主动播报出口按 surface 唯一：Panel、Integrations 与统一 Settings 各一个") {
-        let sources = guiSources() + sourcesUnder("gui/Sources/ClaudioSettingsPresentation")
+        let sources = settingsAnnouncementSurfaceSources(
+            executable: guiSources(),
+            presentation: sourcesUnder("gui/Sources/ClaudioSettingsPresentation"))
         expect(
             sources.count >= 5,
             "在 executable 与 Settings presentation targets 下一个 Swift 文件都没数到"
@@ -458,26 +481,19 @@ func runViewWiringSuites() {
                 },
             "Panel 与统一 Settings 集成 destination 两个独立 surface 都必须在普查名册里")
 
-        var posts: [String: Int] = [:]
-        var consumes: [String: Int] = [:]
-        for file in sources {
-            let postCount = file.code.components(separatedBy: "NSAccessibility.post").count - 1
-            let consumeCount = file.code.components(separatedBy: "announcer.consume(").count - 1
-            if postCount > 0 { posts[file.path] = postCount }
-            if consumeCount > 0 { consumes[file.path] = consumeCount }
-        }
+        let census = settingsAnnouncementSurfaceCensus(in: sources)
 
         expect(
-            posts == [
+            census.posts == [
                 "PanelView.swift": 1,
                 "SettingsWindowController.swift": 1,
             ],
             "Panel 与统一 Settings 的基础页动作反馈各有一个窗口级主动播报出口；"
-                + "destination 通过注入 callback，不得新增 AppKit post。实得 \(posts)")
+                + "destination 通过注入 callback，不得新增 AppKit post。实得 \(census.posts)")
         expect(
-            consumes == ["PanelView.swift": 1],
+            census.consumes == ["PanelView.swift": 1],
             "去重器也只许有一个调用点，理由一字不差 —— 绕过它 = 把「同一趟里 post 两条」放回来。"
-                + "实得 \(consumes)")
+                + "实得 \(census.consumes)")
         let integrations =
             sources.first {
                 $0.path.hasSuffix("IntegrationsSettingsDestinationView.swift")
@@ -485,6 +501,29 @@ func runViewWiringSuites() {
         expect(
             integrations.components(separatedBy: "feedbackAnnouncer.consume(").count - 1 == 1,
             "集成 destination 的出口必须只经过一处 feedback revision 去重器")
+
+        let collisionMutation = settingsAnnouncementSurfaceSources(
+            executable: [
+                scannedFixture(
+                    path: "PanelView.swift",
+                    text: "NSAccessibility.post; announcer.consume("),
+                scannedFixture(
+                    path: "SettingsWindowController.swift", text: "NSAccessibility.post"),
+            ],
+            presentation: [
+                scannedFixture(path: "PanelView.swift", text: "NSAccessibility.post")
+            ])
+        let mutationCensus = settingsAnnouncementSurfaceCensus(in: collisionMutation)
+        expect(
+            mutationCensus.posts
+                == [
+                    "gui/Sources/ClaudioGUI/PanelView.swift": 1,
+                    "gui/Sources/ClaudioGUI/SettingsWindowController.swift": 1,
+                    "gui/Sources/ClaudioSettingsPresentation/PanelView.swift": 1,
+                ]
+                && mutationCensus.consumes
+                    == ["gui/Sources/ClaudioGUI/PanelView.swift": 1],
+            "同 basename presentation mutation 的额外 post 必须成为独立 finding，不能覆盖 executable key")
     }
 
     suite("PanelView 单作用域边界：无宿主探测，固定呈现 scope/报告/当前来源内容") {
