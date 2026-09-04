@@ -11,7 +11,7 @@ import SwiftUI
 /// It reuses the panel's manager-owned scope and event projections; full per-event file editing
 /// routes inside the same retained Settings window to the embedded Sounds editor.
 @MainActor
-package struct EventSettingsWindowView: View {
+struct EventSettingsWindowView: View {
     @ObservedObject var model: PanelConfigController
     @ObservedObject var selection: EventSettingsWindowSelection
     @ObservedObject var hostIntegrations: HostIntegrationPresentationStore
@@ -36,7 +36,7 @@ package struct EventSettingsWindowView: View {
     @State private var previewAllFailureEvent: Event?
     @State private var previewAllCoordinator = EventPreviewSequenceCoordinator()
 
-    package init(
+    init(
         model: PanelConfigController,
         selection: EventSettingsWindowSelection,
         hostIntegrations: HostIntegrationPresentationStore,
@@ -137,7 +137,7 @@ package struct EventSettingsWindowView: View {
         }
     }
 
-    package var body: some View {
+    var body: some View {
         HStack(spacing: 0) {
             scopeSidebar
                 .frame(width: 230)

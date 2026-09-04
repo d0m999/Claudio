@@ -12,14 +12,14 @@ package enum SettingsPresentationAccessibilityID {
 /// The real Login Item section shared by the transitional nine-destination shell and the new
 /// importable Settings root. All mutations and system effects return through the session seam.
 @MainActor
-package struct LoginItemSettingsSection: View {
+struct LoginItemSettingsSection: View {
     @ObservedObject private var session: SettingsPresentationSession
 
-    package init(session: SettingsPresentationSession) {
+    init(session: SettingsPresentationSession) {
         self.session = session
     }
 
-    package var body: some View {
+    var body: some View {
         let l10n = ClaudioL10n(language: session.state.language)
         let loginItemStatusText = SettingsPresentationAnnouncement.Meaning.loginItemStatus(
             session.state.loginItemRegistration

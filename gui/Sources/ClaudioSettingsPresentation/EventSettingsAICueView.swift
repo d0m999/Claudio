@@ -5,7 +5,7 @@ import Foundation
 import SwiftUI
 
 @MainActor
-package struct EventSettingsAICueServiceCard: View {
+struct EventSettingsAICueServiceCard: View {
     @ObservedObject var viewModel: AICueGenerationViewModel
     @ObservedObject var languageStore: ClaudioPreferences
     let onManageCredential: () -> Void
@@ -14,7 +14,7 @@ package struct EventSettingsAICueServiceCard: View {
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
 
-    package init(
+    init(
         viewModel: AICueGenerationViewModel,
         languageStore: ClaudioPreferences,
         onManageCredential: @escaping () -> Void
@@ -24,7 +24,7 @@ package struct EventSettingsAICueServiceCard: View {
         self.onManageCredential = onManageCredential
     }
 
-    package var body: some View {
+    var body: some View {
         let status = statusPresentation
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
@@ -188,7 +188,7 @@ package struct EventSettingsAICueServiceCard: View {
 }
 
 @MainActor
-package struct EventSettingsAICueComposerView: View {
+struct EventSettingsAICueComposerView: View {
     @ObservedObject var viewModel: AICueGenerationViewModel
     @ObservedObject var languageStore: ClaudioPreferences
     let eventTitle: String
@@ -204,7 +204,7 @@ package struct EventSettingsAICueComposerView: View {
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
 
-    package init(
+    init(
         viewModel: AICueGenerationViewModel,
         languageStore: ClaudioPreferences,
         eventTitle: String,
@@ -228,7 +228,7 @@ package struct EventSettingsAICueComposerView: View {
         self.onClose = onClose
     }
 
-    package var body: some View {
+    var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(l10n.format(.aiCueComposerTitle, eventTitle))
@@ -544,7 +544,7 @@ package struct EventSettingsAICueComposerView: View {
 }
 
 @MainActor
-package struct EventSettingsAICueCredentialSheet: View {
+struct EventSettingsAICueCredentialSheet: View {
     @ObservedObject var viewModel: AICueGenerationViewModel
     @ObservedObject var languageStore: ClaudioPreferences
 
@@ -556,7 +556,7 @@ package struct EventSettingsAICueCredentialSheet: View {
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
 
-    package init(
+    init(
         viewModel: AICueGenerationViewModel,
         languageStore: ClaudioPreferences
     ) {
@@ -564,7 +564,7 @@ package struct EventSettingsAICueCredentialSheet: View {
         self.languageStore = languageStore
     }
 
-    package var body: some View {
+    var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(credentialTitle)
                 .font(ClaudioTheme.font(.sectionTitle).weight(.bold))

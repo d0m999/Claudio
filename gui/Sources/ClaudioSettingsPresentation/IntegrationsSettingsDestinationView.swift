@@ -7,7 +7,7 @@ import SwiftUI
 /// Prototype-aligned Integrations destination. It owns no host configuration or capability-matrix
 /// state; all facts and asynchronous lifecycle behavior come from the Core model.
 @MainActor
-package struct IntegrationsSettingsDestinationView: View {
+struct IntegrationsSettingsDestinationView: View {
     @ObservedObject var model: IntegrationDestinationModel
     @ObservedObject var focusCoordinator: IntegrationDestinationFocusCoordinator
     @ObservedObject var languageStore: ClaudioPreferences
@@ -22,7 +22,7 @@ package struct IntegrationsSettingsDestinationView: View {
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
 
-    package init(
+    init(
         model: IntegrationDestinationModel,
         focusCoordinator: IntegrationDestinationFocusCoordinator,
         languageStore: ClaudioPreferences,
@@ -36,7 +36,7 @@ package struct IntegrationsSettingsDestinationView: View {
         self.onAnnouncement = onAnnouncement
     }
 
-    package var body: some View {
+    var body: some View {
         ZStack(alignment: .bottomTrailing) {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 0) {
