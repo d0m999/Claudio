@@ -531,7 +531,15 @@ func runGlobalShortcutsSuites() {
         expect(
             recorder.contains("override func keyDown(with event: NSEvent)")
                 && recorder.contains("guard isRecording, !event.isARepeat")
-                && recorder.contains("onCapture?(UInt32(event.keyCode)")
+                && recorder.contains("LocalShortcutCaptureNSView(")
+                && recorder.contains("onCapture: onCapture")
+                && recorder.contains("onCancel: onCancel")
+                && recorder.contains("let onCapture: @MainActor")
+                && recorder.contains("let onCancel: @MainActor")
+                && recorder.contains("onCapture(UInt32(event.keyCode)")
+                && recorder.contains("onCancel()")
+                && !recorder.contains("onCapture?(")
+                && !recorder.contains("onCancel?(")
                 && recorder.contains("event.keyCode == 53")
                 && recorder.contains("else if model.suspendForRecording()")
                 && recorder.contains("model.resumeAfterRecording(preservingFailureFor: action)")
@@ -547,7 +555,7 @@ func runGlobalShortcutsSuites() {
                 && !recorder.contains(".foregroundColor(.red)")
                 && !recorder.contains("event.characters")
                 && !recorder.contains("charactersIgnoringModifiers"),
-            "录制必须暂停 Carbon，使用字体/颜色 token，并在结束后恢复发起按钮焦点")
+            "录制必须持有 required callback、暂停 Carbon、使用 token，并在结束后恢复发起按钮焦点")
         expect(
             menu.contains("private let globalShortcutSettings: GlobalShortcutSettingsModel")
                 && menu.contains("fileprivate func performGlobalShortcut(")
