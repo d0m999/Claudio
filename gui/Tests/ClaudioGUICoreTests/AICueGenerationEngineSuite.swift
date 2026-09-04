@@ -548,25 +548,37 @@ func runAICueGenerationEngineSuites() async {
                 .success(audio), .success(audio), .success(audio),
             ])
             let tempRoot = root.appendingPathComponent("slow-third-probe", isDirectory: true)
+            let probe = GenerationControlledThirdDurationProbe()
             let engine = AICueGenerationEngine(
                 vault: GenerationVaultFixture(configured: true),
                 provider: provider,
                 temporaryRoot: tempRoot,
-                durationProbe: GenerationSlowThirdDurationProbe())
-            let start = Date()
-            var deadlineExceeded = false
-            do {
-                _ = try await engine.generate(
+                durationProbe: probe)
+            let generation = Task {
+                try await engine.generate(
                     description: "短促木琴音效",
                     locale: "zh-Hans",
                     providerProfileID: .elevenLabsGlobal,
                     deadline: generationDeadline(durationNanoseconds: 100_000_000))
+            }
+            guard await waitForThirdDurationProbeToEnter(probe) else {
+                generation.cancel()
+                probe.releaseThirdProbe()
+                expect(false, "可观测 probe 必须在 safety deadline 前进入第三次校验")
+                return
+            }
+            var deadlineExceeded = false
+            do {
+                _ = try await generation.value
             } catch AICueGenerationError.deadlineExceeded {
                 deadlineExceeded = true
             } catch {}
             expect(deadlineExceeded, "第三项本地校验也受同一 absolute deadline")
-            expect(Date().timeIntervalSince(start) < 0.25, "慢 probe 不得拖过调用方硬上限")
-            try? await Task.sleep(nanoseconds: 350_000_000)
+            expect(
+                probe.didEnterThirdProbe && !probe.didCompleteThirdProbe,
+                "deadline race 必须在迟到 probe 完成前先结束调用方")
+            probe.releaseThirdProbe()
+            await waitForThirdDurationProbeToComplete(probe)
             expect(generationDirectories(in: tempRoot).isEmpty, "迟到 probe 不得发布 candidates")
         }
     }

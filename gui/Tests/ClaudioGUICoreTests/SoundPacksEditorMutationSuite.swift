@@ -342,7 +342,9 @@ func runSoundPacksEditorMutationSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 11)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "stop.mp3" }
+            }
             guard case .sounds(let sounds) = owner.presentation.mode,
                 case .ready(let audioRows) = sounds.inventory,
                 let assignNotification = audioRows.first(where: { $0.fileName == "stop.mp3" })?
@@ -706,7 +708,9 @@ func runSoundPacksEditorMutationSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 3)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "orphan.mp3" }
+            }
             guard case .sounds(let sounds) = owner.presentation.mode,
                 case .ready(let audio) = sounds.inventory,
                 let requestDelete = audio.first(where: { $0.fileName == "orphan.mp3" })?
@@ -743,7 +747,9 @@ func runSoundPacksEditorMutationSuites() async {
             await waitForSoundEditorOperation(owner, operationID: operationID)
             await waitForSoundEditorScanCount(fixture.recorder, atLeast: scansBefore + 1)
             await fixture.library.waitUntilIdleForTesting()
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                !inventory.contains { $0.fileName == "orphan.mp3" }
+            }
             expect(!regularFileExists(at: orphan), "唯一 accepted operation 必须删除孤儿文件")
             expect(
                 owner.presentation.activities.contains {
@@ -798,7 +804,9 @@ func runSoundPacksEditorMutationSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 32)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "orphan.mp3" }
+            }
             guard case .sounds(let sounds) = owner.presentation.mode,
                 case .ready(let audio) = sounds.inventory,
                 let requestDelete = audio.first(where: { $0.fileName == "orphan.mp3" })?
@@ -821,7 +829,9 @@ func runSoundPacksEditorMutationSuites() async {
             await waitForSoundEditorOperation(owner, operationID: operationID)
             await waitForSoundEditorScanCount(fixture.recorder, atLeast: scansBefore + 1)
             await fixture.library.waitUntilIdleForTesting()
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                !inventory.contains { $0.fileName == "orphan.mp3" }
+            }
 
             expect(
                 owner.presentation.activities.first(where: { $0.operationID == operationID })?
@@ -1076,7 +1086,9 @@ func runSoundPacksEditorMutationSuites() async {
                         route: .overview(surface: .workBuddy),
                         requestRevision: 4)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "orphan.mp3" }
+            }
             guard case .sounds(let sounds) = owner.presentation.mode,
                 case .ready(let audio) = sounds.inventory,
                 let requestDelete = audio.first(where: { $0.fileName == "orphan.mp3" })?
@@ -1148,7 +1160,9 @@ func runSoundPacksEditorMutationSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 5)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "orphan.mp3" }
+            }
             guard case .sounds(let initial) = owner.presentation.mode,
                 case .ready(let initialAudio) = initial.inventory,
                 let firstRequest = initialAudio.first(where: { $0.fileName == "orphan.mp3" })?
@@ -1162,7 +1176,9 @@ func runSoundPacksEditorMutationSuites() async {
 
             expect(owner.send(.invoke(first.cancelAction)) == .applied, "cancel 必须同栈消费")
             expect(owner.presentation.pendingConfirmation == nil, "cancel 后 UI 必须立即清除")
-            await waitForSoundEditorInventory(owner)
+            await waitForSoundEditorInventory(owner) { inventory in
+                inventory.contains { $0.fileName == "orphan.mp3" }
+            }
             guard case .sounds(let afterCancel) = owner.presentation.mode else {
                 expect(false, "cancel 后必须保持 Sounds mode")
                 return
