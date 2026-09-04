@@ -2,6 +2,7 @@ import ClaudioCore
 import ClaudioGUICore
 import ClaudioSettingsPresentation
 import Combine
+import Foundation
 
 @MainActor
 func runEventSettingsWindowSelectionSuites() {
@@ -12,16 +13,23 @@ func runEventSettingsWindowSelectionSuites() {
                 && selection.presentationState.route.event == nil
                 && selection.presentationState.routeRequestRevision == 0
                 && selection.presentationState.previewState == .idle
-                && selection.presentationState.aiSessionState == .idle,
-            "初始 route 与两个会话必须是可复现的空闲状态")
+                && selection.presentationState.aiSessionState == .idle
+                && !selection.presentationState.credentialSheetIsPresented
+                && selection.presentationState.playingCandidateID == nil,
+            "初始 route 与 destination-local transient state 必须是可复现的空闲状态")
 
         let previewGeneration = selection.beginPreviewSequence()
         selection.beginAISession(scope: .global, event: .stop)
+        let candidateID = UUID()
+        selection.presentCredentialSheet()
+        selection.beginCandidatePreview(id: candidateID)
         expect(
             selection.presentationState.previewState == .running(generation: previewGeneration)
                 && selection.presentationState.aiSessionState
-                    == .active(scope: .global, event: .stop),
-            "显式用户动作必须登记 preview 与 AI session 身份")
+                    == .active(scope: .global, event: .stop)
+                && selection.presentationState.credentialSheetIsPresented
+                && selection.presentationState.playingCandidateID == candidateID,
+            "显式用户动作必须登记 preview、AI session、credential sheet 与 candidate 身份")
 
         let route = EventSettingsWindowRoute(scope: .surface(.workBuddy), event: .stop)
         selection.select(route)
@@ -31,8 +39,10 @@ func runEventSettingsWindowSelectionSuites() {
                 && selection.presentationState.previewState == .idle
                 && selection.presentationState.previewStopRequestRevision == 1
                 && selection.presentationState.aiSessionState == .idle
-                && selection.presentationState.aiSessionEndRequestRevision == 1,
-            "route 变化必须原子保留目标并停止旧 preview/AI session")
+                && selection.presentationState.aiSessionEndRequestRevision == 1
+                && !selection.presentationState.credentialSheetIsPresented
+                && selection.presentationState.playingCandidateID == nil,
+            "route 变化必须原子保留目标并停止旧 destination-local transient state")
         expect(
             !selection.completePreviewSequence(generation: previewGeneration),
             "route 变化后旧 preview generation 不得重新发布完成态")
@@ -58,6 +68,8 @@ func runEventSettingsWindowSelectionSuites() {
         selection.clearUnavailableScope()
         _ = selection.beginPreviewSequence()
         selection.beginAISession(scope: .surface(.workBuddy), event: .stop)
+        selection.presentCredentialSheet()
+        selection.beginCandidatePreview(id: candidateID)
         let stopRevision = selection.presentationState.previewStopRequestRevision
         let endRevision = selection.presentationState.aiSessionEndRequestRevision
         selection.leaveDestination()
@@ -65,8 +77,19 @@ func runEventSettingsWindowSelectionSuites() {
             selection.presentationState.previewState == .idle
                 && selection.presentationState.previewStopRequestRevision == stopRevision + 1
                 && selection.presentationState.aiSessionState == .idle
-                && selection.presentationState.aiSessionEndRequestRevision == endRevision + 1,
-            "离页/关窗必须发出单调停止命令并清空两个会话")
+                && selection.presentationState.aiSessionEndRequestRevision == endRevision + 1
+                && !selection.presentationState.credentialSheetIsPresented
+                && selection.presentationState.playingCandidateID == nil,
+            "离页/关窗必须发出单调停止命令并清空全部 destination-local transient state")
+
+        selection.presentCredentialSheet()
+        selection.dismissCredentialSheet()
+        selection.beginCandidatePreview(id: candidateID)
+        selection.noteCandidatePreviewStopped()
+        expect(
+            !selection.presentationState.credentialSheetIsPresented
+                && selection.presentationState.playingCandidateID == nil,
+            "production dismiss/preview-stop command 必须与 route cleanup 复用同一个 coherent state seam")
     }
 
     suite("事件设置 selection：同步 subscriber 重入仍发布最终 coherent projection") {

@@ -360,7 +360,18 @@ func runSettingsPresentationSliceSuites() {
 
     #if DEBUG
     suite("Settings presentation root：九个 destination 都经同一 compiled production root 挂载") {
-        var mountedDestinations = Set<SettingsDestination>()
+        let destinationSubtreeIdentifiers: [SettingsDestination: String] = [
+            .general: SettingsPresentationAccessibilityID.general,
+            .integrations: "integrations.destination.scroll",
+            .eventsAndSounds: "event-settings.header",
+            .notifications: "settings.notifications.dynamic-quiet-policy",
+            .display: "settings.display.text-size",
+            .sounds: "settings.sounds.editor",
+            .usage: "settings.usage.refresh",
+            .shortcuts: "settings.shortcuts.toggle-panel",
+            .about: "settings.about.identity",
+        ]
+        var mountedDestinations: [SettingsDestination] = []
         for scenario in PreviewFixtures.settingsRouteScenarios {
             let fixture = SettingsPresentationFixtures.generalLogin(
                 route: scenario.route,
@@ -369,16 +380,56 @@ func runSettingsPresentationSliceSuites() {
             hostingView.frame = NSRect(x: 0, y: 0, width: 980, height: 720)
             hostingView.layoutSubtreeIfNeeded()
             if hostingView.fittingSize.width > 0 && hostingView.fittingSize.height > 0,
-                fixture.session.state.routeResolution.destination == scenario.destination
+                fixture.session.state.routeResolution.destination == scenario.destination,
+                let identifier = destinationSubtreeIdentifiers[scenario.destination],
+                settingsAXDescendant(identifier: identifier, in: hostingView) != nil
             {
-                mountedDestinations.insert(scenario.destination)
+                mountedDestinations.append(scenario.destination)
             }
         }
 
         expect(
-            mountedDestinations == Set(SettingsDestination.allCases)
-                && mountedDestinations.count == 9,
-            "固定九个 destination 必须全部由 fixture 与 production 共用的 SettingsRootView(session:) 挂载")
+            mountedDestinations == SettingsDestination.allCases,
+            "固定九个 destination 必须按 sidebar 顺序挂载可从真实 AX tree 观察的唯一 production subtree，实得 \(mountedDestinations)")
+    }
+
+    suite("Settings AI Cue gallery：credential/composer/playing 均进入 production root state") {
+        for scenario in PreviewFixtures.aiCueGalleryScenarios {
+            let fixture = SettingsPresentationFixtures.generalLogin(
+                route: .events(scope: .global, event: .stop),
+                availability: PreviewFixtures.settingsRouteAvailability,
+                aiCueScenario: scenario)
+            let hostingView = NSHostingView(rootView: SettingsRootView(session: fixture.session))
+            hostingView.frame = NSRect(x: 0, y: 0, width: 1_240, height: 820)
+            hostingView.layoutSubtreeIfNeeded()
+            let state = fixture.session.state.eventPresentation
+            let scenarioSession = scenario.previewState.session
+
+            expect(
+                state.credentialSheetIsPresented == scenario.rendersCredentialSheet,
+                "\(scenario.rawValue) credential sheet visibility 必须来自 selection coherent state")
+            expect(
+                state.playingCandidateID == scenario.playingCandidateID,
+                "\(scenario.rawValue) playing candidate 必须来自 selection coherent state")
+            if let scenarioSession {
+                expect(
+                    state.route.scope == scenarioSession.scope
+                        && state.route.event == scenarioSession.event,
+                    "\(scenario.rawValue) composer route 必须与 fixture session scope/Event 对齐")
+                expect(
+                    settingsAXDescendant(
+                        identifier: "event-settings.ai-cue.composer",
+                        in: hostingView) != nil,
+                    "\(scenario.rawValue) 必须经 production root AX subtree 挂载 composer")
+            }
+            if scenario.rendersCredentialSheet {
+                expect(
+                    settingsAXDescendant(
+                        identifier: "event-settings.ai-cue.credential-sheet",
+                        in: hostingView) != nil,
+                    "\(scenario.rawValue) 必须经 production root 实际呈现 credential sheet")
+            }
+        }
     }
 
     suite("Settings presentation fixture：DEBUG seam 随机隔离且只暴露真实 owner") {
@@ -433,6 +484,38 @@ func runSettingsPresentationSliceSuites() {
     }
 
     #endif
+}
+
+@MainActor
+private func settingsAXDescendant(identifier: String, in root: NSView) -> Any? {
+    var pending: [Any] = [root]
+    var visited = Set<ObjectIdentifier>()
+    while let current = pending.popLast() {
+        let object = current as AnyObject
+        let identity = ObjectIdentifier(object)
+        guard visited.insert(identity).inserted else { continue }
+        if settingsAXIdentifier(of: current) == identifier { return current }
+        pending.append(contentsOf: settingsAXChildren(of: current))
+    }
+    return nil
+}
+
+@MainActor
+private func settingsAXChildren(of element: Any) -> [Any] {
+    if let view = element as? NSView { return view.accessibilityChildren() ?? [] }
+    if let element = element as? NSAccessibilityElement {
+        return element.accessibilityChildren() ?? []
+    }
+    return []
+}
+
+@MainActor
+private func settingsAXIdentifier(of element: Any) -> String? {
+    if let view = element as? NSView { return view.accessibilityIdentifier() }
+    if let element = element as? NSAccessibilityElement {
+        return element.accessibilityIdentifier()
+    }
+    return nil
 }
 
 @MainActor
