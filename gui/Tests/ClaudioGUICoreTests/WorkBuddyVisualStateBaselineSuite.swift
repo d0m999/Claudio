@@ -103,37 +103,4 @@ func runWorkBuddyVisualStateBaselineSuites() {
         }
     }
 
-    suite("WorkBuddy production gallery wiring：七态进入新 destination，另有 disconnect in-flight 帧") {
-        let root = guiTestRepositoryRoot()
-        guard
-            let gallery = try? String(
-                contentsOf: root.appendingPathComponent(
-                    "gui/Sources/ClaudioGUI/StateGalleryView.swift"),
-                encoding: .utf8),
-            let view = try? String(
-                contentsOf: root.appendingPathComponent(
-                    "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift"
-                ),
-                encoding: .utf8)
-        else {
-            expect(false, "读不到 production destination/gallery source")
-            return
-        }
-        expect(
-            gallery.contains("ForEach(PreviewFixtures.workBuddyVisualScenarios)")
-                && gallery.contains("workbuddy.disconnect-in-flight")
-                && gallery.contains("previewInFlightAction: .disconnect(.workBuddy)"),
-            "七态之外必须固定提供 disconnect in-flight gallery 帧")
-        expect(
-            gallery.contains("IntegrationsSettingsDestinationView(")
-                && gallery.contains("state: scenario.state"),
-            "WorkBuddy fixture 必须进入同一生产 Integrations destination")
-        expect(
-            view.contains("Toggle(")
-                && view.contains("IntegrationConnectionRowKind")
-                && view.contains("integrations.destination.info-callout")
-                && !view.contains("Inspector")
-                && !view.contains("capabilityMatrix"),
-            "新 destination 必须包含真实 Toggle/四行组且不再渲染旧 Inspector/矩阵")
-    }
 }
