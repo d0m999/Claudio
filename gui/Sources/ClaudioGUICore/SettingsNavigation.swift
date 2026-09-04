@@ -54,7 +54,8 @@ public enum SettingsRoute: Sendable, Equatable, Hashable {
         }
     }
 
-    /// Debug and test projection that deliberately exposes only stable route tokens.
+    #if DEBUG
+    /// Test projection that deliberately exposes only stable route tokens.
     public var stableIdentityComponents: [String] {
         switch self {
         case .destination(let destination):
@@ -74,6 +75,7 @@ public enum SettingsRoute: Sendable, Equatable, Hashable {
             ]
         }
     }
+    #endif
 }
 
 /// Current stable identities that a Settings deep link may target. Absence means stale, not an

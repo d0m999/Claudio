@@ -63,7 +63,7 @@ struct LoginItemSettingsSection: View {
                 }
             }
 
-            if session.state.platformActionFailure?.action == .openLoginItemsSettings {
+            if session.state.platformActionFailure == .openLoginItemsSettings {
                 FailureRow(message: l10n.text(.settingsGeneralLoginItem.unavailable))
                     .accessibilityIdentifier("settings.general.login-item.settings-failure")
             }
