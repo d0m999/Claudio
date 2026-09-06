@@ -146,13 +146,17 @@ func runLocalActivitySummarySuites() {
                 pendingDirectory: pendingDirectory)
             let installation = UUID(uuidString: "22222222-2222-4222-8222-222222222228")!
             let moment = Date(timeIntervalSince1970: 1_900_000_300)
+            let timeZone = TimeZone(secondsFromGMT: 0)!
+            let calendar = LocalActivitySummaryStore.gregorianCalendar(timeZone: timeZone)
             expect(
                 store.record(
                     host: .claudeCode,
                     event: .stop,
                     installationID: installation,
                     activeInstallationID: installation,
-                    occurredAt: moment) == .committed,
+                    occurredAt: moment,
+                    timeZone: timeZone,
+                    calendar: calendar) == .committed,
                 "test must start with one committed activity fact")
             try? FileManager.default.createDirectory(
                 at: pendingDirectory,
@@ -167,7 +171,9 @@ func runLocalActivitySummarySuites() {
                     event: .stop,
                     installationID: installation,
                     activeInstallationID: installation,
-                    occurredAt: moment.addingTimeInterval(1)) == .deferred,
+                    occurredAt: moment.addingTimeInterval(1),
+                    timeZone: timeZone,
+                    calendar: calendar) == .deferred,
                 "the host hook must stage only its callback when a pending backlog exists")
 
             let pendingFiles =
@@ -185,7 +191,11 @@ func runLocalActivitySummarySuites() {
                 } == true,
                 "the hook must not assign batch identity to the existing backlog")
 
-            if case .ready(let document) = store.read(now: moment.addingTimeInterval(1)).state {
+            if case .ready(let document) = store.read(
+                now: moment.addingTimeInterval(1),
+                timeZone: timeZone,
+                calendar: calendar
+            ).state {
                 expect(
                     document.buckets.first?.count(host: .claudeCode, event: .stop) == 3,
                     "the next read must merge each committed and deferred callback once")
@@ -328,13 +338,17 @@ func runLocalActivitySummarySuites() {
                 pendingDirectory: pendingDirectory)
             let installation = UUID(uuidString: "22222222-2222-4222-8222-222222222224")!
             let moment = Date(timeIntervalSince1970: 1_900_000_300)
+            let timeZone = TimeZone(secondsFromGMT: 0)!
+            let calendar = LocalActivitySummaryStore.gregorianCalendar(timeZone: timeZone)
             expect(
                 store.record(
                     host: .claudeCode,
                     event: .stop,
                     installationID: installation,
                     activeInstallationID: installation,
-                    occurredAt: moment) == .committed,
+                    occurredAt: moment,
+                    timeZone: timeZone,
+                    calendar: calendar) == .committed,
                 "test must publish the already-counted activity")
 
             try? FileManager.default.createDirectory(
@@ -351,7 +365,11 @@ func runLocalActivitySummarySuites() {
                 setPendingBatchMarker(consumedBatchID, on: summary),
                 "test must reproduce the summary-published cleanup-incomplete state")
 
-            if case .ready(let document) = store.read(now: moment).state {
+            if case .ready(let document) = store.read(
+                now: moment,
+                timeZone: timeZone,
+                calendar: calendar
+            ).state {
                 expect(
                     document.buckets.first?.count(host: .claudeCode, event: .stop) == 2,
                     "the committed identity must be skipped while the identical new file counts once"
@@ -620,7 +638,7 @@ private func pendingFixtureData(batchID: UUID?) -> Data {
     var object: [String: Any] = [
         "schema": 1,
         "occurred_at": "2030-03-17T17:51:40Z",
-        "local_date": "2030-03-18",
+        "local_date": "2030-03-17",
         "host": HostID.claudeCode.rawValue,
         "event": Event.stop.cliName,
     ]
