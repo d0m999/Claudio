@@ -9,7 +9,7 @@ func makeActivityDiagnosticsModel() -> ActivityDiagnosticsModel {
     let logStore = ActivityDiagnosticLogStore.production
     let logFile = logStore.logFile
 
-    func load() async -> ActivityDiagnosticsLoadResult {
+    let load: @Sendable () async -> ActivityDiagnosticsLoadResult = {
         await Task.detached(priority: .userInitiated) {
             ActivityDiagnosticsLoadResult(
                 readResult: activityStore.read(),

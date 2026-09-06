@@ -156,6 +156,10 @@ func runActivityDiagnosticsSuites() async {
                 && adapter?.contains("UsageActivityStore") == false,
             "production composition must use the local activity and log-only owners")
         expect(
+            adapter?.contains(
+                "let load: @Sendable () async -> ActivityDiagnosticsLoadResult = {") == true,
+            "production load closure must carry its @Sendable type before crossing into operations")
+        expect(
             activityView?.contains("ActivityDiagnosticsModel") == true
                 && activityView?.contains("UsageActivityStore") == false,
             "the Activity destination must consume the shared model, not the retired usage store")
