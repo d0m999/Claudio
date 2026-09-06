@@ -87,6 +87,114 @@ func runLocalActivitySummarySuites() {
         }
     }
 
+    suite("Local activity pending staging never waits for its quota lock") {
+        withTempDirectory { root in
+            let lockURL = root.appendingPathComponent("summary.lock")
+            let pendingDirectory = root.appendingPathComponent("pending", isDirectory: true)
+            let store = LocalActivitySummaryStore(
+                summaryFile: root.appendingPathComponent("summary.json"),
+                lockFile: lockURL,
+                pendingDirectory: pendingDirectory)
+            let activityLock = FileLock(path: lockURL.path)
+            let stagingLock = FileLock(
+                path: root.appendingPathComponent(".activity-pending-stage.lock").path)
+            expect(activityLock.attemptLock() == .acquired, "test must hold the activity lock")
+            expect(stagingLock.attemptLock() == .acquired, "test must hold the staging lock")
+
+            let installation = UUID(uuidString: "22222222-2222-4222-8222-222222222227")!
+            let started = DispatchSemaphore(value: 0)
+            let completion = DispatchSemaphore(value: 0)
+            let outcomes = LocalActivityOutcomeCollector()
+            DispatchQueue.global().async {
+                started.signal()
+                outcomes.append(
+                    store.record(
+                        host: .claudeCode,
+                        event: .stop,
+                        installationID: installation,
+                        activeInstallationID: installation,
+                        occurredAt: Date(timeIntervalSince1970: 1_900_000_150)))
+                completion.signal()
+            }
+
+            let workerStarted = started.wait(timeout: .now() + .seconds(1)) == .success
+            expect(workerStarted, "test worker must start before measuring lock wait time")
+            let returnedWithoutWaiting =
+                workerStarted
+                && completion.wait(timeout: .now() + .milliseconds(250)) == .success
+            expect(
+                returnedWithoutWaiting,
+                "a contended staging quota lock must never block the host hook")
+            stagingLock.unlock()
+            if !returnedWithoutWaiting {
+                _ = completion.wait(timeout: .now() + .seconds(1))
+            }
+            activityLock.unlock()
+            expect(
+                outcomes.snapshot == [.failed],
+                "staging contention must fail closed without waiting for the lock")
+        }
+    }
+
+    suite("Local activity host records defer existing pending backlog work") {
+        withTempDirectory { root in
+            let summary = root.appendingPathComponent("summary.json")
+            let pendingDirectory = root.appendingPathComponent("pending", isDirectory: true)
+            let store = LocalActivitySummaryStore(
+                summaryFile: summary,
+                lockFile: root.appendingPathComponent("summary.lock"),
+                pendingDirectory: pendingDirectory)
+            let installation = UUID(uuidString: "22222222-2222-4222-8222-222222222228")!
+            let moment = Date(timeIntervalSince1970: 1_900_000_300)
+            expect(
+                store.record(
+                    host: .claudeCode,
+                    event: .stop,
+                    installationID: installation,
+                    activeInstallationID: installation,
+                    occurredAt: moment) == .committed,
+                "test must start with one committed activity fact")
+            try? FileManager.default.createDirectory(
+                at: pendingDirectory,
+                withIntermediateDirectories: true)
+            writePendingFixture(
+                to: pendingDirectory.appendingPathComponent("delta-existing.json"),
+                batchID: nil)
+
+            expect(
+                store.record(
+                    host: .claudeCode,
+                    event: .stop,
+                    installationID: installation,
+                    activeInstallationID: installation,
+                    occurredAt: moment.addingTimeInterval(1)) == .deferred,
+                "the host hook must stage only its callback when a pending backlog exists")
+
+            let pendingFiles =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: pendingDirectory,
+                    includingPropertiesForKeys: nil))?
+                .filter { $0.pathExtension == "json" }
+            expect(pendingFiles?.count == 2, "the hook must leave both pending deltas staged")
+            expect(
+                pendingFiles?.allSatisfy { url in
+                    guard let data = try? Data(contentsOf: url),
+                        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    else { return false }
+                    return object["batch_id"] == nil
+                } == true,
+                "the hook must not assign batch identity to the existing backlog")
+
+            if case .ready(let document) = store.read(now: moment.addingTimeInterval(1)).state {
+                expect(
+                    document.buckets.first?.count(host: .claudeCode, event: .stop) == 3,
+                    "the next read must merge each committed and deferred callback once")
+            } else {
+                expect(false, "the deferred backlog should merge on the next read")
+            }
+        }
+    }
+
     suite("Local activity pending timestamps preserve the post-clear subsecond boundary") {
         withTempDirectory { root in
             let lockURL = root.appendingPathComponent("summary.lock")
@@ -96,8 +204,8 @@ func runLocalActivitySummarySuites() {
                 lockFile: lockURL,
                 pendingDirectory: pendingDirectory)
             let installation = UUID(uuidString: "22222222-2222-4222-8222-222222222223")!
-            let clearedAt = Date(timeIntervalSince1970: 1_900_000_200.125)
-            let occurredAt = Date(timeIntervalSince1970: 1_900_000_200.625)
+            let clearedAt = Date(timeIntervalSince1970: 1_900_000_200.1231)
+            let occurredAt = Date(timeIntervalSince1970: 1_900_000_200.1232)
 
             let clearResult = store.clear(now: clearedAt)
             expect(clearResult.isSuccess, "test must publish the clear boundary")
@@ -107,6 +215,12 @@ func runLocalActivitySummarySuites() {
                     "clear should return the exact empty document that crossed the publish boundary"
                 )
             }
+            let clearedObject = (try? Data(contentsOf: store.summaryFile)).flatMap {
+                try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+            }
+            expect(
+                clearedObject?["cleared_at"] is NSNumber,
+                "new clear boundaries must use lossless numeric epoch seconds")
             let held = FileLock(path: lockURL.path)
             expect(held.attemptLock() == .acquired, "test must hold the activity lock")
             expect(
@@ -117,6 +231,16 @@ func runLocalActivitySummarySuites() {
                     activeInstallationID: installation,
                     occurredAt: occurredAt) == .deferred,
                 "a post-clear callback in the same second must be staged")
+            let stagedObject =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: pendingDirectory,
+                    includingPropertiesForKeys: nil))?
+                .first(where: { $0.pathExtension == "json" })
+                .flatMap { try? Data(contentsOf: $0) }
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            expect(
+                stagedObject?["occurred_at"] is NSNumber,
+                "new pending timestamps must use lossless numeric epoch seconds")
             held.unlock()
 
             if case .ready(let document) = store.read(now: occurredAt).state {
@@ -125,6 +249,71 @@ func runLocalActivitySummarySuites() {
                     "fractional pending time must remain later than the fractional clear boundary")
             } else {
                 expect(false, "the staged post-clear callback should merge")
+            }
+        }
+    }
+
+    suite("Local activity clear recovers a published batch before a failed publish") {
+        withTempDirectory { root in
+            let summaryDirectory = root.appendingPathComponent("summary", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: summaryDirectory,
+                withIntermediateDirectories: true)
+            let summary = summaryDirectory.appendingPathComponent("activity.json")
+            let pendingDirectory = root.appendingPathComponent("pending", isDirectory: true)
+            let store = LocalActivitySummaryStore(
+                summaryFile: summary,
+                lockFile: root.appendingPathComponent("summary.lock"),
+                pendingDirectory: pendingDirectory)
+            let installation = UUID(uuidString: "22222222-2222-4222-8222-222222222229")!
+            let moment = Date(timeIntervalSince1970: 1_900_000_300)
+            expect(
+                store.record(
+                    host: .claudeCode,
+                    event: .stop,
+                    installationID: installation,
+                    activeInstallationID: installation,
+                    occurredAt: moment) == .committed,
+                "test must publish the already-counted activity")
+
+            try? FileManager.default.createDirectory(
+                at: pendingDirectory,
+                withIntermediateDirectories: true)
+            let consumedBatchID = UUID(uuidString: "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB")!
+            writePendingFixture(
+                to: pendingDirectory.appendingPathComponent("delta-consumed.json"),
+                batchID: consumedBatchID)
+            expect(
+                setPendingBatchMarker(consumedBatchID, on: summary),
+                "test must reproduce the summary-published cleanup-incomplete state")
+
+            guard setFixtureACL(["+a", "everyone deny delete_child"], on: summaryDirectory) else {
+                expect(false, "test must prevent replacement of the regular summary")
+                return
+            }
+            defer { _ = setFixtureACL(["-N"], on: summaryDirectory) }
+            expect(
+                store.clear(now: moment.addingTimeInterval(10)).isSuccess == false,
+                "test must force empty-summary publication to fail after batch recovery")
+            let pendingAfterClear =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: pendingDirectory,
+                    includingPropertiesForKeys: nil))?
+                .filter { $0.pathExtension == "json" }
+            expect(
+                pendingAfterClear?.isEmpty == true,
+                "clear must reclaim the already published batch before attempting publication")
+            expect(
+                pendingBatchMarkerIsMissing(on: summary),
+                "clear must remove the recovered batch marker before attempting publication")
+            _ = setFixtureACL(["-N"], on: summaryDirectory)
+
+            if case .ready(let document) = store.read(now: moment.addingTimeInterval(10)).state {
+                expect(
+                    document.buckets.first?.count(host: .claudeCode, event: .stop) == 1,
+                    "failed clear recovery must not replay the already published batch")
+            } else {
+                expect(false, "the old summary should remain readable after failed clear")
             }
         }
     }
@@ -453,6 +642,28 @@ private func setPendingBatchMarker(_ batchID: UUID, on url: URL) -> Bool {
                 setxattr(path, name, bytes.baseAddress, bytes.count, 0, XATTR_NOFOLLOW) == 0
             }
         }
+    }
+}
+
+private func pendingBatchMarkerIsMissing(on url: URL) -> Bool {
+    let size = url.path.withCString { path in
+        pendingBatchMarkerName.withCString { name in
+            getxattr(path, name, nil, 0, 0, XATTR_NOFOLLOW)
+        }
+    }
+    return size < 0 && errno == ENOATTR
+}
+
+private func setFixtureACL(_ arguments: [String], on url: URL) -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/chmod")
+    process.arguments = arguments + [url.path]
+    do {
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+    } catch {
+        return false
     }
 }
 

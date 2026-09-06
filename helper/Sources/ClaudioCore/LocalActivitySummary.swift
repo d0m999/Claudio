@@ -221,7 +221,8 @@ public struct LocalActivitySummaryStore: Sendable {
                 newDeltas: [delta],
                 now: occurredAt,
                 timeZone: timeZone,
-                calendar: calendar)
+                calendar: calendar,
+                pendingMergeMode: .deferExisting)
         }
         switch locked {
         case .ran(let result):
@@ -282,8 +283,12 @@ public struct LocalActivitySummaryStore: Sendable {
             path: lockFile.path
         ) {
             guard case .success(let pending) = readPendingEntries() else { return nil }
-            let consumed = pending.filter { $0.delta.occurredAt <= now }
-            let retained = pending.filter { $0.delta.occurredAt > now }
+            guard
+                case .success(let recoveredPending) = recoverPublishedPendingBatchBeforeClear(
+                    from: pending)
+            else { return nil }
+            let consumed = recoveredPending.filter { $0.delta.occurredAt <= now }
+            let retained = recoveredPending.filter { $0.delta.occurredAt > now }
             let batchID = consumed.isEmpty ? nil : UUID()
             guard rewritePendingEntries(consumed, assigning: batchID),
                 rewritePendingEntries(retained, assigning: nil)
@@ -359,20 +364,21 @@ public struct LocalActivitySummaryStore: Sendable {
         guard case .success(let entries) = pending else { return false }
         guard !entries.isEmpty else { return true }
         return mergeAndPublish(
-            // `mergeAndPublish` reads the pending directory itself so record() can merge
-            // the pending set with its new callback. Passing `entries` here as well would
-            // count every deferred callback twice on the first successful read.
+            // `mergeAndPublish` claims its own stable pending batch. Passing `entries` here as
+            // new deltas as well would count every deferred callback twice.
             newDeltas: [],
             now: now,
             timeZone: timeZone,
-            calendar: calendar)
+            calendar: calendar,
+            pendingMergeMode: .mergeExisting)
     }
 
     private func mergeAndPublish(
         newDeltas: [LocalActivityPendingDelta],
         now: Date,
         timeZone: TimeZone,
-        calendar: Calendar
+        calendar: Calendar,
+        pendingMergeMode: PendingMergeMode
     ) -> Bool {
         let loaded = readRawSummary()
         let current: LocalActivitySummaryDocument
@@ -391,12 +397,22 @@ public struct LocalActivitySummaryStore: Sendable {
             return false
         }
 
-        let pendingResult = readPendingEntries()
-        guard case .success(let pending) = pendingResult,
-            case .success(let pendingBatch) = preparePendingBatch(
-                pending,
-                consumedBatchID: consumedPendingBatchID)
-        else { return false }
+        let pendingBatch: PendingBatch?
+        switch pendingMergeMode {
+        case .mergeExisting:
+            let pendingResult = readPendingEntries()
+            guard case .success(let pending) = pendingResult,
+                case .success(let prepared) = preparePendingBatch(
+                    pending,
+                    consumedBatchID: consumedPendingBatchID)
+            else { return false }
+            pendingBatch = prepared
+        case .deferExisting:
+            guard consumedPendingBatchID == nil,
+                case .success(false) = containsPendingDeltaFiles()
+            else { return false }
+            pendingBatch = nil
+        }
         let mergedDeltas = (pendingBatch?.entries.map(\.delta) ?? []) + newDeltas
         let activeDeltas = mergedDeltas.filter { delta in
             guard let clearedAt = current.clearedAt else { return true }
@@ -441,7 +457,7 @@ public struct LocalActivitySummaryStore: Sendable {
 
     private func stage(_ delta: LocalActivityPendingDelta) -> LocalActivityRecordOutcome {
         let stageLock = FileLock(path: pendingStageLockFile.path)
-        guard stageLock.lock() == .acquired else { return .failed }
+        guard stageLock.attemptLock() == .acquired else { return .failed }
         defer { stageLock.unlock() }
         do {
             try ensurePrivateDirectoryTree(at: pendingDirectory)
@@ -479,6 +495,11 @@ public struct LocalActivitySummaryStore: Sendable {
         let entries: [PendingEntry]
     }
 
+    private enum PendingMergeMode {
+        case deferExisting
+        case mergeExisting
+    }
+
     private func readSummary() -> LocalActivitySummaryReadState {
         switch readRawSummary() {
         case .missing: .missing
@@ -509,18 +530,11 @@ public struct LocalActivitySummaryStore: Sendable {
     }
 
     private func readPendingEntries() -> Result<[PendingEntry], LocalActivitySummaryStoreError> {
-        var status = stat()
-        guard lstat(pendingDirectory.path, &status) == 0 else {
-            return errno == ENOENT ? .success([]) : .failure(.pendingUnreadable)
+        let names: [URL]
+        switch boundedPendingDirectoryEntries() {
+        case .success(let entries): names = entries
+        case .failure(let error): return .failure(error)
         }
-        guard status.st_mode & S_IFMT == S_IFDIR else { return .failure(.pendingUnreadable) }
-        guard
-            let names = try? FileManager.default.contentsOfDirectory(
-                at: pendingDirectory,
-                includingPropertiesForKeys: nil,
-                options: []),
-            names.count <= Self.maximumPendingEntries
-        else { return .failure(.pendingOversize) }
 
         var entries: [PendingEntry] = []
         for url in names.sorted(by: { $0.path < $1.path }) {
@@ -544,6 +558,33 @@ public struct LocalActivitySummaryStore: Sendable {
             }
         }
         return .success(entries)
+    }
+
+    private func boundedPendingDirectoryEntries() -> Result<
+        [URL], LocalActivitySummaryStoreError
+    > {
+        var status = stat()
+        guard lstat(pendingDirectory.path, &status) == 0 else {
+            return errno == ENOENT ? .success([]) : .failure(.pendingUnreadable)
+        }
+        guard status.st_mode & S_IFMT == S_IFDIR else { return .failure(.pendingUnreadable) }
+        guard
+            let names = try? FileManager.default.contentsOfDirectory(
+                at: pendingDirectory,
+                includingPropertiesForKeys: nil,
+                options: []),
+            names.count <= Self.maximumPendingEntries
+        else { return .failure(.pendingOversize) }
+        return .success(names)
+    }
+
+    private func containsPendingDeltaFiles() -> Result<Bool, LocalActivitySummaryStoreError> {
+        switch boundedPendingDirectoryEntries() {
+        case .success(let entries):
+            return .success(entries.contains { $0.pathExtension == "json" })
+        case .failure(let error):
+            return .failure(error)
+        }
     }
 
     private func preparePendingBatch(
@@ -576,6 +617,25 @@ public struct LocalActivitySummaryStore: Sendable {
                 entries: selected.map {
                     PendingEntry(url: $0.url, delta: $0.delta.assigning(batchID: batchID))
                 }))
+    }
+
+    private func recoverPublishedPendingBatchBeforeClear(
+        from entries: [PendingEntry]
+    ) -> Result<[PendingEntry], LocalActivitySummaryStoreError> {
+        var status = stat()
+        guard lstat(summaryFile.path, &status) == 0 else {
+            return errno == ENOENT ? .success(entries) : .failure(.summaryUnreadable)
+        }
+        guard status.st_mode & S_IFMT == S_IFREG,
+            case .success(let consumedBatchID) = readConsumedPendingBatchMarker(from: summaryFile)
+        else { return .failure(.summaryUnreadable) }
+        guard let consumedBatchID else { return .success(entries) }
+
+        let consumed = entries.filter { $0.delta.batchID == consumedBatchID }
+        guard removePendingEntries(consumed, batchID: consumedBatchID),
+            removeConsumedPendingBatchMarker(consumedBatchID, from: summaryFile)
+        else { return .failure(.pendingUnreadable) }
+        return .success(entries.filter { $0.delta.batchID != consumedBatchID })
     }
 
     private func rewritePendingEntries(
@@ -632,8 +692,7 @@ public struct LocalActivitySummaryStore: Sendable {
     private func decodeDocument(_ object: [String: Any]) -> LocalActivitySummaryDocument? {
         guard let schema = activityUnsignedInteger(object["schema"]),
             schema == UInt64(LocalActivitySummaryDocument.currentSchema),
-            let updated = object["updated_at"] as? String,
-            let updatedAt = activityISO8601Date(from: updated)
+            let updatedAt = activityDate(from: object["updated_at"])
         else { return nil }
         let hasClearedAt = object["cleared_at"] != nil
         let hasClearedLocalDate = object["cleared_local_date"] != nil
@@ -641,8 +700,7 @@ public struct LocalActivitySummaryStore: Sendable {
         let clearedAt: Date?
         let clearedLocalDate: String?
         if hasClearedAt {
-            guard let rawClearedAt = object["cleared_at"] as? String,
-                let parsedClearedAt = activityISO8601Date(from: rawClearedAt),
+            guard let parsedClearedAt = activityDate(from: object["cleared_at"]),
                 let rawClearedLocalDate = object["cleared_local_date"] as? String,
                 isValidActivityLocalDate(rawClearedLocalDate)
             else { return nil }
@@ -685,9 +743,9 @@ public struct LocalActivitySummaryStore: Sendable {
     ) -> Data {
         var output = object ?? [:]
         output["schema"] = document.schema
-        output["updated_at"] = activityISO8601String(from: document.updatedAt)
+        output["updated_at"] = NSNumber(value: document.updatedAt.timeIntervalSince1970)
         if let clearedAt = document.clearedAt {
-            output["cleared_at"] = activityISO8601String(from: clearedAt)
+            output["cleared_at"] = NSNumber(value: clearedAt.timeIntervalSince1970)
         } else {
             output.removeValue(forKey: "cleared_at")
         }
@@ -803,15 +861,16 @@ public struct LocalActivitySummaryStore: Sendable {
         return .success(batchID)
     }
 
-    private func removeConsumedPendingBatchMarker(_ batchID: UUID, from url: URL) {
+    @discardableResult
+    private func removeConsumedPendingBatchMarker(_ batchID: UUID, from url: URL) -> Bool {
         guard case .success(let currentBatchID) = readConsumedPendingBatchMarker(from: url),
             currentBatchID == batchID
         else {
-            return
+            return false
         }
-        _ = url.path.withCString { path in
+        return url.path.withCString { path in
             pendingBatchMarkerName.withCString { name in
-                removexattr(path, name, XATTR_NOFOLLOW)
+                removexattr(path, name, XATTR_NOFOLLOW) == 0
             }
         }
     }
@@ -829,10 +888,6 @@ private func activityISO8601Formatter() -> ISO8601DateFormatter {
     return formatter
 }
 
-private func activityISO8601String(from date: Date) -> String {
-    activityISO8601Formatter().string(from: date)
-}
-
 private func activityISO8601Date(from string: String) -> Date? {
     if let fractional = activityISO8601Formatter().date(from: string) {
         return fractional
@@ -840,6 +895,17 @@ private func activityISO8601Date(from string: String) -> Date? {
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = [.withInternetDateTime]
     return formatter.date(from: string)
+}
+
+private func activityDate(from value: Any?) -> Date? {
+    if let number = value as? NSNumber,
+        String(cString: number.objCType) != "c",
+        number.doubleValue.isFinite
+    {
+        return Date(timeIntervalSince1970: number.doubleValue)
+    }
+    guard let string = value as? String else { return nil }
+    return activityISO8601Date(from: string)
 }
 
 private func activityUnsignedInteger(_ value: Any?) -> UInt64? {
@@ -879,7 +945,7 @@ extension JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .custom { date, encoder in
             var container = encoder.singleValueContainer()
-            try container.encode(activityISO8601String(from: date))
+            try container.encode(date.timeIntervalSince1970)
         }
         encoder.outputFormatting = [.sortedKeys]
         return encoder
@@ -891,13 +957,17 @@ extension JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
-            let value = try container.decode(String.self)
-            guard let date = activityISO8601Date(from: value) else {
-                throw DecodingError.dataCorruptedError(
-                    in: container,
-                    debugDescription: "Invalid ISO-8601 activity date")
+            if let seconds = try? container.decode(Double.self), seconds.isFinite {
+                return Date(timeIntervalSince1970: seconds)
             }
-            return date
+            if let value = try? container.decode(String.self),
+                let date = activityISO8601Date(from: value)
+            {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid activity date")
         }
         return decoder
     }
