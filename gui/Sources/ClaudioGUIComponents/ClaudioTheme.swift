@@ -361,7 +361,7 @@ public struct ClaudioFullRowButtonStyle: ButtonStyle {
                 alignment: .leading
             )
             .overlay(
-                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
                     .fill(Color.primary.opacity(configuration.isPressed ? 0.08 : 0))
             )
             .contentShape(Rectangle())

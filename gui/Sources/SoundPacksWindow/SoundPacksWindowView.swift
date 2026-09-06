@@ -1036,14 +1036,14 @@ struct SoundPacksWindowView: View {
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
                 .fill(
                     dropTargetEvent == row.event
                         ? ClaudioTheme.clay(colorScheme).opacity(0.12)
                         : Color.clear)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
                 .stroke(
                     dropTargetEvent == row.event
                         ? ClaudioTheme.clay(colorScheme)
