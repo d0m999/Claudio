@@ -78,7 +78,8 @@ for suite in \
     runSettingsPreferencesSuites \
     runDynamicQuietPolicySuites \
     runDisplayPreferencesSuites \
-    runUsageActivitySuites \
+    runActivityDiagnosticsSuites \
+    runActivityOverviewSuites \
     runGlobalShortcutsSuites \
     runSettingsNavigationSuites \
     runEventSettingsDestinationCoordinatorSuites \
