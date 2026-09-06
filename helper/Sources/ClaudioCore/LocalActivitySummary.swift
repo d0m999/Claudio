@@ -346,7 +346,7 @@ public struct LocalActivitySummaryStore: Sendable {
     ) -> Bool {
         let pending = readPendingEntries()
         guard case .success(let entries) = pending else { return false }
-        guard !entries.isEmpty else { return true }
+        guard !entries.isEmpty else { return migrateSchemaOneTimestampsIfNeeded() }
         return mergeAndPublish(
             // `mergeAndPublish` claims its own stable pending batch. Passing `entries` here as
             // new deltas as well would count every deferred callback twice.
@@ -388,7 +388,8 @@ public struct LocalActivitySummaryStore: Sendable {
             guard case .success(let pending) = pendingResult,
                 case .success(let prepared) = preparePendingBatch(
                     pending,
-                    consumedBatchID: consumedPendingBatchID)
+                    consumedBatchID: consumedPendingBatchID,
+                    clearedAt: current.clearedAt)
             else { return false }
             pendingBatch = prepared
         case .deferExisting:
@@ -513,6 +514,22 @@ public struct LocalActivitySummaryStore: Sendable {
         }
     }
 
+    private func migrateSchemaOneTimestampsIfNeeded() -> Bool {
+        switch readRawSummary() {
+        case .missing:
+            return true
+        case .ready(let document, let object, let batchID):
+            guard object["updated_at"] is NSNumber || object["cleared_at"] is NSNumber else {
+                return true
+            }
+            let data = encode(document: document, preserving: object)
+            return data.count <= Self.maximumSummaryBytes
+                && publish(data, to: summaryFile, consumedPendingBatchID: batchID)
+        case .unavailable:
+            return false
+        }
+    }
+
     private func readPendingEntries() -> Result<[PendingEntry], LocalActivitySummaryStoreError> {
         let names: [URL]
         switch boundedPendingDirectoryEntries() {
@@ -573,9 +590,15 @@ public struct LocalActivitySummaryStore: Sendable {
 
     private func preparePendingBatch(
         _ entries: [PendingEntry],
-        consumedBatchID: UUID?
+        consumedBatchID: UUID?,
+        clearedAt: Date?
     ) -> Result<PendingBatch?, LocalActivitySummaryStoreError> {
         var remaining = entries
+        if let clearedAt {
+            let cleared = remaining.filter { $0.delta.occurredAt <= clearedAt }
+            removePendingEntriesClearedBy(clearedAt, from: cleared)
+            remaining.removeAll { $0.delta.occurredAt <= clearedAt }
+        }
         if let consumedBatchID {
             let consumed = remaining.filter { $0.delta.batchID == consumedBatchID }
             guard removePendingEntries(consumed, batchID: consumedBatchID) else {

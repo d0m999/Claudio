@@ -313,6 +313,48 @@ func runLocalActivitySummarySuites() {
         }
     }
 
+    suite("Local activity pure reads migrate numeric schema 1 timestamps") {
+        withTempDirectory { root in
+            let summary = root.appendingPathComponent("summary.json")
+            let moment = Date(timeIntervalSince1970: 1_900_000_260.123_456)
+            let numericSummary: [String: Any] = [
+                "schema": 1,
+                "updated_at": NSNumber(value: moment.timeIntervalSince1970),
+                "cleared_at": NSNumber(value: moment.addingTimeInterval(-1).timeIntervalSince1970),
+                "cleared_local_date": "2030-03-17",
+                "buckets": [],
+                "future_top_level": ["kept": true],
+            ]
+            try? JSONSerialization.data(
+                withJSONObject: numericSummary,
+                options: [.sortedKeys]
+            ).write(to: summary)
+            let store = LocalActivitySummaryStore(
+                summaryFile: summary,
+                lockFile: root.appendingPathComponent("summary.lock"),
+                pendingDirectory: root.appendingPathComponent("pending", isDirectory: true))
+
+            if case .ready(let document) = store.read(now: moment).state {
+                expect(
+                    document.updatedAt == moment
+                        && document.clearedAt == moment.addingTimeInterval(-1),
+                    "a numeric schema 1 summary must remain readable without pending deltas")
+            } else {
+                expect(false, "a pure read should migrate a numeric schema 1 summary")
+            }
+            let migrated = (try? Data(contentsOf: summary)).flatMap {
+                try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+            }
+            expect(
+                (migrated?["updated_at"] as? String).flatMap(legacyActivityDate) != nil
+                    && (migrated?["cleared_at"] as? String).flatMap(legacyActivityDate) != nil,
+                "pure reads must restore rollback-compatible schema 1 timestamp strings")
+            expect(
+                (migrated?["future_top_level"] as? [String: Any])?["kept"] as? Bool == true,
+                "timestamp migration must preserve unknown top-level fields")
+        }
+    }
+
     suite("Local activity failed clear preserves a published batch without recounting") {
         withTempDirectory { root in
             let summaryDirectory = root.appendingPathComponent("summary", isDirectory: true)
@@ -438,6 +480,64 @@ func runLocalActivitySummarySuites() {
             expect(
                 pendingBatchMarkerIsMissing(on: summary),
                 "successful clear retry should replace the damaged marker-bearing summary")
+        }
+    }
+
+    suite("Local activity reads stay ready when cleared pending cleanup is denied") {
+        withTempDirectory { root in
+            let summary = root.appendingPathComponent("summary.json")
+            let pendingDirectory = root.appendingPathComponent("pending", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: pendingDirectory,
+                withIntermediateDirectories: true)
+            writePendingFixture(
+                to: pendingDirectory.appendingPathComponent("delta-before-clear.json"),
+                batchID: nil,
+                occurredAt: "2030-03-17T17:51:40Z",
+                localDate: "2030-03-17")
+            let store = LocalActivitySummaryStore(
+                summaryFile: summary,
+                lockFile: root.appendingPathComponent("summary.lock"),
+                pendingDirectory: pendingDirectory)
+
+            guard setFixtureACL(["+a", "everyone deny delete_child"], on: pendingDirectory) else {
+                expect(false, "test must prevent pending deletion and replacement")
+                return
+            }
+            defer { _ = setFixtureACL(["-N"], on: pendingDirectory) }
+            let clearAt = Date(timeIntervalSince1970: 1_900_000_310)
+            expect(
+                store.clear(now: clearAt).isSuccess,
+                "clear may succeed after atomically publishing its boundary")
+            let pendingAfterClear =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: pendingDirectory,
+                    includingPropertiesForKeys: nil))?
+                .filter { $0.pathExtension == "json" }
+            expect(
+                pendingAfterClear?.count == 1,
+                "the fixture must retain the pre-clear delta when cleanup is denied")
+
+            if case .ready(let document) = store.read(now: clearAt.addingTimeInterval(1)).state {
+                expect(
+                    document.buckets.isEmpty,
+                    "a retained pre-clear delta must be ignored without requiring a rewrite")
+            } else {
+                expect(false, "cleared pending cleanup failure must not make later reads stale")
+            }
+
+            expect(
+                setFixtureACL(["-N"], on: pendingDirectory),
+                "test must restore pending deletion access")
+            _ = store.read(now: clearAt.addingTimeInterval(2))
+            let pendingAfterRecovery =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: pendingDirectory,
+                    includingPropertiesForKeys: nil))?
+                .filter { $0.pathExtension == "json" }
+            expect(
+                pendingAfterRecovery?.isEmpty == true,
+                "a later read should reclaim ignored pending after deletion access returns")
         }
     }
 
