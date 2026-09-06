@@ -173,7 +173,8 @@ public enum ActivityOverviewBarLayout {
         let remaining = max(0, usableWidth - minimumTotal)
         let widths: [Double]
         if remaining == 0 || totalWeight == 0 {
-            widths = Array(repeating: max(minimumTargetWidth, usableWidth / Double(count)), count: count)
+            widths = Array(
+                repeating: max(minimumTargetWidth, usableWidth / Double(count)), count: count)
         } else {
             widths = weights.map { minimumTargetWidth + remaining * ($0 / totalWeight) }
         }
@@ -272,20 +273,22 @@ public enum ActivityOverviewProjector {
             now: now,
             timeZone: timeZone,
             capabilities: capabilities)
-        let surfaces = Dictionary(uniqueKeysWithValues: hosts.map { host in
-            let scope = PanelSoundScopeID.surface(host.surfaceID)
-            return (
-                host,
-                makePresentation(
-                    scope: scope,
-                    hosts: [host],
-                    document: document,
-                    readState: readState,
-                    integrationStatuses: integrationStatuses,
-                    now: now,
-                    timeZone: timeZone,
-                    capabilities: capabilities))
-        })
+        let surfaces = Dictionary(
+            uniqueKeysWithValues: hosts.map { host in
+                let scope = PanelSoundScopeID.surface(host.surfaceID)
+                return (
+                    host,
+                    makePresentation(
+                        scope: scope,
+                        hosts: [host],
+                        document: document,
+                        readState: readState,
+                        integrationStatuses: integrationStatuses,
+                        now: now,
+                        timeZone: timeZone,
+                        capabilities: capabilities)
+                )
+            })
         return ActivityOverviewProjection(global: global, surfaces: surfaces)
     }
 
@@ -302,9 +305,10 @@ public enum ActivityOverviewProjector {
             integrationStatuses: integrationStatuses,
             now: now,
             timeZone: timeZone,
-            capabilities: Dictionary(uniqueKeysWithValues: HostID.productVisibleCases.map {
-                ($0, HostCapabilityCatalog.bindings(for: $0))
-            }))
+            capabilities: Dictionary(
+                uniqueKeysWithValues: HostID.productVisibleCases.map {
+                    ($0, HostCapabilityCatalog.bindings(for: $0))
+                }))
     }
 
     public static func integrationStatus(
@@ -372,7 +376,8 @@ public enum ActivityOverviewProjector {
         }
         return ActivityOverviewPresentation(
             scope: scope,
-            integrationStatus: aggregateIntegrationStatus(hosts: hosts, statuses: integrationStatuses),
+            integrationStatus: aggregateIntegrationStatus(
+                hosts: hosts, statuses: integrationStatuses),
             todayMessages: todayMessages,
             sevenDayMessages: sevenDayMessages,
             todaySubtasks: todaySubtasks,
@@ -473,7 +478,8 @@ public enum ActivityOverviewProjector {
             .filter { dateKeys.contains($0.localDate) }
             .flatMap(\.counts)
             .reduce(into: UInt64(0)) { result, entry in
-                guard let key = LocalActivityCounterKey.split(entry.key), hostSet.contains(key.host),
+                guard let key = LocalActivityCounterKey.split(entry.key),
+                    hostSet.contains(key.host),
                     key.event == event
                 else { return }
                 let (sum, overflow) = result.addingReportingOverflow(entry.value)
@@ -525,23 +531,33 @@ public enum ActivityOverviewProjector {
         if let status = statuses.first(where: {
             if case .unavailable = $0 { return true }
             return false
-        }) { return status }
+        }) {
+            return status
+        }
         if let status = statuses.first(where: {
             if case .stale = $0 { return true }
             return false
-        }) { return status }
+        }) {
+            return status
+        }
         if let status = statuses.first(where: {
             if case .partial = $0 { return true }
             return false
-        }) { return status }
+        }) {
+            return status
+        }
         if statuses.contains(where: {
             if case .ready = $0 { return true }
             return false
-        }) { return .ready }
+        }) {
+            return .ready
+        }
         if statuses.contains(where: {
             if case .empty = $0 { return true }
             return false
-        }) { return .empty }
+        }) {
+            return .empty
+        }
         return .unobserved
     }
 
@@ -631,23 +647,27 @@ public struct ActivityDiagnosticsFeedback: Sendable, Equatable {
 @MainActor
 public struct ActivityDiagnosticsOperations {
     public let load: @Sendable () async -> ActivityDiagnosticsLoadResult
-    public let clearActivity: @Sendable () async -> Result<
-        ActivityDiagnosticsLoadResult, ActivityDiagnosticsFailure
-    >
-    public let clearLog: @Sendable () async -> Result<
-        ActivityDiagnosticLogSnapshot, ActivityDiagnosticsFailure
-    >
+    public let clearActivity:
+        @Sendable () async -> Result<
+            ActivityDiagnosticsLoadResult, ActivityDiagnosticsFailure
+        >
+    public let clearLog:
+        @Sendable () async -> Result<
+            ActivityDiagnosticLogSnapshot, ActivityDiagnosticsFailure
+        >
     public let revealLog: @MainActor () -> Bool
     public let copyLogPath: @MainActor () -> Bool
 
     public init(
         load: @escaping @Sendable () async -> ActivityDiagnosticsLoadResult,
-        clearActivity: @escaping @Sendable () async -> Result<
-            ActivityDiagnosticsLoadResult, ActivityDiagnosticsFailure
-        >,
-        clearLog: @escaping @Sendable () async -> Result<
-            ActivityDiagnosticLogSnapshot, ActivityDiagnosticsFailure
-        >,
+        clearActivity:
+            @escaping @Sendable () async -> Result<
+                ActivityDiagnosticsLoadResult, ActivityDiagnosticsFailure
+            >,
+        clearLog:
+            @escaping @Sendable () async -> Result<
+                ActivityDiagnosticLogSnapshot, ActivityDiagnosticsFailure
+            >,
         revealLog: @escaping @MainActor () -> Bool,
         copyLogPath: @escaping @MainActor () -> Bool
     ) {
@@ -695,10 +715,11 @@ public final class ActivityDiagnosticsModel: ObservableObject {
                         readResult: LocalActivitySummaryReadResult(state: .missing),
                         log: previewPresentation.log)
                 },
-                clearActivity: { .success(
-                    ActivityDiagnosticsLoadResult(
-                        readResult: LocalActivitySummaryReadResult(state: .missing),
-                        log: previewPresentation.log))
+                clearActivity: {
+                    .success(
+                        ActivityDiagnosticsLoadResult(
+                            readResult: LocalActivitySummaryReadResult(state: .missing),
+                            log: previewPresentation.log))
                 },
                 clearLog: { .success(previewPresentation.log) },
                 revealLog: { true },
@@ -724,7 +745,10 @@ public final class ActivityDiagnosticsModel: ObservableObject {
         perform(
             .clearActivity,
             operation: { [operations] in await operations.clearActivity() },
-            apply: { [weak self] result in self?.apply(result) })
+            apply: { [weak self] result in
+                self?.lastSuccessfulDocument = nil
+                self?.apply(result)
+            })
     }
 
     public func clearLog() {
@@ -781,9 +805,10 @@ public final class ActivityDiagnosticsModel: ObservableObject {
 
     private func perform(
         _ action: ActivityDiagnosticsAction,
-        operation: @escaping @Sendable () async -> Result<
-            ActivityDiagnosticsLoadResult, ActivityDiagnosticsFailure
-        >,
+        operation:
+            @escaping @Sendable () async -> Result<
+                ActivityDiagnosticsLoadResult, ActivityDiagnosticsFailure
+            >,
         apply: @escaping @MainActor (ActivityDiagnosticsLoadResult) -> Void
     ) {
         guard !isOperationActive else { return }
@@ -827,9 +852,10 @@ public final class ActivityDiagnosticsModel: ObservableObject {
             readState = .stale(lastUpdated: loaded.updatedAt)
         case .unavailable:
             document = lastSuccessfulDocument
-            readState = lastSuccessfulDocument.map {
-                .stale(lastUpdated: $0.updatedAt)
-            } ?? .unavailable
+            readState =
+                lastSuccessfulDocument.map {
+                    .stale(lastUpdated: $0.updatedAt)
+                } ?? .unavailable
         }
         let now = Date()
         currentDocument = document

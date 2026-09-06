@@ -126,6 +126,7 @@ public struct LocalActivityPendingDelta: Codable, Sendable, Equatable, Hashable 
     public let localDate: String
     public let host: HostID
     public let event: Event
+    public let batchID: UUID?
 
     private enum CodingKeys: String, CodingKey {
         case schema
@@ -133,6 +134,7 @@ public struct LocalActivityPendingDelta: Codable, Sendable, Equatable, Hashable 
         case localDate = "local_date"
         case host
         case event
+        case batchID = "batch_id"
     }
 
     public init(
@@ -140,13 +142,25 @@ public struct LocalActivityPendingDelta: Codable, Sendable, Equatable, Hashable 
         occurredAt: Date,
         localDate: String,
         host: HostID,
-        event: Event
+        event: Event,
+        batchID: UUID? = nil
     ) {
         self.schema = schema
         self.occurredAt = occurredAt
         self.localDate = localDate
         self.host = host
         self.event = event
+        self.batchID = batchID
+    }
+
+    fileprivate func assigning(batchID: UUID?) -> Self {
+        Self(
+            schema: schema,
+            occurredAt: occurredAt,
+            localDate: localDate,
+            host: host,
+            event: event,
+            batchID: batchID)
     }
 }
 
@@ -162,6 +176,11 @@ public struct LocalActivitySummaryStore: Sendable {
     public let summaryFile: URL
     public let lockFile: URL
     public let pendingDirectory: URL
+
+    private var pendingStageLockFile: URL {
+        pendingDirectory.deletingLastPathComponent().appendingPathComponent(
+            ".activity-pending-stage.lock")
+    }
 
     public init(summaryFile: URL, lockFile: URL, pendingDirectory: URL) {
         self.summaryFile = summaryFile
@@ -251,7 +270,7 @@ public struct LocalActivitySummaryStore: Sendable {
         now: Date = Date(),
         timeZone: TimeZone = .current,
         calendar: Calendar? = nil
-    ) -> Result<Void, LocalActivitySummaryStoreError> {
+    ) -> Result<LocalActivitySummaryDocument, LocalActivitySummaryStoreError> {
         let resolvedCalendar = calendar ?? Self.gregorianCalendar(timeZone: timeZone)
         let localDate = Self.localDate(for: now, timeZone: timeZone, calendar: resolvedCalendar)
         let document = LocalActivitySummaryDocument(
@@ -259,16 +278,33 @@ public struct LocalActivitySummaryStore: Sendable {
             clearedAt: now,
             clearedLocalDate: localDate,
             buckets: [])
-        let locked = withNonBlockingLock(path: lockFile.path) {
-            guard case .success(let pending) = readPendingDeltas() else { return false }
+        let locked: LockedRun<LocalActivitySummaryDocument?> = withNonBlockingLock(
+            path: lockFile.path
+        ) {
+            guard case .success(let pending) = readPendingEntries() else { return nil }
+            let consumed = pending.filter { $0.delta.occurredAt <= now }
+            let retained = pending.filter { $0.delta.occurredAt > now }
+            let batchID = consumed.isEmpty ? nil : UUID()
+            guard rewritePendingEntries(consumed, assigning: batchID),
+                rewritePendingEntries(retained, assigning: nil)
+            else { return nil }
             let data = encode(document: document, preserving: nil)
-            guard publish(data, to: summaryFile) else { return false }
-            removePendingDeltas(matching: pending.filter { $0.occurredAt <= now })
-            return true
+            guard publish(data, to: summaryFile, consumedPendingBatchID: batchID) else {
+                return nil
+            }
+            if let batchID {
+                let claimed = consumed.map {
+                    PendingEntry(url: $0.url, delta: $0.delta.assigning(batchID: batchID))
+                }
+                if removePendingEntries(claimed, batchID: batchID) {
+                    removeConsumedPendingBatchMarker(batchID, from: summaryFile)
+                }
+            }
+            return document
         }
         switch locked {
-        case .ran(true): return .success(())
-        case .ran(false): return .failure(.writeFailure)
+        case .ran(.some(let published)): return .success(published)
+        case .ran(.none): return .failure(.writeFailure)
         case .skipped: return .failure(.lockBusy)
         case .failed: return .failure(.lockFailure)
         }
@@ -319,12 +355,12 @@ public struct LocalActivitySummaryStore: Sendable {
         timeZone: TimeZone,
         calendar: Calendar
     ) -> Bool {
-        let pending = readPendingDeltas()
-        guard case .success(let deltas) = pending else { return false }
-        guard !deltas.isEmpty else { return true }
+        let pending = readPendingEntries()
+        guard case .success(let entries) = pending else { return false }
+        guard !entries.isEmpty else { return true }
         return mergeAndPublish(
             // `mergeAndPublish` reads the pending directory itself so record() can merge
-            // the pending set with its new callback.  Passing `deltas` here as well would
+            // the pending set with its new callback. Passing `entries` here as well would
             // count every deferred callback twice on the first successful read.
             newDeltas: [],
             now: now,
@@ -341,20 +377,27 @@ public struct LocalActivitySummaryStore: Sendable {
         let loaded = readRawSummary()
         let current: LocalActivitySummaryDocument
         let raw: [String: Any]?
+        let consumedPendingBatchID: UUID?
         switch loaded {
         case .missing:
             current = LocalActivitySummaryDocument(updatedAt: now)
             raw = nil
-        case .ready(let document, let object):
+            consumedPendingBatchID = nil
+        case .ready(let document, let object, let batchID):
             current = document
             raw = object
+            consumedPendingBatchID = batchID
         case .unavailable:
             return false
         }
 
-        let pendingResult = readPendingDeltas()
-        guard case .success(let pending) = pendingResult else { return false }
-        let mergedDeltas = pending + newDeltas
+        let pendingResult = readPendingEntries()
+        guard case .success(let pending) = pendingResult,
+            case .success(let pendingBatch) = preparePendingBatch(
+                pending,
+                consumedBatchID: consumedPendingBatchID)
+        else { return false }
+        let mergedDeltas = (pendingBatch?.entries.map(\.delta) ?? []) + newDeltas
         let activeDeltas = mergedDeltas.filter { delta in
             guard let clearedAt = current.clearedAt else { return true }
             return delta.occurredAt > clearedAt
@@ -368,7 +411,8 @@ public struct LocalActivitySummaryStore: Sendable {
             buckets[delta.localDate] = counts
         }
         let keys = Set(Self.dateKeys(today: now, timeZone: timeZone, calendar: calendar))
-        let orderedBuckets = buckets
+        let orderedBuckets =
+            buckets
             .filter { keys.contains($0.key) }
             .sorted { $0.key < $1.key }
             .map { LocalActivityDayBucket(localDate: $0.key, counts: $0.value) }
@@ -380,17 +424,34 @@ public struct LocalActivitySummaryStore: Sendable {
             buckets: orderedBuckets)
         let encoded = encode(document: next, preserving: raw)
         guard encoded.count <= Self.maximumSummaryBytes,
-            publish(encoded, to: summaryFile)
+            publish(
+                encoded,
+                to: summaryFile,
+                consumedPendingBatchID: pendingBatch?.id)
         else {
             return false
         }
-        removePendingDeltas(matching: mergedDeltas)
+        if let pendingBatch,
+            removePendingEntries(pendingBatch.entries, batchID: pendingBatch.id)
+        {
+            removeConsumedPendingBatchMarker(pendingBatch.id, from: summaryFile)
+        }
         return true
     }
 
     private func stage(_ delta: LocalActivityPendingDelta) -> LocalActivityRecordOutcome {
+        let stageLock = FileLock(path: pendingStageLockFile.path)
+        guard stageLock.lock() == .acquired else { return .failed }
+        defer { stageLock.unlock() }
         do {
             try ensurePrivateDirectoryTree(at: pendingDirectory)
+            guard
+                let entries = try? FileManager.default.contentsOfDirectory(
+                    at: pendingDirectory,
+                    includingPropertiesForKeys: nil,
+                    options: []),
+                entries.count < Self.maximumPendingEntries
+            else { return .failed }
             let data = try JSONEncoder.activityEncoder.encode(delta)
             guard data.count <= Self.maximumPendingDeltaBytes else { return .failed }
             let destination = pendingDirectory.appendingPathComponent(
@@ -404,14 +465,24 @@ public struct LocalActivitySummaryStore: Sendable {
 
     private enum RawSummary {
         case missing
-        case ready(LocalActivitySummaryDocument, [String: Any])
+        case ready(LocalActivitySummaryDocument, [String: Any], UUID?)
         case unavailable
+    }
+
+    private struct PendingEntry {
+        let url: URL
+        let delta: LocalActivityPendingDelta
+    }
+
+    private struct PendingBatch {
+        let id: UUID
+        let entries: [PendingEntry]
     }
 
     private func readSummary() -> LocalActivitySummaryReadState {
         switch readRawSummary() {
         case .missing: .missing
-        case .ready(let document, _): .ready(document)
+        case .ready(let document, _, _): .ready(document)
         case .unavailable: .unavailable
         }
     }
@@ -426,9 +497,10 @@ public struct LocalActivitySummaryStore: Sendable {
             guard
                 let object = try? JSONSerialization.jsonObject(with: data),
                 let dictionary = object as? [String: Any],
-                let document = decodeDocument(dictionary)
+                let document = decodeDocument(dictionary),
+                case .success(let batchID) = readConsumedPendingBatchMarker(from: summaryFile)
             else { return .unavailable }
-            return .ready(document, dictionary)
+            return .ready(document, dictionary, batchID)
         case .unreadable, .notRegularFile, .oversize:
             var status = stat()
             if lstat(summaryFile.path, &status) != 0, errno == ENOENT { return .missing }
@@ -436,20 +508,21 @@ public struct LocalActivitySummaryStore: Sendable {
         }
     }
 
-    private func readPendingDeltas() -> Result<[LocalActivityPendingDelta], LocalActivitySummaryStoreError> {
+    private func readPendingEntries() -> Result<[PendingEntry], LocalActivitySummaryStoreError> {
         var status = stat()
         guard lstat(pendingDirectory.path, &status) == 0 else {
             return errno == ENOENT ? .success([]) : .failure(.pendingUnreadable)
         }
         guard status.st_mode & S_IFMT == S_IFDIR else { return .failure(.pendingUnreadable) }
-        guard let names = try? FileManager.default.contentsOfDirectory(
-            at: pendingDirectory,
-            includingPropertiesForKeys: nil,
-            options: []),
+        guard
+            let names = try? FileManager.default.contentsOfDirectory(
+                at: pendingDirectory,
+                includingPropertiesForKeys: nil,
+                options: []),
             names.count <= Self.maximumPendingEntries
         else { return .failure(.pendingOversize) }
 
-        var deltas: [LocalActivityPendingDelta] = []
+        var entries: [PendingEntry] = []
         for url in names.sorted(by: { $0.path < $1.path }) {
             guard url.pathExtension == "json" else { continue }
             switch readRegularFileBounded(
@@ -458,39 +531,102 @@ public struct LocalActivitySummaryStore: Sendable {
                 followSymlink: false)
             {
             case .success(let data):
-                guard let delta = try? JSONDecoder.activityDecoder.decode(
-                    LocalActivityPendingDelta.self, from: data),
+                guard
+                    let delta = try? JSONDecoder.activityDecoder.decode(
+                        LocalActivityPendingDelta.self, from: data),
                     delta.schema == LocalActivityPendingDelta.currentSchema,
                     Event.allCases.contains(delta.event),
                     HostID.productVisibleCases.contains(delta.host)
                 else { return .failure(.pendingUnreadable) }
-                deltas.append(delta)
+                entries.append(PendingEntry(url: url, delta: delta))
             case .oversize: return .failure(.pendingOversize)
             case .notRegularFile, .unreadable: return .failure(.pendingUnreadable)
             }
         }
-        return .success(deltas)
+        return .success(entries)
     }
 
-    private func removePendingDeltas(matching deltas: [LocalActivityPendingDelta]) {
-        guard !deltas.isEmpty,
-            let names = try? FileManager.default.contentsOfDirectory(
-                at: pendingDirectory,
-                includingPropertiesForKeys: nil,
-                options: [])
-        else { return }
-        let wanted = Set(deltas)
-        for url in names where url.pathExtension == "json" {
-            guard case .success(let data) = readRegularFileBounded(
-                at: url,
-                maxBytes: Self.maximumPendingDeltaBytes,
-                followSymlink: false),
-                let delta = try? JSONDecoder.activityDecoder.decode(
-                    LocalActivityPendingDelta.self, from: data),
-                wanted.contains(delta)
-            else { continue }
-            _ = unlink(url.path)
+    private func preparePendingBatch(
+        _ entries: [PendingEntry],
+        consumedBatchID: UUID?
+    ) -> Result<PendingBatch?, LocalActivitySummaryStoreError> {
+        var remaining = entries
+        if let consumedBatchID {
+            let consumed = remaining.filter { $0.delta.batchID == consumedBatchID }
+            guard removePendingEntries(consumed, batchID: consumedBatchID) else {
+                return .failure(.pendingUnreadable)
+            }
+            remaining.removeAll { $0.delta.batchID == consumedBatchID }
         }
+        guard !remaining.isEmpty else { return .success(nil) }
+
+        let existingBatchIDs = Set(remaining.compactMap(\.delta.batchID))
+        let batchID = existingBatchIDs.sorted { $0.uuidString < $1.uuidString }.first ?? UUID()
+        let selected = remaining.filter {
+            $0.delta.batchID == nil || $0.delta.batchID == batchID
+        }
+        guard
+            rewritePendingEntries(
+                selected.filter { $0.delta.batchID == nil },
+                assigning: batchID)
+        else { return .failure(.writeFailure) }
+        return .success(
+            PendingBatch(
+                id: batchID,
+                entries: selected.map {
+                    PendingEntry(url: $0.url, delta: $0.delta.assigning(batchID: batchID))
+                }))
+    }
+
+    private func rewritePendingEntries(
+        _ entries: [PendingEntry],
+        assigning batchID: UUID?
+    ) -> Bool {
+        for entry in entries {
+            guard
+                let data = try? JSONEncoder.activityEncoder.encode(
+                    entry.delta.assigning(batchID: batchID)),
+                data.count <= Self.maximumPendingDeltaBytes,
+                publish(
+                    data,
+                    to: entry.url,
+                    stagingDirectory: pendingDirectory.deletingLastPathComponent())
+            else { return false }
+        }
+        return true
+    }
+
+    private func removePendingEntries(_ entries: [PendingEntry], batchID: UUID) -> Bool {
+        var removedEveryEntry = true
+        for entry in entries {
+            switch readRegularFileBounded(
+                at: entry.url,
+                maxBytes: Self.maximumPendingDeltaBytes,
+                followSymlink: false)
+            {
+            case .success(let data):
+                guard
+                    let current = try? JSONDecoder.activityDecoder.decode(
+                        LocalActivityPendingDelta.self,
+                        from: data),
+                    current.batchID == batchID
+                else {
+                    removedEveryEntry = false
+                    continue
+                }
+                if unlink(entry.url.path) != 0, errno != ENOENT {
+                    removedEveryEntry = false
+                }
+            case .unreadable:
+                var status = stat()
+                if lstat(entry.url.path, &status) == 0 || errno != ENOENT {
+                    removedEveryEntry = false
+                }
+            case .notRegularFile, .oversize:
+                removedEveryEntry = false
+            }
+        }
+        return removedEveryEntry
     }
 
     private func decodeDocument(_ object: [String: Any]) -> LocalActivitySummaryDocument? {
@@ -560,21 +696,40 @@ public struct LocalActivitySummaryStore: Sendable {
         } else {
             output.removeValue(forKey: "cleared_local_date")
         }
+        let originalBuckets = (object?["buckets"] as? [[String: Any]]) ?? []
+        let originalBucketsByDate = Dictionary(
+            uniqueKeysWithValues: originalBuckets.compactMap { bucket -> (String, [String: Any])? in
+                guard let localDate = bucket["local_date"] as? String else { return nil }
+                return (localDate, bucket)
+            })
         output["buckets"] = document.buckets.map { bucket in
-            [
-                "local_date": bucket.localDate,
-                "counts": bucket.counts.reduce(into: [String: Any]()) { result, entry in
-                    result[entry.key] = NSNumber(value: entry.value)
-                },
-            ]
+            var outputBucket = originalBucketsByDate[bucket.localDate] ?? [:]
+            outputBucket["local_date"] = bucket.localDate
+            outputBucket["counts"] = bucket.counts.reduce(into: [String: Any]()) { result, entry in
+                result[entry.key] = NSNumber(value: entry.value)
+            }
+            return outputBucket
         }
-        return (try? JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys]))
+        return
+            (try? JSONSerialization.data(
+                withJSONObject: output, options: [.prettyPrinted, .sortedKeys]))
             ?? Data("{}".utf8)
     }
 
-    private func publish(_ data: Data, to destination: URL) -> Bool {
-        do { try ensurePrivateDirectoryTree(at: destination.deletingLastPathComponent()) }
-        catch { return false }
+    private func publish(
+        _ data: Data,
+        to destination: URL,
+        consumedPendingBatchID: UUID? = nil,
+        stagingDirectory: URL? = nil
+    ) -> Bool {
+        let destinationDirectory = destination.deletingLastPathComponent()
+        let stagingDirectory = stagingDirectory ?? destinationDirectory
+        do {
+            try ensurePrivateDirectoryTree(at: destinationDirectory)
+            if stagingDirectory != destinationDirectory {
+                try ensurePrivateDirectoryTree(at: stagingDirectory)
+            }
+        } catch { return false }
         var existing = stat()
         let inspected = lstat(destination.path, &existing)
         if inspected == 0 {
@@ -582,8 +737,7 @@ public struct LocalActivitySummaryStore: Sendable {
         } else {
             guard errno == ENOENT else { return false }
         }
-        let directory = destination.deletingLastPathComponent()
-        let templateURL = directory.appendingPathComponent(
+        let templateURL = stagingDirectory.appendingPathComponent(
             ".\(destination.lastPathComponent).tmp-XXXXXX")
         var template = templateURL.path.utf8CString
         let descriptor = template.withUnsafeMutableBufferPointer { buffer in
@@ -597,6 +751,15 @@ public struct LocalActivitySummaryStore: Sendable {
             _ = unlink(stagingPath)
         }
         guard fchmod(descriptor, 0o600) == 0 else { return false }
+        if let consumedPendingBatchID {
+            let marker = Array(consumedPendingBatchID.uuidString.utf8)
+            let marked = pendingBatchMarkerName.withCString { name in
+                marker.withUnsafeBytes { bytes in
+                    fsetxattr(descriptor, name, bytes.baseAddress, bytes.count, 0, 0)
+                }
+            }
+            guard marked == 0 else { return false }
+        }
         var offset = 0
         while offset < data.count {
             let written = data.withUnsafeBytes { buffer in
@@ -613,15 +776,57 @@ public struct LocalActivitySummaryStore: Sendable {
         return rename(stagingPath, destination.path) == 0
     }
 
+    private func readConsumedPendingBatchMarker(
+        from url: URL
+    ) -> Result<UUID?, LocalActivitySummaryStoreError> {
+        let size = url.path.withCString { path in
+            pendingBatchMarkerName.withCString { name in
+                getxattr(path, name, nil, 0, 0, XATTR_NOFOLLOW)
+            }
+        }
+        if size < 0 {
+            return errno == ENOATTR ? .success(nil) : .failure(.summaryUnreadable)
+        }
+        guard size > 0, size <= 64 else { return .failure(.summaryUnreadable) }
+        var bytes = [UInt8](repeating: 0, count: size)
+        let readCount = url.path.withCString { path in
+            pendingBatchMarkerName.withCString { name in
+                bytes.withUnsafeMutableBytes { buffer in
+                    getxattr(path, name, buffer.baseAddress, buffer.count, 0, XATTR_NOFOLLOW)
+                }
+            }
+        }
+        guard readCount == size,
+            let value = String(bytes: bytes, encoding: .utf8),
+            let batchID = UUID(uuidString: value)
+        else { return .failure(.summaryUnreadable) }
+        return .success(batchID)
+    }
+
+    private func removeConsumedPendingBatchMarker(_ batchID: UUID, from url: URL) {
+        guard case .success(let currentBatchID) = readConsumedPendingBatchMarker(from: url),
+            currentBatchID == batchID
+        else {
+            return
+        }
+        _ = url.path.withCString { path in
+            pendingBatchMarkerName.withCString { name in
+                removexattr(path, name, XATTR_NOFOLLOW)
+            }
+        }
+    }
+
     private static func saturatingIncrement(_ value: UInt64) -> UInt64 {
         value == UInt64.max ? value : value + 1
     }
 }
 
+private let pendingBatchMarkerName = "com.claudio.activity.pending-batch"
+
 private func activityISO8601Formatter() -> ISO8601DateFormatter {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
 }
 
 private func activityISO8601String(from date: Date) -> String {
@@ -629,7 +834,12 @@ private func activityISO8601String(from date: Date) -> String {
 }
 
 private func activityISO8601Date(from string: String) -> Date? {
-    activityISO8601Formatter().date(from: string)
+    if let fractional = activityISO8601Formatter().date(from: string) {
+        return fractional
+    }
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.date(from: string)
 }
 
 private func activityUnsignedInteger(_ value: Any?) -> UInt64? {
@@ -664,19 +874,31 @@ private func isValidActivityLocalDate(_ value: String) -> Bool {
         && calendar.component(.day, from: date) == day
 }
 
-private extension JSONEncoder {
-    static let activityEncoder: JSONEncoder = {
+extension JSONEncoder {
+    fileprivate static var activityEncoder: JSONEncoder {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(activityISO8601String(from: date))
+        }
         encoder.outputFormatting = [.sortedKeys]
         return encoder
-    }()
+    }
 }
 
-private extension JSONDecoder {
-    static let activityDecoder: JSONDecoder = {
+extension JSONDecoder {
+    fileprivate static var activityDecoder: JSONDecoder {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+            guard let date = activityISO8601Date(from: value) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Invalid ISO-8601 activity date")
+            }
+            return date
+        }
         return decoder
-    }()
+    }
 }

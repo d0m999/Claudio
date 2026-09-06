@@ -23,10 +23,11 @@ func makeActivityDiagnosticsModel() -> ActivityDiagnosticsModel {
             clearActivity: {
                 await Task.detached(priority: .userInitiated) {
                     switch activityStore.clear() {
-                    case .success:
+                    case .success(let clearedDocument):
                         return .success(
                             ActivityDiagnosticsLoadResult(
-                                readResult: activityStore.read(),
+                                readResult: LocalActivitySummaryReadResult(
+                                    state: .ready(clearedDocument)),
                                 log: logStore.diagnosticLogSnapshot()))
                     case .failure(let error):
                         return .failure(activityDiagnosticsFailure(error))
@@ -67,7 +68,8 @@ private func activityDiagnosticsFailure(
     }
 }
 
-private func logClearFailure(_ error: ActivityDiagnosticLogStoreError) -> ActivityDiagnosticsFailure {
+private func logClearFailure(_ error: ActivityDiagnosticLogStoreError) -> ActivityDiagnosticsFailure
+{
     switch error {
     case .logLockBusy: .logLockBusy
     case .logClearFailure, .lockFailure:

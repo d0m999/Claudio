@@ -239,7 +239,8 @@ struct ActivityDiagnosticsView: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityValue(
-                    "\(countText(row.todayCount)), \(countText(row.sevenDayCount)), \(row.coverage.fractionText)")
+                    "\(countText(row.todayCount)), \(countText(row.sevenDayCount)), \(row.coverage.fractionText)"
+                )
                 .accessibilityIdentifier("settings.activity.event.\(row.event.cliName)")
             }
         }
@@ -260,6 +261,20 @@ struct ActivityDiagnosticsView: View {
                 .foregroundColor(.secondary)
                 .textSelection(.enabled)
                 .accessibilityIdentifier("settings.activity.log-path")
+            if model.presentation.log.failures.isEmpty {
+                Text(l10n.text(.settingsUsageLogNoFailures))
+                    .font(.system(.body, design: .rounded))
+                    .foregroundColor(.secondary)
+                    .accessibilityIdentifier("settings.activity.log-no-failures")
+            } else {
+                ForEach(Array(model.presentation.log.failures.enumerated()), id: \.offset) {
+                    offset, failure in
+                    Text(logFailureText(failure))
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundColor(.secondary)
+                        .accessibilityIdentifier("settings.activity.log-failure.\(offset)")
+                }
+            }
             HStack(spacing: 12) {
                 Button(l10n.text(.settingsUsageRevealLog)) { model.revealLog() }
                     .disabled(model.isOperationActive)
@@ -291,7 +306,10 @@ struct ActivityDiagnosticsView: View {
     ) -> some View {
         Group {
             if model.activeActions.contains(action) {
-                HStack { ProgressView().controlSize(.small); Text(l10n.text(.settingsUsageActionInProgress)) }
+                HStack {
+                    ProgressView().controlSize(.small);
+                    Text(l10n.text(.settingsUsageActionInProgress))
+                }
             } else {
                 Label(title, systemImage: systemImage)
             }
@@ -302,10 +320,11 @@ struct ActivityDiagnosticsView: View {
         Label(
             feedbackText(feedback),
             systemImage: feedback.failure == nil
-                ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-            .foregroundColor(feedback.failure == nil ? .green : .red)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityIdentifier("settings.activity.feedback")
+                ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+        )
+        .foregroundColor(feedback.failure == nil ? .green : .red)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityIdentifier("settings.activity.feedback")
     }
 
     private func feedbackText(_ feedback: ActivityDiagnosticsFeedback) -> String {
@@ -334,16 +353,21 @@ struct ActivityDiagnosticsView: View {
         case .unobserved: return l10n.text(.settingsActivityStatusUnobserved)
         case .unavailable: return l10n.text(.settingsActivityStatusUnavailable)
         case .stale(let date):
-            return l10n.format(.settingsActivityStatusStale, date.formatted(date: .abbreviated, time: .shortened) as NSString)
+            return l10n.format(
+                .settingsActivityStatusStale,
+                date.formatted(date: .abbreviated, time: .shortened) as NSString)
         case .partial(let date):
-            return l10n.format(.settingsActivityStatusPartial, date.formatted(date: .abbreviated, time: .shortened) as NSString)
+            return l10n.format(
+                .settingsActivityStatusPartial,
+                date.formatted(date: .abbreviated, time: .shortened) as NSString)
         }
     }
 
     private func coverageText(_ overview: ActivityOverviewPresentation?) -> String {
         guard let overview else { return "—" }
         let supported = overview.eventRows.filter { $0.availability == .supported }.count
-        return l10n.format(.settingsActivityCoverage, Int64(supported), Int64(overview.eventRows.count))
+        return l10n.format(
+            .settingsActivityCoverage, Int64(supported), Int64(overview.eventRows.count))
     }
 
     private func integrationStatusText(_ status: ActivityIntegrationStatus?) -> String {
@@ -376,6 +400,24 @@ struct ActivityDiagnosticsView: View {
         case .missing: "doc.badge.ellipsis"
         case .damaged, .unreadable: "exclamationmark.triangle.fill"
         }
+    }
+
+    private func logFailureText(_ failure: ActivityLogFailureSummary) -> String {
+        let category: String =
+            switch failure.category {
+            case .playbackLaunch: l10n.text(.settingsUsageLogFailurePlaybackLaunch)
+            case .playbackLock: l10n.text(.settingsUsageLogFailurePlaybackLock)
+            case .receiptWrite: l10n.text(.settingsUsageLogFailureReceiptWrite)
+            case .other: l10n.text(.settingsUsageLogFailureOther)
+            }
+        let event =
+            failure.event.map {
+                localizedEventName($0, language: preferences.language)
+            } ?? l10n.text(.settingsUsageLogFailureUnknownEvent)
+        return l10n.format(
+            .settingsUsageLogFailureSummary,
+            event,
+            category)
     }
 
     private func formattedByteCount(_ count: Int) -> String {
