@@ -283,28 +283,12 @@ public struct LocalActivitySummaryStore: Sendable {
             path: lockFile.path
         ) {
             guard case .success(let pending) = readPendingEntries() else { return nil }
-            guard
-                case .success(let recoveredPending) = recoverPublishedPendingBatchBeforeClear(
-                    from: pending)
-            else { return nil }
-            let consumed = recoveredPending.filter { $0.delta.occurredAt <= now }
-            let retained = recoveredPending.filter { $0.delta.occurredAt > now }
-            let batchID = consumed.isEmpty ? nil : UUID()
-            guard rewritePendingEntries(consumed, assigning: batchID),
-                rewritePendingEntries(retained, assigning: nil)
-            else { return nil }
+            let consumed = pending.filter { $0.delta.occurredAt <= now }
             let data = encode(document: document, preserving: nil)
-            guard publish(data, to: summaryFile, consumedPendingBatchID: batchID) else {
+            guard publish(data, to: summaryFile) else {
                 return nil
             }
-            if let batchID {
-                let claimed = consumed.map {
-                    PendingEntry(url: $0.url, delta: $0.delta.assigning(batchID: batchID))
-                }
-                if removePendingEntries(claimed, batchID: batchID) {
-                    removeConsumedPendingBatchMarker(batchID, from: summaryFile)
-                }
-            }
+            removePendingEntriesClearedBy(now, from: consumed)
             return document
         }
         switch locked {
@@ -362,7 +346,7 @@ public struct LocalActivitySummaryStore: Sendable {
     ) -> Bool {
         let pending = readPendingEntries()
         guard case .success(let entries) = pending else { return false }
-        guard !entries.isEmpty else { return true }
+        guard !entries.isEmpty else { return migrateSchemaOneTimestampsIfNeeded() }
         return mergeAndPublish(
             // `mergeAndPublish` claims its own stable pending batch. Passing `entries` here as
             // new deltas as well would count every deferred callback twice.
@@ -404,7 +388,8 @@ public struct LocalActivitySummaryStore: Sendable {
             guard case .success(let pending) = pendingResult,
                 case .success(let prepared) = preparePendingBatch(
                     pending,
-                    consumedBatchID: consumedPendingBatchID)
+                    consumedBatchID: consumedPendingBatchID,
+                    clearedAt: current.clearedAt)
             else { return false }
             pendingBatch = prepared
         case .deferExisting:
@@ -529,6 +514,22 @@ public struct LocalActivitySummaryStore: Sendable {
         }
     }
 
+    private func migrateSchemaOneTimestampsIfNeeded() -> Bool {
+        switch readRawSummary() {
+        case .missing:
+            return true
+        case .ready(let document, let object, let batchID):
+            guard object["updated_at"] is NSNumber || object["cleared_at"] is NSNumber else {
+                return true
+            }
+            let data = encode(document: document, preserving: object)
+            return data.count <= Self.maximumSummaryBytes
+                && publish(data, to: summaryFile, consumedPendingBatchID: batchID)
+        case .unavailable:
+            return false
+        }
+    }
+
     private func readPendingEntries() -> Result<[PendingEntry], LocalActivitySummaryStoreError> {
         let names: [URL]
         switch boundedPendingDirectoryEntries() {
@@ -589,9 +590,15 @@ public struct LocalActivitySummaryStore: Sendable {
 
     private func preparePendingBatch(
         _ entries: [PendingEntry],
-        consumedBatchID: UUID?
+        consumedBatchID: UUID?,
+        clearedAt: Date?
     ) -> Result<PendingBatch?, LocalActivitySummaryStoreError> {
         var remaining = entries
+        if let clearedAt {
+            let cleared = remaining.filter { $0.delta.occurredAt <= clearedAt }
+            removePendingEntriesClearedBy(clearedAt, from: cleared)
+            remaining.removeAll { $0.delta.occurredAt <= clearedAt }
+        }
         if let consumedBatchID {
             let consumed = remaining.filter { $0.delta.batchID == consumedBatchID }
             guard removePendingEntries(consumed, batchID: consumedBatchID) else {
@@ -617,25 +624,6 @@ public struct LocalActivitySummaryStore: Sendable {
                 entries: selected.map {
                     PendingEntry(url: $0.url, delta: $0.delta.assigning(batchID: batchID))
                 }))
-    }
-
-    private func recoverPublishedPendingBatchBeforeClear(
-        from entries: [PendingEntry]
-    ) -> Result<[PendingEntry], LocalActivitySummaryStoreError> {
-        var status = stat()
-        guard lstat(summaryFile.path, &status) == 0 else {
-            return errno == ENOENT ? .success(entries) : .failure(.summaryUnreadable)
-        }
-        guard status.st_mode & S_IFMT == S_IFREG,
-            case .success(let consumedBatchID) = readConsumedPendingBatchMarker(from: summaryFile)
-        else { return .failure(.summaryUnreadable) }
-        guard let consumedBatchID else { return .success(entries) }
-
-        let consumed = entries.filter { $0.delta.batchID == consumedBatchID }
-        guard removePendingEntries(consumed, batchID: consumedBatchID),
-            removeConsumedPendingBatchMarker(consumedBatchID, from: summaryFile)
-        else { return .failure(.pendingUnreadable) }
-        return .success(entries.filter { $0.delta.batchID != consumedBatchID })
     }
 
     private func rewritePendingEntries(
@@ -687,6 +675,31 @@ public struct LocalActivitySummaryStore: Sendable {
             }
         }
         return removedEveryEntry
+    }
+
+    private func removePendingEntriesClearedBy(
+        _ clearedAt: Date,
+        from entries: [PendingEntry]
+    ) {
+        for entry in entries {
+            switch readRegularFileBounded(
+                at: entry.url,
+                maxBytes: Self.maximumPendingDeltaBytes,
+                followSymlink: false)
+            {
+            case .success(let data):
+                guard
+                    let current = try? JSONDecoder.activityDecoder.decode(
+                        LocalActivityPendingDelta.self,
+                        from: data),
+                    current == entry.delta,
+                    current.occurredAt <= clearedAt
+                else { continue }
+                _ = unlink(entry.url.path)
+            case .unreadable, .notRegularFile, .oversize:
+                continue
+            }
+        }
     }
 
     private func decodeDocument(_ object: [String: Any]) -> LocalActivitySummaryDocument? {
@@ -743,9 +756,9 @@ public struct LocalActivitySummaryStore: Sendable {
     ) -> Data {
         var output = object ?? [:]
         output["schema"] = document.schema
-        output["updated_at"] = NSNumber(value: document.updatedAt.timeIntervalSince1970)
+        output["updated_at"] = activityISO8601String(from: document.updatedAt)
         if let clearedAt = document.clearedAt {
-            output["cleared_at"] = NSNumber(value: clearedAt.timeIntervalSince1970)
+            output["cleared_at"] = activityISO8601String(from: clearedAt)
         } else {
             output.removeValue(forKey: "cleared_at")
         }
@@ -888,13 +901,49 @@ private func activityISO8601Formatter() -> ISO8601DateFormatter {
     return formatter
 }
 
+private func activityISO8601WholeSecondsFormatter() -> ISO8601DateFormatter {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter
+}
+
+private func activityISO8601String(from date: Date) -> String {
+    let interval = date.timeIntervalSince1970
+    var wholeSeconds = floor(interval)
+    var nanoseconds = Int(((interval - wholeSeconds) * 1_000_000_000).rounded())
+    if nanoseconds == 1_000_000_000 {
+        wholeSeconds += 1
+        nanoseconds = 0
+    }
+    let whole = activityISO8601WholeSecondsFormatter().string(
+        from: Date(timeIntervalSince1970: wholeSeconds))
+    return String(whole.dropLast()) + String(format: ".%09dZ", nanoseconds)
+}
+
+private func activityPreciseISO8601Date(from string: String) -> Date? {
+    guard string.hasSuffix("Z"),
+        let separator = string.lastIndex(of: ".")
+    else { return nil }
+    let fractionStart = string.index(after: separator)
+    let fractionEnd = string.index(before: string.endIndex)
+    let fraction = String(string[fractionStart..<fractionEnd])
+    guard (1...9).contains(fraction.count),
+        fraction.utf8.allSatisfy({ (48...57).contains($0) }),
+        let nanoseconds = Int(fraction + String(repeating: "0", count: 9 - fraction.count)),
+        let whole = activityISO8601WholeSecondsFormatter().date(
+            from: String(string[..<separator]) + "Z")
+    else { return nil }
+    return whole.addingTimeInterval(Double(nanoseconds) / 1_000_000_000)
+}
+
 private func activityISO8601Date(from string: String) -> Date? {
+    if let precise = activityPreciseISO8601Date(from: string) {
+        return precise
+    }
     if let fractional = activityISO8601Formatter().date(from: string) {
         return fractional
     }
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime]
-    return formatter.date(from: string)
+    return activityISO8601WholeSecondsFormatter().date(from: string)
 }
 
 private func activityDate(from value: Any?) -> Date? {
@@ -945,7 +994,7 @@ extension JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .custom { date, encoder in
             var container = encoder.singleValueContainer()
-            try container.encode(date.timeIntervalSince1970)
+            try container.encode(activityISO8601String(from: date))
         }
         encoder.outputFormatting = [.sortedKeys]
         return encoder
