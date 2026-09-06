@@ -42,7 +42,6 @@ struct EventSettingsWindowView: View {
     @State private var previewAllCoordinator = EventPreviewSequenceCoordinator()
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
-    private var interfaceTextSize: ClaudioInterfaceTextSize { languageStore.interfaceTextSize }
     private var scopes: [PanelSoundScopePresentation] {
         panelSoundScopePresentations(
             sourceRows: hostIntegrations.content.sourceRows,
@@ -85,7 +84,6 @@ struct EventSettingsWindowView: View {
         }
         .background(ClaudioTheme.panel(colorScheme))
         .frame(minWidth: 680, minHeight: 520)
-        .environment(\.dynamicTypeSize, interfaceTextSize.dynamicTypeSize)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.eventSettingsWindowTitle))
         .onReceive(selection.$focusRequestRevision) { revision in
@@ -561,7 +559,7 @@ struct EventSettingsWindowView: View {
     private func eventRows(availableWidth: CGFloat) -> some View {
         let windowLayout = eventSettingsWindowLayout(
             availableWidth: Double(availableWidth),
-            typeScale: interfaceTextSize.scale)
+            typeScale: 1)
         if routeIsUnavailable {
             EmptyView()
         } else {
@@ -897,7 +895,7 @@ private struct EventSettingsEventRow: View {
     private let focusedTarget: FocusState<EventSettingsFocusTarget?>.Binding
 
     @Environment(\.colorScheme) private var colorScheme
-    @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
+    private let typeScale: CGFloat = 1
 
     init(
         presentation: PanelEventPresentation,

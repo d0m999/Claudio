@@ -14,7 +14,7 @@ struct SettingsWindowView: View {
     @ObservedObject var preferences: ClaudioPreferences
     @ObservedObject var dynamicQuietPolicy: DynamicQuietPolicyController
     @ObservedObject var loginItemSettings: LoginItemSettingsModel
-    @ObservedObject var usageSettings: UsageSettingsModel
+    @ObservedObject var activityDiagnostics: ActivityDiagnosticsModel
     @ObservedObject var globalShortcutSettings: GlobalShortcutSettingsModel
     @ObservedObject var aboutSettings: AboutSettingsModel
     let soundPacksEditorOwner: SoundPacksEditorOwner?
@@ -53,7 +53,7 @@ struct SettingsWindowView: View {
         preferences: ClaudioPreferences,
         dynamicQuietPolicy: DynamicQuietPolicyController,
         loginItemSettings: LoginItemSettingsModel,
-        usageSettings: UsageSettingsModel,
+        activityDiagnostics: ActivityDiagnosticsModel? = nil,
         globalShortcutSettings: GlobalShortcutSettingsModel,
         aboutSettings: AboutSettingsModel,
         soundPacksEditorOwner: SoundPacksEditorOwner? = nil,
@@ -78,7 +78,8 @@ struct SettingsWindowView: View {
         self.preferences = preferences
         self.dynamicQuietPolicy = dynamicQuietPolicy
         self.loginItemSettings = loginItemSettings
-        self.usageSettings = usageSettings
+        self.activityDiagnostics = activityDiagnostics ?? makeFallbackActivityDiagnosticsModel(
+            log: ActivityDiagnosticLogSnapshot(path: "", state: .missing, failures: []))
         self.globalShortcutSettings = globalShortcutSettings
         self.aboutSettings = aboutSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner
@@ -101,9 +102,7 @@ struct SettingsWindowView: View {
                 sidebar
                     .frame(
                         width: CGFloat(
-                            settingsSidebarWidth(
-                                windowWidth: geometry.size.width,
-                                interfaceTextSize: preferences.interfaceTextSize))
+                            settingsSidebarWidth(windowWidth: geometry.size.width))
                     )
                     .frame(maxHeight: .infinity)
                     .background(Color(nsColor: .underPageBackgroundColor))
@@ -119,7 +118,6 @@ struct SettingsWindowView: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.settingsWindowTitle))
-        .environment(\.dynamicTypeSize, preferences.interfaceTextSize.dynamicTypeSize)
         .onExitCommand {
             focusedTarget = SettingsWindowFocusTarget.sidebar(destination)
         }
@@ -175,8 +173,11 @@ struct SettingsWindowView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("claudi0")
-                .font(.system(.headline, design: .rounded).weight(.semibold))
+            HStack(spacing: 7) {
+                ClaudioOrbitWordmark(height: 19)
+                Text("claudi0")
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+            }
                 .padding(.horizontal, 14)
                 .padding(.bottom, 16)
 
@@ -204,7 +205,13 @@ struct SettingsWindowView: View {
 
             Spacer(minLength: 0)
 
-            Label(l10n.text(.settingsSidebarLocalFirst), systemImage: "lock.shield")
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+                Text(l10n.text(.settingsSidebarLocalFirst))
+            }
                 .font(.caption2.weight(.semibold))
                 .foregroundColor(.secondary)
                 .padding(.horizontal, 10)
@@ -339,8 +346,8 @@ struct SettingsWindowView: View {
                     } else if destination == .display {
                         displaySettings
                     } else if destination == .usage {
-                        UsageSettingsView(
-                            model: usageSettings,
+                        ActivityDiagnosticsView(
+                            model: activityDiagnostics,
                             preferences: preferences,
                             focusedTarget: $focusedTarget,
                             onAnnouncement: onAnnouncement)
@@ -461,54 +468,14 @@ struct SettingsWindowView: View {
     private var displaySettings: some View {
         VStack(alignment: .leading, spacing: 20) {
             SettingsSectionCard {
-                InterfaceTextSizeStepperContent(
-                    selection: interfaceTextSizeBinding,
-                    managesFocus: false,
-                    language: preferences.language
-                )
-                .focused(
-                    $focusedTarget,
-                    equals: SettingsWindowFocusTarget.firstAction(.display)
-                )
-                .accessibilityHint(l10n.text(.settingsDisplay.textSizeDescription))
-                .accessibilityIdentifier("settings.display.text-size")
-            }
-
-            SettingsSectionCard {
                 VStack(alignment: .leading, spacing: 10) {
-                    Picker(
-                        l10n.text(.settingsDisplay.panelWidthTitle),
-                        selection: panelWidthPreferenceBinding
-                    ) {
-                        Text(
-                            ClaudioPanelWidthPreference.automatic.localizedDisplayName(
-                                preferences.language)
-                        )
-                        .tag(ClaudioPanelWidthPreference.automatic)
-                        Text(
-                            ClaudioPanelWidthPreference.compact.localizedDisplayName(
-                                preferences.language)
-                        )
-                        .tag(ClaudioPanelWidthPreference.compact)
-                        Text(
-                            ClaudioPanelWidthPreference.roomy.localizedDisplayName(
-                                preferences.language)
-                        )
-                        .tag(ClaudioPanelWidthPreference.roomy)
-                    }
-                    .accessibilityHint(l10n.text(.settingsDisplay.panelWidthDescription))
-                    .accessibilityIdentifier("settings.display.panel-width")
-
-                    if panelWidthResolution.isClamped {
-                        Text(
-                            l10n.format(
-                                .settingsDisplay.panelWidthClamped,
-                                Int64(panelWidthResolution.effectiveWidth))
-                        )
+                    Text(l10n.text(.settingsDisplayFixedLayoutTitle))
+                        .font(.headline)
+                    Text(l10n.text(.settingsDisplayFixedLayoutDescription))
                         .foregroundColor(.secondary)
-                        .accessibilityIdentifier("settings.display.panel-width.clamped")
-                    }
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .accessibilityIdentifier("settings.display.fixed-layout")
             }
 
             SettingsSectionCard {
@@ -663,34 +630,6 @@ struct SettingsWindowView: View {
             set: { dynamicQuietPolicy.setFocusEnabled($0) })
     }
 
-    private var interfaceTextSizeBinding: Binding<ClaudioInterfaceTextSize> {
-        Binding(
-            get: { preferences.interfaceTextSize },
-            set: {
-                preferences.setInterfaceTextSize($0)
-                onAnnouncement?(
-                    l10n.format(
-                        .settingsAnnouncementValue,
-                        l10n.text(.interfaceTextSize) as NSString,
-                        $0.localizedDisplayName(preferences.language) as NSString)
-                )
-            })
-    }
-
-    private var panelWidthPreferenceBinding: Binding<ClaudioPanelWidthPreference> {
-        Binding(
-            get: { preferences.panelWidthPreference },
-            set: {
-                preferences.setPanelWidthPreference($0)
-                onAnnouncement?(
-                    l10n.format(
-                        .settingsAnnouncementValue,
-                        l10n.text(.settingsDisplay.panelWidthTitle) as NSString,
-                        $0.localizedDisplayName(preferences.language) as NSString)
-                )
-            })
-    }
-
     private var menuBarStatusDotBinding: Binding<Bool> {
         Binding(
             get: { preferences.showsMenuBarStatusDot },
@@ -703,13 +642,6 @@ struct SettingsWindowView: View {
                             : .settingsDisplayStatusDotDisabled)
                 )
             })
-    }
-
-    private var panelWidthResolution: (effectiveWidth: Double, isClamped: Bool) {
-        ClaudioGUICore.panelWidthResolution(
-            preference: preferences.panelWidthPreference,
-            language: preferences.language,
-            interfaceTextSize: preferences.interfaceTextSize)
     }
 
     private var calendarQuietBinding: Binding<Bool> {
@@ -878,6 +810,29 @@ struct SettingsWindowView: View {
         model.request(.destination(next))
         focusedTarget = .sidebar(next)
     }
+}
+
+@MainActor
+private func makeFallbackActivityDiagnosticsModel(
+    log: ActivityDiagnosticLogSnapshot
+) -> ActivityDiagnosticsModel {
+    ActivityDiagnosticsModel(
+        initialPresentation: ActivityDiagnosticsPresentation.empty(),
+        operations: ActivityDiagnosticsOperations(
+            load: {
+                ActivityDiagnosticsLoadResult(
+                    readResult: LocalActivitySummaryReadResult(state: .missing),
+                    log: log)
+            },
+            clearActivity: {
+                .success(
+                    ActivityDiagnosticsLoadResult(
+                        readResult: LocalActivitySummaryReadResult(state: .missing),
+                        log: log))
+            },
+            clearLog: { .success(log) },
+            revealLog: { true },
+            copyLogPath: { true }))
 }
 
 @MainActor

@@ -32,14 +32,15 @@ public struct PanelView: View {
     @StateObject private var announcer: PanelAnnouncer
     @StateObject private var panelModel: PanelConfigController
     @State private var isSoundScopeMenuExpanded = false
+    @State private var activityRange: LocalActivityRange = .today
     @State private var scrollViewportHeight: CGFloat = 0
     @State private var soundScopePickerBottom: CGFloat = 0
     @FocusState private var focusedTarget: PanelFocusTarget?
 
     @ObservedObject private var focusCoordinator: PanelFocusCoordinator
     @ObservedObject private var hostIntegrations: HostIntegrationPresentationStore
-    @ObservedObject private var bootstrapReports: BootstrapReportPresentationStore
     @ObservedObject private var languageStore: ClaudioPreferences
+    @ObservedObject private var activityDiagnostics: ActivityDiagnosticsModel
 
     @Environment(\.colorScheme) private var colorScheme
     /// `unselected` 只表示从未选择；用户显式选过 Global 后持久化为 `global`。
@@ -49,13 +50,9 @@ public struct PanelView: View {
     private let audioEnvironment: AudioImportEnvironment
     private let configFile: URL
     private let previewPlayer: AudioPreviewPlaying
-    private let onManageSounds: @MainActor (SoundPacksWindowRoute, PanelFocusTarget) -> Void
-    private let onOpenEventSettings: @MainActor (EventSettingsWindowRoute, PanelFocusTarget) -> Void
-    private let onManageIntegrations: @MainActor (HostID?, PanelFocusTarget) -> Void
-    private let onRetryBootstrap: @MainActor () -> Void
     private let onAudibilityInputsChanged: @MainActor () -> Void
+    private let onOpenSettings: @MainActor () -> Void
     private let onQuit: @MainActor () -> Void
-    private let onPanelWidthChange: (Double) -> Void
 
     public init(
         audioEnvironment: AudioImportEnvironment,
@@ -63,35 +60,23 @@ public struct PanelView: View {
         lockFile: URL = ClaudioPaths.configLockFile,
         focusCoordinator: PanelFocusCoordinator = PanelFocusCoordinator(),
         hostIntegrations: HostIntegrationPresentationStore,
-        bootstrapReports: BootstrapReportPresentationStore,
         languageStore: ClaudioPreferences,
+        activityDiagnostics: ActivityDiagnosticsModel,
         soundPackLibrary: SoundPackLibrary,
         soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator,
-        onManageSounds: @escaping @MainActor (SoundPacksWindowRoute, PanelFocusTarget) -> Void,
-        onOpenEventSettings:
-            @escaping @MainActor (
-                EventSettingsWindowRoute,
-                PanelFocusTarget
-            ) -> Void,
-        onManageIntegrations: @escaping @MainActor (HostID?, PanelFocusTarget) -> Void,
-        onRetryBootstrap: @escaping @MainActor () -> Void,
         onAudibilityInputsChanged: @escaping @MainActor () -> Void,
+        onOpenSettings: @escaping @MainActor () -> Void,
         onQuit: @escaping @MainActor () -> Void,
-        onPanelWidthChange: @escaping (Double) -> Void = { _ in }
     ) {
         self.audioEnvironment = audioEnvironment
         self.configFile = configFile
         self.focusCoordinator = focusCoordinator
         self.hostIntegrations = hostIntegrations
-        self.bootstrapReports = bootstrapReports
         self.languageStore = languageStore
-        self.onManageSounds = onManageSounds
-        self.onOpenEventSettings = onOpenEventSettings
-        self.onManageIntegrations = onManageIntegrations
-        self.onRetryBootstrap = onRetryBootstrap
+        self.activityDiagnostics = activityDiagnostics
         self.onAudibilityInputsChanged = onAudibilityInputsChanged
+        self.onOpenSettings = onOpenSettings
         self.onQuit = onQuit
-        self.onPanelWidthChange = onPanelWidthChange
         previewPlayer = NSSoundAudioPreviewPlayer()
 
         let inputsChanged = onAudibilityInputsChanged
@@ -117,7 +102,6 @@ public struct PanelView: View {
         audioEnvironment: AudioImportEnvironment,
         focusCoordinator: PanelFocusCoordinator,
         hostIntegrations: HostIntegrationPresentationStore,
-        bootstrapReports: BootstrapReportPresentationStore,
         languageStore: ClaudioPreferences
     ) {
         let previewKey = UUID().uuidString
@@ -133,24 +117,22 @@ public struct PanelView: View {
         self.configFile = URL(fileURLWithPath: "/dev/null/claudio-panel-preview-config.json")
         self.focusCoordinator = focusCoordinator
         self.hostIntegrations = hostIntegrations
-        self.bootstrapReports = bootstrapReports
         self.languageStore = languageStore
+        self.activityDiagnostics = ActivityDiagnosticsModel(previewPresentation: .empty())
         self.previewPlayer = NSSoundAudioPreviewPlayer()
-        self.onManageSounds = { _, _ in }
-        self.onOpenEventSettings = { _, _ in }
-        self.onManageIntegrations = { _, _ in }
-        self.onRetryBootstrap = {}
         self.onAudibilityInputsChanged = {}
+        self.onOpenSettings = {}
         self.onQuit = {}
-        self.onPanelWidthChange = { _ in }
     }
     #endif
 
     public var body: some View {
         VStack(spacing: 0) {
+            header
+                .padding(13)
+            Divider().opacity(0.65)
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 12) {
-                    header
                     soundScopePicker(
                         availableMenuHeight: max(
                             0,
@@ -165,7 +147,7 @@ public struct PanelView: View {
                                 ).maxY)
                         }
                     )
-                    bootstrapReportSection
+                    activityOverview
                     mainContent
                     writeFailures
                 }
@@ -187,25 +169,24 @@ public struct PanelView: View {
             }
             PanelQuitFooter(
                 language: languageStore.language,
-                typeScale: typeScale,
                 focusedTarget: $focusedTarget,
                 onQuit: onQuit)
         }
-        .frame(width: panelWidth)
+        .frame(width: standardPanelWidth)
         .background(ClaudioTheme.panelGradient(colorScheme))
         .overlay(
             RoundedRectangle(cornerRadius: ClaudioTheme.Radius.panel)
                 .strokeBorder(ClaudioTheme.hairline(colorScheme), lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.panel))
-        .environment(\.dynamicTypeSize, interfaceTextSize.dynamicTypeSize)
         .onAppear {
             synchronizeSelectedSoundSurface()
             applyFirstFocus()
-            onPanelWidthChange(panelWidth)
+            activityDiagnostics.refresh()
         }
         .onChange(of: focusCoordinator.showCount) { _ in
             isSoundScopeMenuExpanded = false
             panelModel.reload()
+            activityDiagnostics.refresh()
             synchronizeSelectedSoundSurface()
             applyFirstFocus()
             announcePanelSummary()
@@ -214,16 +195,8 @@ public struct PanelView: View {
             synchronizeSelectedSoundSurface()
             applyFirstFocus()
         }
-        .onChange(of: bootstrapReports.records) { _ in
-            guard focusCoordinator.showCount > focusCoordinator.hideCount else { return }
-            applyFirstFocus()
-            announcePanelSummary()
-        }
         .onChange(of: panelModel.libraryPresentationState) { _ in
             if isEventFocusTarget(focusedTarget) { applyFirstFocus() }
-        }
-        .onChange(of: panelWidth) { width in
-            onPanelWidthChange(width)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(headerAccessibilityLabel)
@@ -232,41 +205,28 @@ public struct PanelView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .center) {
-                ClaudioOrbitWordmark(height: 22 * typeScale)
-                Spacer(minLength: 8)
-            InterfaceTextSizeControl(
-                    selection: interfaceTextSizeBinding,
-                    languageStore: languageStore)
+        HStack(alignment: .center, spacing: 8) {
+            ClaudioOrbitWordmark(height: 22)
+            Spacer(minLength: 8)
+            Button(action: onOpenSettings) {
+                Label(l10n.text(.panelOpenSettings), systemImage: "gearshape")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .padding(.horizontal, 8)
+                    .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
+                    .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
             }
-            Text(selectedPackHeading)
-                .font(.system(size: 14.5 * typeScale, weight: .semibold, design: .rounded))
-                .foregroundColor(ClaudioTheme.text(colorScheme))
-                .lineLimit(2)
-            Text(headerSummary)
-                .font(.system(size: 11 * typeScale, design: .rounded))
-                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
+            .buttonStyle(.borderless)
+            .focused($focusedTarget, equals: .headerSettings)
+            .accessibilityLabel(l10n.text(.panelOpenSettings))
+            .accessibilityIdentifier("panel.settings")
         }
         .accessibilityLabel(headerAccessibilityLabel)
-    }
-
-    private var headerSummary: String {
-        l10n.format(.panelHeaderSummary, Int64(publishedSurfaceCount))
-    }
-
-    private var selectedPackHeading: String {
-        selectedPackDisplayName.isEmpty
-            ? l10n.text(.panelSelectedPackNone) : selectedPackDisplayName
     }
 
     private var headerAccessibilityLabel: String {
         l10n.text(.panelTitle)
             + (languageStore.language == .english ? ", " : "，")
-            + selectedPackHeading
-            + (languageStore.language == .english ? ", " : "，")
-            + headerSummary
+            + l10n.text(.panelOpenSettings)
     }
 
     private func announcePanelSummary() {
@@ -307,27 +267,15 @@ public struct PanelView: View {
             ?? soundScopePresentations[0]
     }
 
-    private var publishedSurfaceCount: Int {
-        HostID.productVisibleCases.count
-    }
-
     private func soundScopePicker(availableMenuHeight: CGFloat) -> some View {
         PanelSoundScopePicker(
             scopes: soundScopePresentations,
             selectedScope: selectedScope,
-            typeScale: typeScale,
             language: languageStore.language,
             availableMenuHeight: availableMenuHeight,
             isExpanded: $isSoundScopeMenuExpanded,
             focusedTarget: $focusedTarget,
-            onSelect: selectSoundScope,
-            onManageIntegrations: {
-                onManageIntegrations(diagnosticsHost, .soundScope)
-            })
-    }
-
-    private var diagnosticsHost: HostID? {
-        selectedScope.host ?? soundScopePresentations.first(where: { $0.host != nil })?.host
+            onSelect: selectSoundScope)
     }
 
     private func selectSoundScope(_ scope: PanelSoundScopeID) {
@@ -348,6 +296,205 @@ public struct PanelView: View {
             selectedSurfaceRaw = storedValue
         }
         panelModel.selectSoundSurface(resolved.surface)
+    }
+
+    // MARK: - Activity overview
+
+    private var activityPresentation: ActivityOverviewPresentation {
+        activityDiagnostics.presentation.projection.presentation(for: selectedScope.scope)
+    }
+
+    private var activityOverview: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(l10n.text(.settingsActivityTitle))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                Spacer(minLength: 4)
+                Picker(
+                    l10n.text(.settingsActivityTitle),
+                    selection: $activityRange
+                ) {
+                    Text(l10n.text(.settingsActivityRangeToday)).tag(LocalActivityRange.today)
+                    Text(l10n.text(.settingsActivityRangeSevenDays)).tag(LocalActivityRange.sevenDays)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 132)
+                .focused($focusedTarget, equals: .activityRange)
+                .accessibilityLabel(l10n.text(.settingsActivityTitle))
+                .accessibilityIdentifier("panel.activity.range")
+            }
+
+            HStack(spacing: 8) {
+                activityMetric(
+                    title: localizedEventName(.taskStart, language: languageStore.language),
+                    value: activityRange == .today
+                        ? activityPresentation.event(.taskStart)?.todayCount
+                        : activityPresentation.event(.taskStart)?.sevenDayCount,
+                    identifier: "panel.activity.task-start")
+                activityMetric(
+                    title: localizedEventName(.stop, language: languageStore.language),
+                    value: activityRange == .today
+                        ? activityPresentation.event(.stop)?.todayCount
+                        : activityPresentation.event(.stop)?.sevenDayCount,
+                    identifier: "panel.activity.stop")
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(l10n.text(.settingsActivityMessages))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                Text(
+                    activityCountText(
+                        activityRange == .today
+                            ? activityPresentation.todayMessages
+                            : activityPresentation.sevenDayMessages))
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+                Spacer(minLength: 4)
+                Text(activityStatusText(
+                    activityRange == .today
+                        ? activityPresentation.todayStatus
+                        : activityPresentation.sevenDayStatus))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .font(.system(size: 9, weight: .medium, design: .rounded))
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("panel.activity.messages")
+
+            GeometryReader { proxy in
+                let layouts = ActivityOverviewBarLayout.resolve(
+                    segments: activityPresentation.barSegments,
+                    range: activityRange,
+                    availableWidth: proxy.size.width)
+                HStack(spacing: 3) {
+                    ForEach(layouts) { segment in
+                        activitySegment(segment)
+                            .frame(width: segment.width)
+                            .frame(minHeight: 29)
+                    }
+                }
+            }
+            .frame(height: 29)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("panel.activity.bar")
+
+            if let failure = activityPresentation.event(.stopFailure),
+                let count = activityRange == .today ? failure.todayCount : failure.sevenDayCount,
+                count > 0
+            {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text(localizedEventName(.stopFailure, language: languageStore.language))
+                    Spacer(minLength: 4)
+                    Text(String(count)).monospacedDigit()
+                }
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundColor(ClaudioColor.warning(colorScheme))
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("panel.activity.stop-failure")
+            }
+        }
+        .padding(10)
+        .background(ClaudioTheme.elevated(colorScheme).opacity(0.8))
+        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("panel.activity-overview")
+    }
+
+    private func activityMetric(title: String, value: UInt64?, identifier: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 8.5, weight: .medium, design: .rounded))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+            Text(value.map { String($0) } ?? "—")
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundColor(ClaudioTheme.text(colorScheme))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func activitySegment(
+        _ segment: ActivityOverviewSegmentLayout
+    ) -> some View {
+        let color = ClaudioTheme.event(segment.event, colorScheme)
+        let isSupported = segment.availability == .supported
+        return Button {
+            focusedTarget = .activityMetric(segment.event)
+        } label: {
+            ZStack {
+                Color.clear
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(isSupported && (segment.count ?? 0) > 0 ? color : .clear)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 5)
+                            .strokeBorder(
+                                isSupported ? color : ClaudioTheme.secondaryText(colorScheme),
+                                style: StrokeStyle(
+                                    lineWidth: 1.5,
+                                    dash: isSupported ? [] : [3, 2]))
+                    }
+                    .overlay {
+                        if !isSupported {
+                            Image(systemName: "slash.circle")
+                                .font(.caption2)
+                                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                        }
+                    }
+                    .frame(height: ActivityOverviewBarLayout.visibleBarHeight)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focused($focusedTarget, equals: .activityMetric(segment.event))
+        .accessibilityLabel(localizedEventName(segment.event, language: languageStore.language))
+        .accessibilityValue(activityTooltipText(segment))
+        .accessibilityHint(
+            l10n.format(
+                .settingsActivityCoverage,
+                Int64(activityPresentation.event(segment.event)?.coverage.supportedCount ?? 0),
+                Int64(activityPresentation.event(segment.event)?.coverage.totalCount ?? 0)))
+        .help(activityTooltipText(segment))
+        .accessibilityIdentifier("panel.activity.segment.\(segment.event.cliName)")
+    }
+
+    private func activityTooltipText(_ segment: ActivityOverviewSegmentLayout) -> String {
+        let event = activityPresentation.event(segment.event)
+        let today = activityCountText(event?.todayCount)
+        let sevenDays = activityCountText(event?.sevenDayCount)
+        let coverage = l10n.format(
+            .settingsActivityCoverage,
+            Int64(event?.coverage.supportedCount ?? 0),
+            Int64(event?.coverage.totalCount ?? 0))
+        let label = localizedEventName(segment.event, language: languageStore.language)
+        return "\(label) · \(l10n.text(.settingsActivityRangeToday)) \(today) · "
+            + "\(l10n.text(.settingsActivityRangeSevenDays)) \(sevenDays) · \(coverage)"
+    }
+
+    private func activityStatusText(_ status: ActivityOverviewStatus) -> String {
+        switch status {
+        case .ready: return l10n.text(.settingsActivityStatusReady)
+        case .empty: return l10n.text(.settingsActivityStatusEmpty)
+        case .unobserved: return l10n.text(.settingsActivityStatusUnobserved)
+        case .unavailable: return l10n.text(.settingsActivityStatusUnavailable)
+        case .stale(let date):
+            return l10n.format(
+                .settingsActivityStatusStale,
+                date.formatted(date: .abbreviated, time: .shortened) as NSString)
+        case .partial(let date):
+            return l10n.format(
+                .settingsActivityStatusPartial,
+                date.formatted(date: .abbreviated, time: .shortened) as NSString)
+        }
+    }
+
+    private func activityCountText(_ count: UInt64?) -> String {
+        count.map { String($0) } ?? "—"
     }
 
     // MARK: - Main content
@@ -383,11 +530,11 @@ public struct PanelView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(l10n.format(.panelEventsTitle, selectedScope.name))
-                    .font(.system(size: 11 * typeScale, weight: .semibold, design: .rounded))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 Spacer(minLength: 4)
                 Text(eventCoverageSummary)
-                    .font(.system(size: 8.5 * typeScale, weight: .medium, design: .rounded))
+                    .font(.system(size: 8.5, weight: .medium, design: .rounded))
                     .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
             }
             .padding(.bottom, 4)
@@ -451,10 +598,10 @@ public struct PanelView: View {
     private var needsPackNotice: some View {
         VStack(alignment: .leading, spacing: 5) {
             Label(l10n.text(.panelSelectPack), systemImage: "speaker.slash")
-                .font(.system(size: 12 * typeScale, weight: .semibold, design: .rounded))
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundColor(ClaudioTheme.text(colorScheme))
             Text(l10n.text(.panelNeedsPackSettingsMessage))
-                .font(.system(size: 11 * typeScale, design: .rounded))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -486,7 +633,7 @@ public struct PanelView: View {
     private func playbackSettings(masterVolumeEnabled: Bool) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(l10n.text(.panelPlaybackSettings))
-                .font(.system(size: 11 * typeScale, weight: .semibold, design: .rounded))
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
             VStack(spacing: 0) {
                 MasterVolumeRow(
@@ -503,10 +650,6 @@ public struct PanelView: View {
                     language: languageStore.language)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 7)
-                Divider().padding(.leading, 9)
-                soundPackSettingsRow
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 8)
             }
             .background(ClaudioTheme.elevated(colorScheme))
             .overlay(
@@ -516,150 +659,6 @@ public struct PanelView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("panel.playback-settings")
-    }
-
-    private var soundPackSettingsRow: some View {
-        Group {
-            if layoutAdaptation.rowWrapsToTwoLines {
-                VStack(alignment: .leading, spacing: 7) {
-                    soundPackIdentity
-                    soundPackActions
-                }
-            } else {
-                HStack(alignment: .center, spacing: 8) {
-                    soundPackIdentity
-                    Spacer(minLength: 6)
-                    soundPackActions
-                }
-            }
-        }
-    }
-
-    private var soundPackIdentity: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(l10n.text(.panelSoundPackLabel))
-                .font(.system(size: 12 * typeScale, weight: .medium, design: .rounded))
-                .foregroundColor(ClaudioTheme.text(colorScheme))
-            Text(selectedPackDisplayName.isEmpty ? l10n.text(.panelSelectedPackNone) : selectedPackDisplayName)
-                .font(.system(size: 10.5 * typeScale, design: .rounded))
-                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                .lineLimit(layoutAdaptation.rowWrapsToTwoLines ? 2 : 1)
-            Text(soundPackInheritanceText)
-                .font(.system(size: 9.5 * typeScale, design: .rounded))
-                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var soundPackActions: some View {
-        HStack(spacing: 6) {
-            Button(l10n.text(.panelOpenSettings)) {
-                onOpenEventSettings(
-                    EventSettingsWindowRoute(scope: selectedScope.scope),
-                    .openSoundSettings)
-            }
-            .buttonStyle(.bordered)
-            .focused($focusedTarget, equals: .openSoundSettings)
-            .accessibilityLabel(l10n.text(.panelOpenSettings))
-            .accessibilityIdentifier("panel.sound-settings.open")
-
-            if selectedScope.scope.surface != nil {
-                Button(l10n.text(.panelResetSurface)) {
-                    panelModel.resetSelectedSurfaceOverrides()
-                    onAudibilityInputsChanged()
-                }
-                .buttonStyle(.borderless)
-                .focused($focusedTarget, equals: .resetSurface)
-                .help(l10n.text(.panelResetSurfaceHint))
-                .accessibilityLabel(l10n.text(.panelResetSurface))
-                .accessibilityIdentifier("panel.sound-settings.reset-surface")
-            }
-        }
-        .fixedSize(horizontal: !layoutAdaptation.rowWrapsToTwoLines, vertical: false)
-    }
-
-    private var soundPackInheritanceText: String {
-        guard let surface = selectedScope.scope.surface else {
-            return l10n.text(.panelGlobalInheritance)
-        }
-        let hasPackOverride = panelModel.config.surfaceOverrides[surface.rawValue]?.selectedPack != nil
-        if hasPackOverride {
-            return l10n.text(.panelSurfaceOverride)
-        }
-        return l10n.text(.panelInheritedGlobal)
-    }
-
-    // MARK: - Bootstrap reports and failures
-
-    @ViewBuilder
-    private var bootstrapReportSection: some View {
-        if let error = bootstrapReports.acknowledgementError {
-            FailureRow(message: error)
-        }
-        ForEach(bootstrapReports.records, id: \.id) { record in
-            let reportID = record.id.uuidString
-            let failure = record.events.contains { event in
-                if case .failure = event { return true }
-                return false
-            }
-            VStack(alignment: .leading, spacing: 7) {
-                Text(bootstrapReportMessage(record))
-                    .font(.system(size: 11 * typeScale, weight: .medium))
-                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 7) {
-                    if failure {
-                        Button(languageStore.language == .english ? "Retry" : "重试") {
-                            onRetryBootstrap()
-                        }
-                        .focused($focusedTarget, equals: .bootstrapReportRetry(id: reportID))
-                        .accessibilityLabel(l10n.text(.panelRetry))
-                        .accessibilityIdentifier("bootstrap-report.retry")
-                        Button(languageStore.language == .english ? "Diagnostics" : "连接与诊断") {
-                            onManageIntegrations(.claudeCode, .soundScope)
-                        }
-                        .focused($focusedTarget, equals: .bootstrapReportDiagnostics(id: reportID))
-                        .accessibilityLabel(l10n.text(.panelConnectionsDiagnostics))
-                        .accessibilityIdentifier("bootstrap-report.diagnostics")
-                    }
-                    if let path = bootstrapReportRevealPath(record) {
-                        Button(languageStore.language == .english ? "Show in Finder" : "在 Finder 中显示") {
-                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-                        }
-                        .focused($focusedTarget, equals: .bootstrapReportReveal(id: reportID))
-                        .accessibilityLabel(l10n.text(.panelRevealConfig))
-                        .accessibilityIdentifier("bootstrap-report.reveal")
-                    }
-                    if record.events.contains(where: { if case .selectionChanged = $0 { return true }; return false }) {
-                        Button(l10n.text(.panelOpenSettings)) {
-                            onManageSounds(
-                                .overview(surface: selectedScope.scope.surface),
-                                .bootstrapReportManageSounds(id: reportID))
-                        }
-                        .focused($focusedTarget, equals: .bootstrapReportManageSounds(id: reportID))
-                        .accessibilityLabel(l10n.text(.panelOpenSettings))
-                        .accessibilityIdentifier("bootstrap-report.manage-sounds")
-                    }
-                    Spacer(minLength: 0)
-                    Button(languageStore.language == .english ? "Got it" : "知道了") {
-                        bootstrapReports.acknowledge(record.id)
-                    }
-                    .focused($focusedTarget, equals: .bootstrapReportAcknowledge(id: reportID))
-                    .accessibilityLabel(
-                        languageStore.language == .english ? "Got it" : "知道了")
-                    .accessibilityIdentifier("bootstrap-report.acknowledge")
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding(9)
-            .background(
-                (failure ? ClaudioTheme.error(colorScheme) : ClaudioColor.warning(colorScheme))
-                    .opacity(0.09))
-            .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(bootstrapReportMessage(record))
-        }
     }
 
     private var writeFailures: some View {
@@ -690,60 +689,6 @@ public struct PanelView: View {
         return l10n.format(.panelSurfaceOverrideDamaged, name)
     }
 
-    private func bootstrapReportMessage(_ record: BootstrapReportRecord) -> String {
-        let english = languageStore.language == .english
-        let messages = record.events.map { event -> String in
-            switch event {
-            case .failure(let code):
-                return english ? "Startup repair failed (\(code))." : "启动修复失败（\(code)）。"
-            case .helperCopied:
-                return english ? "The helper was installed." : "helper 已完成安装。"
-            case .packPublished(let packID):
-                return english ? "Installed sound pack \(packID)." : "已发布声音包 \(packID)。"
-            case .packSalvaged(let packID, let movedTo):
-                return english
-                    ? "Moved unreadable pack \(packID) to \(movedTo); no files were deleted."
-                    : "无法读取的声音包 \(packID) 已搬到 \(movedTo)，没有删除任何文件。"
-            case .selectionChanged(let removed, let selected):
-                if let removed {
-                    return english
-                        ? "The missing selection \(removed) was replaced with \(selected)."
-                        : "缺失的选中包 \(removed) 已自动改为 \(selected)。"
-                }
-                return english ? "Selected \(selected)." : "已自动选择 \(selected)。"
-            }
-        }
-        let repeated = record.occurrenceCount > 1
-            ? (english ? " Repeated \(record.occurrenceCount) times." : " 已重复 \(record.occurrenceCount) 次。")
-            : ""
-        return messages.joined(separator: " ") + repeated
-    }
-
-    private func bootstrapReportRevealPath(_ record: BootstrapReportRecord) -> String? {
-        record.events.compactMap { event in
-            if case .packSalvaged(_, let movedTo) = event { return movedTo }
-            return nil
-        }.first
-    }
-
-    private var bootstrapReportFocusActions: [PanelFocusTarget] {
-        bootstrapReports.records.flatMap { record in
-            let id = record.id.uuidString
-            var actions: [PanelFocusTarget] = []
-            if record.events.contains(where: { if case .failure = $0 { return true }; return false }) {
-                actions += [.bootstrapReportRetry(id: id), .bootstrapReportDiagnostics(id: id)]
-            }
-            if bootstrapReportRevealPath(record) != nil {
-                actions.append(.bootstrapReportReveal(id: id))
-            }
-            if record.events.contains(where: { if case .selectionChanged = $0 { return true }; return false }) {
-                actions.append(.bootstrapReportManageSounds(id: id))
-            }
-            actions.append(.bootstrapReportAcknowledge(id: id))
-            return actions
-        }
-    }
-
     // MARK: - Focus and playback
 
     private func applyFirstFocus() {
@@ -751,21 +696,20 @@ public struct PanelView: View {
         let visibleEvents = content.showsEventContent
             && panelModel.libraryPresentationState.hasUsableSnapshot
             ? eventPresentations : []
-        let hasOpenSettings = !content.hasConfigFailureNotice
-        let hasReset = hasOpenSettings && selectedScope.scope.surface != nil
         let order = panelFocusOrder(
-            .operational(
+            .activityOperational(
                 events: visibleEvents,
+                hasActivityOverview: true,
                 hasMasterVolume: content.showsEventContent
                     && panelModel.libraryPresentationState.hasUsableSnapshot,
-                hasOpenSoundSettings: hasOpenSettings,
-                hasResetSurface: hasReset,
-                hasConfigFailureNotice: content.hasConfigFailureNotice,
-                bootstrapReportActions: bootstrapReportFocusActions))
+                hasConfigFailureNotice: content.hasConfigFailureNotice))
         if let requested = focusCoordinator.requestedTarget, order.contains(requested) {
             focusedTarget = requested
         } else {
-            focusedTarget = order.first
+            // Natural Tab order still starts at the fixed header. Opening the panel for its
+            // primary task starts in the scope picker; a Settings handback supplies the
+            // explicit header target through the coordinator above.
+            focusedTarget = order.contains(.soundScope) ? .soundScope : order.first
         }
     }
 
@@ -791,24 +735,13 @@ public struct PanelView: View {
 
     // MARK: - Shared projections
 
-    private var selectedPackDisplayName: String { panelModel.selectedPackMetadata.displayName }
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
-    private var interfaceTextSize: ClaudioInterfaceTextSize { languageStore.interfaceTextSize }
-    private var interfaceTextSizeBinding: Binding<ClaudioInterfaceTextSize> {
-        Binding(
-            get: { languageStore.interfaceTextSize },
-            set: { languageStore.setInterfaceTextSize($0) })
-    }
-    private var typeScale: CGFloat { CGFloat(interfaceTextSize.scale) }
     private var layoutAdaptation: PanelLayoutAdaptation {
-        panelLayoutAdaptation(for: panelTypeSizeTier(for: interfaceTextSize))
-    }
-    private var panelWidth: Double {
-        panelWidthResolution(
-            preference: languageStore.panelWidthPreference,
-            language: languageStore.language,
-            interfaceTextSize: interfaceTextSize
-        ).effectiveWidth
+        PanelLayoutAdaptation(
+            hidesWaveform: false,
+            rowWrapsToTwoLines: false,
+            eventActionsMoveBelow: false,
+            panelWidth: standardPanelWidth)
     }
 }
 
@@ -839,7 +772,6 @@ private struct PanelAgentEventRow: View {
     private let focusedTarget: FocusState<PanelFocusTarget?>.Binding
 
     @Environment(\.colorScheme) private var colorScheme
-    @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
 
     init(
         presentation: PanelEventPresentation,
@@ -883,13 +815,13 @@ private struct PanelAgentEventRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(presentation.title)
-                    .font(.system(size: 12.5 * typeScale, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
                     .foregroundColor(
                         controlsUnavailable
                             ? ClaudioTheme.secondaryText(colorScheme)
                             : ClaudioTheme.text(colorScheme))
                 Text(presentation.nativeEventText)
-                    .font(.system(size: 9.5 * typeScale, design: .monospaced))
+                    .font(.system(size: 9.5, design: .monospaced))
                     .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                     .textSelection(.enabled)
                 if adaptation.rowWrapsToTwoLines {
@@ -916,7 +848,7 @@ private struct PanelAgentEventRow: View {
 
     private var capabilityBadge: some View {
         Text(presentation.capabilityText)
-            .font(.system(size: 9 * typeScale, weight: .medium, design: .rounded))
+            .font(.system(size: 9, weight: .medium, design: .rounded))
             .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
@@ -926,7 +858,7 @@ private struct PanelAgentEventRow: View {
 
     private var soundFileText: some View {
         Text(presentation.soundFileText)
-            .font(.system(size: 9.5 * typeScale, design: .rounded))
+            .font(.system(size: 9.5, design: .rounded))
             .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
             .lineLimit(adaptation.rowWrapsToTwoLines ? 2 : 1)
     }
@@ -973,48 +905,5 @@ private struct PanelAgentEventRow: View {
             .accessibilityIdentifier("panel.event.\(presentation.event.rawValue).mute")
         }
         .fixedSize()
-    }
-}
-
-/// Panel 专属语言/文字大小 popover。关闭后焦点精确回到 `Aa⌄` 触发器。
-@MainActor
-struct InterfaceTextSizeControl: View {
-    @Binding var selection: ClaudioInterfaceTextSize
-    @ObservedObject var languageStore: ClaudioPreferences
-
-    @Environment(\.colorScheme) private var colorScheme
-    @FocusState private var isTriggerFocused: Bool
-    @State private var isPopoverPresented = false
-
-    var body: some View {
-        Button {
-            isPopoverPresented.toggle()
-        } label: {
-            Text("Aa⌄")
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
-        }
-        .buttonStyle(.bordered)
-        .tint(ClaudioTheme.clay(colorScheme))
-        .frame(width: 54, height: 32)
-        .focused($isTriggerFocused)
-        .accessibilityLabel(ClaudioL10n(language: languageStore.language).text(.interfaceTitle))
-        .accessibilityValue(
-            "\(languageStore.language.selfName)"
-                + (languageStore.language == .english ? ", " : "，")
-                + selection.localizedDisplayName(languageStore.language))
-        .accessibilityHint(ClaudioL10n(language: languageStore.language).text(.panelOptionsHint))
-        .accessibilityIdentifier("panel.options.text-size")
-        .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
-            InterfaceSettingsPopoverContent(
-                selection: $selection,
-                languageStore: languageStore)
-        }
-        .onChange(of: isPopoverPresented) { presented in
-            if !presented { isTriggerFocused = true }
-        }
-        .onDisappear {
-            isPopoverPresented = false
-            isTriggerFocused = false
-        }
     }
 }

@@ -250,8 +250,8 @@ public struct PanelSoundScopePresentation: Sendable, Equatable, Identifiable {
     }
 }
 
-/// 声音作用域浮层在当前滚动视口内的尺寸决策。诊断入口与浮层 chrome 固定保留，只有
-/// 作用域选项区随剩余高度收缩并在 SwiftUI 层滚动。
+/// 声音作用域浮层在当前滚动视口内的尺寸决策。面板只负责选择 Scope；集成管理与诊断
+/// 由 Settings 目的页承载，因此菜单不再保留第二个入口。
 public struct PanelSoundScopeMenuLayout: Sendable, Equatable {
     public let optionHeight: Double
     public let optionsContentHeight: Double
@@ -268,7 +268,7 @@ public func panelSoundScopeMenuLayout(
     let count = max(0, scopeCount)
     let scale = max(1, typeScale)
     let optionHeight = max(46, 46 * typeScale)
-    let diagnosticsHeight = max(34, 34 * typeScale)
+    let diagnosticsHeight: Double = 0
     let chromeHeight: Double = 21
     let designHeightLimit = 250 * scale
     let effectiveAvailableHeight =

@@ -139,17 +139,6 @@ public enum ClaudioTheme {
     }
 }
 
-public extension ClaudioInterfaceTextSize {
-    var dynamicTypeSize: DynamicTypeSize {
-        switch self {
-        case .compact: .medium
-        case .standard: .large
-        case .large: .xxLarge
-        case .maximum: .accessibility2
-        }
-    }
-}
-
 public func claudioEventGlyphName(_ event: Event) -> String {
     switch event {
     case .taskStart: "paperplane.fill"

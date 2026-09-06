@@ -48,12 +48,12 @@ struct StateGalleryView: View {
                 EventRowGalleryView()
                 EventHostIndicatorGalleryView()
                 PanelPackSectionGalleryView()
-                InterfaceTextSizeGalleryView()
+                CompactEventLayoutGalleryView()
                 PanelQuitFooterGalleryView()
                 MasterVolumeGalleryView()
                 PackCardGalleryView()
                 ForEach(ClaudioAppLanguage.allCases) { language in
-                    ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                    ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
                         ForEach(SettingsGalleryAppearance.allCases) { appearance in
                             GallerySection(
                                 title:
@@ -121,10 +121,10 @@ struct SettingsExperienceGalleryView: View {
     var body: some View {
         GallerySection(
             title:
-                "Unified Settings · 6 basic production destinations · 2 languages × 4 text sizes"
+                "Unified Settings · 6 basic production destinations · 2 languages × fixed compact layout"
         ) {
             ForEach(ClaudioAppLanguage.allCases) { language in
-                ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
                     ForEach(PreviewFixtures.settingsExperienceScenarios) { scenario in
                         GalleryFrame(
                             caption:
@@ -163,10 +163,10 @@ private enum SettingsGalleryAppearance: String, CaseIterable, Identifiable {
 struct EventSettingsLayoutGalleryView: View {
     var body: some View {
         GallerySection(
-            title: "Events destination · production mount · 2 languages × 4 text sizes × 2 widths"
+            title: "Events destination · production mount · 2 languages × fixed compact layout × 2 widths"
         ) {
             ForEach(ClaudioAppLanguage.allCases) { language in
-                ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
                     ForEach(SettingsGalleryAppearance.allCases) { appearance in
                         ForEach(EventSettingsGalleryWidth.allCases) { width in
                             GalleryFrame(
@@ -212,7 +212,7 @@ struct ComplexAccessibilityEnvironmentGalleryView: View {
             GalleryFrame(caption: "Reduce Motion") {
                 EventSettingsLayoutFrame(
                     language: .english,
-                    textSize: .maximum,
+                        textSize: .standard,
                     width: EventSettingsGalleryWidth.minimum.value
                 )
                 .transaction { transaction in
@@ -254,12 +254,12 @@ private struct EventSettingsLayoutFrame: View {
 
     init(
         language: ClaudioAppLanguage,
-        textSize: ClaudioInterfaceTextSize,
+        textSize: ClaudioCompactPreviewDensity,
         width: CGFloat
     ) {
         self.width = width
         let preferences = ClaudioPreferences(previewLanguage: language)
-        preferences.setInterfaceTextSize(textSize)
+        preferences.setCompactPreviewDensity(textSize)
         _languageStore = StateObject(wrappedValue: preferences)
         _selection = StateObject(
             wrappedValue: EventSettingsWindowSelection(
@@ -361,10 +361,10 @@ struct AICueExperienceGalleryView: View {
     var body: some View {
         GallerySection(
             title:
-                "Events AI Cue · 4 profiles + credential/composer/failure states · 2 languages × 4 text sizes"
+                "Events AI Cue · 4 profiles + credential/composer/failure states · 2 languages × fixed compact layout"
         ) {
             ForEach(ClaudioAppLanguage.allCases) { language in
-                ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
                     ForEach(SettingsGalleryAppearance.allCases) { appearance in
                         ForEach(PreviewFixtures.aiCueGalleryScenarios) { scenario in
                             GalleryFrame(
@@ -395,11 +395,11 @@ private struct AICueExperienceStateFrame: View {
     init(
         scenario: PreviewFixtures.AICueGalleryScenario,
         language: ClaudioAppLanguage,
-        textSize: ClaudioInterfaceTextSize
+        textSize: ClaudioCompactPreviewDensity
     ) {
         self.scenario = scenario
         let preferences = ClaudioPreferences(previewLanguage: language)
-        preferences.setInterfaceTextSize(textSize)
+        preferences.setCompactPreviewDensity(textSize)
         _languageStore = StateObject(wrappedValue: preferences)
         _viewModel = StateObject(
             wrappedValue: AICueGenerationViewModel(previewState: scenario.previewState))
@@ -430,7 +430,6 @@ private struct AICueExperienceStateFrame: View {
         }
         .frame(width: 720, alignment: .leading)
         .padding(18)
-        .environment(\.dynamicTypeSize, languageStore.interfaceTextSize.dynamicTypeSize)
     }
 }
 
@@ -440,7 +439,7 @@ private struct SettingsWindowRouteFrame: View {
     @StateObject private var languageStore: ClaudioPreferences
     @StateObject private var dynamicQuietPolicy: DynamicQuietPolicyController
     @StateObject private var loginItemSettings: LoginItemSettingsModel
-    @StateObject private var usageSettings: UsageSettingsModel
+    @StateObject private var activityDiagnostics: ActivityDiagnosticsModel
     @StateObject private var globalShortcutSettings: GlobalShortcutSettingsModel
     @StateObject private var aboutSettings: AboutSettingsModel
 
@@ -448,12 +447,12 @@ private struct SettingsWindowRouteFrame: View {
         route: SettingsRoute,
         availability: SettingsRouteAvailability,
         language: ClaudioAppLanguage,
-        textSize: ClaudioInterfaceTextSize = .standard,
+        textSize: ClaudioCompactPreviewDensity = .standard,
         experienceScenario: PreviewFixtures.SettingsExperienceScenario? = nil
     ) {
         let preferences = ClaudioPreferences(previewLanguage: language)
         let experienceProfile = experienceScenario?.profile
-        preferences.setInterfaceTextSize(textSize)
+        preferences.setCompactPreviewDensity(textSize)
         _model = StateObject(
             wrappedValue: SettingsWindowPresentationModel(
                 initialRoute: route,
@@ -464,8 +463,8 @@ private struct SettingsWindowRouteFrame: View {
             wrappedValue: Self.makeDynamicQuietPolicy(for: experienceProfile))
         _loginItemSettings = StateObject(
             wrappedValue: Self.makeLoginItemSettings(for: experienceProfile))
-        _usageSettings = StateObject(
-            wrappedValue: Self.makeUsageSettings(for: experienceProfile))
+        _activityDiagnostics = StateObject(
+            wrappedValue: ActivityDiagnosticsModel(previewPresentation: .empty()))
         _globalShortcutSettings = StateObject(
             wrappedValue: Self.makeShortcutSettings(for: experienceProfile))
         _aboutSettings = StateObject(
@@ -478,7 +477,7 @@ private struct SettingsWindowRouteFrame: View {
             preferences: languageStore,
             dynamicQuietPolicy: dynamicQuietPolicy,
             loginItemSettings: loginItemSettings,
-            usageSettings: usageSettings,
+            activityDiagnostics: activityDiagnostics,
             globalShortcutSettings: globalShortcutSettings,
             aboutSettings: aboutSettings
         )
@@ -548,64 +547,6 @@ private struct SettingsWindowRouteFrame: View {
             model.refresh()
         }
         return model
-    }
-
-    private static func makeUsageSettings(
-        for profile: PreviewFixtures.SettingsExperienceProfile?
-    ) -> UsageSettingsModel {
-        let state = profile?.usage ?? .empty
-        let empty = usagePresentation(state: .missing, hasEvents: false)
-        let presentation: UsageActivityPresentation
-        switch state {
-        case .ready, .stale:
-            presentation = usagePresentation(state: .available, hasEvents: true)
-        case .unreadable:
-            presentation = usagePresentation(state: .unreadable, hasEvents: false)
-        case .loading, .empty, .writeFailed:
-            presentation = empty
-        }
-        let feedback: UsageSettingsFeedback? =
-            switch state {
-            case .stale:
-                UsageSettingsFeedback(action: .clearHistory, failure: .historyClearFailed)
-            case .writeFailed:
-                UsageSettingsFeedback(action: .copyLogPath, failure: .clipboardFailed)
-            case .loading, .ready, .empty, .unreadable:
-                nil
-            }
-        return UsageSettingsModel(
-            previewPresentation: presentation,
-            isRefreshing: state == .loading,
-            feedback: feedback)
-    }
-
-    private static func usagePresentation(
-        state: UsageHistorySourceState,
-        hasEvents: Bool
-    ) -> UsageActivityPresentation {
-        let events =
-            hasEvents
-            ? [
-                UsageEventActivity(
-                    event: .stop,
-                    resultCounts: [
-                        UsagePlaybackResultCount(result: .played, count: 4),
-                        UsagePlaybackResultCount(result: .muted, count: 1),
-                    ])
-            ] : []
-        return UsageActivityPresentation(
-            surfaces: HostID.productVisibleCases.map {
-                UsageSurfaceActivity(
-                    host: $0,
-                    retainedCount: hasEvents ? 5 : 0,
-                    events: events,
-                    sourceState: state)
-            },
-            log: UsageDiagnosticLogSnapshot(
-                path: "/Users/example/.claudio/claudio.log",
-                state: state == .unreadable
-                    ? .unreadable : (hasEvents ? .available(sizeBytes: 512) : .missing),
-                failures: []))
     }
 
     private static func makeShortcutSettings(
@@ -699,7 +640,7 @@ struct ProductionPanelGalleryView: View {
             title: "Production Agent Panel · 2 languages × 4 sizes × 6 critical states"
         ) {
             ForEach(ClaudioAppLanguage.allCases) { language in
-                ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                    ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
                     ForEach(ProductionPanelGalleryScenario.allCases) { scenario in
                         GalleryFrame(
                             caption:
@@ -720,12 +661,11 @@ struct ProductionPanelGalleryView: View {
 @MainActor
 private struct ProductionPanelStateFrame: View {
     let language: ClaudioAppLanguage
-    let textSize: ClaudioInterfaceTextSize
+    let textSize: ClaudioCompactPreviewDensity
     let scenario: ProductionPanelGalleryScenario
 
     @StateObject private var focusCoordinator: PanelFocusCoordinator
     @StateObject private var hostIntegrations: HostIntegrationPresentationStore
-    @StateObject private var bootstrapReports: BootstrapReportPresentationStore
     @StateObject private var languageStore: ClaudioPreferences
     private let panelModel: PanelConfigController
     private let selectedScope: PanelSoundScopeID
@@ -733,7 +673,7 @@ private struct ProductionPanelStateFrame: View {
 
     init(
         language: ClaudioAppLanguage,
-        textSize: ClaudioInterfaceTextSize,
+        textSize: ClaudioCompactPreviewDensity,
         scenario: ProductionPanelGalleryScenario
     ) {
         self.language = language
@@ -752,12 +692,8 @@ private struct ProductionPanelStateFrame: View {
             wrappedValue: HostIntegrationPresentationStore(
                 state: hostState,
                 configurationSources: [:]))
-        _bootstrapReports = StateObject(
-            wrappedValue: BootstrapReportPresentationStore(
-                store: BootstrapReportStore(
-                    directory: URL(fileURLWithPath: "/dev/null/claudio-preview-reports"))))
         let languageStore = ClaudioPreferences(previewLanguage: language)
-        languageStore.setInterfaceTextSize(textSize)
+        languageStore.setCompactPreviewDensity(textSize)
         _languageStore = StateObject(wrappedValue: languageStore)
 
         let baseConfig = ClaudioConfig(
@@ -842,7 +778,6 @@ private struct ProductionPanelStateFrame: View {
             audioEnvironment: previewAudioImportEnvironment,
             focusCoordinator: focusCoordinator,
             hostIntegrations: hostIntegrations,
-            bootstrapReports: bootstrapReports,
             languageStore: languageStore
         )
         .frame(height: 560)
@@ -1063,7 +998,7 @@ private struct PanelPackSectionStateFrame: View {
             state: state,
             typeScale: 1,
             focusedTarget: $focusedTarget,
-            adaptation: panelLayoutAdaptation(for: .standard),
+            adaptation: panelLayoutAdaptation(),
             onSelect: { _ in }
         )
         .frame(width: CGFloat(standardPanelWidth))
@@ -1080,24 +1015,23 @@ private func panelPackSectionCaption(_ state: PanelPackSectionState) -> String {
     }
 }
 
-struct InterfaceTextSizeGalleryView: View {
+struct CompactEventLayoutGalleryView: View {
     var body: some View {
         GallerySection(
-            title: "Interface + EventRow C layout (2 languages × 4 sizes × 3 mapping states)"
+            title: "Compact EventRow layout (2 languages × 3 mapping states)"
         ) {
             ForEach(PreviewFixtures.eventRowLayoutScenarios) { scenario in
                 GalleryFrame(
-                    caption:
-                        "\(scenario.language.selfName) · .\(scenario.interfaceTextSize.rawValue)"
+                    caption: scenario.language.selfName
                 ) {
-                    InterfaceTextSizeFrame(scenario: scenario)
+                    CompactEventLayoutFrame(scenario: scenario)
                 }
             }
         }
     }
 }
 
-private struct InterfaceTextSizeFrame: View {
+private struct CompactEventLayoutFrame: View {
     let scenario: PreviewFixtures.EventRowLayoutScenario
     @StateObject private var languageStore: ClaudioPreferences
     @FocusState private var focusedTarget: PanelFocusTarget?
@@ -1111,9 +1045,6 @@ private struct InterfaceTextSizeFrame: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            InterfaceSettingsPopoverContent(
-                selection: .constant(scenario.interfaceTextSize),
-                languageStore: languageStore)
             Text(panelSummary)
                 .font(ClaudioTheme.font(.productTitle))
             ForEach(scenario.samples) { sample in
@@ -1136,7 +1067,6 @@ private struct InterfaceTextSizeFrame: View {
             width: CGFloat(scenario.adaptation.panelWidth),
             alignment: .leading
         )
-        .environment(\.dynamicTypeSize, scenario.interfaceTextSize.dynamicTypeSize)
     }
 
     private var panelSummary: String {
@@ -1146,20 +1076,14 @@ private struct InterfaceTextSizeFrame: View {
     }
 }
 
-// MARK: - Fixed panel quit footer (2 languages × 4 interface text sizes)
+// MARK: - Fixed panel quit footer (2 languages × one compact density)
 
 struct PanelQuitFooterGalleryView: View {
     var body: some View {
-        GallerySection(title: "Panel quit footer (2 languages × 4 sizes · 312/360pt)") {
+        GallerySection(title: "Panel quit footer (2 languages · 312pt)") {
             ForEach(ClaudioAppLanguage.allCases) { language in
-                ForEach(ClaudioInterfaceTextSize.allCases) { interfaceTextSize in
-                    GalleryFrame(
-                        caption: "\(language.selfName) · .\(interfaceTextSize.rawValue)"
-                    ) {
-                        PanelQuitFooterStateFrame(
-                            language: language,
-                            interfaceTextSize: interfaceTextSize)
-                    }
+                GalleryFrame(caption: language.selfName) {
+                    PanelQuitFooterStateFrame(language: language)
                 }
             }
         }
@@ -1168,23 +1092,15 @@ struct PanelQuitFooterGalleryView: View {
 
 private struct PanelQuitFooterStateFrame: View {
     let language: ClaudioAppLanguage
-    let interfaceTextSize: ClaudioInterfaceTextSize
     @FocusState private var focusedTarget: PanelFocusTarget?
 
     var body: some View {
         PanelQuitFooter(
             language: language,
-            typeScale: CGFloat(interfaceTextSize.scale),
             focusedTarget: $focusedTarget,
             onQuit: {}
         )
-        .frame(
-            width: CGFloat(
-                panelLayoutAdaptation(
-                    for: panelTypeSizeTier(for: interfaceTextSize)
-                ).panelWidth)
-        )
-        .environment(\.dynamicTypeSize, interfaceTextSize.dynamicTypeSize)
+        .frame(width: CGFloat(standardPanelWidth))
     }
 }
 
@@ -1226,7 +1142,7 @@ private struct MasterVolumeStateFrame: View {
                 onCommit: { _ in nil },
                 focusCoordinator: PanelFocusCoordinator(),
                 focusedTarget: $focusedTarget,
-                adaptation: panelLayoutAdaptation(for: .standard),
+                adaptation: panelLayoutAdaptation(),
                 language: .zhHans)
             if case .failed(_, let message) = state {
                 FailureRow(message: message)
@@ -1322,7 +1238,7 @@ struct HostIntegrationGalleryView: View {
             title: "Host integrations · 2 languages (\(scenarioCount))"
         ) {
             ForEach(ClaudioAppLanguage.allCases) { language in
-                ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
                     ForEach(SettingsGalleryAppearance.allCases) { appearance in
                         ForEach(PreviewFixtures.hostIntegrationScenarios) { scenario in
                             GalleryFrame(
@@ -1387,12 +1303,12 @@ private struct HostIntegrationStateFrame: View {
     init(
         scenario: PreviewFixtures.HostIntegrationScenario,
         language: ClaudioAppLanguage,
-        textSize: ClaudioInterfaceTextSize = .standard,
+        textSize: ClaudioCompactPreviewDensity = .standard,
         previewInFlightAction: HostIntegrationUserAction? = nil
     ) {
         let languageStore = ClaudioPreferences(defaults: UserDefaults())
         languageStore.setLanguage(language)
-        languageStore.setInterfaceTextSize(textSize)
+        languageStore.setCompactPreviewDensity(textSize)
         _languageStore = StateObject(wrappedValue: languageStore)
         let store = HostIntegrationPresentationStore(
             state: scenario.state,

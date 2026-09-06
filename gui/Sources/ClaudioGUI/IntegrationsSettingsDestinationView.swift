@@ -62,7 +62,6 @@ struct IntegrationsSettingsDestinationView: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .environment(\.dynamicTypeSize, languageStore.interfaceTextSize.dynamicTypeSize)
         .confirmationDialog(
             confirmationTitle,
             isPresented: Binding(

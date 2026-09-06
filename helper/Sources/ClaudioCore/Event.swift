@@ -39,10 +39,10 @@ public enum Event: String, CaseIterable, Codable, Sendable, Hashable {
     /// 用户界面的稳定声音语义；宿主原生事件名由各 adapter 提供。
     public var displayName: String {
         switch self {
-        case .taskStart: "任务开始"
-        case .stop: "本轮结束"
+        case .taskStart: "用户发起"
+        case .stop: "响应结束"
         case .stopFailure: "执行中断"
-        case .notification: "待响应"
+        case .notification: "等待介入"
         case .subagentStop: "子任务结束"
         }
     }

@@ -304,7 +304,7 @@ func runHostIntegrationModelSuites() {
             "Codex 执行中断格必须以中性 unsupported 存在")
         expect(
             matrix.cell(host: .codex, event: .notification)?.accessibilityLabel
-                == "Codex，待响应，permission_request_only，部分支持，已连接，可听",
+                == "Codex，等待介入，permission_request_only，部分支持，已连接，可听",
             "Core 诊断必须使用稳定限定 token；GUI localization 再投影人类文案")
 
         var mutated = HostCapabilityCatalog.bindings(for: .codex)
@@ -381,7 +381,7 @@ func runHostIntegrationModelSuites() {
             "任务开始格必须给出唯一且可操作的升级说明")
         expect(
             taskStart?.accessibilityLabel
-                == "Claude Code，任务开始，完整支持，需要处理，不可听，旧版连接未安装此事件，请升级连接",
+                == "Claude Code，用户发起，完整支持，需要处理，不可听，旧版连接未安装此事件，请升级连接",
             "VoiceOver 不得把旧连接的任务开始误报为可听或仅缺声音")
         expect(
             matrix.summary(for: .claudeCode) == .legacy(supported: 4, total: 5),

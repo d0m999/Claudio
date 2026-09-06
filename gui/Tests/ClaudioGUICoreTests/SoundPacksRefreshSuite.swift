@@ -2326,17 +2326,18 @@ func runSoundPacksRefreshSuites() async {
 
         let panelFlat = collapsingWhitespace(panel)
         expect(
-            panelFlat.contains(
-                "onOpenEventSettings( EventSettingsWindowRoute(scope: selectedScope.scope), .openSoundSettings)"),
-            "打开设置必须把当前 Sound Scope 与精确返回焦点交给事件设置窗口")
+            panelFlat.contains("onOpenSettings")
+                && panel.contains(".focused($focusedTarget, equals: .headerSettings)"),
+            "打开设置必须通过固定头部按钮返回 retained Settings，并保留精确焦点语义")
         expect(
             !panel.contains(
                 "NSWorkspace.shared.activateFileViewerSelecting([audioEnvironment.userPacksDirectory])"
             ),
             "T7 的 Finder 中间态必须被真窗口替换")
         expect(
-            panel.contains(".focused($focusedTarget, equals: .openSoundSettings)"),
-            "打开设置必须认领 .openSoundSettings 焦点契约")
+            !panel.contains(".focused($focusedTarget, equals: .openSoundSettings)")
+                && panel.contains(".focused($focusedTarget, equals: .headerSettings)"),
+            "打开设置必须认领 .headerSettings 焦点契约")
         expect(
             requestBody.contains("route: .events(scope: route.scope, event: route.event)")
                 && requestBody.contains("returnFocusTo: target")

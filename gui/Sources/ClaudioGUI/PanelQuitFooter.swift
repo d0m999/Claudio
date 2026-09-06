@@ -7,7 +7,6 @@ import SwiftUI
 /// `MenuBarController` 注入的闭包负责。
 struct PanelQuitFooter: View {
     let language: ClaudioAppLanguage
-    let typeScale: CGFloat
     let onQuit: @MainActor () -> Void
     private let focusedTarget: FocusState<PanelFocusTarget?>.Binding
 
@@ -16,12 +15,10 @@ struct PanelQuitFooter: View {
 
     init(
         language: ClaudioAppLanguage,
-        typeScale: CGFloat,
         focusedTarget: FocusState<PanelFocusTarget?>.Binding,
         onQuit: @escaping @MainActor () -> Void
     ) {
         self.language = language
-        self.typeScale = typeScale
         self.focusedTarget = focusedTarget
         self.onQuit = onQuit
     }
@@ -35,7 +32,7 @@ struct PanelQuitFooter: View {
                         .accessibilityHidden(true)
                     Text(l10n.text(.commonClose))
                 }
-                .font(.system(size: 11 * typeScale, weight: .medium, design: .rounded))
+                .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundColor(
                     isHighlighted
                         ? ClaudioTheme.text(colorScheme)

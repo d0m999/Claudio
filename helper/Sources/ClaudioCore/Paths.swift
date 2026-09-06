@@ -154,6 +154,25 @@ public enum ClaudioPaths {
         root.appendingPathComponent("integrations", isDirectory: true)
     }
 
+    /// `~/.claudio/integrations/activity/` — the private local activity summary namespace.
+    /// Summary, lock, and pending deltas stay separate from receipts so clearing activity
+    /// cannot mutate activation or receipt history facts.
+    public static var activityDirectory: URL {
+        integrationsDirectory.appendingPathComponent("activity", isDirectory: true)
+    }
+
+    public static var activitySummaryFile: URL {
+        activityDirectory.appendingPathComponent("summary.json")
+    }
+
+    public static var activityLockFile: URL {
+        activityDirectory.appendingPathComponent("summary.lock")
+    }
+
+    public static var activityPendingDirectory: URL {
+        activityDirectory.appendingPathComponent("pending", isDirectory: true)
+    }
+
     public static var receiptsDirectory: URL {
         integrationsDirectory.appendingPathComponent("receipts", isDirectory: true)
     }

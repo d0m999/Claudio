@@ -10,13 +10,11 @@ import SwiftUI
 struct PanelSoundScopePicker: View {
     let scopes: [PanelSoundScopePresentation]
     let selectedScope: PanelSoundScopePresentation
-    let typeScale: CGFloat
     let language: ClaudioAppLanguage
     let availableMenuHeight: CGFloat
     @Binding var isExpanded: Bool
     let focusedTarget: FocusState<PanelFocusTarget?>.Binding
     let onSelect: (PanelSoundScopeID) -> Void
-    let onManageIntegrations: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedMenuTarget: PanelSoundScopePickerFocusTarget?
@@ -65,11 +63,11 @@ struct PanelSoundScopePicker: View {
     private var heading: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(l10n.text(.panelSoundScope))
-                .font(.system(size: 11 * typeScale, weight: .semibold, design: .rounded))
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
             Spacer(minLength: 4)
             Text(l10n.text(.panelSoundScopeInheritanceCaption))
-                .font(.system(size: 8.5 * typeScale, weight: .medium, design: .rounded))
+                .font(.system(size: 8.5, weight: .medium, design: .rounded))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 .multilineTextAlignment(.trailing)
                 .fixedSize(horizontal: false, vertical: true)
@@ -85,7 +83,7 @@ struct PanelSoundScopePicker: View {
                 Spacer(minLength: 8)
                 statusBadge(selectedScope)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10 * typeScale, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                     .accessibilityHidden(true)
             }
@@ -93,7 +91,7 @@ struct PanelSoundScopePicker: View {
             .padding(.vertical, 8)
             .frame(
                 maxWidth: .infinity,
-                minHeight: max(50, 50 * typeScale),
+                minHeight: 50,
                 alignment: .leading
             )
             .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section))
@@ -137,27 +135,6 @@ struct PanelSoundScopePicker: View {
             }
             .frame(height: CGFloat(menuLayout.optionsHeight))
 
-            Divider()
-                .padding(.vertical, 4)
-
-            Button {
-                dismissMenuAndRestoreTriggerFocus()
-                onManageIntegrations()
-            } label: {
-                Label(l10n.text(.panelConnectionsDiagnostics), systemImage: "stethoscope")
-                    .font(.system(size: 10.5 * typeScale, weight: .medium, design: .rounded))
-                    .foregroundColor(ClaudioTheme.text(colorScheme))
-                    .frame(
-                        maxWidth: .infinity,
-                        minHeight: CGFloat(menuLayout.diagnosticsHeight),
-                        alignment: .leading
-                    )
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .focused($focusedMenuTarget, equals: .integrations)
-            .accessibilityLabel(l10n.text(.panelConnectionsDiagnostics))
-            .accessibilityIdentifier("panel.sound-scope.integrations")
         }
         .padding(6)
         .frame(maxWidth: .infinity)
@@ -221,7 +198,7 @@ struct PanelSoundScopePicker: View {
             Text(scope.name)
                 .font(
                     .system(
-                        size: (prominent ? 13.5 : 11.5) * typeScale,
+                        size: prominent ? 13.5 : 11.5,
                         weight: .semibold,
                         design: .rounded)
                 )
@@ -230,7 +207,7 @@ struct PanelSoundScopePicker: View {
             Text(scope.summaryText)
                 .font(
                     .system(
-                        size: (prominent ? 10.5 : 9.5) * typeScale,
+                        size: prominent ? 10.5 : 9.5,
                         weight: .medium,
                         design: .rounded)
                 )
@@ -243,11 +220,11 @@ struct PanelSoundScopePicker: View {
     private func statusBadge(_ scope: PanelSoundScopePresentation) -> some View {
         HStack(spacing: 5) {
             Image(systemName: statusSymbol(scope))
-                .font(.system(size: 13 * typeScale, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(statusColor(scope.status))
                 .accessibilityHidden(true)
             Text(scope.stateText)
-                .font(.system(size: 10.5 * typeScale, weight: .semibold, design: .rounded))
+                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 .lineLimit(1)
         }
@@ -277,7 +254,7 @@ struct PanelSoundScopePicker: View {
     private var menuLayout: PanelSoundScopeMenuLayout {
         panelSoundScopeMenuLayout(
             scopeCount: scopes.count,
-            typeScale: Double(typeScale),
+            typeScale: 1,
             availableHeight: Double(availableMenuHeight))
     }
 

@@ -285,8 +285,8 @@ public func integrationConnectionSectionPresentation(
                 actions: [.manageEvents(facts.host)]),
             IntegrationConnectionRowPresentation(
                 kind: .receiptHistory,
-                title: "脱敏回执历史",
-                caption: "每个来源最多保留 20 条、30 天；清除不影响当前连接或声音偏好",
+                title: "脱敏连接证据",
+                caption: "只显示当前连接所需的脱敏证据；清除活动汇总不影响连接或声音偏好",
                 actions: [.clearReceiptHistory(facts.host)]),
         ],
         infoText:

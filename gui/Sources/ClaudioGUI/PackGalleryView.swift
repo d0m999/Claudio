@@ -36,15 +36,14 @@ public struct PackGalleryView: View {
     /// own `adaptation` parameter exactly (/codex review 6c40fbc P1: this rewrite had wired
     /// EVERY other row to `PanelView`'s `layoutAdaptation` except this gallery, so pack rows
     /// alone never wrapped to two lines at `.largest`/`.maximum`, squeezing/truncating the
-    /// pack name against the trailing slot). Defaults to ``PanelTypeSizeTier/standard`` so
-    /// every existing call site (`StateGalleryView`'s single-card preview, `PackGallerySuite`)
-    /// keeps today's single-line layout unless a caller explicitly opts into a larger tier.
+    /// pack name against the trailing slot). Defaults to the fixed compact adaptation so every
+    /// existing call site keeps today's single-line layout.
     private let adaptation: PanelLayoutAdaptation
 
     public init(
         cards: [PackCard],
         focusedTarget: FocusState<PanelFocusTarget?>.Binding,
-        adaptation: PanelLayoutAdaptation = panelLayoutAdaptation(for: .standard),
+        adaptation: PanelLayoutAdaptation = panelLayoutAdaptation(),
         language: ClaudioAppLanguage = .zhHans,
         onSelect: @escaping (PackCard) -> Void = { _ in }
     ) {
@@ -73,11 +72,9 @@ public struct PackGalleryView: View {
     }
 }
 
-/// One pack row (2026-07-17 竖排整宽行 mockup 拍板; DESIGN.md「包行四态」). Anatomy at
-/// ``PanelTypeSizeTier/standard``/``PanelTypeSizeTier/larger``:
-/// `[包名][meta 槽] Spacer [覆盖轨 / broken 状态行]`（一行）；从 ``PanelTypeSizeTier/largest``
-/// 起（`adaptation.rowWrapsToTwoLines`）改两行：`[包名][meta 槽]` 上、`[覆盖轨 / broken 状态行]`
-/// 下 —— 继续服从面板既有的累计降级规则 (ENGINEERING.md「无障碍规格 · Dynamic Type + 降级规则」)。
+/// One pack row (2026-07-17 竖排整宽行 mockup 拍板; DESIGN.md「包行四态」). The fixed
+/// compact production adaptation keeps `[包名][meta 槽] Spacer [覆盖轨 / broken 状态行]`
+/// on one row.
 /// DESIGN.md now defines the selected/broken/partial visual language (「包行四态」); where a
 /// pixel choice still isn't pinned there — the mockup itself omits meta labels entirely, a
 /// documented OMISSION not a reversal (DESIGN.md's own "省略不是推翻" note) — every derivation

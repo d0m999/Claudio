@@ -65,7 +65,7 @@ func runHostIntegrationPresentationSuites() {
     suite("宿主事件文案：五个 UI 名称统一为声音语义，不泄漏原生事件名") {
         expect(
             Event.allCases.map(\.displayName)
-                == ["任务开始", "本轮结束", "执行中断", "待响应", "子任务结束"],
+                == ["用户发起", "响应结束", "执行中断", "等待介入", "子任务结束"],
             "Event displayName 必须保持产品声音语义顺序")
         let codex = localizedCapabilityCell(
             HostCapabilityCellPresentation(
@@ -146,7 +146,7 @@ func runHostIntegrationPresentationSuites() {
         let text = hostLatestReceiptText(snapshot: observed)
         expect(
             hostLatestReceiptEvidence(snapshot: observed)?.event == .taskStart
-                && text?.contains("Claude Code · 任务开始") == true,
+                && text?.contains("Claude Code · 用户发起") == true,
             "observed receipt 必须保留结构化宿主与声音语义")
         expect(
             text?.contains("UserPromptSubmit") == false

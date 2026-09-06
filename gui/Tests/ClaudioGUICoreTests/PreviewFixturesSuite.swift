@@ -83,8 +83,6 @@ func runPreviewFixturesSuites() {
             "packCard.complete", "packCard.partial", "packCard.broken",
             "panelPack.loading", "panelPack.pinned.one", "panelPack.pinned.four",
             "panelPack.noPinned", "panelPack.noPacks", "panelPack.readFailed",
-            "interfaceText.compact", "interfaceText.standard",
-            "interfaceText.large", "interfaceText.maximum",
             "settingsRoute.general", "settingsRoute.integrations",
             "settingsRoute.events-and-sounds", "settingsRoute.notifications",
             "settingsRoute.display", "settingsRoute.sounds", "settingsRoute.usage",
@@ -168,14 +166,8 @@ func runPreviewFixturesSuites() {
             "eventHostIndicator.all-gray",
             "eventHostIndicator.legacy",
             "eventHostIndicator.awaiting-narrow",
-            "eventRowLayout.zh-Hans-compact",
-            "eventRowLayout.zh-Hans-standard",
-            "eventRowLayout.zh-Hans-large",
-            "eventRowLayout.zh-Hans-maximum",
-            "eventRowLayout.en-compact",
-            "eventRowLayout.en-standard",
-            "eventRowLayout.en-large",
-            "eventRowLayout.en-maximum",
+            "eventRowLayout.zh-Hans",
+            "eventRowLayout.en",
         ]
         expect(
             visited == expected,
@@ -313,8 +305,8 @@ func runPreviewFixturesSuites() {
             "全彩帧必须检查标准单行布局")
         expect(
             scenarios.first(where: { $0.id == "awaiting-narrow" })?.adaptation
-                .rowWrapsToTwoLines == true,
-            "待激活帧必须检查窄版两行布局")
+                == panelLayoutAdaptation(),
+            "待激活帧必须消费固定紧凑布局")
         expect(
             scenarios.first(where: { $0.id == "full-color" })?.title.contains("Logo 12pt") == true
                 && scenarios.first(where: { $0.id == "awaiting-narrow" })?.title
@@ -327,33 +319,24 @@ func runPreviewFixturesSuites() {
     }
 
     suite(
-        "PreviewFixtures.eventRowLayoutScenarios covers 2 languages × 4 sizes × 3 coverage states"
+        "PreviewFixtures.eventRowLayoutScenarios covers 2 languages × 3 coverage states at fixed density"
     ) {
         let scenarios = PreviewFixtures.eventRowLayoutScenarios
-        expect(scenarios.count == 8, "事件行 C 布局必须恰好有 8 个语言×字号面板")
+        expect(scenarios.count == ClaudioAppLanguage.allCases.count, "事件行布局每种语言恰好一帧")
 
-        let languageAndSize = Set(
-            scenarios.map {
-                "\($0.language.rawValue)-\($0.interfaceTextSize.rawValue)"
-            })
-        let expectedLanguageAndSize = Set(
-            ClaudioAppLanguage.allCases.flatMap { language in
-                ClaudioInterfaceTextSize.allCases.map { size in
-                    "\(language.rawValue)-\(size.rawValue)"
-                }
-            })
+        let languages = Set(scenarios.map(\.language))
         expect(
-            languageAndSize == expectedLanguageAndSize,
-            "事件行 C 布局缺少语言×字号组合：\(expectedLanguageAndSize.subtracting(languageAndSize))")
+            languages == Set(ClaudioAppLanguage.allCases),
+            "事件行布局必须覆盖两种产品语言")
 
         for scenario in scenarios {
             expect(
                 Set(scenario.samples.map { coverageStateLabel($0.row.coverage) })
                     == ["present", "unmapped", "broken"],
-                "每个面板必须同帧混排 present/unmapped/broken：\(scenario.id)")
+                "每个固定密度面板必须同帧混排 present/unmapped/broken：\(scenario.id)")
             expect(
                 scenario.samples.first?.row.event == .stopFailure,
-                "每个字号与语言帧都必须渲染最长英文标题 Execution interrupted")
+                "每个语言帧都必须渲染最长英文标题 Execution interrupted")
 
             let disconnectedSample = scenario.samples.first {
                 if case .unmapped = $0.row.coverage { return true }
@@ -377,17 +360,11 @@ func runPreviewFixturesSuites() {
                 "unmapped 样例必须区分已实现能力未连接与未实现能力：\(scenario.id)")
         }
 
-        for size in ClaudioInterfaceTextSize.allCases {
-            let layouts =
-                scenarios
-                .filter { $0.interfaceTextSize == size }
-                .map(\.adaptation.eventActionsMoveBelow)
-            let expected = size == .maximum
-            expect(
-                layouts.count == ClaudioAppLanguage.allCases.count
-                    && layouts.allSatisfy { $0 == expected },
-                "\(size.rawValue) 的双语动作布局错误：\(layouts)")
-        }
+        expect(
+            scenarios.allSatisfy {
+                $0.adaptation == panelLayoutAdaptation()
+            },
+            "所有事件行画廊帧必须消费同一固定紧凑布局")
     }
 
     // MARK: - PackCard: PackCardState × isSelected, every combination — plus the coverage
@@ -469,9 +446,7 @@ func runPreviewFixturesSuites() {
         )
     }
 
-    suite(
-        "PreviewFixtures covers panel pack loading/four-result rendering plus 1-row/4-row density and all text sizes"
-    ) {
+    suite("PreviewFixtures covers panel pack loading/four-result rendering plus 1-row/4-row density") {
         expect(
             PreviewFixtures.panelPackSectionStates.count == 6,
             "包区域必须包含加载、pinned 1 行/4 行、无固定、无包、读取失败六帧")
@@ -480,9 +455,6 @@ func runPreviewFixturesSuites() {
             return cards.count
         }
         expect(pinnedCounts == [1, 4], "固定包密度必须覆盖 1 与 4 行，实得 \(pinnedCounts)")
-        expect(
-            PreviewFixtures.interfaceTextSizes == ClaudioInterfaceTextSize.allCases,
-            "state gallery 必须逐档渲染 Claudio 的全部四档界面文字")
     }
 
     suite("PreviewFixtures.settingsRouteScenarios pins the fixed nine-slot route gallery") {
