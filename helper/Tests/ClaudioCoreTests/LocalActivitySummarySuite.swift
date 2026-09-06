@@ -163,7 +163,8 @@ func runLocalActivitySummarySuites() {
                 withIntermediateDirectories: true)
             writePendingFixture(
                 to: pendingDirectory.appendingPathComponent("delta-existing.json"),
-                batchID: nil)
+                batchID: nil,
+                localDate: "2030-03-17")
 
             expect(
                 store.record(
@@ -658,10 +659,12 @@ func runLocalActivitySummarySuites() {
             let consumedBatchID = UUID(uuidString: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA")!
             writePendingFixture(
                 to: pendingDirectory.appendingPathComponent("delta-consumed.json"),
-                batchID: consumedBatchID)
+                batchID: consumedBatchID,
+                localDate: "2030-03-17")
             writePendingFixture(
                 to: pendingDirectory.appendingPathComponent("delta-new-identical.json"),
-                batchID: nil)
+                batchID: nil,
+                localDate: "2030-03-17")
             expect(
                 setPendingBatchMarker(consumedBatchID, on: summary),
                 "test must reproduce the summary-published cleanup-incomplete state")
