@@ -130,7 +130,9 @@ public struct PanelView: View {
         VStack(spacing: 0) {
             header
                 .padding(13)
-            Divider().opacity(0.65)
+            Rectangle()
+                .fill(ClaudioTheme.hairline(colorScheme))
+                .frame(height: ClaudioTheme.Metrics.hairline)
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 12) {
                     soundScopePicker(
@@ -215,7 +217,7 @@ public struct PanelView: View {
                     .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
                     .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(ClaudioIconButtonStyle())
             .focused($focusedTarget, equals: .headerSettings)
             .accessibilityLabel(l10n.text(.panelOpenSettings))
             .accessibilityIdentifier("panel.settings")
@@ -387,18 +389,25 @@ public struct PanelView: View {
             {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(ClaudioColor.warning(colorScheme))
                     Text(localizedEventName(.stopFailure, language: languageStore.language))
                     Spacer(minLength: 4)
                     Text(String(count)).monospacedDigit()
                 }
                 .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundColor(ClaudioColor.warning(colorScheme))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("panel.activity.stop-failure")
             }
         }
         .padding(10)
-        .background(ClaudioTheme.elevated(colorScheme).opacity(0.8))
+        .background(ClaudioTheme.surface(colorScheme))
+        .overlay(
+            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section)
+                .strokeBorder(
+                    ClaudioTheme.hairline(colorScheme),
+                    lineWidth: ClaudioTheme.Metrics.hairline)
+        )
         .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("panel.activity-overview")
@@ -450,7 +459,10 @@ public struct PanelView: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(
+            PanelActivitySegmentButtonStyle(
+                cornerRadius: ClaudioTheme.Radius.control)
+        )
         .focused($focusedTarget, equals: .activityMetric(segment.event))
         .accessibilityLabel(localizedEventName(segment.event, language: languageStore.language))
         .accessibilityValue(activityTooltipText(segment))
@@ -538,25 +550,41 @@ public struct PanelView: View {
                     .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
             }
             .padding(.bottom, 4)
-            ForEach(Array(eventPresentations.enumerated()), id: \.element.id) { index, event in
-                PanelAgentEventRow(
-                    presentation: event,
-                    adaptation: layoutAdaptation,
-                    language: languageStore.language,
-                    focusedTarget: $focusedTarget,
-                    onPreview: {
-                        guard let row = panelModel.eventRows.first(where: { $0.event == event.event })
-                        else { return }
-                        playPreview(for: row)
-                    },
-                    onToggleMute: {
-                        panelModel.toggleMute(event.event)
-                        onAudibilityInputsChanged()
-                    })
-                if index < eventPresentations.count - 1 {
-                    Divider().opacity(0.65)
+            VStack(spacing: 0) {
+                ForEach(Array(eventPresentations.enumerated()), id: \.element.id) { index, event in
+                    PanelAgentEventRow(
+                        presentation: event,
+                        adaptation: layoutAdaptation,
+                        language: languageStore.language,
+                        focusedTarget: $focusedTarget,
+                        onPreview: {
+                            guard
+                                let row = panelModel.eventRows.first(where: {
+                                    $0.event == event.event
+                                })
+                            else { return }
+                            playPreview(for: row)
+                        },
+                        onToggleMute: {
+                            panelModel.toggleMute(event.event)
+                            onAudibilityInputsChanged()
+                        })
+                    if index < eventPresentations.count - 1 {
+                        Rectangle()
+                            .fill(ClaudioTheme.hairline(colorScheme))
+                            .frame(height: ClaudioTheme.Metrics.hairline)
+                    }
                 }
             }
+            .padding(.horizontal, 8)
+            .background(ClaudioTheme.surface(colorScheme))
+            .overlay(
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
+                    .strokeBorder(
+                        ClaudioTheme.hairline(colorScheme),
+                        lineWidth: ClaudioTheme.Metrics.hairline)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row))
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("panel.events.single-scope")
@@ -607,7 +635,7 @@ public struct PanelView: View {
         }
         .padding(9)
         .background(ClaudioTheme.elevated(colorScheme))
-        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row))
         .accessibilityIdentifier("panel.needs-pack")
     }
 
@@ -651,11 +679,13 @@ public struct PanelView: View {
                 .padding(.horizontal, 9)
                 .padding(.vertical, 7)
             }
-            .background(ClaudioTheme.elevated(colorScheme))
+            .background(ClaudioTheme.surface(colorScheme))
             .overlay(
-                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
-                    .strokeBorder(ClaudioTheme.hairline(colorScheme), lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
+                    .strokeBorder(
+                        ClaudioTheme.hairline(colorScheme),
+                        lineWidth: ClaudioTheme.Metrics.hairline))
+            .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row))
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("panel.playback-settings")
@@ -869,10 +899,6 @@ private struct PanelAgentEventRow: View {
                 Image(systemName: "play.fill")
             }
             .buttonStyle(ClaudioIconButtonStyle())
-            .foregroundColor(
-                presentation.controls.previewEnabled
-                    ? ClaudioTheme.event(presentation.event, colorScheme)
-                    : ClaudioTheme.secondaryText(colorScheme))
             .disabled(!presentation.controls.previewEnabled)
             .focused(focusedTarget, equals: .eventPreview(presentation.event))
             .help(localizedEventPreviewHint(presentation.controls.previewAvailability, language: language))
@@ -883,12 +909,7 @@ private struct PanelAgentEventRow: View {
             .accessibilityIdentifier("panel.event.\(presentation.event.rawValue).preview")
 
             Button(action: onToggleMute) {
-                EventMuteSpeakerIcon(
-                    isMuted: !presentation.enabled,
-                    color: presentation.enabled
-                        ? ClaudioTheme.secondaryText(colorScheme)
-                        : ClaudioTheme.clay(colorScheme)
-                )
+                PanelMuteSpeakerIcon(isMuted: !presentation.enabled)
                 .accessibilityHidden(true)
             }
             .buttonStyle(ClaudioIconButtonStyle())
@@ -905,5 +926,85 @@ private struct PanelAgentEventRow: View {
             .accessibilityIdentifier("panel.event.\(presentation.event.rawValue).mute")
         }
         .fixedSize()
+    }
+}
+
+/// Activity segments keep their 29pt target and 13pt visible bar while exposing the same warm
+/// interaction language as the shared icon actions. Geometry never changes between states.
+private struct PanelActivitySegmentButtonStyle: ButtonStyle {
+    let cornerRadius: CGFloat
+
+    func makeBody(configuration: Configuration) -> some View {
+        PanelActivitySegmentButtonStyleBody(
+            configuration: configuration,
+            cornerRadius: cornerRadius)
+    }
+}
+
+private struct PanelActivitySegmentButtonStyleBody: View {
+    let configuration: ButtonStyleConfiguration
+    let cornerRadius: CGFloat
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.isFocused) private var isFocused
+    @State private var isHovered = false
+
+    private var interactionState: ClaudioIconButtonInteractionState {
+        ClaudioIconButtonInteractionState(
+            isEnabled: isEnabled,
+            isHovered: isHovered,
+            isFocused: isFocused,
+            isPressed: configuration.isPressed)
+    }
+
+    private var isHighlighted: Bool {
+        interactionState == .hovered || interactionState == .focused
+    }
+
+    private var backgroundColor: Color {
+        if isHighlighted { return ClaudioTheme.claySoft(colorScheme) }
+        if interactionState == .pressed { return ClaudioTheme.elevated(colorScheme) }
+        return .clear
+    }
+
+    private var borderColor: Color {
+        isHighlighted ? ClaudioTheme.clay(colorScheme) : .clear
+    }
+
+    var body: some View {
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .fill(backgroundColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .strokeBorder(
+                        borderColor,
+                        lineWidth: ClaudioTheme.Metrics.hairline)
+            )
+            .contentShape(Rectangle())
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.12),
+                value: interactionState
+            )
+            .onHover { isHovered = $0 }
+    }
+}
+
+/// The custom Touch Bar speaker remains the visual mask; the shared button style owns its actual
+/// foreground so hover, focus, disabled and Reduce Motion states cannot be overridden locally.
+private struct PanelMuteSpeakerIcon: View {
+    let isMuted: Bool
+
+    var body: some View {
+        Rectangle()
+            .fill(.foreground)
+            .frame(width: 24, height: 24)
+            .mask {
+                EventMuteSpeakerIcon(isMuted: isMuted, color: .white)
+            }
     }
 }

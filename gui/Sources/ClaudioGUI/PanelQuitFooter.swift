@@ -11,6 +11,7 @@ struct PanelQuitFooter: View {
     private let focusedTarget: FocusState<PanelFocusTarget?>.Binding
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
 
     init(
@@ -33,17 +34,18 @@ struct PanelQuitFooter: View {
                     Text(l10n.text(.commonClose))
                 }
                 .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundColor(
-                    isHighlighted
-                        ? ClaudioTheme.text(colorScheme)
-                        : ClaudioTheme.secondaryText(colorScheme))
+                .foregroundColor(foregroundColor)
                 .padding(.horizontal, 8)
                 .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
                 .fixedSize(horizontal: true, vertical: false)
                 .background(
                     RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
-                        .fill(isHighlighted ? ClaudioTheme.elevated(colorScheme) : .clear))
+                        .fill(highlightBackground)
+                )
                 .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+                .animation(
+                    reduceMotion ? nil : .easeOut(duration: 0.12),
+                    value: isHighlighted)
             }
             .buttonStyle(.borderless)
             .focused(focusedTarget, equals: .quitApplication)
@@ -55,10 +57,25 @@ struct PanelQuitFooter: View {
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 2)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(ClaudioTheme.hairline(colorScheme))
+                .frame(height: ClaudioTheme.Metrics.hairline)
+        }
     }
 
     private var isHighlighted: Bool {
         isHovered || focusedTarget.wrappedValue == .quitApplication
+    }
+
+    private var foregroundColor: Color {
+        isHighlighted
+            ? ClaudioTheme.text(colorScheme)
+            : ClaudioTheme.secondaryText(colorScheme)
+    }
+
+    private var highlightBackground: Color {
+        isHighlighted ? ClaudioTheme.elevated(colorScheme) : .clear
     }
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: language) }

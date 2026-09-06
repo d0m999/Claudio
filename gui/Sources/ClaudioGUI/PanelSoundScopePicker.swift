@@ -17,6 +17,7 @@ struct PanelSoundScopePicker: View {
     let onSelect: (PanelSoundScopeID) -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focusedMenuTarget: PanelSoundScopePickerFocusTarget?
     @State private var hoveredScope: PanelSoundScopeID?
     @State private var triggerHovered = false
@@ -98,17 +99,21 @@ struct PanelSoundScopePicker: View {
             .background(
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section)
                     .fill(
-                        isExpanded || triggerHovered
-                            ? ClaudioTheme.elevated(colorScheme)
-                            : ClaudioTheme.elevated(colorScheme).opacity(0.72))
+                        triggerHighlighted
+                            ? ClaudioTheme.claySoft(colorScheme)
+                            : ClaudioTheme.surface(colorScheme))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section)
                     .strokeBorder(
-                        isExpanded
-                            ? ClaudioColor.hairlineStrong(colorScheme)
+                        triggerHighlighted
+                            ? ClaudioTheme.clay(colorScheme)
                             : ClaudioTheme.hairline(colorScheme),
-                        lineWidth: isExpanded ? 1.5 : 1))
+                        lineWidth: triggerHighlighted ? 1.5 : 1)
+            )
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.12),
+                value: triggerHighlighted)
         }
         .buttonStyle(.plain)
         .focused(focusedTarget, equals: .soundScope)
@@ -119,6 +124,10 @@ struct PanelSoundScopePicker: View {
             l10n.text(isExpanded ? .panelSoundScopeCollapseHint : .panelSoundScopeExpandHint)
         )
         .accessibilityIdentifier("panel.sound-scope")
+    }
+
+    private var triggerHighlighted: Bool {
+        isExpanded || triggerHovered || focusedTarget.wrappedValue == .soundScope
     }
 
     private var menu: some View {
@@ -143,7 +152,9 @@ struct PanelSoundScopePicker: View {
         .background(ClaudioTheme.surface(colorScheme))
         .overlay(
             RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section)
-                .strokeBorder(ClaudioColor.hairlineStrong(colorScheme), lineWidth: 1)
+                .strokeBorder(
+                    ClaudioTheme.hairline(colorScheme),
+                    lineWidth: ClaudioTheme.Metrics.hairline)
         )
         .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section))
         .shadow(
@@ -161,6 +172,7 @@ struct PanelSoundScopePicker: View {
         let selected = scope.scope == selectedScope.scope
         let hovered = hoveredScope == scope.scope
         let target = PanelSoundScopePickerFocusTarget.scope(scope.scope)
+        let focused = focusedMenuTarget == target
         return Button {
             onSelect(scope.scope)
             dismissMenuAndRestoreTriggerFocus()
@@ -180,7 +192,26 @@ struct PanelSoundScopePicker: View {
             .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
             .background(
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
-                    .fill(selected || hovered ? ClaudioTheme.elevated(colorScheme) : .clear))
+                    .fill(
+                        selected
+                            ? ClaudioTheme.claySoft(colorScheme)
+                            : hovered || focused
+                                ? ClaudioTheme.elevated(colorScheme)
+                                : .clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                    .strokeBorder(
+                        selected
+                            ? ClaudioTheme.clay(colorScheme)
+                            : hovered || focused
+                                ? ClaudioTheme.hairline(colorScheme)
+                                : .clear,
+                        lineWidth: ClaudioTheme.Metrics.hairline)
+            )
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.12),
+                value: selected || hovered || focused)
         }
         .buttonStyle(.plain)
         .focused($focusedMenuTarget, equals: target)
