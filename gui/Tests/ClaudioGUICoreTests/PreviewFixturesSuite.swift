@@ -446,7 +446,9 @@ func runPreviewFixturesSuites() {
         )
     }
 
-    suite("PreviewFixtures covers panel pack loading/four-result rendering plus 1-row/4-row density") {
+    suite(
+        "PreviewFixtures covers panel pack loading/four-result rendering plus 1-row/4-row density"
+    ) {
         expect(
             PreviewFixtures.panelPackSectionStates.count == 6,
             "包区域必须包含加载、pinned 1 行/4 行、无固定、无包、读取失败六帧")
@@ -575,6 +577,46 @@ func runPreviewFixturesSuites() {
             PreviewFixtures.AICueGalleryScenario.displayNameFailure.previewState.failure
                 == .displayName(.displayNameTooLong(maximumCharacters: 40)),
             "候选采用前的 display-name validation failure 必须进入 gallery")
+    }
+
+    suite("Finalized Events fixture pins Claude ElevenLabs verified prompt state") {
+        let state = PreviewFixtures.finalizedClaudeEventsAICuePreviewState
+        expect(
+            state.providerProfileID == .elevenLabsGlobal,
+            "finalized Events fixture 必须使用 elevenlabs-global")
+        expect(
+            state.credentialStatus
+                == .stored(verification: .verified, hasPendingReplacement: false),
+            "finalized Events fixture 必须呈现 verified credential")
+        expect(
+            state.phase == .editing && state.target?.surface == .claudeCode,
+            "finalized Events fixture 必须是 Claude surface 的 prompt/editing 阶段")
+        expect(
+            state.generation == nil && state.failure == nil,
+            "prompt/editing fixture 不得伪造候选或失败")
+    }
+
+    suite("Finalized Panel fixture keeps Claude 5/5 truth and real unsupported coverage") {
+        let presentation = PreviewFixtures.finalizedActivityDiagnosticsPresentation
+        let claude = presentation.projection.presentation(for: .surface(.claudeCode))
+        let workBuddy = presentation.projection.presentation(for: .surface(.workBuddy))
+
+        expect(
+            claude.scope == .surface(.claudeCode)
+                && claude.integrationStatus == .connected
+                && claude.eventRows.count == Event.allCases.count,
+            "finalized Panel fixture 必须投影 Claude 的完整五事件事实")
+        expect(
+            claude.event(.taskStart)?.sevenDayCount == 22
+                && claude.event(.stop)?.todayCount == 0
+                && claude.event(.stopFailure)?.sevenDayCount == 2,
+            "Claude sevenDays fixture 必须同时覆盖非零、零值与 StopFailure")
+        expect(
+            claude.eventRows.allSatisfy { $0.availability == .supported },
+            "Claude Code 的 5/5 能力不得为了画廊 unsupported 视觉而被伪造")
+        expect(
+            workBuddy.eventRows.contains { $0.availability == .unsupported },
+            "unsupported 视觉必须来自真实 WorkBuddy 2/5 能力，而不是篡改 Claude")
     }
 
     // MARK: - All-product integration scenarios

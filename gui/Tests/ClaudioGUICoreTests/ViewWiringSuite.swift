@@ -1876,7 +1876,8 @@ func runViewWiringSuites() {
             "生产面板只保留显式 General 设置入口，不再把声音编辑或 reset 混入面板")
         expect(
             focusCollapsed.contains("case activityOperational")
-                && focusCollapsed.contains("var order: [PanelFocusTarget] = [.headerSettings, .soundScope]")
+                && focusCollapsed.contains(
+                    "var order: [PanelFocusTarget] = [.headerSettings, .soundScope]")
                 && focusCollapsed.contains(".activityRange")
                 && focusCollapsed.contains("order.append(.quitApplication)"),
             "新焦点模型必须以 Header 设置/作用域/活动范围开始，并以退出收尾")
@@ -3291,6 +3292,60 @@ func runViewWiringSuites() {
         expect(
             flat.contains(".focused($focusedTarget, equals: .restoreFactoryPack)"),
             "恢复出厂按钮必须接进窗口专用焦点模型")
+    }
+
+    suite("试听 pulse：只接在播放器接受后的生产路径，三个入口共用组件") {
+        guard
+            let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift"),
+            let events = codeOnly("gui/Sources/ClaudioGUI/EventSettingsWindowView.swift"),
+            let ai = codeOnly("gui/Sources/ClaudioGUI/EventSettingsAICueView.swift")
+        else {
+            expect(false, "必须能读取 Panel、Events 与 AI candidate 的试听接线")
+            return
+        }
+        let flatPanel = collapsingWhitespace(panel)
+        let flatEvents = collapsingWhitespace(events)
+        let flatAI = collapsingWhitespace(ai)
+
+        expect(
+            flatPanel.contains("private func playPreview(for row: EventRow) -> Bool")
+                && flatPanel.contains("return previewPlayer.play(")
+                && flatPanel.contains("if onPreview() { previewPulseTrigger &+= 1 }")
+                && flatPanel.contains(
+                    ".claudioPreviewPulse(trigger: previewPulseTrigger)"),
+            "Panel 必须只在 AudioPreviewPlaying 返回 true 后触发共享 pulse")
+        expect(
+            flatEvents.contains("private func playPreview(_ event: Event) -> Bool")
+                && flatEvents.contains("return true")
+                && flatEvents.contains("if onPreview() { previewPulseTrigger &+= 1 }")
+                && flatEvents.contains(
+                    ".claudioPreviewPulse(trigger: previewPulseTrigger)"),
+            "Events 必须在 NSSound play guard 成功后才触发共享 pulse")
+        expect(
+            flatAI.contains(".claudioPreviewPulse(")
+                && flatAI.contains("trigger: playingCandidateID == candidate.id ? 1 : 0")
+                && flatEvents.contains("playingCandidateID = candidate.id"),
+            "AI candidate 必须由父视图的真实 playingCandidateID 驱动共享 pulse")
+    }
+
+    suite("Finalized gallery：目标 URL 的 Claude / ElevenLabs / week 状态必须接入生产视图") {
+        guard let gallery = codeOnly("gui/Sources/ClaudioGUI/StateGalleryView.swift") else {
+            expect(false, "必须能读取 StateGalleryView")
+            return
+        }
+        let flatGallery = collapsingWhitespace(gallery)
+        expect(
+            flatGallery.contains(
+                "previewState: PreviewFixtures.finalizedClaudeEventsAICuePreviewState")
+                && flatGallery.contains("scope: .surface(.claudeCode)"),
+            "Events finalized frame 必须接入 Claude scope 与 ElevenLabs verified prompt fixture")
+        expect(
+            flatGallery.contains("previewActivityPresentation:")
+                && flatGallery.contains(
+                    "PreviewFixtures.finalizedActivityDiagnosticsPresentation")
+                && flatGallery.contains("previewActivityRange:")
+                && flatGallery.contains(".sevenDays"),
+            "Panel Claude frame 必须接入真实活动投影并固定 seven-day range")
     }
 
     suite("任务开始事件：身份字形使用 paperplane.fill，试听仍使用 play.fill") {

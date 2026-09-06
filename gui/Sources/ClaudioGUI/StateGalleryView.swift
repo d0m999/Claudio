@@ -163,7 +163,8 @@ private enum SettingsGalleryAppearance: String, CaseIterable, Identifiable {
 struct EventSettingsLayoutGalleryView: View {
     var body: some View {
         GallerySection(
-            title: "Events destination · production mount · 2 languages × fixed compact layout × 2 widths"
+            title:
+                "Events destination · Claude + ElevenLabs verified prompt · 2 languages × 2 widths"
         ) {
             ForEach(ClaudioAppLanguage.allCases) { language in
                 ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
@@ -212,7 +213,7 @@ struct ComplexAccessibilityEnvironmentGalleryView: View {
             GalleryFrame(caption: "Reduce Motion") {
                 EventSettingsLayoutFrame(
                     language: .english,
-                        textSize: .standard,
+                    textSize: .standard,
                     width: EventSettingsGalleryWidth.minimum.value
                 )
                 .transaction { transaction in
@@ -264,11 +265,11 @@ private struct EventSettingsLayoutFrame: View {
         _selection = StateObject(
             wrappedValue: EventSettingsWindowSelection(
                 route: EventSettingsWindowRoute(
-                    scope: .surface(.workBuddy),
+                    scope: .surface(.claudeCode),
                     event: .stop)))
 
-        let hostState = PreviewFixtures.workBuddyVisualScenarios.first {
-            $0.phase == .allImplementedBindingsCurrent
+        let hostState = PreviewFixtures.hostIntegrationScenarios.first {
+            $0.id == "claude-only"
         }!.state
         _hostIntegrations = StateObject(
             wrappedValue: HostIntegrationPresentationStore(
@@ -283,12 +284,12 @@ private struct EventSettingsLayoutFrame: View {
             masterVolume: 0.75,
             eventsEnabled: enabledEvents,
             surfaceOverrides: [
-                HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
-                    selectedPack: "workbuddy-private",
+                HostSurfaceID.claudeCode.rawValue: SurfaceSoundOverride(
+                    selectedPack: "claude-private",
                     eventsEnabled: [Event.notification.cliName: true])
             ])
         let effectiveConfig = ClaudioConfig(
-            selectedPack: "workbuddy-private",
+            selectedPack: "claude-private",
             masterVolume: 0.75,
             eventsEnabled: Dictionary(
                 uniqueKeysWithValues: Event.allCases.map { ($0.cliName, true) }))
@@ -301,8 +302,8 @@ private struct EventSettingsLayoutFrame: View {
                 state: .complete,
                 isSelected: false),
             PackCard(
-                id: "workbuddy-private",
-                name: "WorkBuddy Private",
+                id: "claude-private",
+                name: "Claude Private",
                 isCC0: false,
                 presentEvents: Set(Event.allCases),
                 state: .complete,
@@ -317,24 +318,24 @@ private struct EventSettingsLayoutFrame: View {
         panelModel = PanelConfigController(
             previewConfigState: .operational(baseConfig),
             effectiveConfig: effectiveConfig,
-            selectedSurface: .workBuddy,
+            selectedSurface: .claudeCode,
             eventRows: rows,
             packCards: packCards,
             selectedPackMetadata: SelectedPackMetadata(
-                id: "workbuddy-private",
-                name: "WorkBuddy Private"),
+                id: "claude-private",
+                name: "Claude Private"),
             environment: previewAudioImportEnvironment)
         _soundPacksModel = StateObject(
             wrappedValue: SoundPacksWindowModel(
                 previewConfig: baseConfig,
                 packCards: packCards,
-                selectedPackID: "workbuddy-private",
+                selectedPackID: "claude-private",
                 selectedEventRows: rows,
                 environment: previewAudioImportEnvironment,
                 refreshCoordinator: SoundPacksRefreshCoordinator()))
         _aiCueViewModel = StateObject(
             wrappedValue: AICueGenerationViewModel(
-                previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState))
+                previewState: PreviewFixtures.finalizedClaudeEventsAICuePreviewState))
     }
 
     var body: some View {
@@ -624,6 +625,7 @@ private final class SettingsPreviewPublicationGate {
 // MARK: - Production Agent panel (2 languages × 4 sizes × critical states)
 
 private enum ProductionPanelGalleryScenario: String, CaseIterable, Identifiable {
+    case claudeWeek = "Claude · seven-day activity"
     case workBuddy = "WorkBuddy 2/5 operational"
     case workBuddyAwaitingExpanded = "WorkBuddy awaiting · scope expanded"
     case needsPack = "needsPack recovery"
@@ -637,10 +639,11 @@ private enum ProductionPanelGalleryScenario: String, CaseIterable, Identifiable 
 struct ProductionPanelGalleryView: View {
     var body: some View {
         GallerySection(
-            title: "Production Agent Panel · 2 languages × 4 sizes × 6 critical states"
+            title:
+                "Production Agent Panel · 2 languages × \(ProductionPanelGalleryScenario.allCases.count) critical states"
         ) {
             ForEach(ClaudioAppLanguage.allCases) { language in
-                    ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
+                ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
                     ForEach(ProductionPanelGalleryScenario.allCases) { scenario in
                         GalleryFrame(
                             caption:
@@ -680,12 +683,19 @@ private struct ProductionPanelStateFrame: View {
         self.textSize = textSize
         self.scenario = scenario
 
-        let hostPhase: PreviewFixtures.WorkBuddyVisualPhase =
-            scenario == .workBuddyAwaitingExpanded
-            ? .awaitingActivation : .allImplementedBindingsCurrent
-        let hostState = PreviewFixtures.workBuddyVisualScenarios.first {
-            $0.phase == hostPhase
-        }!.state
+        let hostState = {
+            if scenario == .claudeWeek {
+                return PreviewFixtures.hostIntegrationScenarios.first {
+                    $0.id == "claude-only"
+                }!.state
+            }
+            let hostPhase: PreviewFixtures.WorkBuddyVisualPhase =
+                scenario == .workBuddyAwaitingExpanded
+                ? .awaitingActivation : .allImplementedBindingsCurrent
+            return PreviewFixtures.workBuddyVisualScenarios.first {
+                $0.phase == hostPhase
+            }!.state
+        }()
         soundScopeExpanded = scenario == .workBuddyAwaitingExpanded
         _focusCoordinator = StateObject(wrappedValue: PanelFocusCoordinator())
         _hostIntegrations = StateObject(
@@ -709,6 +719,16 @@ private struct ProductionPanelStateFrame: View {
         }
 
         switch scenario {
+        case .claudeWeek:
+            selectedScope = .surface(.claudeCode)
+            panelModel = PanelConfigController(
+                previewConfigState: .operational(baseConfig),
+                selectedSurface: .claudeCode,
+                eventRows: presentRows,
+                selectedPackMetadata: SelectedPackMetadata(
+                    id: "gallery-pack",
+                    name: "Orbit Signals"),
+                environment: previewAudioImportEnvironment)
         case .workBuddy, .workBuddyAwaitingExpanded:
             selectedScope = .surface(.workBuddy)
             panelModel = PanelConfigController(
@@ -775,6 +795,10 @@ private struct ProductionPanelStateFrame: View {
             previewPanelModel: panelModel,
             previewScope: selectedScope,
             previewSoundScopeExpanded: soundScopeExpanded,
+            previewActivityPresentation: scenario == .claudeWeek || scenario == .workBuddy
+                ? PreviewFixtures.finalizedActivityDiagnosticsPresentation
+                : .empty(),
+            previewActivityRange: scenario == .claudeWeek ? .sevenDays : .today,
             audioEnvironment: previewAudioImportEnvironment,
             focusCoordinator: focusCoordinator,
             hostIntegrations: hostIntegrations,

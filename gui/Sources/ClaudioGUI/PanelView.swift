@@ -50,6 +50,7 @@ public struct PanelView: View {
     private let audioEnvironment: AudioImportEnvironment
     private let configFile: URL
     private let previewPlayer: AudioPreviewPlaying
+    private let refreshesActivityOnLifecycle: Bool
     private let onAudibilityInputsChanged: @MainActor () -> Void
     private let onOpenSettings: @MainActor () -> Void
     private let onQuit: @MainActor () -> Void
@@ -78,6 +79,7 @@ public struct PanelView: View {
         self.onOpenSettings = onOpenSettings
         self.onQuit = onQuit
         previewPlayer = NSSoundAudioPreviewPlayer()
+        refreshesActivityOnLifecycle = true
 
         let inputsChanged = onAudibilityInputsChanged
         _announcer = StateObject(wrappedValue: PanelAnnouncer())
@@ -99,6 +101,8 @@ public struct PanelView: View {
         previewPanelModel: PanelConfigController,
         previewScope: PanelSoundScopeID,
         previewSoundScopeExpanded: Bool = false,
+        previewActivityPresentation: ActivityDiagnosticsPresentation = .empty(),
+        previewActivityRange: LocalActivityRange = .today,
         audioEnvironment: AudioImportEnvironment,
         focusCoordinator: PanelFocusCoordinator,
         hostIntegrations: HostIntegrationPresentationStore,
@@ -113,13 +117,16 @@ public struct PanelView: View {
         _announcer = StateObject(wrappedValue: PanelAnnouncer())
         _panelModel = StateObject(wrappedValue: previewPanelModel)
         _isSoundScopeMenuExpanded = State(initialValue: previewSoundScopeExpanded)
+        _activityRange = State(initialValue: previewActivityRange)
         self.audioEnvironment = audioEnvironment
         self.configFile = URL(fileURLWithPath: "/dev/null/claudio-panel-preview-config.json")
         self.focusCoordinator = focusCoordinator
         self.hostIntegrations = hostIntegrations
         self.languageStore = languageStore
-        self.activityDiagnostics = ActivityDiagnosticsModel(previewPresentation: .empty())
+        self.activityDiagnostics = ActivityDiagnosticsModel(
+            previewPresentation: previewActivityPresentation)
         self.previewPlayer = NSSoundAudioPreviewPlayer()
+        self.refreshesActivityOnLifecycle = false
         self.onAudibilityInputsChanged = {}
         self.onOpenSettings = {}
         self.onQuit = {}
@@ -178,17 +185,22 @@ public struct PanelView: View {
         .background(ClaudioTheme.panelGradient(colorScheme))
         .overlay(
             RoundedRectangle(cornerRadius: ClaudioTheme.Radius.panel)
-                .strokeBorder(ClaudioTheme.hairline(colorScheme), lineWidth: 1))
+                .strokeBorder(ClaudioTheme.hairline(colorScheme), lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.panel))
         .onAppear {
             synchronizeSelectedSoundSurface()
             applyFirstFocus()
-            activityDiagnostics.refresh()
+            if refreshesActivityOnLifecycle {
+                activityDiagnostics.refresh()
+            }
         }
         .onChange(of: focusCoordinator.showCount) { _ in
             isSoundScopeMenuExpanded = false
             panelModel.reload()
-            activityDiagnostics.refresh()
+            if refreshesActivityOnLifecycle {
+                activityDiagnostics.refresh()
+            }
             synchronizeSelectedSoundSurface()
             applyFirstFocus()
             announcePanelSummary()
@@ -318,7 +330,8 @@ public struct PanelView: View {
                     selection: $activityRange
                 ) {
                     Text(l10n.text(.settingsActivityRangeToday)).tag(LocalActivityRange.today)
-                    Text(l10n.text(.settingsActivityRangeSevenDays)).tag(LocalActivityRange.sevenDays)
+                    Text(l10n.text(.settingsActivityRangeSevenDays)).tag(
+                        LocalActivityRange.sevenDays)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -350,17 +363,20 @@ public struct PanelView: View {
                     activityCountText(
                         activityRange == .today
                             ? activityPresentation.todayMessages
-                            : activityPresentation.sevenDayMessages))
-                    .fontWeight(.semibold)
-                    .monospacedDigit()
+                            : activityPresentation.sevenDayMessages)
+                )
+                .fontWeight(.semibold)
+                .monospacedDigit()
                 Spacer(minLength: 4)
-                Text(activityStatusText(
-                    activityRange == .today
-                        ? activityPresentation.todayStatus
-                        : activityPresentation.sevenDayStatus))
-                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                Text(
+                    activityStatusText(
+                        activityRange == .today
+                            ? activityPresentation.todayStatus
+                            : activityPresentation.sevenDayStatus)
+                )
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                .lineLimit(1)
+                .truncationMode(.tail)
             }
             .font(.system(size: 9, weight: .medium, design: .rounded))
             .accessibilityElement(children: .combine)
@@ -470,7 +486,8 @@ public struct PanelView: View {
             l10n.format(
                 .settingsActivityCoverage,
                 Int64(activityPresentation.event(segment.event)?.coverage.supportedCount ?? 0),
-                Int64(activityPresentation.event(segment.event)?.coverage.totalCount ?? 0)))
+                Int64(activityPresentation.event(segment.event)?.coverage.totalCount ?? 0))
+        )
         .help(activityTooltipText(segment))
         .accessibilityIdentifier("panel.activity.segment.\(segment.event.cliName)")
     }
@@ -520,7 +537,8 @@ public struct PanelView: View {
             } else {
                 libraryUnavailableSection
             }
-            playbackSettings(masterVolumeEnabled: panelModel.libraryPresentationState.hasUsableSnapshot)
+            playbackSettings(
+                masterVolumeEnabled: panelModel.libraryPresentationState.hasUsableSnapshot)
         case .needsPack:
             needsPackNotice
             playbackSettings(masterVolumeEnabled: false)
@@ -562,8 +580,8 @@ public struct PanelView: View {
                                 let row = panelModel.eventRows.first(where: {
                                     $0.event == event.event
                                 })
-                            else { return }
-                            playPreview(for: row)
+                            else { return false }
+                            return playPreview(for: row)
                         },
                         onToggleMute: {
                             panelModel.toggleMute(event.event)
@@ -675,7 +693,8 @@ public struct PanelView: View {
                     focusCoordinator: focusCoordinator,
                     focusedTarget: $focusedTarget,
                     adaptation: layoutAdaptation,
-                    language: languageStore.language)
+                    language: languageStore.language
+                )
                 .padding(.horizontal, 9)
                 .padding(.vertical, 7)
             }
@@ -684,7 +703,8 @@ public struct PanelView: View {
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
                     .strokeBorder(
                         ClaudioTheme.hairline(colorScheme),
-                        lineWidth: ClaudioTheme.Metrics.hairline))
+                        lineWidth: ClaudioTheme.Metrics.hairline)
+            )
             .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row))
         }
         .accessibilityElement(children: .contain)
@@ -698,7 +718,8 @@ public struct PanelView: View {
                     panelWriteFailures(
                         muteError: panelModel.muteError,
                         packSwitchError: panelModel.packSwitchError,
-                        masterVolumeError: panelModel.masterVolumeError).enumerated()),
+                        masterVolumeError: panelModel.masterVolumeError
+                    ).enumerated()),
                 id: \.offset
             ) { _, message in
                 FailureRow(message: message)
@@ -714,7 +735,8 @@ public struct PanelView: View {
         guard panelModel.selectedSurfaceProfileIsMalformed,
             let surface = selectedScope.scope.surface
         else { return issue }
-        let name = HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?.displayName
+        let name =
+            HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?.displayName
             ?? surface.rawValue
         return l10n.format(.panelSurfaceOverrideDamaged, name)
     }
@@ -723,8 +745,9 @@ public struct PanelView: View {
 
     private func applyFirstFocus() {
         let content = panelModel.configState.topContent
-        let visibleEvents = content.showsEventContent
-            && panelModel.libraryPresentationState.hasUsableSnapshot
+        let visibleEvents =
+            content.showsEventContent
+                && panelModel.libraryPresentationState.hasUsableSnapshot
             ? eventPresentations : []
         let order = panelFocusOrder(
             .activityOperational(
@@ -750,7 +773,7 @@ public struct PanelView: View {
         }
     }
 
-    private func playPreview(for row: EventRow) {
+    private func playPreview(for row: EventRow) -> Bool {
         guard
             let file = eventPreviewFileURL(
                 row: row,
@@ -758,9 +781,11 @@ public struct PanelView: View {
                 environment: audioEnvironment)
         else {
             panelModel.reload()
-            return
+            return false
         }
-        previewPlayer.play(fileAt: file, volume: Float(previewVolume(for: panelModel.config)))
+        return previewPlayer.play(
+            fileAt: file,
+            volume: Float(previewVolume(for: panelModel.config)))
     }
 
     // MARK: - Shared projections
@@ -797,18 +822,19 @@ private struct PanelAgentEventRow: View {
     let presentation: PanelEventPresentation
     let adaptation: PanelLayoutAdaptation
     let language: ClaudioAppLanguage
-    let onPreview: () -> Void
+    let onPreview: () -> Bool
     let onToggleMute: () -> Void
     private let focusedTarget: FocusState<PanelFocusTarget?>.Binding
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var previewPulseTrigger = 0
 
     init(
         presentation: PanelEventPresentation,
         adaptation: PanelLayoutAdaptation,
         language: ClaudioAppLanguage,
         focusedTarget: FocusState<PanelFocusTarget?>.Binding,
-        onPreview: @escaping () -> Void,
+        onPreview: @escaping () -> Bool,
         onToggleMute: @escaping () -> Void
     ) {
         self.presentation = presentation
@@ -895,22 +921,31 @@ private struct PanelAgentEventRow: View {
 
     private var actions: some View {
         HStack(spacing: 5) {
-            Button(action: onPreview) {
+            Button {
+                if onPreview() {
+                    previewPulseTrigger &+= 1
+                }
+            } label: {
                 Image(systemName: "play.fill")
+                    .claudioPreviewPulse(trigger: previewPulseTrigger)
             }
             .buttonStyle(ClaudioIconButtonStyle())
             .disabled(!presentation.controls.previewEnabled)
             .focused(focusedTarget, equals: .eventPreview(presentation.event))
-            .help(localizedEventPreviewHint(presentation.controls.previewAvailability, language: language))
+            .help(
+                localizedEventPreviewHint(
+                    presentation.controls.previewAvailability, language: language)
+            )
             .accessibilityLabel(
                 ClaudioL10n(language: language).format(
                     .eventPreviewLabel,
-                    presentation.title))
+                    presentation.title)
+            )
             .accessibilityIdentifier("panel.event.\(presentation.event.rawValue).preview")
 
             Button(action: onToggleMute) {
                 PanelMuteSpeakerIcon(isMuted: !presentation.enabled)
-                .accessibilityHidden(true)
+                    .accessibilityHidden(true)
             }
             .buttonStyle(ClaudioIconButtonStyle())
             .disabled(!presentation.controls.muteEnabled)
@@ -918,11 +953,13 @@ private struct PanelAgentEventRow: View {
             .accessibilityLabel(
                 presentation.enabled
                     ? ClaudioL10n(language: language).format(.eventMute, presentation.title)
-                    : ClaudioL10n(language: language).format(.eventUnmute, presentation.title))
+                    : ClaudioL10n(language: language).format(.eventUnmute, presentation.title)
+            )
             .accessibilityValue(
                 presentation.enabled
                     ? ClaudioL10n(language: language).text(.eventEnabled)
-                    : ClaudioL10n(language: language).text(.eventMuted))
+                    : ClaudioL10n(language: language).text(.eventMuted)
+            )
             .accessibilityIdentifier("panel.event.\(presentation.event.rawValue).mute")
         }
         .fixedSize()

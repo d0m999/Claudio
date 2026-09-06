@@ -71,6 +71,23 @@ func runHitTargetSuites() {
             "disabled 不得保留误导性的交互动效")
     }
 
+    suite("Claudio preview pulse：仅播放成功后提供一次 220ms 几何反馈") {
+        expect(ClaudioPreviewPulseMotion.peakScale == 1.12, "试听 pulse 峰值必须为 1.12")
+        expect(
+            ClaudioPreviewPulseMotion.halfDuration == 0.11
+                && ClaudioPreviewPulseMotion.totalDuration == 0.22,
+            "试听 pulse 必须在 220ms 内完成放大与回落")
+        expect(
+            ClaudioPreviewPulseMotion.scale(isAtPeak: true, reduceMotion: false) == 1.12,
+            "正常动效环境必须渲染 pulse 峰值")
+        expect(
+            ClaudioPreviewPulseMotion.scale(isAtPeak: true, reduceMotion: true) == 1,
+            "Reduce Motion 下试听成功不得产生几何缩放")
+        expect(
+            ClaudioPreviewPulseMotion.scale(isAtPeak: false, reduceMotion: false) == 1,
+            "pulse 完成后必须回到稳定比例")
+    }
+
     suite("ClaudioFullRowButtonStyle：选中与未选中透明行的整行命中") {
         let recorder = HitTargetRecorder()
         let probe = NativeHitTargetProbe(

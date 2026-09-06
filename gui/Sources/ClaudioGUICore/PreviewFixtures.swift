@@ -665,6 +665,75 @@ public enum PreviewFixtures {
 
     public static let aiCueGalleryScenarios = AICueGalleryScenario.allCases
 
+    /// The exact finalized Events reference: Claude Code, ElevenLabs verified, prompt editing.
+    public static let finalizedClaudeEventsAICuePreviewState: AICueGenerationPreviewState = {
+        let target = try! AICueAdoptionTarget(
+            surface: .claudeCode,
+            event: .stop,
+            packID: "claude-private")
+        return AICueGenerationPreviewState(
+            providerProfileID: .elevenLabsGlobal,
+            credentialStatus: .stored(
+                verification: .verified,
+                hasPendingReplacement: false),
+            credentialActivity: .idle,
+            credentialFailure: nil,
+            phase: .editing,
+            adoptingCandidateID: nil,
+            soundDescription: aiCueDescription,
+            displayName: "",
+            target: target,
+            generation: nil,
+            failure: nil,
+            adoptionOutcome: nil)
+    }()
+
+    /// A deterministic seven-day activity document used by the production Panel gallery.
+    /// Claude Code keeps its real 5/5 capability truth; WorkBuddy supplies the real unsupported
+    /// slots so both visual states are covered without forging a Claude capability gap.
+    public static let finalizedActivityDiagnosticsPresentation: ActivityDiagnosticsPresentation = {
+        let now = Date(timeIntervalSince1970: 1_788_739_200)
+        let timeZone = TimeZone(secondsFromGMT: 0)!
+        let dateKeys = LocalActivitySummaryStore.dateKeys(today: now, timeZone: timeZone)
+        let todayCounts: [String: UInt64] = [
+            LocalActivityCounterKey.make(host: .claudeCode, event: .taskStart): 4,
+            LocalActivityCounterKey.make(host: .claudeCode, event: .stop): 0,
+            LocalActivityCounterKey.make(host: .claudeCode, event: .stopFailure): 1,
+            LocalActivityCounterKey.make(host: .claudeCode, event: .notification): 0,
+            LocalActivityCounterKey.make(host: .claudeCode, event: .subagentStop): 2,
+            LocalActivityCounterKey.make(host: .workBuddy, event: .taskStart): 2,
+            LocalActivityCounterKey.make(host: .workBuddy, event: .stop): 1,
+        ]
+        let previousCounts: [String: UInt64] = [
+            LocalActivityCounterKey.make(host: .claudeCode, event: .taskStart): 18,
+            LocalActivityCounterKey.make(host: .claudeCode, event: .stop): 16,
+            LocalActivityCounterKey.make(host: .claudeCode, event: .stopFailure): 1,
+            LocalActivityCounterKey.make(host: .claudeCode, event: .notification): 5,
+            LocalActivityCounterKey.make(host: .claudeCode, event: .subagentStop): 4,
+            LocalActivityCounterKey.make(host: .workBuddy, event: .taskStart): 8,
+            LocalActivityCounterKey.make(host: .workBuddy, event: .stop): 7,
+        ]
+        let document = LocalActivitySummaryDocument(
+            updatedAt: now,
+            buckets: [
+                LocalActivityDayBucket(localDate: dateKeys[0], counts: todayCounts),
+                LocalActivityDayBucket(localDate: dateKeys[1], counts: previousCounts),
+            ])
+        let projection = ActivityOverviewProjector.project(
+            document: document,
+            readState: .ready,
+            integrationStatuses: [
+                .claudeCode: .connected,
+                .codex: .awaitingReceipt,
+                .workBuddy: .connected,
+            ],
+            now: now,
+            timeZone: timeZone)
+        return ActivityDiagnosticsPresentation(
+            projection: projection,
+            log: ActivityDiagnosticLogSnapshot(path: "", state: .missing, failures: []))
+    }()
+
     private static let aiCueDescription = "清晰地说“任务完成”，语气温和"
     private static let aiCueDisplayName = "任务完成"
     private static let aiCueGenerationID = UUID(
@@ -1019,31 +1088,31 @@ public enum PreviewFixtures {
             title: "全部产品宿主已连接 · 标签 Logo 12pt",
             event: .stop,
             sourceScenarioID: "all-products-connected",
-            ),
+        ),
         eventHostIndicatorScenario(
             id: "mixed",
             title: "Claude 可用 · Codex 此事件不支持",
             event: .stopFailure,
             sourceScenarioID: "all-products-connected",
-            ),
+        ),
         eventHostIndicatorScenario(
             id: "all-gray",
             title: "全部产品宿主未连接",
             event: .stop,
             sourceScenarioID: "all-products-disconnected",
-            ),
+        ),
         eventHostIndicatorScenario(
             id: "legacy",
             title: "Claude Code 旧版连接",
             event: .stop,
             sourceScenarioID: "claude-legacy",
-            ),
+        ),
         eventHostIndicatorScenario(
             id: "awaiting-narrow",
             title: "Codex 待回执 · 固定紧凑布局 · 标签 Logo 12pt",
             event: .notification,
             sourceScenarioID: "codex-awaiting",
-            ),
+        ),
     ]
 
     /// One production event-row sample inside the C-layout locale/type-size gallery. Each sample

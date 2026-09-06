@@ -412,6 +412,8 @@ struct EventSettingsAICueComposerView: View {
             } label: {
                 Image(systemName: playingCandidateID == candidate.id ? "stop.fill" : "play.fill")
                     .frame(width: 16, height: 16)
+                    .claudioPreviewPulse(
+                        trigger: playingCandidateID == candidate.id ? 1 : 0)
             }
             .buttonStyle(ClaudioIconButtonStyle())
             .accessibilityLabel(candidatePreviewLabel(candidate))

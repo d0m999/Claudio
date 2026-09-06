@@ -3,8 +3,8 @@ import ClaudioGUICore
 import Foundation
 import SwiftUI
 
-private extension Color {
-    init(claudioHex: String) {
+extension Color {
+    fileprivate init(claudioHex: String) {
         var value: UInt64 = 0
         Scanner(string: claudioHex).scanHexInt64(&value)
         self.init(
@@ -112,7 +112,8 @@ public enum ClaudioTheme {
     }
 
     public static func hairline(_ scheme: ColorScheme) -> Color {
-        let base = scheme == .dark
+        let base =
+            scheme == .dark
             ? Color(claudioHex: ClaudioColorHex.hairlineBaseDark)
             : Color(claudioHex: ClaudioColorHex.hairlineBaseLight)
         return base.opacity(scheme == .dark ? 0.16 : 0.14)
@@ -200,7 +201,9 @@ public struct ClaudioStatusCapsule: View {
         Text(text)
             .font(ClaudioTheme.font(.caption).weight(.semibold))
             .foregroundColor(
-                isEmphasized ? ClaudioTheme.clay(colorScheme) : ClaudioTheme.secondaryText(colorScheme))
+                isEmphasized
+                    ? ClaudioTheme.clay(colorScheme) : ClaudioTheme.secondaryText(colorScheme)
+            )
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
             .background(
@@ -208,7 +211,8 @@ public struct ClaudioStatusCapsule: View {
                     .fill(
                         isEmphasized
                             ? ClaudioTheme.clay(colorScheme).opacity(0.12)
-                            : ClaudioTheme.elevated(colorScheme)))
+                            : ClaudioTheme.elevated(colorScheme))
+            )
             .overlay(Capsule().stroke(ClaudioTheme.hairline(colorScheme)))
             .accessibilityLabel(text)
     }
@@ -254,6 +258,71 @@ public enum ClaudioIconButtonInteractionState: Equatable, Sendable {
         case .disabled:
             return nil
         }
+    }
+}
+
+public enum ClaudioPreviewPulseMotion {
+    public static let peakScale: CGFloat = 1.12
+    public static let halfDuration: Double = 0.11
+    public static let totalDuration: Double = halfDuration * 2
+
+    public static func scale(isAtPeak: Bool, reduceMotion: Bool) -> CGFloat {
+        isAtPeak && !reduceMotion ? peakScale : 1
+    }
+}
+
+public struct ClaudioPreviewPulseModifier: ViewModifier {
+    public let trigger: Int
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isAtPeak = false
+    @State private var generation = 0
+
+    public init(trigger: Int) {
+        self.trigger = trigger
+    }
+
+    public func body(content: Content) -> some View {
+        content
+            .scaleEffect(
+                ClaudioPreviewPulseMotion.scale(
+                    isAtPeak: isAtPeak,
+                    reduceMotion: reduceMotion)
+            )
+            .onChange(of: trigger) { newTrigger in
+                generation &+= 1
+                let currentGeneration = generation
+                var resetTransaction = Transaction(animation: nil)
+                resetTransaction.disablesAnimations = true
+                withTransaction(resetTransaction) {
+                    isAtPeak = false
+                }
+                guard newTrigger > 0, !reduceMotion else { return }
+                DispatchQueue.main.async {
+                    guard generation == currentGeneration else { return }
+                    withAnimation(.easeOut(duration: ClaudioPreviewPulseMotion.halfDuration)) {
+                        isAtPeak = true
+                    }
+                    scheduleReturnToRest(for: currentGeneration)
+                }
+            }
+    }
+
+    private func scheduleReturnToRest(for currentGeneration: Int) {
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + ClaudioPreviewPulseMotion.halfDuration
+        ) {
+            guard generation == currentGeneration else { return }
+            withAnimation(.easeOut(duration: ClaudioPreviewPulseMotion.halfDuration)) {
+                isAtPeak = false
+            }
+        }
+    }
+}
+
+extension View {
+    public func claudioPreviewPulse(trigger: Int) -> some View {
+        modifier(ClaudioPreviewPulseModifier(trigger: trigger))
     }
 }
 
@@ -322,11 +391,13 @@ private struct ClaudioIconButtonStyleBody: View {
             .scaleEffect(interactionState.scale(reduceMotion: reduceMotion))
             .frame(
                 minWidth: ClaudioTheme.Metrics.iconTarget,
-                minHeight: ClaudioTheme.Metrics.iconTarget)
+                minHeight: ClaudioTheme.Metrics.iconTarget
+            )
             .foregroundColor(foregroundColor)
             .background(
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
-                    .fill(backgroundColor))
+                    .fill(backgroundColor)
+            )
             .contentShape(Rectangle())
             .animation(transition, value: interactionState)
             .onHover { isHovered = $0 }

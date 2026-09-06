@@ -754,7 +754,7 @@ struct EventSettingsWindowView: View {
         }
     }
 
-    private func playPreview(_ event: Event) {
+    private func playPreview(_ event: Event) -> Bool {
         stopCandidatePreview()
         stopAllPreviews()
         guard
@@ -765,7 +765,7 @@ struct EventSettingsWindowView: View {
                 environment: audioEnvironment)
         else {
             model.reload()
-            return
+            return false
         }
         guard
             previewPlayer.play(
@@ -774,8 +774,9 @@ struct EventSettingsWindowView: View {
             )
         else {
             model.reload()
-            return
+            return false
         }
+        return true
     }
 
     private func openAICueComposer(_ eligibility: AICueAdoptionEligibility) {
@@ -885,7 +886,7 @@ private struct EventSettingsEventRow: View {
     let windowLayout: EventSettingsWindowLayout
     let language: ClaudioAppLanguage
     let onGenerateAICue: () -> Void
-    let onPreview: () -> Void
+    let onPreview: () -> Bool
     let onToggleMute: () -> Void
     let onConfigureSound: () -> Void
     let inheritanceText: String?
@@ -896,6 +897,7 @@ private struct EventSettingsEventRow: View {
     private let focusedTarget: FocusState<EventSettingsFocusTarget?>.Binding
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var previewPulseTrigger = 0
     private let typeScale: CGFloat = 1
 
     init(
@@ -904,7 +906,7 @@ private struct EventSettingsEventRow: View {
         language: ClaudioAppLanguage,
         focusedTarget: FocusState<EventSettingsFocusTarget?>.Binding,
         onGenerateAICue: @escaping () -> Void,
-        onPreview: @escaping () -> Void,
+        onPreview: @escaping () -> Bool,
         onToggleMute: @escaping () -> Void,
         onConfigureSound: @escaping () -> Void,
         inheritanceText: String?,
@@ -1088,8 +1090,13 @@ private struct EventSettingsEventRow: View {
             .accessibilityIdentifier(
                 "event-settings.event.\(presentation.event.rawValue).configure")
 
-            Button(action: onPreview) {
+            Button {
+                if onPreview() {
+                    previewPulseTrigger &+= 1
+                }
+            } label: {
                 Image(systemName: "play.fill")
+                    .claudioPreviewPulse(trigger: previewPulseTrigger)
             }
             .buttonStyle(ClaudioIconButtonStyle())
             .disabled(!presentation.controls.previewEnabled)
