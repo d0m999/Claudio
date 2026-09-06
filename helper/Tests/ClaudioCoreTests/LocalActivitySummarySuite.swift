@@ -219,8 +219,9 @@ func runLocalActivitySummarySuites() {
                 try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
             }
             expect(
-                clearedObject?["cleared_at"] is NSNumber,
-                "new clear boundaries must use lossless numeric epoch seconds")
+                (clearedObject?["updated_at"] as? String).flatMap(legacyActivityDate) != nil
+                    && (clearedObject?["cleared_at"] as? String).flatMap(legacyActivityDate) != nil,
+                "schema 1 summary timestamps must remain rollback-readable ISO-8601 strings")
             let held = FileLock(path: lockURL.path)
             expect(held.attemptLock() == .acquired, "test must hold the activity lock")
             expect(
@@ -239,8 +240,8 @@ func runLocalActivitySummarySuites() {
                 .flatMap { try? Data(contentsOf: $0) }
                 .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             expect(
-                stagedObject?["occurred_at"] is NSNumber,
-                "new pending timestamps must use lossless numeric epoch seconds")
+                (stagedObject?["occurred_at"] as? String).flatMap(legacyActivityDate) != nil,
+                "schema 1 pending timestamps must remain rollback-readable ISO-8601 strings")
             held.unlock()
 
             if case .ready(let document) = store.read(now: occurredAt).state {
@@ -253,7 +254,66 @@ func runLocalActivitySummarySuites() {
         }
     }
 
-    suite("Local activity clear recovers a published batch before a failed publish") {
+    suite("Local activity migrates numeric schema 1 timestamps back to compatible strings") {
+        withTempDirectory { root in
+            let summary = root.appendingPathComponent("summary.json")
+            let pendingDirectory = root.appendingPathComponent("pending", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: pendingDirectory,
+                withIntermediateDirectories: true)
+            let timeZone = TimeZone(secondsFromGMT: 0)!
+            let calendar = LocalActivitySummaryStore.gregorianCalendar(timeZone: timeZone)
+            let moment = Date(timeIntervalSince1970: 1_900_000_250.123_456)
+            let localDate = LocalActivitySummaryStore.localDate(
+                for: moment,
+                timeZone: timeZone,
+                calendar: calendar)
+            let numericSummary: [String: Any] = [
+                "schema": 1,
+                "updated_at": NSNumber(value: moment.addingTimeInterval(-1).timeIntervalSince1970),
+                "buckets": [],
+            ]
+            let numericPending: [String: Any] = [
+                "schema": 1,
+                "occurred_at": NSNumber(value: moment.timeIntervalSince1970),
+                "local_date": localDate,
+                "host": HostID.claudeCode.rawValue,
+                "event": Event.stop.cliName,
+            ]
+            try? JSONSerialization.data(
+                withJSONObject: numericSummary,
+                options: [.sortedKeys]
+            ).write(to: summary)
+            try? JSONSerialization.data(
+                withJSONObject: numericPending,
+                options: [.sortedKeys]
+            ).write(to: pendingDirectory.appendingPathComponent("numeric-delta.json"))
+            let store = LocalActivitySummaryStore(
+                summaryFile: summary,
+                lockFile: root.appendingPathComponent("summary.lock"),
+                pendingDirectory: pendingDirectory)
+
+            if case .ready(let document) = store.read(
+                now: moment,
+                timeZone: timeZone,
+                calendar: calendar
+            ).state {
+                expect(
+                    document.buckets.first?.count(host: .claudeCode, event: .stop) == 1,
+                    "numeric timestamps from the brief schema 1 regression must remain readable")
+            } else {
+                expect(false, "numeric schema 1 data should migrate on the next successful read")
+            }
+            let migrated = (try? Data(contentsOf: summary)).flatMap {
+                try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+            }
+            expect(
+                (migrated?["updated_at"] as? String).flatMap(legacyActivityDate) != nil,
+                "the migrated summary must restore the rollback-compatible string encoding")
+        }
+    }
+
+    suite("Local activity failed clear preserves a published batch without recounting") {
         withTempDirectory { root in
             let summaryDirectory = root.appendingPathComponent("summary", isDirectory: true)
             try? FileManager.default.createDirectory(
@@ -294,18 +354,18 @@ func runLocalActivitySummarySuites() {
             defer { _ = setFixtureACL(["-N"], on: summaryDirectory) }
             expect(
                 store.clear(now: moment.addingTimeInterval(10)).isSuccess == false,
-                "test must force empty-summary publication to fail after batch recovery")
+                "test must force empty-summary publication to fail")
             let pendingAfterClear =
                 (try? FileManager.default.contentsOfDirectory(
                     at: pendingDirectory,
                     includingPropertiesForKeys: nil))?
                 .filter { $0.pathExtension == "json" }
             expect(
-                pendingAfterClear?.isEmpty == true,
-                "clear must reclaim the already published batch before attempting publication")
+                pendingAfterClear?.count == 1,
+                "failed clear must retain the published pending batch for crash recovery")
             expect(
-                pendingBatchMarkerIsMissing(on: summary),
-                "clear must remove the recovered batch marker before attempting publication")
+                pendingBatchMarkerIsMissing(on: summary) == false,
+                "failed clear must retain the old summary batch marker")
             _ = setFixtureACL(["-N"], on: summaryDirectory)
 
             if case .ready(let document) = store.read(now: moment.addingTimeInterval(10)).state {
@@ -314,6 +374,147 @@ func runLocalActivitySummarySuites() {
                     "failed clear recovery must not replay the already published batch")
             } else {
                 expect(false, "the old summary should remain readable after failed clear")
+            }
+        }
+    }
+
+    suite("Local activity failed clear preserves pending facts beside a damaged summary") {
+        withTempDirectory { root in
+            let summaryDirectory = root.appendingPathComponent("summary", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: summaryDirectory,
+                withIntermediateDirectories: true)
+            let summary = summaryDirectory.appendingPathComponent("activity.json")
+            writeFixture("{", to: summary)
+            let pendingDirectory = root.appendingPathComponent("pending", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: pendingDirectory,
+                withIntermediateDirectories: true)
+            let store = LocalActivitySummaryStore(
+                summaryFile: summary,
+                lockFile: root.appendingPathComponent("summary.lock"),
+                pendingDirectory: pendingDirectory)
+            let consumedBatchID = UUID(uuidString: "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC")!
+            writePendingFixture(
+                to: pendingDirectory.appendingPathComponent("delta-consumed.json"),
+                batchID: consumedBatchID)
+            expect(
+                setPendingBatchMarker(consumedBatchID, on: summary),
+                "test must attach a valid batch marker to the damaged summary")
+
+            guard setFixtureACL(["+a", "everyone deny delete_child"], on: summaryDirectory) else {
+                expect(false, "test must prevent replacement of the damaged summary")
+                return
+            }
+            defer { _ = setFixtureACL(["-N"], on: summaryDirectory) }
+            let clearAt = Date(timeIntervalSince1970: 1_900_000_310)
+            expect(
+                store.clear(now: clearAt).isSuccess == false,
+                "test must force damaged-summary replacement to fail")
+            let pendingAfterFailure =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: pendingDirectory,
+                    includingPropertiesForKeys: nil))?
+                .filter { $0.pathExtension == "json" }
+            expect(
+                pendingAfterFailure?.count == 1,
+                "failed clear must not delete the only retryable activity fact")
+            expect(
+                pendingBatchMarkerIsMissing(on: summary) == false,
+                "failed clear must leave the damaged summary marker untouched")
+
+            _ = setFixtureACL(["-N"], on: summaryDirectory)
+            expect(
+                store.clear(now: clearAt).isSuccess,
+                "the retained pending fact must allow a later clear retry to succeed")
+            let pendingAfterRetry =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: pendingDirectory,
+                    includingPropertiesForKeys: nil))?
+                .filter { $0.pathExtension == "json" }
+            expect(
+                pendingAfterRetry?.isEmpty == true,
+                "successful clear retry should reclaim its pre-boundary pending fact")
+            expect(
+                pendingBatchMarkerIsMissing(on: summary),
+                "successful clear retry should replace the damaged marker-bearing summary")
+        }
+    }
+
+    suite("Local activity clear retains post-boundary facts from a published batch") {
+        withTempDirectory { root in
+            let summary = root.appendingPathComponent("summary.json")
+            let pendingDirectory = root.appendingPathComponent("pending", isDirectory: true)
+            let store = LocalActivitySummaryStore(
+                summaryFile: summary,
+                lockFile: root.appendingPathComponent("summary.lock"),
+                pendingDirectory: pendingDirectory)
+            let installation = UUID(uuidString: "22222222-2222-4222-8222-222222222230")!
+            let timeZone = TimeZone(secondsFromGMT: 0)!
+            let calendar = LocalActivitySummaryStore.gregorianCalendar(timeZone: timeZone)
+            let occurredAt = Date(timeIntervalSince1970: 1_900_000_320)
+            let clearAt = occurredAt.addingTimeInterval(-10)
+            let oldOccurredAt = clearAt.addingTimeInterval(-10)
+            expect(
+                store.record(
+                    host: .claudeCode,
+                    event: .stop,
+                    installationID: installation,
+                    activeInstallationID: installation,
+                    occurredAt: oldOccurredAt,
+                    timeZone: timeZone,
+                    calendar: calendar) == .committed,
+                "test must publish the pre-clear activity fact")
+            expect(
+                store.record(
+                    host: .claudeCode,
+                    event: .stop,
+                    installationID: installation,
+                    activeInstallationID: installation,
+                    occurredAt: occurredAt,
+                    timeZone: timeZone,
+                    calendar: calendar) == .committed,
+                "test must publish the future activity fact")
+
+            try? FileManager.default.createDirectory(
+                at: pendingDirectory,
+                withIntermediateDirectories: true)
+            let consumedBatchID = UUID(uuidString: "DDDDDDDD-DDDD-4DDD-8DDD-DDDDDDDDDDDD")!
+            writePendingFixture(
+                to: pendingDirectory.appendingPathComponent("delta-old.json"),
+                batchID: consumedBatchID,
+                localDate: "2030-03-17")
+            writePendingFixture(
+                to: pendingDirectory.appendingPathComponent("delta-future.json"),
+                batchID: consumedBatchID,
+                occurredAt: "2030-03-17T17:52:00Z",
+                localDate: "2030-03-17")
+            expect(
+                setPendingBatchMarker(consumedBatchID, on: summary),
+                "test must reproduce a published batch awaiting cleanup")
+
+            expect(
+                store.clear(now: clearAt, timeZone: timeZone, calendar: calendar).isSuccess,
+                "clear should publish its earlier boundary")
+            let pendingAfterClear =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: pendingDirectory,
+                    includingPropertiesForKeys: nil))?
+                .filter { $0.pathExtension == "json" }
+            expect(
+                pendingAfterClear?.count == 1,
+                "clear must retain a published delta later than its boundary")
+
+            if case .ready(let document) = store.read(
+                now: occurredAt,
+                timeZone: timeZone,
+                calendar: calendar
+            ).state {
+                expect(
+                    document.buckets.first?.count(host: .claudeCode, event: .stop) == 1,
+                    "the retained post-clear delta must be counted exactly once")
+            } else {
+                expect(false, "the retained post-clear delta should remain readable")
             }
         }
     }
@@ -614,13 +815,28 @@ private func activityFixtureUnsignedInteger(_ value: Any?) -> UInt64? {
     return number.uint64Value
 }
 
+private func legacyActivityDate(from string: String) -> Date? {
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = fractional.date(from: string) {
+        return date
+    }
+    let wholeSeconds = ISO8601DateFormatter()
+    wholeSeconds.formatOptions = [.withInternetDateTime]
+    return wholeSeconds.date(from: string)
+}
+
 private let pendingBatchMarkerName = "com.claudio.activity.pending-batch"
 
-private func pendingFixtureData(batchID: UUID?) -> Data {
+private func pendingFixtureData(
+    batchID: UUID?,
+    occurredAt: String = "2030-03-17T17:51:40Z",
+    localDate: String = "2030-03-18"
+) -> Data {
     var object: [String: Any] = [
         "schema": 1,
-        "occurred_at": "2030-03-17T17:51:40Z",
-        "local_date": "2030-03-18",
+        "occurred_at": occurredAt,
+        "local_date": localDate,
         "host": HostID.claudeCode.rawValue,
         "event": Event.stop.cliName,
     ]
@@ -630,8 +846,17 @@ private func pendingFixtureData(batchID: UUID?) -> Data {
     return try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
 }
 
-private func writePendingFixture(to url: URL, batchID: UUID?) {
-    try? pendingFixtureData(batchID: batchID).write(to: url)
+private func writePendingFixture(
+    to url: URL,
+    batchID: UUID?,
+    occurredAt: String = "2030-03-17T17:51:40Z",
+    localDate: String = "2030-03-18"
+) {
+    try? pendingFixtureData(
+        batchID: batchID,
+        occurredAt: occurredAt,
+        localDate: localDate
+    ).write(to: url)
 }
 
 private func setPendingBatchMarker(_ batchID: UUID, on url: URL) -> Bool {
