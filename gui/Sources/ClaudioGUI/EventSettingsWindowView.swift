@@ -83,6 +83,7 @@ struct EventSettingsWindowView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(ClaudioTheme.panel(colorScheme))
+        .tint(ClaudioTheme.clay(colorScheme))
         .frame(minWidth: 680, minHeight: 520)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.eventSettingsWindowTitle))
@@ -213,10 +214,10 @@ struct EventSettingsWindowView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
                     .fill(
                         resolvedScope == scope.scope
-                            ? ClaudioTheme.clay(colorScheme).opacity(0.14)
+                            ? ClaudioTheme.claySoft(colorScheme)
                             : Color.clear))
         }
         .buttonStyle(ClaudioFullRowButtonStyle())
@@ -242,7 +243,7 @@ struct EventSettingsWindowView: View {
                             .eventSettingsUnavailableShortcutScope,
                             unavailableScope as NSString)
                     )
-                    .foregroundColor(.secondary)
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
                 } icon: {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -299,7 +300,7 @@ struct EventSettingsWindowView: View {
                             unavailableScope as NSString)
                     )
                     .font(ClaudioTheme.font(.body))
-                    .foregroundColor(ClaudioTheme.error(colorScheme))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 } else {
                     Text(selectedScope.name + " · " + selectedScope.summaryText)
                         .font(ClaudioTheme.font(.body))
@@ -381,7 +382,7 @@ struct EventSettingsWindowView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .background(ClaudioTheme.elevated(colorScheme))
-        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("event-settings.ai-cue.eligibility")
     }
@@ -460,10 +461,10 @@ struct EventSettingsWindowView: View {
             .padding(14)
             .background(ClaudioTheme.elevated(colorScheme))
             .overlay(
-                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section)
                     .strokeBorder(ClaudioTheme.hairline(colorScheme), lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+            .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section))
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("event-settings.playback-settings")
@@ -943,6 +944,13 @@ private struct EventSettingsEventRow: View {
             }
         }
         .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background(ClaudioTheme.surface(colorScheme))
+        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row))
+        .overlay(
+            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
+                .stroke(ClaudioTheme.hairline(colorScheme), lineWidth: 1)
+        )
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("event-settings.event.\(presentation.event.rawValue).row")
     }
@@ -1026,7 +1034,7 @@ private struct EventSettingsEventRow: View {
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(ClaudioTheme.elevated(colorScheme))
-            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.chip))
     }
 
     private var soundFileText: some View {
@@ -1045,7 +1053,7 @@ private struct EventSettingsEventRow: View {
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
                 .background(ClaudioTheme.elevated(colorScheme))
-                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.chip))
         }
     }
 
@@ -1084,11 +1092,6 @@ private struct EventSettingsEventRow: View {
                 Image(systemName: "play.fill")
             }
             .buttonStyle(ClaudioIconButtonStyle())
-            .foregroundColor(
-                presentation.controls.previewEnabled
-                    ? ClaudioTheme.event(presentation.event, colorScheme)
-                    : ClaudioTheme.secondaryText(colorScheme)
-            )
             .disabled(!presentation.controls.previewEnabled)
             .focused(focusedTarget, equals: .preview(presentation.event))
             .help(previewHint)
@@ -1137,6 +1140,7 @@ private struct EventSettingsMasterVolumeControl: View {
     let isEnabled: Bool
     let language: ClaudioAppLanguage
     let onCommit: (Double) -> Double?
+    @Environment(\.colorScheme) private var colorScheme
     private let focusedTarget: FocusState<EventSettingsFocusTarget?>.Binding
 
     init(
@@ -1160,7 +1164,7 @@ private struct EventSettingsMasterVolumeControl: View {
                     .font(ClaudioTheme.font(.body).weight(.semibold))
                 Text(ClaudioL10n(language: language).text(.panelMasterVolumeDescription))
                     .font(ClaudioTheme.font(.caption))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
             }
             Spacer(minLength: 10)
             SharedMasterVolumeSlider(

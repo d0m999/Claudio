@@ -35,6 +35,7 @@ struct SettingsWindowView: View {
             >
         )?
 
+    @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedTarget: SettingsWindowFocusTarget?
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: preferences.language) }
@@ -78,8 +79,10 @@ struct SettingsWindowView: View {
         self.preferences = preferences
         self.dynamicQuietPolicy = dynamicQuietPolicy
         self.loginItemSettings = loginItemSettings
-        self.activityDiagnostics = activityDiagnostics ?? makeFallbackActivityDiagnosticsModel(
-            log: ActivityDiagnosticLogSnapshot(path: "", state: .missing, failures: []))
+        self.activityDiagnostics =
+            activityDiagnostics
+            ?? makeFallbackActivityDiagnosticsModel(
+                log: ActivityDiagnosticLogSnapshot(path: "", state: .missing, failures: []))
         self.globalShortcutSettings = globalShortcutSettings
         self.aboutSettings = aboutSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner
@@ -105,17 +108,22 @@ struct SettingsWindowView: View {
                             settingsSidebarWidth(windowWidth: geometry.size.width))
                     )
                     .frame(maxHeight: .infinity)
-                    .background(Color(nsColor: .underPageBackgroundColor))
-                Divider()
+                    .background(ClaudioTheme.elevated(colorScheme))
+                Rectangle()
+                    .fill(ClaudioTheme.hairline(colorScheme))
+                    .frame(width: ClaudioTheme.Metrics.hairline)
+                    .accessibilityHidden(true)
                 routeSlot
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(nsColor: .windowBackgroundColor))
+                    .background(ClaudioTheme.panel(colorScheme))
             }
         }
         .frame(
             minWidth: SettingsWindowGeometry.minimumWidth,
             minHeight: SettingsWindowGeometry.minimumHeight
         )
+        .background(ClaudioTheme.panel(colorScheme))
+        .tint(ClaudioTheme.clay(colorScheme))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.settingsWindowTitle))
         .onExitCommand {
@@ -178,8 +186,8 @@ struct SettingsWindowView: View {
                 Text("claudi0")
                     .font(.system(.subheadline, design: .rounded).weight(.semibold))
             }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 16)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 16)
 
             ForEach(
                 settingsSidebarSections(
@@ -191,7 +199,7 @@ struct SettingsWindowView: View {
                         .padding(.vertical, 12)
                     Text(sidebarSectionName(section.id))
                         .font(.caption.weight(.semibold))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                         .padding(.horizontal, 10)
                         .padding(.bottom, 5)
                 }
@@ -207,16 +215,16 @@ struct SettingsWindowView: View {
 
             HStack(spacing: 6) {
                 Circle()
-                    .fill(Color.green)
+                    .fill(ClaudioTheme.success(colorScheme))
                     .frame(width: 7, height: 7)
                     .accessibilityHidden(true)
                 Text(l10n.text(.settingsSidebarLocalFirst))
             }
-                .font(.caption2.weight(.semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .accessibilityIdentifier("settings.sidebar.local-first")
+            .font(.caption2.weight(.semibold))
+            .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .accessibilityIdentifier("settings.sidebar.local-first")
         }
         .padding(.horizontal, 12)
         .padding(.top, 20)
@@ -230,13 +238,30 @@ struct SettingsWindowView: View {
             HStack(spacing: 9) {
                 Image(systemName: icon(item))
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(
+                        item == destination
+                            ? ClaudioTheme.clay(colorScheme)
+                            : ClaudioTheme.secondaryText(colorScheme)
+                    )
                     .frame(width: 25, height: 25)
-                    .background(sidebarIconColor(item))
-                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                    .background(
+                        item == destination
+                            ? ClaudioTheme.claySoft(colorScheme)
+                            : ClaudioTheme.surface(colorScheme)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                            .stroke(ClaudioTheme.hairline(colorScheme), lineWidth: 1)
+                    )
                     .accessibilityHidden(true)
 
                 Text(item.localizedName(language: preferences.language))
+                    .foregroundColor(
+                        item == destination
+                            ? ClaudioTheme.text(colorScheme)
+                            : ClaudioTheme.secondaryText(colorScheme)
+                    )
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
 
@@ -245,6 +270,7 @@ struct SettingsWindowView: View {
                 if item == destination {
                     Image(systemName: "checkmark")
                         .font(.caption.weight(.bold))
+                        .foregroundColor(ClaudioTheme.clay(colorScheme))
                         .accessibilityHidden(true)
                 }
             }
@@ -252,8 +278,11 @@ struct SettingsWindowView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(item == destination ? Color.primary.opacity(0.1) : .clear)
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                    .fill(
+                        item == destination
+                            ? ClaudioTheme.claySoft(colorScheme)
+                            : Color.clear)
             )
             .contentShape(Rectangle())
         }
@@ -781,20 +810,6 @@ struct SettingsWindowView: View {
         case .primary: ""
         case .advanced: l10n.text(.settingsSidebarAdvanced)
         case .product: l10n.text(.settingsSidebarProduct)
-        }
-    }
-
-    private func sidebarIconColor(_ destination: SettingsDestination) -> Color {
-        switch destination {
-        case .general: .gray
-        case .integrations: .cyan
-        case .eventsAndSounds: .red
-        case .notifications: .purple
-        case .display: .indigo
-        case .sounds: .green
-        case .usage: .pink
-        case .shortcuts: .purple
-        case .about: .blue
         }
     }
 
