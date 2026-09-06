@@ -327,9 +327,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         super.init()
 
         activityDiagnostics.updateIntegrationStatuses(
-            Dictionary(uniqueKeysWithValues: hostIntegrationState.snapshots.map {
-                ($0.host, ActivityOverviewProjector.integrationStatus(from: $0))
-            }))
+            Dictionary(
+                uniqueKeysWithValues: hostIntegrationState.snapshots.map {
+                    ($0.host, ActivityOverviewProjector.integrationStatus(from: $0))
+                }))
 
         actionRouter.owner = self
         popover.delegate = self
@@ -435,9 +436,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 let content = self.hostIntegrations.replace(state: state)
                 self.integrationsModel.replaceExternalContent(content)
                 self.activityDiagnostics.updateIntegrationStatuses(
-                    Dictionary(uniqueKeysWithValues: state.snapshots.map {
-                        ($0.host, ActivityOverviewProjector.integrationStatus(from: $0))
-                    }))
+                    Dictionary(
+                        uniqueKeysWithValues: state.snapshots.map {
+                            ($0.host, ActivityOverviewProjector.integrationStatus(from: $0))
+                        }))
             } catch {
                 // 集成目的页的显式“重新检测”会显示错误反馈；后台/打开面板刷新只保留
                 // 上一份事实，避免一次瞬时 I/O 失败把两条宿主行抹成伪造状态。
@@ -454,9 +456,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         hostIntegrationRefreshTask?.cancel()
         let content = hostIntegrations.replace(state: state)
         activityDiagnostics.updateIntegrationStatuses(
-            Dictionary(uniqueKeysWithValues: state.snapshots.map {
-                ($0.host, ActivityOverviewProjector.integrationStatus(from: $0))
-            }))
+            Dictionary(
+                uniqueKeysWithValues: state.snapshots.map {
+                    ($0.host, ActivityOverviewProjector.integrationStatus(from: $0))
+                }))
         return content
     }
 
