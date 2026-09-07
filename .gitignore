@@ -22,3 +22,8 @@ local-packs/
 # Local research documents — keep on this machine, never commit
 docs/research/
 docs/*research*.md
+
+# Unused local license research for a pack that is not part of the current candidates
+/packs/license-snapshots/kenney-impact-sounds-2026-09-02.html
+/packs/license-snapshots/kenney-impact-sounds-2026-09-02.png
+/packs/license-snapshots/kenney-impact-sounds-package-License-2026-09-02.txt
