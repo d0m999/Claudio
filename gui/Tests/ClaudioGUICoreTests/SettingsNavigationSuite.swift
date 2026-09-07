@@ -25,7 +25,7 @@ func runSettingsNavigationSuites() {
             (.notifications, "通知", "Notifications"),
             (.display, "显示", "Display"),
             (.sounds, "声音", "Sounds"),
-            (.usage, "用量", "Usage"),
+            (.usage, "活动与诊断", "Activity & Diagnostics"),
             (.shortcuts, "快捷键", "Shortcuts"),
             (.about, "关于", "About"),
         ]
@@ -424,11 +424,9 @@ func runSettingsNavigationSuites() {
                 && SettingsWindowGeometry.minimumHeight == 640,
             "最小窗口尺寸必须匹配批准原型")
         expect(
-            settingsSidebarWidth(windowWidth: 960, interfaceTextSize: .standard) == 220
-                && settingsSidebarWidth(windowWidth: 1_240, interfaceTextSize: .standard) == 252
-                && settingsSidebarWidth(windowWidth: 1_240, interfaceTextSize: .maximum) == 276
-                && settingsSidebarWidth(windowWidth: 960, interfaceTextSize: .maximum) == 252,
-            "侧栏必须在最小窗口收紧，并为最大文字档保留额外阅读宽度")
+            settingsSidebarWidth(windowWidth: 960) == 210
+                && settingsSidebarWidth(windowWidth: 1_240) == 252,
+            "侧栏必须在最小窗口收紧，并在默认窗口保持批准宽度")
         let sidebarSections = settingsSidebarSections(
             availableDestinations: SettingsDestination.allCases)
         expect(

@@ -229,18 +229,20 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             credentialManager: aiCueCredentialManager,
             generator: aiCueGenerator)
         let dynamicQuietObserver = DynamicQuietSystemObserver()
+        let activityDiagnostics = makeActivityDiagnosticsModel()
+        let soundPacksEditorNativeEffects = SoundPacksEditorNativeEffectsDispatcher(
+            adapter: SystemSoundPacksEditorNativeEffectsAdapter())
         let settingsPresentationSession = SettingsPresentationSession(
             dependencies: SettingsPresentationDependencies(
                 preferences: languageStore,
                 loginItemSettings: loginItemSettings,
                 dynamicQuietPolicy: dynamicQuietObserver.policy,
-                usageSettings: makeUsageSettingsModel(),
+                activityDiagnostics: activityDiagnostics,
                 globalShortcutSettings: globalShortcutSettings,
                 aboutSettings: makeSystemAboutSettingsModel(
                     surfaceFacts: hostIntegrations.safeSurfaceFacts),
                 soundPacksEditorOwner: soundPacksEditorOwner,
-                soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher(
-                    adapter: SystemSoundPacksEditorNativeEffectsAdapter()),
+                soundPacksEditorNativeEffects: soundPacksEditorNativeEffects,
                 eventSettingsModel: eventSettingsModel,
                 hostIntegrations: hostIntegrations,
                 integrationsModel: integrationsModel,
@@ -252,61 +254,33 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let settingsWindowController = SettingsWindowController(
             session: settingsPresentationSession)
 
-        // Built BEFORE the panel so the panel's width callback can capture it (the callback can't
-        // capture `self` — we're still pre-`super.init()` here).
+        // Build the popover before the panel so AppKit owns the fixed outer geometry from the
+        // moment the SwiftUI content is attached; no user preference or resize callback enters
+        // this path.
         let popover = NSPopover()
         // `standardPanelWidth` (`ClaudioGUICore`), never a second hardcoded `312`: DESIGN.md's
         // 312pt panel width already exists as a constant, and `PanelLayoutAdaptation/panelWidth`
         // — the value the SwiftUI side actually sizes itself to — is derived from it.
-        // Height is intrinsic-content-driven at runtime.
-        popover.contentSize = NSSize(width: standardPanelWidth, height: 520)
+        // The production panel has one fixed compact width and a 560pt preferred height.
+        popover.contentSize = NSSize(width: standardPanelWidth, height: 560)
 
         let panel = PanelView(
             audioEnvironment: audioEnvironment,
             focusCoordinator: focusCoordinator,
             hostIntegrations: hostIntegrations,
-            bootstrapReports: bootstrapReports,
             languageStore: languageStore,
+            activityDiagnostics: activityDiagnostics,
             soundPackLibrary: soundPackLibrary,
             soundPacksRefreshCoordinator: soundPacksRefreshCoordinator,
-            onManageSounds: { [weak actionRouter] route, focusTarget in
-                actionRouter?.requestSoundsSettings(
-                    route: route,
-                    returnFocusTo: focusTarget)
-            },
-            onOpenEventSettings: { [weak actionRouter] route, focusTarget in
-                actionRouter?.requestEventsSettings(
-                    route: route,
-                    returnFocusTo: focusTarget)
-            },
-            onManageIntegrations: { [weak actionRouter] host, target in
-                actionRouter?.requestIntegrationsSettings(preselect: host, returnFocusTo: target)
-            },
-            onRetryBootstrap: { [weak actionRouter] in
-                actionRouter?.owner?.requestHostIntegrationRefresh(bootstrapSharedRuntime: true)
-            },
             onAudibilityInputsChanged: { [weak actionRouter] in
                 actionRouter?.audibilityInputsChanged()
             },
+            onOpenSettings: { [weak actionRouter] in
+                actionRouter?.owner?.requestSettingsWindowPresentation()
+            },
             onQuit: {
                 NSApp.terminate(nil)
-            },
-            // T15 D5「极大 → 加宽 popover」, now actually in effect (TODOS.md:257): `PanelView`
-            // widens ITSELF to `widenedPanelWidth` (360pt) at the `.maximum` Dynamic Type tier,
-            // but this AppKit popover around it kept its hardcoded 312pt `contentSize` — so the
-            // widened panel was being rendered inside a container that never grew, which is
-            // exactly the 「不裁切、不溢出」 the degradation rule exists to prevent. `PanelView`
-            // reports its real width here (on appear and on every tier change) and the popover
-            // follows. Captures `popover` (a class), never `self`.
-            // `[weak popover]`：强捕获会成环——`popover → contentViewController → rootView(PanelView)
-            // → 这个闭包 → popover`，于是 popover 与它整棵 SwiftUI 视图树永不释放（本轮 /ship 评审：
-            // Claude 对抗子代理）。今天菜单栏 app 的 popover 与进程同生共死，所以泄漏不可见；一旦将来
-            // 有人重建 popover（换皮肤、换尺寸策略、多状态栏图标），它就会变成一个真实的、每次重建都
-            // 涨一份的泄漏。捕获 popover 而不是 self 本来就是对的，只是漏了 weak。
-            onPanelWidthChange: { [weak popover] width in
-                popover?.contentSize.width = CGFloat(width)
-            }
-        )
+            })
         hostingController = NSHostingController(rootView: panel)
 
         popover.contentViewController = hostingController
@@ -341,6 +315,12 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             to: statusItem)
 
         super.init()
+
+        activityDiagnostics.updateIntegrationStatuses(
+            Dictionary(
+                uniqueKeysWithValues: hostIntegrationState.snapshots.map {
+                    ($0.host, ActivityOverviewProjector.integrationStatus(from: $0))
+                }))
 
         actionRouter.owner = self
         popover.delegate = self

@@ -93,6 +93,7 @@ runSurfaceSoundPreferencesSuites()
 runStarredPacksSuites()
 runConfigConcurrencySuites()
 runLegacyInstallPipelineSuites()
+runLocalActivitySummarySuites()
 
 // MARK: - Summary
 

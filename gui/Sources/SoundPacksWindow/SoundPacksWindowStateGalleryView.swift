@@ -14,11 +14,11 @@ public struct SoundPacksWindowStateGalleryView: View {
 
     public init(
         language: ClaudioAppLanguage = .zhHans,
-        textSize: ClaudioInterfaceTextSize = .standard
+        textSize: ClaudioCompactPreviewDensity = .standard
     ) {
         let store = ClaudioPreferences(defaults: UserDefaults())
         store.setLanguage(language)
-        store.setInterfaceTextSize(textSize)
+        store.setCompactPreviewDensity(textSize)
         _languageStore = StateObject(wrappedValue: store)
         _fixture = StateObject(wrappedValue: SoundPacksWindowGalleryFixture())
     }

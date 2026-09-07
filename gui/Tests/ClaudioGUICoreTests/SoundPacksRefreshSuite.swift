@@ -2132,7 +2132,7 @@ func runSoundPacksRefreshSuites() async {
             "common production interface 只能保留 coherent presentation、sync send 与 async perform")
     }
 
-    suite(".openSoundSettings：携带当前 Sound Scope，并通过单一 pending-close 展示 Settings Events") {
+    suite("Panel Settings：通过单一 pending-close 展示统一 Settings") {
         guard
             let panel = soundPacksCode("gui/Sources/ClaudioGUI/PanelView.swift"),
             let menu = soundPacksCode("gui/Sources/ClaudioGUI/MenuBarController.swift"),
@@ -2149,18 +2149,17 @@ func runSoundPacksRefreshSuites() async {
 
         let panelFlat = collapsingWhitespace(panel)
         expect(
-            panelFlat.contains(
-                "onOpenEventSettings( EventSettingsWindowRoute(scope: selectedScope.scope), .openSoundSettings)"
-            ),
-            "打开设置必须把当前 Sound Scope 与精确返回焦点交给事件设置窗口")
+            panelFlat.contains("Button(action: onOpenSettings)")
+                && panelFlat.contains(".focused($focusedTarget, equals: .headerSettings)"),
+            "Panel 设置入口必须通过统一 session action，并认领 headerSettings 焦点")
         expect(
             !panel.contains(
                 "NSWorkspace.shared.activateFileViewerSelecting([audioEnvironment.userPacksDirectory])"
             ),
             "T7 的 Finder 中间态必须被真窗口替换")
         expect(
-            panel.contains(".focused($focusedTarget, equals: .openSoundSettings)"),
-            "打开设置必须认领 .openSoundSettings 焦点契约")
+            panel.contains("accessibilityIdentifier(\"panel.settings\")"),
+            "打开设置必须认领稳定的 Panel AX identifier")
         expect(
             requestBody.contains(
                 "request: .route(.events(scope: route.scope, event: route.event))")

@@ -506,6 +506,11 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     // **追加不是替换**，改成 `.atomic` 会用一行盖掉整份日志。它有自己的原子性纪律，不归 ② 管，
     // 所以 `.write(` 之外的那两个 token（`open(` / `write(`）在这里是**有意**的。
     "helper/Sources/ClaudioCore/Log.swift": [".write(", "open(", "write("],
+    // Local activity: private 0600 delta/summary staging uses mkstemp + complete write + fsync
+    // + same-directory rename; pending cleanup only unlinks the exact generated delta.
+    "helper/Sources/ClaudioCore/LocalActivitySummary.swift": [
+        "fchmod(", "mkstemp(", "rename(", "unlink(", "write(",
+    ],
     // `play.state` 的防抖戳（一次原子写）+ `afplay` 子进程。子进程不写盘（它只出声）。
     "helper/Sources/ClaudioCore/Play.swift": [".write(", "Process("],
     // 有界只读：`open(O_RDONLY | O_NOFOLLOW | O_NONBLOCK)`。它是**读者**，不是写者 ——
@@ -574,7 +579,9 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     "gui/Sources/ClaudioGUICore/PackGallery.swift": ["unlink("],
     // Usage 日志清理：与 append/rotation 共用 log lock，只 unlink 固定日志叶路径；ENOENT 成功。
     // History 清理由 ClaudioCore 的 HostHookReceiptStore 既有安全原语负责，不在这里重复登记。
-    "gui/Sources/ClaudioGUICore/UsageActivity.swift": ["unlink("],
+    // Diagnostic log cleanup only removes bounded, generated log files under the private
+    // diagnostics directory; activity summary writes remain owned by LocalActivitySummary.
+    "gui/Sources/ClaudioGUICore/ActivityDiagnosticsLog.swift": ["unlink("],
     // T6 forkPack：出厂包整份目录拷进调用独占 staging（`.copyItem(`），成功后用
     // `renameatx_np(..., RENAME_EXCL)` 做同卷、原子、不可覆盖的目录发布。manifest 本身的写
     // 已记在 `ManifestBinding.swift`，这里不重复记。

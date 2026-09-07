@@ -14,7 +14,7 @@ package struct SettingsStateGalleryView: View {
         route: SettingsRoute,
         availability: SettingsRouteAvailability,
         language: ClaudioAppLanguage,
-        textSize: ClaudioInterfaceTextSize = .standard,
+        textSize: ClaudioCompactPreviewDensity = .standard,
         experienceProfile: PreviewFixtures.SettingsExperienceProfile? = nil,
         aiCueScenario: PreviewFixtures.AICueGalleryScenario? = nil,
         integrationScenario: PreviewFixtures.HostIntegrationScenario? = nil,

@@ -62,7 +62,7 @@ public struct MasterVolumeRow: View {
         onCommit: @escaping (Double) -> Double?,
         focusCoordinator: PanelFocusCoordinator,
         focusedTarget: FocusState<PanelFocusTarget?>.Binding,
-        adaptation: PanelLayoutAdaptation = panelLayoutAdaptation(for: .standard),
+        adaptation: PanelLayoutAdaptation = panelLayoutAdaptation(),
         language: ClaudioAppLanguage = .zhHans
     ) {
         self.diskVolume = diskVolume

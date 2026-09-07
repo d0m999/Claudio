@@ -141,7 +141,7 @@ final class SettingsRootNativeProbe {
         guard let index = SettingsDestination.allCases.firstIndex(of: destination), index <= 6
         else { return false }
         let sidebarWidth = CGFloat(
-            settingsSidebarWidth(windowWidth: size.width, interfaceTextSize: .standard))
+            settingsSidebarWidth(windowWidth: size.width))
         let x = 12 + (sidebarWidth - 24) * horizontalFraction
         let yFromTop = 72.5 + CGFloat(index) * 39
         return click(windowPoint: NSPoint(x: x, y: size.height - yFromTop))
@@ -151,7 +151,7 @@ final class SettingsRootNativeProbe {
         guard let index = SettingsDestination.allCases.firstIndex(of: destination), index <= 6
         else { return false }
         let sidebarWidth = CGFloat(
-            settingsSidebarWidth(windowWidth: size.width, interfaceTextSize: .standard))
+            settingsSidebarWidth(windowWidth: size.width))
         let yFromTop = 72.5 + CGFloat(index) * 39
         return click(windowPoint: NSPoint(x: sidebarWidth + 4, y: size.height - yFromTop))
     }

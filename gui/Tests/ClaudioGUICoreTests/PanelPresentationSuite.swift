@@ -274,7 +274,7 @@ func runPanelPresentationSuites() async {
             availableHeight: .nan)
 
         expect(unmeasured.optionsHeight == 144, "三个标准字号来源必须完整显示：\(unmeasured)")
-        expect(unmeasured.totalHeight == 199, "未测量状态不得把菜单裁成零高：\(unmeasured)")
+        expect(unmeasured.totalHeight == 165, "固定作用域菜单应只包含作用域选项：\(unmeasured)")
         expect(
             invalidMeasurement == unmeasured,
             "非有限几何值必须与尚未测量使用同一安全布局：\(invalidMeasurement)")
@@ -283,7 +283,7 @@ func runPanelPresentationSuites() async {
     suite("声音作用域菜单：最大字号按滚动视口剩余高度裁定选项区，诊断入口固定可见") {
         let layout = panelSoundScopeMenuLayout(
             scopeCount: 4,
-            typeScale: ClaudioInterfaceTextSize.maximum.scale,
+            typeScale: 1,
             availableHeight: 160)
 
         expect(layout.totalHeight == 160, "菜单总高必须精确受剩余视口 160pt 限制：\(layout)")
@@ -291,8 +291,8 @@ func runPanelPresentationSuites() async {
             layout.optionsHeight < layout.optionsContentHeight,
             "四来源最大字号必须把溢出的选项留在内部滚动区")
         expect(
-            abs(layout.diagnosticsHeight - 48.28) < 0.000_1,
-            "视口裁切不得压缩底部连接与诊断入口：\(layout.diagnosticsHeight)")
+            layout.diagnosticsHeight == 0,
+            "生产作用域菜单不再包含连接与诊断入口：\(layout.diagnosticsHeight)")
     }
 
     suite("面板作用域：Global 恒在、Surface 按 registry 排序，notConnected 一律过滤") {

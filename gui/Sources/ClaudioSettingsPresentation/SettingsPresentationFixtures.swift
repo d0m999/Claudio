@@ -36,6 +36,7 @@ package struct SettingsPresentationFixture {
     package let temporaryRoot: URL
     package let session: SettingsPresentationSession
     package let soundPacksEditor: SoundPacksEditorOwner
+    package let activityDiagnostics: ActivityDiagnosticsModel
     package let eventSettingsModel: PanelConfigController
     package let integrationsModel: IntegrationDestinationModel
     package let aiCueViewModel: AICueGenerationViewModel
@@ -86,7 +87,7 @@ package enum SettingsPresentationFixtures {
         platformActionResult: SettingsPlatformActionResult = .performed,
         route: SettingsRoute = .destination(.general),
         availability: SettingsRouteAvailability? = nil,
-        textSize: ClaudioInterfaceTextSize = .standard,
+        textSize: ClaudioCompactPreviewDensity = .standard,
         experienceProfile: PreviewFixtures.SettingsExperienceProfile? = nil,
         aiCueViewModel injectedAICueViewModel: AICueGenerationViewModel? = nil,
         aiCueScenario: PreviewFixtures.AICueGalleryScenario? = nil,
@@ -98,7 +99,7 @@ package enum SettingsPresentationFixtures {
             isDirectory: true)
         let actionRecorder = SettingsPresentationActionRecorder(result: platformActionResult)
         let preferences = ClaudioPreferences(previewLanguage: language)
-        preferences.setInterfaceTextSize(textSize)
+        preferences.setCompactPreviewDensity(textSize)
         let generalState = experienceProfile?.general
         let projectedLoginItemRegistration: LoginItemRegistrationState =
             generalState == .permissionRequired ? .requiresApproval : loginItemRegistration
@@ -173,7 +174,7 @@ package enum SettingsPresentationFixtures {
             ])
         let dynamicQuietPolicy = makeSettingsFixtureDynamicQuietPolicy(
             for: experienceProfile)
-        let usageSettings = makeSettingsFixtureUsageSettings(for: experienceProfile)
+        let activityDiagnostics = makeSettingsFixtureActivityDiagnostics(for: experienceProfile)
         let globalShortcutSettings = makeSettingsFixtureShortcutSettings(
             for: experienceProfile)
         let aboutSettings = makeSettingsFixtureAboutSettings(for: experienceProfile)
@@ -216,7 +217,7 @@ package enum SettingsPresentationFixtures {
                 preferences: preferences,
                 loginItemSettings: loginItemSettings,
                 dynamicQuietPolicy: dynamicQuietPolicy,
-                usageSettings: usageSettings,
+                activityDiagnostics: activityDiagnostics,
                 globalShortcutSettings: globalShortcutSettings,
                 aboutSettings: aboutSettings,
                 soundPacksEditorOwner: soundPacksEditor,
@@ -258,6 +259,7 @@ package enum SettingsPresentationFixtures {
             temporaryRoot: temporaryRoot,
             session: session,
             soundPacksEditor: soundPacksEditor,
+            activityDiagnostics: activityDiagnostics,
             eventSettingsModel: eventSettingsModel,
             integrationsModel: integrationsModel,
             aiCueViewModel: aiCueViewModel,
@@ -307,7 +309,7 @@ extension SettingsPresentationDependencies {
             preferences: preferences,
             loginItemSettings: loginItemSettings,
             dynamicQuietPolicy: makeSettingsFixtureDynamicQuietPolicy(for: nil),
-            usageSettings: makeSettingsFixtureUsageSettings(for: nil),
+            activityDiagnostics: makeSettingsFixtureActivityDiagnostics(for: nil),
             globalShortcutSettings: makeSettingsFixtureShortcutSettings(for: nil),
             aboutSettings: makeSettingsFixtureAboutSettings(for: nil),
             soundPacksEditorOwner: soundPacksEditorOwner,
@@ -369,46 +371,85 @@ private func makeSettingsFixtureDynamicQuietPolicy(
 }
 
 @MainActor
-private func makeSettingsFixtureUsageSettings(
+private func makeSettingsFixtureActivityDiagnostics(
     for profile: PreviewFixtures.SettingsExperienceProfile?
-) -> UsageSettingsModel {
+) -> ActivityDiagnosticsModel {
     let state = profile?.usage ?? .empty
+    let now = Date(timeIntervalSince1970: 1_788_739_200)
+    let timeZone = TimeZone(secondsFromGMT: 0)!
+    let dateKeys = LocalActivitySummaryStore.dateKeys(today: now, timeZone: timeZone)
     let hasEvents = state == .ready || state == .stale
-    let sourceState: UsageHistorySourceState = state == .unreadable ? .unreadable : .available
-    let events =
+    let todayCounts: [String: UInt64] =
         hasEvents
         ? [
-            UsageEventActivity(
-                event: .stop,
-                resultCounts: [UsagePlaybackResultCount(result: .played, count: 4)])
-        ] : []
-    let presentation = UsageActivityPresentation(
-        surfaces: HostID.productVisibleCases.map {
-            UsageSurfaceActivity(
-                host: $0,
-                retainedCount: hasEvents ? 4 : 0,
-                events: events,
-                sourceState: state == .empty || state == .loading || state == .writeFailed
-                    ? .missing : sourceState)
-        },
-        log: UsageDiagnosticLogSnapshot(
-            path: "/preview/claudio.log",
-            state: state == .unreadable
-                ? .unreadable : (hasEvents ? .available(sizeBytes: 512) : .missing),
-            failures: []))
-    let feedback: UsageSettingsFeedback? =
+            LocalActivityCounterKey.make(host: .claudeCode, event: .taskStart): 4,
+            LocalActivityCounterKey.make(host: .claudeCode, event: .stop): 2,
+            LocalActivityCounterKey.make(host: .claudeCode, event: .subagentStop): 1,
+        ] : [:]
+    let document = LocalActivitySummaryDocument(
+        updatedAt: now,
+        buckets: [LocalActivityDayBucket(localDate: dateKeys[0], counts: todayCounts)])
+    let integrationStatuses: [HostID: ActivityIntegrationStatus] = [
+        .claudeCode: .connected,
+        .codex: .awaitingReceipt,
+        .workBuddy: .notConnected,
+    ]
+    let readResult: LocalActivitySummaryReadResult
+    let readState: ActivityOverviewReadState
+    let projectedDocument: LocalActivitySummaryDocument?
+    switch state {
+    case .ready, .empty:
+        readResult = LocalActivitySummaryReadResult(state: .ready(document))
+        readState = .ready
+        projectedDocument = document
+    case .stale:
+        readResult = LocalActivitySummaryReadResult(state: .stale(document))
+        readState = .stale(lastUpdated: document.updatedAt)
+        projectedDocument = document
+    case .loading, .writeFailed:
+        readResult = LocalActivitySummaryReadResult(state: .missing)
+        readState = .missing
+        projectedDocument = nil
+    case .unreadable:
+        readResult = LocalActivitySummaryReadResult(state: .unavailable)
+        readState = .unavailable
+        projectedDocument = nil
+    }
+    let logState: ActivityDiagnosticLogState =
+        state == .unreadable
+        ? .unreadable
+        : (hasEvents ? .available(sizeBytes: 512) : .missing)
+    let log = ActivityDiagnosticLogSnapshot(
+        path: "/preview/claudio.log", state: logState, failures: [])
+    let presentation = ActivityDiagnosticsPresentation(
+        projection: ActivityOverviewProjector.project(
+            document: projectedDocument,
+            readState: readState,
+            integrationStatuses: integrationStatuses,
+            now: now,
+            timeZone: timeZone),
+        log: log)
+    let loadResult = ActivityDiagnosticsLoadResult(
+        readResult: readResult,
+        integrationStatuses: integrationStatuses,
+        log: log)
+    let feedback: ActivityDiagnosticsFeedback? =
         switch state {
         case .stale:
-            UsageSettingsFeedback(action: .clearHistory, failure: .historyClearFailed)
+            ActivityDiagnosticsFeedback(action: .clearActivity, failure: .activityClearFailed)
         case .writeFailed:
-            UsageSettingsFeedback(action: .copyLogPath, failure: .clipboardFailed)
+            ActivityDiagnosticsFeedback(action: .copyLogPath, failure: .clipboardFailed)
         case .loading, .ready, .empty, .unreadable:
             nil
         }
-    return UsageSettingsModel(
+    return ActivityDiagnosticsModel(
         previewPresentation: presentation,
-        isRefreshing: state == .loading,
-        feedback: feedback)
+        previewLoadResult: loadResult,
+        previewClearActivityResult: state == .stale
+            ? .failure(.activityClearFailed)
+            : .success(loadResult),
+        previewIsRefreshing: state == .loading,
+        previewFeedback: feedback)
 }
 
 @MainActor

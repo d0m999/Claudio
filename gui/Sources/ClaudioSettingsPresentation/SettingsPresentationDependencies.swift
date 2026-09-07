@@ -7,7 +7,7 @@ package struct SettingsPresentationDependencies {
     package let preferences: ClaudioPreferences
     package let loginItemSettings: LoginItemSettingsModel
     package let dynamicQuietPolicy: DynamicQuietPolicyController
-    package let usageSettings: UsageSettingsModel
+    package let activityDiagnostics: ActivityDiagnosticsModel
     package let globalShortcutSettings: GlobalShortcutSettingsModel
     package let aboutSettings: AboutSettingsModel
     package let soundPacksEditorOwner: SoundPacksEditorOwner
@@ -21,7 +21,7 @@ package struct SettingsPresentationDependencies {
         preferences: ClaudioPreferences,
         loginItemSettings: LoginItemSettingsModel,
         dynamicQuietPolicy: DynamicQuietPolicyController,
-        usageSettings: UsageSettingsModel,
+        activityDiagnostics: ActivityDiagnosticsModel,
         globalShortcutSettings: GlobalShortcutSettingsModel,
         aboutSettings: AboutSettingsModel,
         soundPacksEditorOwner: SoundPacksEditorOwner,
@@ -34,7 +34,7 @@ package struct SettingsPresentationDependencies {
         self.preferences = preferences
         self.loginItemSettings = loginItemSettings
         self.dynamicQuietPolicy = dynamicQuietPolicy
-        self.usageSettings = usageSettings
+        self.activityDiagnostics = activityDiagnostics
         self.globalShortcutSettings = globalShortcutSettings
         self.aboutSettings = aboutSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner

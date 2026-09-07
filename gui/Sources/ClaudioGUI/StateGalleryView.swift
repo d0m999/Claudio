@@ -49,16 +49,16 @@ struct StateGalleryView: View {
                 EventRowGalleryView()
                 EventHostIndicatorGalleryView()
                 PanelPackSectionGalleryView()
-                InterfaceTextSizeGalleryView()
+                CompactEventLayoutGalleryView()
                 PanelQuitFooterGalleryView()
                 MasterVolumeGalleryView()
                 PackCardGalleryView()
                 ForEach(ClaudioAppLanguage.allCases) { language in
-                    ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                    ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
                         ForEach(SettingsGalleryAppearance.allCases) { appearance in
                             GallerySection(
                                 title:
-                                    "Sounds destination · \(language.selfName) · \(textSize.rawValue) · \(appearance.rawValue) (12 production states × 2 widths)"
+                                    "Sounds destination · \(language.selfName) · compact · \(appearance.rawValue) (12 production states × 2 widths)"
                             ) {
                                 if textSize == .standard && appearance == .light {
                                     SoundPacksWindowStateGalleryView(language: language)
@@ -122,10 +122,10 @@ struct SettingsExperienceGalleryView: View {
     var body: some View {
         GallerySection(
             title:
-                "Unified Settings · 6 basic production destinations · 2 languages × 4 text sizes"
+                "Unified Settings · 6 basic production destinations · 2 languages × compact density"
         ) {
             ForEach(ClaudioAppLanguage.allCases) { language in
-                ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
                     ForEach(PreviewFixtures.settingsExperienceScenarios) { scenario in
                         GalleryFrame(
                             caption:
@@ -167,10 +167,11 @@ private enum SettingsGalleryAppearance: String, CaseIterable, Identifiable {
 struct EventSettingsLayoutGalleryView: View {
     var body: some View {
         GallerySection(
-            title: "Events destination · production mount · 2 languages × 4 text sizes × 2 widths"
+            title:
+                "Events destination · production mount · 2 languages × compact density × 2 widths"
         ) {
             ForEach(ClaudioAppLanguage.allCases) { language in
-                ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
                     ForEach(SettingsGalleryAppearance.allCases) { appearance in
                         ForEach(EventSettingsGalleryWidth.allCases) { width in
                             GalleryFrame(
@@ -224,7 +225,7 @@ struct ComplexAccessibilityEnvironmentGalleryView: View {
                     route: .events(scope: .surface(.workBuddy), event: .stop),
                     availability: PreviewFixtures.settingsRouteAvailability,
                     language: .english,
-                    textSize: .maximum,
+                    textSize: .standard,
                     width: EventSettingsGalleryWidth.minimum.value
                 )
                 .transaction { transaction in
@@ -258,10 +259,10 @@ struct AICueExperienceGalleryView: View {
     var body: some View {
         GallerySection(
             title:
-                "Events AI Cue · 4 profiles + credential/composer/failure states · 2 languages × 4 text sizes"
+                "Events AI Cue · 4 profiles + credential/composer/failure states · 2 languages × compact density"
         ) {
             ForEach(ClaudioAppLanguage.allCases) { language in
-                ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
                     ForEach(SettingsGalleryAppearance.allCases) { appearance in
                         ForEach(PreviewFixtures.aiCueGalleryScenarios) { scenario in
                             GalleryFrame(
@@ -290,7 +291,7 @@ private struct SettingsWindowRouteFrame: View {
     let route: SettingsRoute
     let availability: SettingsRouteAvailability
     let language: ClaudioAppLanguage
-    let textSize: ClaudioInterfaceTextSize
+    let textSize: ClaudioCompactPreviewDensity
     let experienceProfile: PreviewFixtures.SettingsExperienceProfile?
     let width: CGFloat
     let aiCueScenario: PreviewFixtures.AICueGalleryScenario?
@@ -301,7 +302,7 @@ private struct SettingsWindowRouteFrame: View {
         route: SettingsRoute,
         availability: SettingsRouteAvailability,
         language: ClaudioAppLanguage,
-        textSize: ClaudioInterfaceTextSize = .standard,
+        textSize: ClaudioCompactPreviewDensity = .standard,
         experienceScenario: PreviewFixtures.SettingsExperienceScenario? = nil,
         width: CGFloat = SettingsWindowGeometry.minimumWidth,
         aiCueScenario: PreviewFixtures.AICueGalleryScenario? = nil,
@@ -353,10 +354,10 @@ private enum ProductionPanelGalleryScenario: String, CaseIterable, Identifiable 
 struct ProductionPanelGalleryView: View {
     var body: some View {
         GallerySection(
-            title: "Production Agent Panel · 2 languages × 4 sizes × 6 critical states"
+            title: "Production Agent Panel · 2 languages × compact density × 6 critical states"
         ) {
             ForEach(ClaudioAppLanguage.allCases) { language in
-                ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
                     ForEach(ProductionPanelGalleryScenario.allCases) { scenario in
                         GalleryFrame(
                             caption:
@@ -377,12 +378,11 @@ struct ProductionPanelGalleryView: View {
 @MainActor
 private struct ProductionPanelStateFrame: View {
     let language: ClaudioAppLanguage
-    let textSize: ClaudioInterfaceTextSize
+    let textSize: ClaudioCompactPreviewDensity
     let scenario: ProductionPanelGalleryScenario
 
     @StateObject private var focusCoordinator: PanelFocusCoordinator
     @StateObject private var hostIntegrations: HostIntegrationPresentationStore
-    @StateObject private var bootstrapReports: BootstrapReportPresentationStore
     @StateObject private var languageStore: ClaudioPreferences
     private let panelModel: PanelConfigController
     private let selectedScope: PanelSoundScopeID
@@ -390,7 +390,7 @@ private struct ProductionPanelStateFrame: View {
 
     init(
         language: ClaudioAppLanguage,
-        textSize: ClaudioInterfaceTextSize,
+        textSize: ClaudioCompactPreviewDensity,
         scenario: ProductionPanelGalleryScenario
     ) {
         self.language = language
@@ -409,12 +409,8 @@ private struct ProductionPanelStateFrame: View {
             wrappedValue: HostIntegrationPresentationStore(
                 state: hostState,
                 configurationSources: [:]))
-        _bootstrapReports = StateObject(
-            wrappedValue: BootstrapReportPresentationStore(
-                store: BootstrapReportStore(
-                    directory: URL(fileURLWithPath: "/dev/null/claudio-preview-reports"))))
         let languageStore = ClaudioPreferences(previewLanguage: language)
-        languageStore.setInterfaceTextSize(textSize)
+        languageStore.setCompactPreviewDensity(textSize)
         _languageStore = StateObject(wrappedValue: languageStore)
 
         let baseConfig = ClaudioConfig(
@@ -499,7 +495,6 @@ private struct ProductionPanelStateFrame: View {
             audioEnvironment: previewAudioImportEnvironment,
             focusCoordinator: focusCoordinator,
             hostIntegrations: hostIntegrations,
-            bootstrapReports: bootstrapReports,
             languageStore: languageStore
         )
         .frame(height: 560)
@@ -720,7 +715,7 @@ private struct PanelPackSectionStateFrame: View {
             state: state,
             typeScale: 1,
             focusedTarget: $focusedTarget,
-            adaptation: panelLayoutAdaptation(for: .standard),
+            adaptation: panelLayoutAdaptation(),
             onSelect: { _ in }
         )
         .frame(width: CGFloat(standardPanelWidth))
@@ -737,24 +732,24 @@ private func panelPackSectionCaption(_ state: PanelPackSectionState) -> String {
     }
 }
 
-struct InterfaceTextSizeGalleryView: View {
+struct CompactEventLayoutGalleryView: View {
     var body: some View {
         GallerySection(
-            title: "Interface + EventRow C layout (2 languages × 4 sizes × 3 mapping states)"
+            title: "Compact EventRow C layout (2 languages × 3 mapping states)"
         ) {
             ForEach(PreviewFixtures.eventRowLayoutScenarios) { scenario in
                 GalleryFrame(
                     caption:
-                        "\(scenario.language.selfName) · .\(scenario.interfaceTextSize.rawValue)"
+                        "\(scenario.language.selfName) · compact"
                 ) {
-                    InterfaceTextSizeFrame(scenario: scenario)
+                    CompactEventLayoutFrame(scenario: scenario)
                 }
             }
         }
     }
 }
 
-private struct InterfaceTextSizeFrame: View {
+private struct CompactEventLayoutFrame: View {
     let scenario: PreviewFixtures.EventRowLayoutScenario
     @StateObject private var languageStore: ClaudioPreferences
     @FocusState private var focusedTarget: PanelFocusTarget?
@@ -768,9 +763,6 @@ private struct InterfaceTextSizeFrame: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            InterfaceSettingsPopoverContent(
-                selection: .constant(scenario.interfaceTextSize),
-                languageStore: languageStore)
             Text(panelSummary)
                 .font(ClaudioTheme.font(.productTitle))
             ForEach(scenario.samples) { sample in
@@ -789,11 +781,7 @@ private struct InterfaceTextSizeFrame: View {
                     adaptation: scenario.adaptation)
             }
         }
-        .frame(
-            width: CGFloat(scenario.adaptation.panelWidth),
-            alignment: .leading
-        )
-        .environment(\.dynamicTypeSize, scenario.interfaceTextSize.dynamicTypeSize)
+        .frame(width: CGFloat(standardPanelWidth), alignment: .leading)
     }
 
     private var panelSummary: String {
@@ -803,19 +791,19 @@ private struct InterfaceTextSizeFrame: View {
     }
 }
 
-// MARK: - Fixed panel quit footer (2 languages × 4 interface text sizes)
+// MARK: - Fixed panel quit footer (2 languages × compact density)
 
 struct PanelQuitFooterGalleryView: View {
     var body: some View {
-        GallerySection(title: "Panel quit footer (2 languages × 4 sizes · 312/360pt)") {
+        GallerySection(title: "Panel quit footer (2 languages × compact density · 312pt)") {
             ForEach(ClaudioAppLanguage.allCases) { language in
-                ForEach(ClaudioInterfaceTextSize.allCases) { interfaceTextSize in
+                ForEach([ClaudioCompactPreviewDensity.standard]) { density in
                     GalleryFrame(
-                        caption: "\(language.selfName) · .\(interfaceTextSize.rawValue)"
+                        caption: "\(language.selfName) · \(density.rawValue)"
                     ) {
                         PanelQuitFooterStateFrame(
                             language: language,
-                            interfaceTextSize: interfaceTextSize)
+                            density: density)
                     }
                 }
             }
@@ -825,23 +813,16 @@ struct PanelQuitFooterGalleryView: View {
 
 private struct PanelQuitFooterStateFrame: View {
     let language: ClaudioAppLanguage
-    let interfaceTextSize: ClaudioInterfaceTextSize
+    let density: ClaudioCompactPreviewDensity
     @FocusState private var focusedTarget: PanelFocusTarget?
 
     var body: some View {
         PanelQuitFooter(
             language: language,
-            typeScale: CGFloat(interfaceTextSize.scale),
             focusedTarget: $focusedTarget,
             onQuit: {}
         )
-        .frame(
-            width: CGFloat(
-                panelLayoutAdaptation(
-                    for: panelTypeSizeTier(for: interfaceTextSize)
-                ).panelWidth)
-        )
-        .environment(\.dynamicTypeSize, interfaceTextSize.dynamicTypeSize)
+        .frame(width: CGFloat(standardPanelWidth))
     }
 }
 
@@ -883,7 +864,7 @@ private struct MasterVolumeStateFrame: View {
                 onCommit: { _ in nil },
                 focusCoordinator: PanelFocusCoordinator(),
                 focusedTarget: $focusedTarget,
-                adaptation: panelLayoutAdaptation(for: .standard),
+                adaptation: panelLayoutAdaptation(),
                 language: .zhHans)
             if case .failed(_, let message) = state {
                 FailureRow(message: message)
@@ -979,7 +960,7 @@ struct HostIntegrationGalleryView: View {
             title: "Host integrations · 2 languages (\(scenarioCount))"
         ) {
             ForEach(ClaudioAppLanguage.allCases) { language in
-                ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
                     ForEach(SettingsGalleryAppearance.allCases) { appearance in
                         ForEach(PreviewFixtures.hostIntegrationScenarios) { scenario in
                             GalleryFrame(
@@ -1051,7 +1032,7 @@ struct HostIntegrationGalleryView: View {
 
 private func hostIntegrationGalleryCaption(
     language: ClaudioAppLanguage,
-    textSize: ClaudioInterfaceTextSize,
+    textSize: ClaudioCompactPreviewDensity,
     appearance: SettingsGalleryAppearance,
     id: String,
     title: String
@@ -1065,14 +1046,14 @@ private struct HostIntegrationSettingsFrame: View {
     let scenario: PreviewFixtures.HostIntegrationScenario
     let selectedSurface: HostSurfaceID?
     let language: ClaudioAppLanguage
-    let textSize: ClaudioInterfaceTextSize
+    let textSize: ClaudioCompactPreviewDensity
     let integrationInFlightAction: HostIntegrationUserAction?
 
     init(
         scenario: PreviewFixtures.HostIntegrationScenario,
         selectedSurface: HostSurfaceID? = nil,
         language: ClaudioAppLanguage,
-        textSize: ClaudioInterfaceTextSize,
+        textSize: ClaudioCompactPreviewDensity,
         integrationInFlightAction: HostIntegrationUserAction? = nil
     ) {
         self.scenario = scenario

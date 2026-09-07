@@ -40,6 +40,53 @@ func runContrastSuites() {
         expect(abs(ratio - 1.0) < 0.0001, "expected 1.0, got \(ratio)")
     }
 
+    suite("palette: clay-hover stays pinned to the documented warm interaction values") {
+        expect(
+            ClaudioColorHex.clayHoverDark == "E68A5C",
+            "dark clay-hover drifted from DESIGN.md")
+        expect(
+            ClaudioColorHex.clayHoverLight == "D97757",
+            "light clay-hover drifted from DESIGN.md")
+    }
+
+    suite("contrast: icon-action hover foregrounds clear their real clay-soft backgrounds") {
+        guard
+            let darkHoverBackground = compositedHex(
+                ClaudioColorHex.clayDark,
+                over: ClaudioColorHex.panelDark,
+                alpha: 0.15),
+            let lightHoverBackground = compositedHex(
+                ClaudioColorHex.clayLight,
+                over: ClaudioColorHex.panelDeepLight,
+                alpha: 0.12)
+        else {
+            expect(false, "icon-action hover backgrounds must compose from canonical tokens")
+            return
+        }
+
+        let darkRatio = contrastRatio(ClaudioColorHex.clayHoverDark, darkHoverBackground)
+        expect(
+            darkRatio >= 3.0,
+            "dark clay-hover icon vs clay-soft background must be ≥ 3:1, got \(darkRatio)")
+
+        // The documented light clay-hover is lighter than the base brand clay and drops below
+        // 3:1 on the deepest panel gradient once clay-soft is composited underneath it. The shared
+        // button therefore uses base clay for its light foreground while still exposing the
+        // canonical hover token for surfaces where the real background clears the same guard.
+        let lightRatio = contrastRatio(ClaudioColorHex.clayLight, lightHoverBackground)
+        expect(
+            lightRatio >= 3.0,
+            "light clay icon vs deepest clay-soft panel background must be ≥ 3:1, got"
+                + " \(lightRatio)")
+        let documentedHoverOnSurface = contrastRatio(
+            ClaudioColorHex.clayHoverLight,
+            ClaudioColorHex.surfaceLight)
+        expect(
+            documentedHoverOnSurface >= 3.0,
+            "light clay-hover must remain usable as a non-text accent on surface, got"
+                + " \(documentedHoverOnSurface)")
+    }
+
     suite("contrastRatio: is symmetric — argument order does not matter") {
         let a = contrastRatio(ClaudioColorHex.textDark, ClaudioColorHex.panelDark)
         let b = contrastRatio(ClaudioColorHex.panelDark, ClaudioColorHex.textDark)

@@ -260,21 +260,12 @@ public enum SettingsWindowGeometry {
     public static let defaultHeight: Double = 820
     public static let minimumWidth: Double = 960
     public static let minimumHeight: Double = 640
-    public static let compactSidebarWidth: Double = 220
+    public static let compactSidebarWidth: Double = 210
     public static let standardSidebarWidth: Double = 252
-    public static let expandedSidebarWidth: Double = 276
-    public static let compactSidebarWindowThreshold: Double = 1_040
+    public static let compactSidebarWindowThreshold: Double = 1_100
 }
 
-public func settingsSidebarWidth(
-    windowWidth: Double,
-    interfaceTextSize: ClaudioInterfaceTextSize
-) -> Double {
-    if interfaceTextSize == .maximum {
-        return windowWidth <= SettingsWindowGeometry.compactSidebarWindowThreshold
-            ? SettingsWindowGeometry.standardSidebarWidth
-            : SettingsWindowGeometry.expandedSidebarWidth
-    }
+public func settingsSidebarWidth(windowWidth: Double) -> Double {
     return windowWidth <= SettingsWindowGeometry.compactSidebarWindowThreshold
         ? SettingsWindowGeometry.compactSidebarWidth
         : SettingsWindowGeometry.standardSidebarWidth

@@ -387,14 +387,14 @@
     },
     "event.task-start" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Task start" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "任务开始" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "User initiated" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用户发起" } }
       }
     },
     "event.stop" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Turn complete" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "本轮结束" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Response ended" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "响应结束" } }
       }
     },
     "event.stop-failure" : {
@@ -405,13 +405,13 @@
     },
     "event.notification" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Needs response" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "待响应" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Waiting for input" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "等待介入" } }
       }
     },
     "event.subagent-stop" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Subtask complete" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Subtask ended" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "子任务结束" } }
       }
     },
@@ -757,66 +757,6 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "English" } }
       }
     },
-    "interface.text-size" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface text" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "界面文字" } }
-      }
-    },
-    "interface.text-size.compact" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Compact" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "紧凑" } }
-      }
-    },
-    "interface.text-size.current" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current interface text" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前界面文字" } }
-      }
-    },
-    "interface.text-size.decrease" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Decrease interface text" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "减小界面文字" } }
-      }
-    },
-    "interface.text-size.increase" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Increase interface text" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "增大界面文字" } }
-      }
-    },
-    "interface.text-size.large" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Large" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "较大" } }
-      }
-    },
-    "interface.text-size.level" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Level %lld of 4" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "第 %lld 档，共 4 档" } }
-      }
-    },
-    "interface.text-size.maximum" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Maximum" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最大" } }
-      }
-    },
-    "interface.text-size.minimum" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Already at the smallest size" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已是最小档" } }
-      }
-    },
-    "interface.text-size.standard" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Standard" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "标准" } }
-      }
-    },
     "interface.title" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface" } },
@@ -896,12 +836,6 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Closes the panel and quits the app." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关闭面板并退出整个应用。" } }
-      }
-    },
-    "panel.options.hint" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Adjust text size across the three Claudio interfaces" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整 claudi0 三个界面的文字大小" } }
       }
     },
     "panel.master-volume" : {
@@ -3462,8 +3396,8 @@
     },
     "integrations.destination.receipt-policy" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Up to 20 redacted receipts per source are retained for 30 days; clearing them does not affect the current connection or sound preferences." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "每个来源最多保留 20 条、30 天；清除不影响当前连接或声音偏好" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Recent connection evidence is redacted; clearing the activity summary does not affect the current connection or sound preferences." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最近连接证据均已脱敏；清除活动汇总不影响当前连接或声音偏好。" } }
       }
     },
     "integrations.destination.activation-callout" : {
@@ -3714,8 +3648,8 @@
     },
     "settings.destination.usage" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Usage" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用量" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Activity & Diagnostics" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "活动与诊断" } }
       }
     },
     "settings.integrations.manage-events" : {
@@ -3886,42 +3820,6 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "专注模式权限：%@。日历权限：%@。当前原因：%@。快照状态：%@。" } }
       }
     },
-    "settings.display.panel-width.automatic" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动" } }
-      }
-    },
-    "settings.display.panel-width.clamped" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Expanded to %lld pt to keep the current language and text size visible." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已扩展到 %lld pt，避免当前语言和文字档被裁切。" } }
-      }
-    },
-    "settings.display.panel-width.compact" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Compact" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "紧凑" } }
-      }
-    },
-    "settings.display.panel-width.description" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Explicit widths expand when needed so localized content and controls remain visible." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显式宽度会在需要时扩展，确保本地化内容和控件保持可见。" } }
-      }
-    },
-    "settings.display.panel-width.roomy" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Roomy" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "宽松" } }
-      }
-    },
-    "settings.display.panel-width.title" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Panel width" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "面板宽度" } }
-      }
-    },
     "settings.display.status-dot.description" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Changes only the Orbit Zero visual variant. claudi0 remains in the menu bar and VoiceOver still reports its complete status." } },
@@ -3944,12 +3842,6 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Show activity dot in menu bar" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在菜单栏显示活动状态点" } }
-      }
-    },
-    "settings.display.text-size.description" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Applies immediately across every Claudio interface, including the Aa control in the panel." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "立即应用到所有 Claudio 界面，包括面板中的 Aa 控件。" } }
       }
     },
     "settings.general.login-item.description" : {
@@ -4302,8 +4194,8 @@
     },
     "settings.usage.action.history-cleared" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retained receipt history was cleared. Current activation and stable receipts were not changed." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已清除保留的回执历史；当前激活与稳定回执未改变。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The activity summary was cleared. Current activation and stable receipts were not changed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已清除活动汇总；当前激活与稳定回执未改变。" } }
       }
     },
     "settings.usage.action.in-progress" : {
@@ -4314,8 +4206,8 @@
     },
     "settings.usage.action.log-cleared" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "The diagnostic log was cleared. Receipt history was not changed." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已清除诊断日志；回执历史未改变。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The diagnostic log was cleared. Activity data was not changed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已清除诊断日志；活动数据未改变。" } }
       }
     },
     "settings.usage.action.log-path-copied" : {
@@ -4332,20 +4224,20 @@
     },
     "settings.usage.clear.history" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear retained history" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除保留历史" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear activity summary" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除活动汇总" } }
       }
     },
     "settings.usage.clear.history.message" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "This permanently removes only the retained, redacted history for visible Host Surfaces. It does not change connection markers, Current Activation, stable receipts, sounds, Provider preferences, or Keychain credentials." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这只会永久移除可见 Host Surface 保留的脱敏历史；不会改变连接 marker、当前激活、稳定回执、声音、Provider 偏好或 Keychain 凭据。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This permanently removes only the local activity summary. It does not change connection markers, Current Activation, stable receipts, sounds, Provider preferences, or Keychain credentials." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这只会永久移除本地活动汇总；不会改变连接 marker、当前激活、稳定回执、声音、Provider 偏好或 Keychain 凭据。" } }
       }
     },
     "settings.usage.clear.history.title" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear retained receipt history?" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除保留的回执历史？" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear the local activity summary?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除本地活动汇总？" } }
       }
     },
     "settings.usage.clear.log" : {
@@ -4356,8 +4248,8 @@
     },
     "settings.usage.clear.log.message" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "This permanently removes only the rolling diagnostic log. Retained receipt history and every connection, sound, Provider, and credential fact remain unchanged." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这只会永久移除滚动诊断日志；保留的回执历史以及所有连接、声音、Provider 与凭据事实均保持不变。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This permanently removes only the rolling diagnostic log. Activity, connection, sound, Provider, and credential facts remain unchanged." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这只会永久移除滚动诊断日志；活动、连接、声音、Provider 与凭据事实均保持不变。" } }
       }
     },
     "settings.usage.clear.log.title" : {
@@ -4368,8 +4260,8 @@
     },
     "settings.usage.description" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "A limited local activity view derived only from retained, redacted receipts and the rolling diagnostic log." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只根据保留的脱敏回执与滚动诊断日志生成的有限本地活动视图。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A local activity view derived from accepted host callbacks and the rolling diagnostic log." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "根据已接受的宿主回调与滚动诊断日志生成的本地活动视图。" } }
       }
     },
     "settings.usage.failure.clipboard" : {
@@ -4386,14 +4278,14 @@
     },
     "settings.usage.failure.history-clear" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retained history could not be cleared. The last visible facts were preserved." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法清除保留历史；已保留上次可见事实。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The activity summary could not be cleared. The last visible facts were preserved." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法清除活动汇总；已保留上次可见事实。" } }
       }
     },
     "settings.usage.failure.history-lock-busy" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Receipt history is busy. Nothing visible was changed; try again." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "回执历史锁正忙；可见事实未改变，请重试。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The activity summary is busy. Nothing visible was changed; try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "活动汇总锁正忙；可见事实未改变，请重试。" } }
       }
     },
     "settings.usage.failure.log-clear" : {
@@ -4578,8 +4470,152 @@
     },
     "settings.usage.scope-notice" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "This is not complete usage or a weekly total. Each Host Surface contributes at most 20 receipts retained for at most 30 days." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这不是完整用量或本周总量。每个 Host Surface 最多投影 20 条、最多 30 天的保留回执。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Activity counts come only from accepted, mapped callbacks in the current seven local calendar days. Playback, mute, debounce, and receipt results do not change the count." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "活动只来自最近七个本地日历日内已接受且成功映射的回调；播放、静音、去抖和回执结果不会改变计数。" } }
+      }
+    },
+    "settings.activity.action.cleared" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Activity summary cleared. Connection, receipts, sounds, and diagnostics were not changed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已清除活动汇总；连接、回执、声音和诊断未改变。" } }
+      }
+    },
+    "settings.activity.coverage" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld event capabilities" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld 个事件能力" } }
+      }
+    },
+    "settings.activity.connection.awaiting" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Awaiting receipt" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "待回执" } }
+      }
+    },
+    "settings.activity.connection.connected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已连接" } }
+      }
+    },
+    "settings.activity.connection.not-connected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not connected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未连接" } }
+      }
+    },
+    "settings.activity.connection.unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unavailable" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "不可用" } }
+      }
+    },
+    "settings.activity.events.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Event activity" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "事件活动" } }
+      }
+    },
+    "settings.activity.failure.clear" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The activity summary could not be cleared. The last visible facts were preserved." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法清除活动汇总；已保留上次可见事实。" } }
+      }
+    },
+    "settings.activity.failure.lock-busy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Activity is busy. Nothing visible was changed; try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "活动汇总锁正忙；可见事实未改变，请重试。" } }
+      }
+    },
+    "settings.activity.seven-days.messages" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Messages · 7 days" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "消息往来 · 7 日" } }
+      }
+    },
+    "settings.activity.seven-days.subtasks" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Subtasks ended · 7 days" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "子任务结束 · 7 日" } }
+      }
+    },
+    "settings.activity.messages" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Messages" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "消息往来" } }
+      }
+    },
+    "settings.activity.range.seven-days" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "7 days" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "7 日" } }
+      }
+    },
+    "settings.activity.range.today" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Today" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "今日" } }
+      }
+    },
+    "settings.activity.status.empty" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No accepted events in this range" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此范围暂无已接受事件" } }
+      }
+    },
+    "settings.activity.status.partial" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Partial data since %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自 %@ 起为部分数据" } }
+      }
+    },
+    "settings.activity.status.ready" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Ready" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "数据完整" } }
+      }
+    },
+    "settings.activity.status.stale" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stale · last updated %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "旧快照 · 最后更新 %@" } }
+      }
+    },
+    "settings.activity.status.unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unavailable" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "不可用" } }
+      }
+    },
+    "settings.activity.status.unobserved" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Waiting for the first accepted callback" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "等待首个已接受回调" } }
+      }
+    },
+    "settings.activity.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Activity overview" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "活动概览" } }
+      }
+    },
+    "settings.activity.today.messages" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Messages · today" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "消息往来 · 今日" } }
+      }
+    },
+    "settings.display.fixed-layout.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The interface uses a fixed compact layout. Text scale and menu-bar panel width are not user preferences." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "界面固定使用紧凑布局；字号和菜单栏面板宽度不再作为用户偏好。" } }
+      }
+    },
+    "settings.display.fixed-layout.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Fixed compact layout" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "固定紧凑布局" } }
       }
     },
     "menu-bar.status.running" : {

@@ -1,4 +1,3 @@
-import AppKit
 import ClaudioGUIComponents
 import SwiftUI
 
@@ -25,6 +24,7 @@ struct SettingsSectionCard: View {
     @Environment(\.settingsReduceTransparencyOverride) private var reduceTransparencyOverride
     #endif
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.colorScheme) private var colorScheme
 
     private let content: AnyView
 
@@ -38,14 +38,16 @@ struct SettingsSectionCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 effectiveReduceTransparency
-                    ? Color(nsColor: .windowBackgroundColor)
-                    : Color(nsColor: .controlBackgroundColor)
+                    ? ClaudioTheme.surface(colorScheme)
+                    : ClaudioTheme.elevated(colorScheme)
             )
             .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section))
             .overlay {
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section)
                     .stroke(
-                        Color.primary.opacity(colorSchemeContrast == .increased ? 0.22 : 0.08),
+                        colorSchemeContrast == .increased
+                            ? ClaudioTheme.secondaryText(colorScheme).opacity(0.38)
+                            : ClaudioTheme.hairline(colorScheme),
                         lineWidth: colorSchemeContrast == .increased ? 1.5 : 1)
             }
     }

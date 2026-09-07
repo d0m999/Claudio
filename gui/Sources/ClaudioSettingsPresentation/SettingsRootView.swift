@@ -12,7 +12,7 @@ package struct SettingsRootView: View {
     @ObservedObject var preferences: ClaudioPreferences
     @ObservedObject var dynamicQuietPolicy: DynamicQuietPolicyController
     @ObservedObject var settingsPresentationSession: SettingsPresentationSession
-    @ObservedObject var usageSettings: UsageSettingsModel
+    @ObservedObject var activityDiagnostics: ActivityDiagnosticsModel
     @ObservedObject var globalShortcutSettings: GlobalShortcutSettingsModel
     @ObservedObject var aboutSettings: AboutSettingsModel
     let soundPacksEditorOwner: SoundPacksEditorOwner
@@ -26,6 +26,7 @@ package struct SettingsRootView: View {
     let onEventAudibilityInputsChanged: @MainActor () -> Void
     let onAnnouncement: @MainActor (String) -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedTarget: SettingsWindowFocusTarget?
     @State private var handledFocusDebtRevision: UInt64 = 0
 
@@ -39,7 +40,7 @@ package struct SettingsRootView: View {
         _preferences = ObservedObject(wrappedValue: dependencies.preferences)
         _dynamicQuietPolicy = ObservedObject(wrappedValue: dependencies.dynamicQuietPolicy)
         _settingsPresentationSession = ObservedObject(wrappedValue: session)
-        _usageSettings = ObservedObject(wrappedValue: dependencies.usageSettings)
+        _activityDiagnostics = ObservedObject(wrappedValue: dependencies.activityDiagnostics)
         _globalShortcutSettings = ObservedObject(
             wrappedValue: dependencies.globalShortcutSettings)
         _aboutSettings = ObservedObject(wrappedValue: dependencies.aboutSettings)
@@ -65,26 +66,28 @@ package struct SettingsRootView: View {
                 sidebar
                     .frame(
                         width: CGFloat(
-                            settingsSidebarWidth(
-                                windowWidth: geometry.size.width,
-                                interfaceTextSize: preferences.interfaceTextSize))
+                            settingsSidebarWidth(windowWidth: geometry.size.width))
                     )
                     .frame(maxHeight: .infinity)
-                    .background(Color(nsColor: .underPageBackgroundColor))
-                Divider()
+                    .background(ClaudioTheme.elevated(colorScheme))
+                Rectangle()
+                    .fill(ClaudioTheme.hairline(colorScheme))
+                    .frame(width: ClaudioTheme.Metrics.hairline)
+                    .accessibilityHidden(true)
                 routeSlot
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(nsColor: .windowBackgroundColor))
+                    .background(ClaudioTheme.panel(colorScheme))
             }
         }
         .frame(
             minWidth: SettingsWindowGeometry.minimumWidth,
             minHeight: SettingsWindowGeometry.minimumHeight
         )
+        .background(ClaudioTheme.panel(colorScheme))
+        .tint(ClaudioTheme.clay(colorScheme))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.settingsWindowTitle))
         .accessibilityIdentifier(SettingsPresentationAccessibilityID.root)
-        .environment(\.dynamicTypeSize, preferences.interfaceTextSize.dynamicTypeSize)
         .settingsExitInteraction(destination: destination) { target in
             focusedTarget = target
         }
@@ -114,10 +117,13 @@ package struct SettingsRootView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("claudi0")
-                .font(.system(.headline, design: .rounded).weight(.semibold))
-                .padding(.horizontal, 14)
-                .padding(.bottom, 16)
+            HStack(spacing: 7) {
+                ClaudioOrbitWordmark(height: 19)
+                Text("claudi0")
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 16)
 
             ForEach(
                 settingsSidebarSections(
@@ -129,7 +135,7 @@ package struct SettingsRootView: View {
                         .padding(.vertical, 12)
                     Text(sidebarSectionName(section.id))
                         .font(.caption.weight(.semibold))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                         .padding(.horizontal, 10)
                         .padding(.bottom, 5)
                 }
@@ -143,12 +149,18 @@ package struct SettingsRootView: View {
 
             Spacer(minLength: 0)
 
-            Label(l10n.text(.settingsSidebarLocalFirst), systemImage: "lock.shield")
-                .font(.caption2.weight(.semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .accessibilityIdentifier("settings.sidebar.local-first")
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(ClaudioTheme.success(colorScheme))
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+                Text(l10n.text(.settingsSidebarLocalFirst))
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .accessibilityIdentifier("settings.sidebar.local-first")
         }
         .padding(.horizontal, 12)
         .padding(.top, 20)
@@ -162,13 +174,30 @@ package struct SettingsRootView: View {
             HStack(spacing: 9) {
                 Image(systemName: icon(item))
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(
+                        item == destination
+                            ? ClaudioTheme.clay(colorScheme)
+                            : ClaudioTheme.secondaryText(colorScheme)
+                    )
                     .frame(width: 25, height: 25)
-                    .background(sidebarIconColor(item))
-                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                    .background(
+                        item == destination
+                            ? ClaudioTheme.claySoft(colorScheme)
+                            : ClaudioTheme.surface(colorScheme)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                            .stroke(ClaudioTheme.hairline(colorScheme), lineWidth: 1)
+                    )
                     .accessibilityHidden(true)
 
                 Text(item.localizedName(language: preferences.language))
+                    .foregroundColor(
+                        item == destination
+                            ? ClaudioTheme.text(colorScheme)
+                            : ClaudioTheme.secondaryText(colorScheme)
+                    )
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
 
@@ -177,6 +206,7 @@ package struct SettingsRootView: View {
                 if item == destination {
                     Image(systemName: "checkmark")
                         .font(.caption.weight(.bold))
+                        .foregroundColor(ClaudioTheme.clay(colorScheme))
                         .accessibilityHidden(true)
                 }
             }
@@ -184,8 +214,11 @@ package struct SettingsRootView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(item == destination ? Color.primary.opacity(0.1) : .clear)
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                    .fill(
+                        item == destination
+                            ? ClaudioTheme.claySoft(colorScheme)
+                            : Color.clear)
             )
             .contentShape(Rectangle())
         }
@@ -258,8 +291,8 @@ package struct SettingsRootView: View {
                 .padding(.bottom, 20)
             case .usage:
                 standardDestination {
-                    UsageSettingsView(
-                        model: usageSettings,
+                    ActivityDiagnosticsView(
+                        model: activityDiagnostics,
                         preferences: preferences,
                         focusedTarget: $focusedTarget,
                         onAnnouncement: onAnnouncement)
@@ -387,54 +420,14 @@ package struct SettingsRootView: View {
     private var displaySettings: some View {
         VStack(alignment: .leading, spacing: 20) {
             SettingsSectionCard {
-                InterfaceTextSizeStepperContent(
-                    selection: interfaceTextSizeBinding,
-                    managesFocus: false,
-                    language: preferences.language
-                )
-                .focused(
-                    $focusedTarget,
-                    equals: SettingsWindowFocusTarget.firstAction(.display)
-                )
-                .accessibilityHint(l10n.text(.settingsDisplay.textSizeDescription))
-                .accessibilityIdentifier("settings.display.text-size")
-            }
-
-            SettingsSectionCard {
                 VStack(alignment: .leading, spacing: 10) {
-                    Picker(
-                        l10n.text(.settingsDisplay.panelWidthTitle),
-                        selection: panelWidthPreferenceBinding
-                    ) {
-                        Text(
-                            ClaudioPanelWidthPreference.automatic.localizedDisplayName(
-                                preferences.language)
-                        )
-                        .tag(ClaudioPanelWidthPreference.automatic)
-                        Text(
-                            ClaudioPanelWidthPreference.compact.localizedDisplayName(
-                                preferences.language)
-                        )
-                        .tag(ClaudioPanelWidthPreference.compact)
-                        Text(
-                            ClaudioPanelWidthPreference.roomy.localizedDisplayName(
-                                preferences.language)
-                        )
-                        .tag(ClaudioPanelWidthPreference.roomy)
-                    }
-                    .accessibilityHint(l10n.text(.settingsDisplay.panelWidthDescription))
-                    .accessibilityIdentifier("settings.display.panel-width")
-
-                    if panelWidthResolution.isClamped {
-                        Text(
-                            l10n.format(
-                                .settingsDisplay.panelWidthClamped,
-                                Int64(panelWidthResolution.effectiveWidth))
-                        )
+                    Text(l10n.text(.settingsDisplayFixedLayoutTitle))
+                        .font(.headline)
+                    Text(l10n.text(.settingsDisplayFixedLayoutDescription))
                         .foregroundColor(.secondary)
-                        .accessibilityIdentifier("settings.display.panel-width.clamped")
-                    }
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .accessibilityIdentifier("settings.display.fixed-layout")
             }
 
             SettingsSectionCard {
@@ -564,34 +557,6 @@ package struct SettingsRootView: View {
             set: { dynamicQuietPolicy.setFocusEnabled($0) })
     }
 
-    private var interfaceTextSizeBinding: Binding<ClaudioInterfaceTextSize> {
-        Binding(
-            get: { preferences.interfaceTextSize },
-            set: {
-                preferences.setInterfaceTextSize($0)
-                onAnnouncement(
-                    l10n.format(
-                        .settingsAnnouncementValue,
-                        l10n.text(.interfaceTextSize) as NSString,
-                        $0.localizedDisplayName(preferences.language) as NSString)
-                )
-            })
-    }
-
-    private var panelWidthPreferenceBinding: Binding<ClaudioPanelWidthPreference> {
-        Binding(
-            get: { preferences.panelWidthPreference },
-            set: {
-                preferences.setPanelWidthPreference($0)
-                onAnnouncement(
-                    l10n.format(
-                        .settingsAnnouncementValue,
-                        l10n.text(.settingsDisplay.panelWidthTitle) as NSString,
-                        $0.localizedDisplayName(preferences.language) as NSString)
-                )
-            })
-    }
-
     private var menuBarStatusDotBinding: Binding<Bool> {
         Binding(
             get: { preferences.showsMenuBarStatusDot },
@@ -604,13 +569,6 @@ package struct SettingsRootView: View {
                             : .settingsDisplayStatusDotDisabled)
                 )
             })
-    }
-
-    private var panelWidthResolution: (effectiveWidth: Double, isClamped: Bool) {
-        ClaudioGUICore.panelWidthResolution(
-            preference: preferences.panelWidthPreference,
-            language: preferences.language,
-            interfaceTextSize: preferences.interfaceTextSize)
     }
 
     private var calendarQuietBinding: Binding<Bool> {
@@ -742,20 +700,6 @@ package struct SettingsRootView: View {
         case .primary: ""
         case .advanced: l10n.text(.settingsSidebarAdvanced)
         case .product: l10n.text(.settingsSidebarProduct)
-        }
-    }
-
-    private func sidebarIconColor(_ destination: SettingsDestination) -> Color {
-        switch destination {
-        case .general: .gray
-        case .integrations: .cyan
-        case .eventsAndSounds: .red
-        case .notifications: .purple
-        case .display: .indigo
-        case .sounds: .green
-        case .usage: .pink
-        case .shortcuts: .purple
-        case .about: .blue
         }
     }
 

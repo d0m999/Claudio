@@ -12,7 +12,7 @@ func runEventSuites() {
                 == ["task_start", "stop", "stop_failure", "notification", "subagent_stop"],
             "cliName set mismatch: \(Event.allCases.map(\.cliName))"
         )
-        expect(Event.taskStart.displayName == "任务开始", "任务开始主文案")
+        expect(Event.taskStart.displayName == "用户发起", "用户发起主文案")
         expect(Event.taskStart.settingsName == "UserPromptSubmit", "宿主映射只经 capability 暴露")
     }
 

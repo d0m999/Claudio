@@ -594,15 +594,15 @@ func runSoundPacksWindowAccessibilitySuites() {
                 && !view.contains(".onChange(of: requestedRoute)"),
             "事件滚动必须由单调请求代次驱动，相同 editEvent 重开也要重新定位")
         expect(
-            view.contains("languageStore.interfaceTextSize")
+            !view.contains("languageStore.interfaceTextSize")
                 && !view.contains("@AppStorage(ClaudioInterfaceTextSize.defaultsKey)")
-                && view.contains("interfaceTextSize.dynamicTypeSize")
+                && !view.contains("interfaceTextSize.dynamicTypeSize")
                 && view.contains("layoutAdaptation.detailMinimumWidth")
                 && view.contains("layoutAdaptation.packNameLineLimit")
                 && view.contains("soundPacksWindowDetailUsesStackedLayout(")
                 && view.contains("detailHeader(card, stacks: stacksDetail)")
                 && view.contains("packActionBar(card, stacks: stacksDetail)"),
-            "Claudio 四档文字偏好和真实 detail 宽度必须共同驱动详情重排")
+            "声音包窗口必须使用固定紧凑布局，同时保留真实 detail 宽度重排")
         expect(
             view.contains("ClaudioTheme.Metrics.regularControlHeight")
                 && view.contains(".accessibilityLabel(packAccessibilityLabel(card))")

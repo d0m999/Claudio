@@ -224,7 +224,6 @@ private struct SoundPacksWindowContentView: View {
         }
         .frame(minWidth: 640, minHeight: 480)
         .background(ClaudioTheme.panel(colorScheme))
-        .environment(\.dynamicTypeSize, interfaceTextSize.dynamicTypeSize)
         .onReceive(focusCoordinator.$requestRevision) { revision in
             guard revision > handledFocusRequestRevision else { return }
             requestedRoute = focusCoordinator.requestedRoute
@@ -504,7 +503,7 @@ private struct SoundPacksWindowContentView: View {
         GeometryReader { geometry in
             let stacksDetail = soundPacksWindowDetailUsesStackedLayout(
                 detailWidth: geometry.size.width,
-                tier: typeSizeTier)
+                tier: .standard)
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -978,14 +977,14 @@ private struct SoundPacksWindowContentView: View {
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
                 .fill(
                     dropTargetEvent == row.event
                         ? ClaudioTheme.clay(colorScheme).opacity(0.12)
                         : Color.clear)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
                 .stroke(
                     dropTargetEvent == row.event
                         ? ClaudioTheme.clay(colorScheme)
@@ -1456,18 +1455,8 @@ private struct SoundPacksWindowContentView: View {
         }
     }
 
-    private var typeSizeTier: SoundPacksWindowTypeSizeTier {
-        switch interfaceTextSize {
-        case .compact, .standard: .standard
-        case .large: .enlarged
-        case .maximum: .accessibility
-        }
-    }
-
-    private var interfaceTextSize: ClaudioInterfaceTextSize { languageStore.interfaceTextSize }
-
     private var layoutAdaptation: SoundPacksWindowLayoutAdaptation {
-        soundPacksWindowLayoutAdaptation(for: typeSizeTier)
+        soundPacksWindowLayoutAdaptation(for: .standard)
     }
 
     private var metaSlots: PackRowMetaSlots {

@@ -32,8 +32,8 @@ struct EventSettingsAICueServiceCard: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(ClaudioTheme.clay(colorScheme))
                     .frame(width: 30, height: 30)
-                    .background(ClaudioTheme.clay(colorScheme).opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+                    .background(ClaudioTheme.claySoft(colorScheme))
+                    .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.tile))
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -113,6 +113,7 @@ struct EventSettingsAICueServiceCard: View {
             RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section)
                 .stroke(ClaudioTheme.hairline(colorScheme), lineWidth: 1)
         )
+        .tint(ClaudioTheme.clay(colorScheme))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("event-settings.ai-cue.service")
     }
@@ -237,7 +238,7 @@ struct EventSettingsAICueComposerView: View {
                 Spacer(minLength: 8)
                 Button(l10n.text(.commonClose), action: onClose)
                     .buttonStyle(ClaudioCompactButtonStyle())
-                    .foregroundColor(ClaudioTheme.clay(colorScheme))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                     .accessibilityLabel(l10n.text(.commonClose))
                     .accessibilityIdentifier("event-settings.ai-cue.close")
             }
@@ -264,6 +265,7 @@ struct EventSettingsAICueComposerView: View {
             RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section)
                 .stroke(ClaudioTheme.clay(colorScheme).opacity(0.45), lineWidth: 1)
         )
+        .tint(ClaudioTheme.clay(colorScheme))
         .accessibilityElement(children: .contain)
         .settingsMountIdentity("event-settings.ai-cue.composer")
     }
@@ -292,7 +294,7 @@ struct EventSettingsAICueComposerView: View {
             .font(ClaudioTheme.font(.caption).weight(.semibold))
             .foregroundColor(
                 isActive
-                    ? ClaudioTheme.clay(colorScheme)
+                    ? ClaudioTheme.text(colorScheme)
                     : ClaudioTheme.secondaryText(colorScheme))
     }
 
@@ -322,7 +324,7 @@ struct EventSettingsAICueComposerView: View {
                 .font(ClaudioTheme.font(.body))
                 .frame(minHeight: 92)
                 .padding(4)
-                .background(ClaudioTheme.panel(colorScheme))
+                .background(ClaudioTheme.surface(colorScheme))
                 .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
                 .overlay(
                     RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
@@ -389,8 +391,12 @@ struct EventSettingsAICueComposerView: View {
                 .accessibilityIdentifier("event-settings.ai-cue.modify-description")
             }
             .padding(10)
-            .background(ClaudioTheme.panel(colorScheme))
-            .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+            .background(ClaudioTheme.surface(colorScheme))
+            .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row))
+            .overlay(
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
+                    .stroke(ClaudioTheme.hairline(colorScheme), lineWidth: 1)
+            )
 
             Text(l10n.text(.aiCueNameLabel))
                 .font(ClaudioTheme.font(.body).weight(.semibold))
@@ -442,6 +448,8 @@ struct EventSettingsAICueComposerView: View {
             } label: {
                 Image(systemName: playingCandidateID == candidate.id ? "stop.fill" : "play.fill")
                     .frame(width: 16, height: 16)
+                    .claudioPreviewPulse(
+                        trigger: playingCandidateID == candidate.id ? 1 : 0)
             }
             .buttonStyle(ClaudioIconButtonStyle())
             .accessibilityLabel(candidatePreviewLabel(candidate))
@@ -481,10 +489,10 @@ struct EventSettingsAICueComposerView: View {
                 "event-settings.ai-cue.candidate.\(candidate.variant.rawValue).use")
         }
         .padding(10)
-        .background(ClaudioTheme.panel(colorScheme))
-        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+        .background(ClaudioTheme.surface(colorScheme))
+        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row))
         .overlay(
-            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
                 .stroke(ClaudioTheme.hairline(colorScheme), lineWidth: 1)
         )
         .accessibilityElement(children: .contain)
@@ -494,13 +502,19 @@ struct EventSettingsAICueComposerView: View {
 
     private var appliedStep: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(l10n.text(.aiCueAppliedTitle), systemImage: "checkmark.circle.fill")
-                .font(ClaudioTheme.font(.sectionTitle).weight(.semibold))
-                .foregroundColor(ClaudioTheme.success(colorScheme))
+            HStack(spacing: 7) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(ClaudioTheme.success(colorScheme))
+                    .accessibilityHidden(true)
+                Text(l10n.text(.aiCueAppliedTitle))
+                    .foregroundColor(ClaudioTheme.text(colorScheme))
+            }
+            .font(ClaudioTheme.font(.sectionTitle).weight(.semibold))
+            .accessibilityElement(children: .combine)
             if let outcome = viewModel.adoptionOutcome {
                 Text(l10n.format(.aiCueAppliedMessage, outcome.finalDisplayName))
                     .font(ClaudioTheme.font(.body))
-                    .foregroundColor(ClaudioTheme.text(colorScheme))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
             }
             Button(l10n.text(.commonClose), action: onClose)
                 .buttonStyle(.borderedProminent)
@@ -522,8 +536,12 @@ struct EventSettingsAICueComposerView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ClaudioTheme.error(colorScheme).opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+        .background(ClaudioTheme.surface(colorScheme))
+        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row))
+        .overlay(
+            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
+                .stroke(ClaudioTheme.hairline(colorScheme), lineWidth: 1)
+        )
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("event-settings.ai-cue.error")
     }
@@ -645,6 +663,8 @@ struct EventSettingsAICueCredentialSheet: View {
         }
         .padding(24)
         .frame(width: 520)
+        .background(ClaudioTheme.panel(colorScheme))
+        .tint(ClaudioTheme.clay(colorScheme))
         .alert(
             l10n.text(.aiCueCredentialDeleteTitle),
             isPresented: $confirmsDeletion

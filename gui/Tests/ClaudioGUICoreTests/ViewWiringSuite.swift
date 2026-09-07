@@ -567,25 +567,26 @@ func runViewWiringSuites() {
         guard
             let headerAt = body.range(of: "header")?.lowerBound,
             let scopeAt = body.range(of: "soundScopePicker")?.lowerBound,
-            let bootstrapAt = body.range(of: "bootstrapReportSection")?.lowerBound,
+            let activityAt = body.range(of: "activityOverview")?.lowerBound,
             let contentAt = body.range(of: "mainContent")?.lowerBound
         else {
             expect(
                 false,
-                "Panel body 必须同时含 header、soundScopePicker、bootstrapReportSection、mainContent")
+                "Panel body 必须同时含 header、soundScopePicker、activityOverview、mainContent")
             return
         }
         expect(
-            headerAt < scopeAt && scopeAt < bootstrapAt && bootstrapAt < contentAt,
-            "Panel 必须恒按 header → 声音作用域 → bootstrap → 当前来源内容渲染")
+            headerAt < scopeAt && scopeAt < activityAt && activityAt < contentAt,
+            "Panel 必须恒按 header → 声音作用域 → 活动概览 → 当前来源内容渲染")
         expect(
             panel.contains("panelSoundScopePresentations(")
                 && panel.contains("hostIntegrations.content.sourceRows")
                 && panel.contains("PanelSoundScopePicker(")
                 && panel.contains("scopes: soundScopePresentations")
                 && panel.contains("isExpanded: $isSoundScopeMenuExpanded")
-                && panel.contains("onManageIntegrations(diagnosticsHost, .soundScope)"),
-            "全宽作用域选择器必须来自共享来源 presentation，并把诊断定位与返回焦点分开传递")
+                && !panel.contains("onManageIntegrations(")
+                && !panel.contains("diagnosticsHost"),
+            "全宽作用域选择器必须来自共享来源 presentation；宿主诊断动作保留在 Integrations destination")
         expect(
             scopePicker.contains("ForEach(scopes)")
                 && scopePicker.contains(".frame(maxWidth: .infinity")
@@ -600,20 +601,18 @@ func runViewWiringSuites() {
             "生产面板必须挂载不推移布局、可退出的全宽自绘选择器，且不再挂载来源卡片或包画廊")
         expect(
             panel.contains("configWritesAllowed: panelModel.surfaceSoundIssue == nil")
-                && panel.contains(".bootstrapReportManageSounds(id: reportID)"),
-            "损坏 Surface 必须禁用事件写入；bootstrap 打开的设置窗口必须返回精确触发控件")
+                && panel.contains("libraryUnavailableSection")
+                && panel.contains("configFailureNotice(reason: reason)"),
+            "损坏 Surface 必须禁用事件写入；声音库与 config 失败必须在当前 Panel 显式呈现")
 
         guard
             let showStart = panel.range(
-                of: ".onChange(of: focusCoordinator.showCount)")?.lowerBound,
-            let widthStart = panel.range(
-                of: ".onChange(of: panelWidth)")?.lowerBound,
-            showStart < widthStart
+                of: ".onChange(of: focusCoordinator.showCount)")?.lowerBound
         else {
             expect(false, "无法定位面板打开 handler")
             return
         }
-        let showHandler = panel[showStart..<widthStart]
+        let showHandler = panel[showStart...]
         expect(
             showHandler.contains("panelModel.reload()")
                 && showHandler.contains("applyFirstFocus()")
@@ -1983,24 +1982,21 @@ func runViewWiringSuites() {
         }
         let focusCollapsed = collapsingWhitespace(focusModel)
         expect(
-            panelCollapsed.contains(
-                "onOpenEventSettings( EventSettingsWindowRoute(scope: selectedScope.scope), .openSoundSettings)"
-            )
-                && panelCollapsed.contains(
-                    ".focused($focusedTarget, equals: .openSoundSettings)"),
-            "播放设置必须把当前声音作用域交给事件与提示音窗口，并精确恢复到打开设置按钮")
+            panelCollapsed.contains("focused($focusedTarget, equals: .headerSettings)")
+                && panelCollapsed.contains("onOpenSettings"),
+            "Panel 设置入口必须进入 retained Settings，并把焦点 owner 留在 headerSettings")
         expect(
-            panelCollapsed.contains("if selectedScope.scope.surface != nil")
-                && panelCollapsed.contains("panelModel.resetSelectedSurfaceOverrides()")
-                && panelCollapsed.contains(".focused($focusedTarget, equals: .resetSurface)"),
-            "非 Global 必须显示定向 reset，并认领与焦点模型一致的身份")
+            !panelCollapsed.contains("openSoundSettings")
+                && !panelCollapsed.contains("resetSelectedSurfaceOverrides()")
+                && !panelCollapsed.contains("resetSurface"),
+            "当前 Panel 不得重新承载 Events/Sounds 的窗口级编辑或 Surface reset 写路径")
         expect(
-            focusCollapsed.contains("var order: [PanelFocusTarget] = [.soundScope]")
-                && focusCollapsed.contains(
-                    "if hasOpenSoundSettings { order.append(.openSoundSettings) }")
-                && focusCollapsed.contains("if hasResetSurface { order.append(.resetSurface) }")
+            focusCollapsed.contains(
+                "var order: [PanelFocusTarget] = [.headerSettings, .soundScope]")
+                && focusCollapsed.contains("if hasActivityOverview")
+                && focusCollapsed.contains("order.append(.activityRange)")
                 && focusCollapsed.contains("order.append(.quitApplication)"),
-            "焦点模型必须以 soundScope 开始，并以设置/reset/退出收尾")
+            "当前 Panel 焦点模型必须按 header → 作用域 → 活动概览 → 内容 → 退出收尾")
         expect(
             !panelCollapsed.contains("PanelPackSectionView(")
                 && !panelCollapsed.contains("manageSoundsRow")
@@ -2008,19 +2004,10 @@ func runViewWiringSuites() {
                 && !focusCollapsed.contains("order.append(contentsOf: packCardIDs"),
             "旧包画廊、管理声音包行及其焦点路径必须从生产面板撤下")
         expect(
-            panelCollapsed.contains(
-                "private var selectedPackDisplayName: String { panelModel.selectedPackMetadata.displayName }"
-            ),
-            "当前 effective 包名必须来自 selectedPackMetadata，不得从旧显示集反推")
-        expect(
-            panelCollapsed.contains("Text(selectedPackHeading)")
-                && panelCollapsed.contains(
-                    "l10n.format(.panelHeaderSummary, Int64(publishedSurfaceCount))")
-                && panelCollapsed.contains("HostID.productVisibleCases.count")
-                && panelCollapsed.contains(
-                    "l10n.format(.panelEventsTitle, selectedScope.name)")
+            panelCollapsed.contains("activityPresentation")
+                && panelCollapsed.contains("selectedScope.name")
                 && panelCollapsed.contains(".panelEventsMappable"),
-            "标题必须分离当前包与已发布来源计数，事件区必须标明当前作用域与可映射覆盖")
+            "Panel 必须从共享活动投影与当前声音作用域生成事件区摘要")
         expect(
             panelCollapsed.contains(
                 "case .needsPack: needsPackNotice playbackSettings(masterVolumeEnabled: false)")
@@ -2364,7 +2351,6 @@ func runViewWiringSuites() {
         let paths = [
             "gui/Sources/ClaudioGUI/PanelView.swift",
             "gui/Sources/ClaudioGUI/PanelQuitFooter.swift",
-            "gui/Sources/ClaudioGUIComponents/InterfaceTextSizeStepperContent.swift",
             "gui/Sources/ClaudioGUI/EventRowView.swift",
             "gui/Sources/ClaudioGUI/PackGalleryView.swift",
             "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift",
@@ -2407,25 +2393,21 @@ func runViewWiringSuites() {
                 "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift"),
             let packs = codeOnly(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
-            let footer = codeOnly(
-                "gui/Sources/ClaudioGUI/PanelQuitFooter.swift"),
-            let textSizeStepper = codeOnly(
-                "gui/Sources/ClaudioGUIComponents/InterfaceTextSizeStepperContent.swift")
+            let footer = codeOnly("gui/Sources/ClaudioGUI/PanelQuitFooter.swift")
         else {
             expect(false, "读不到三界面的关键 AX identifier")
             return
         }
         for identifier in [
-            "panel.options", "panel.options.text-size", "panel.reveal-config",
+            "panel.settings", "panel.reveal-config",
             #"panel.event.\(presentation.event.rawValue).row"#,
             #"panel.event.\(presentation.event.rawValue).preview"#,
             #"panel.event.\(presentation.event.rawValue).mute"#,
-            "panel.sound-settings.open", "panel.sound-settings.reset-surface",
         ] {
             expect(panel.contains(identifier), "主面板缺少稳定 AX identifier：\(identifier)")
         }
         for identifier in [
-            "panel.sound-scope", "panel.sound-scope.integrations",
+            "panel.sound-scope",
             #"panel.sound-scope.item.\(scope.scope.storedValue)"#,
         ] {
             expect(
@@ -2433,14 +2415,6 @@ func runViewWiringSuites() {
                 "声音作用域选择器缺少稳定 AX identifier：\(identifier)")
         }
         expect(footer.contains("panel.quit"), "固定退出 footer 缺少稳定 AX identifier：panel.quit")
-        for identifier in [
-            "panel.options.text-size.decrease", "panel.options.text-size.increase",
-            "panel.options.text-size.status",
-        ] {
-            expect(
-                textSizeStepper.contains(identifier),
-                "界面文字步进控件缺少稳定 AX identifier：\(identifier)")
-        }
         for identifier in [
             "integrations.destination.scroll", "integrations.destination.agent-list",
             #"integrations.destination.agent.\(agent.host.rawValue)"#,
@@ -2556,7 +2530,7 @@ func runViewWiringSuites() {
             "PanelView.isEventFocusTarget 必须明确把 quitApplication 归为 false")
     }
 
-    suite("State Gallery：直接复用生产 PanelQuitFooter，覆盖双语四字号与 312/360pt") {
+    suite("State Gallery：直接复用生产 PanelQuitFooter，覆盖双语固定紧凑布局") {
         guard let gallery = codeOnly("gui/Sources/ClaudioGUI/StateGalleryView.swift") else {
             expect(false, "读不到 StateGalleryView")
             return
@@ -2565,17 +2539,16 @@ func runViewWiringSuites() {
         expect(
             gallery.contains("PanelQuitFooter(")
                 && gallery.contains("ForEach(ClaudioAppLanguage.allCases)")
-                && gallery.contains("ForEach(ClaudioInterfaceTextSize.allCases)"),
-            "State Gallery 必须直接渲染生产 footer 的 2×4 组合")
+                && gallery.contains("ForEach([ClaudioCompactPreviewDensity.standard])"),
+            "State Gallery 必须直接渲染生产 footer 的双语固定紧凑组合")
         expect(
-            flat.contains("panelLayoutAdaptation(")
-                && flat.contains("for: panelTypeSizeTier(for: interfaceTextSize)")
-                && flat.contains(").panelWidth")
-                && gallery.contains("onQuit: {}"),
-            "gallery 宽度必须来自 312/360 布局真相源，退出闭包必须无副作用")
+            flat.contains("frame(width: CGFloat(standardPanelWidth))")
+                && gallery.contains("onQuit: {}")
+                && !flat.contains("typeScale: CGFloat(density.scale)"),
+            "gallery 宽度必须来自固定 Panel 真相源，且退出闭包必须无副作用")
     }
 
-    suite("State Gallery：生产 Agent 面板覆盖双语四字号与六个关键状态") {
+    suite("State Gallery：生产 Agent 面板覆盖双语固定紧凑布局与六个关键状态") {
         guard let gallery = codeOnly("gui/Sources/ClaudioGUI/StateGalleryView.swift") else {
             expect(false, "读不到 StateGalleryView")
             return
@@ -2583,7 +2556,7 @@ func runViewWiringSuites() {
         for required in [
             "ProductionPanelGalleryView()",
             "ForEach(ClaudioAppLanguage.allCases)",
-            "ForEach(ClaudioInterfaceTextSize.allCases)",
+            "ForEach([ClaudioCompactPreviewDensity.standard])",
             "ForEach(ProductionPanelGalleryScenario.allCases)",
             "previewPanelModel:",
             "PreviewFixtures.workBuddyVisualScenarios",
@@ -2605,71 +2578,52 @@ func runViewWiringSuites() {
             "State Gallery 必须保留浅色与深色两个生产渲染入口")
     }
 
-    suite("PanelView：界面文字使用方案 C 原生子 Popover 与实时 Binding，旧 Picker 路径已移除") {
+    suite("Display：生产 Panel 与 Settings 只保留固定紧凑布局和状态点") {
         guard
             let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift"),
-            let stepper = codeOnly(
-                "gui/Sources/ClaudioGUIComponents/InterfaceTextSizeStepperContent.swift"),
-            let gallery = codeOnly("gui/Sources/ClaudioGUI/StateGalleryView.swift")
+            let settings = codeOnly(
+                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
+            let preferences = codeOnly("gui/Sources/ClaudioGUICore/SettingsPreferences.swift")
         else {
-            expect(false, "读不到 PanelView 或界面文字步进内容源码")
+            expect(false, "读不到 Panel、Settings 或 Preferences 源码")
             return
         }
         let flatPanel = collapsingWhitespace(panel)
-        let flatStepper = collapsingWhitespace(stepper)
         expect(
-            !panel.contains("Picker(\"界面文字\"")
-                && !panel.contains("Menu {\n            Picker"),
-            "方案 C 必须移除旧的 Menu + Picker 界面文字入口")
+            panel.contains("standardPanelWidth")
+                && !panel.contains("interfaceTextSize")
+                && !panel.contains("panelWidthPreference")
+                && !panel.contains("dynamicTypeSize"),
+            "Panel 必须固定使用紧凑宽度，不再读取字号或宽度偏好")
         expect(
-            flatPanel.contains("InterfaceTextSizeControl(")
-                && flatPanel.contains("selection: interfaceTextSizeBinding")
-                && flatPanel.contains("languageStore: languageStore")
-                && flatPanel.contains(
-                    "private var interfaceTextSizeBinding: Binding<ClaudioInterfaceTextSize>"),
-            "Panel 必须把实时 ClaudioInterfaceTextSize Binding 传给新控件")
+            settings.contains("settingsDisplayFixedLayoutTitle")
+                && settings.contains("settings.display.status-dot")
+                && !settings.contains("interfaceTextSize")
+                && !settings.contains("panelWidthPreference"),
+            "Display destination 必须只呈现固定布局说明和状态点")
         expect(
-            flatPanel.contains(".popover(isPresented: $isPopoverPresented, arrowEdge: .bottom)")
-                && flatPanel.contains("Text(\"Aa⌄\")")
-                && flatPanel.contains(".frame(width: 54, height: 32)"),
-            "触发器必须是固定 Aa⌄，并从原生子 Popover 打开")
+            !preferences.contains("interfaceTextSize")
+                && !preferences.contains("panelWidthPreference")
+                && !preferences.contains("setInterfaceTextSize")
+                && !preferences.contains("setPanelWidthPreference"),
+            "Preferences owner 不得保留旧字号或宽度写路径")
         expect(
-            flatPanel.contains("if !presented { isTriggerFocused = true }")
-                && !panel.contains("PanelFocusTarget.textSize"),
-            "子 Popover 关闭后必须回焦 Aa⌄，且文字控件不能进入 PanelFocusTarget")
-        expect(
-            flatStepper.contains("public struct InterfaceTextSizeStepperContent")
-                && flatStepper.contains("popoverWidth: CGFloat = 280")
-                && flatStepper.contains(".frame(width: Self.popoverWidth)"),
-            "步进内容必须是可复用且固定 280pt 宽")
-        expect(
-            flatStepper.contains(".focused($focusedTarget, equals: .decrease)")
-                && flatStepper.contains(".focused($focusedTarget, equals: .increase)")
-                && flatStepper.contains("focusedTarget = .increase")
-                && flatStepper.contains("focusedTarget = .decrease"),
-            "步进内容必须在边界切换时把焦点移到另一侧仍可用按钮")
-        expect(
-            flatStepper.contains("managesFocus: Bool = true")
-                && gallery.contains("InterfaceSettingsPopoverContent(")
-                && flatStepper.contains("managesFocus: false")
-                && flatStepper.contains("InterfaceTextSizeStepperContent(")
-                && flatStepper.contains("showsTitle: false"),
-            "State Gallery 与生产 Popover 必须复用同一份 stepper content")
+            flatPanel.contains(".focused($focusedTarget, equals: .headerSettings)")
+                && flatPanel.contains("accessibilityIdentifier(\"panel.settings\")"),
+            "Panel 设置入口必须保持稳定焦点 owner 与 identifier")
     }
 
-    suite("PanelView：打开设置携带当前 Sound Scope 进入事件与提示音") {
+    suite("PanelView：设置入口进入保留的统一 Settings session") {
         guard let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/PanelView.swift") else {
             expect(false, "读不到 PanelView.swift")
             return
         }
         expect(
             collapsingWhitespace(panel).contains(
-                "onOpenEventSettings( EventSettingsWindowRoute(scope: selectedScope.scope), .openSoundSettings)"
-            )
-                && !collapsingWhitespace(panel).contains(
-                    "onManageSounds( .overview(surface: selectedScope.scope.surface), .openSoundSettings)"
-                ),
-            "打开设置必须进入当前 Sound Scope 的事件与提示音窗口，不得继续打开声音包 overview")
+                "Button(action: onOpenSettings)")
+                && collapsingWhitespace(panel).contains(
+                    ".focused($focusedTarget, equals: .headerSettings)"),
+            "打开设置必须通过统一 session action，并把焦点留在 headerSettings")
     }
 
     suite("声音包窗口：完整映射菜单列出已有音频并经窗口 model 绑定；面板不消费 inventory") {

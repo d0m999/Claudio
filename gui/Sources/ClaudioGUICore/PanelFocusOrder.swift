@@ -9,7 +9,10 @@ public enum PanelFocusTarget: Sendable, Hashable {
     case revealDetail
     case disconnect
 
+    case headerSettings
     case soundScope
+    case activityRange
+    case activityMetric(Event)
     case eventPreview(Event)
     case eventMute(Event)
     case masterVolume
@@ -41,7 +44,7 @@ public enum PanelSoundScopePickerFocusTarget: Sendable, Equatable, Hashable {
 public func panelSoundScopePickerFocusOrder(
     scopes: [PanelSoundScopeID]
 ) -> [PanelSoundScopePickerFocusTarget] {
-    scopes.map(PanelSoundScopePickerFocusTarget.scope) + [.integrations]
+    scopes.map(PanelSoundScopePickerFocusTarget.scope)
 }
 
 public enum PanelFocusScope: Sendable, Equatable {
@@ -56,6 +59,11 @@ public enum PanelFocusScope: Sendable, Equatable {
         hasResetSurface: Bool,
         hasConfigFailureNotice: Bool = false,
         bootstrapReportActions: [PanelFocusTarget] = [])
+    case activityOperational(
+        events: [PanelEventPresentation],
+        hasActivityOverview: Bool,
+        hasMasterVolume: Bool,
+        hasConfigFailureNotice: Bool = false)
 }
 
 /// 生产顺序与视觉顺序相同：作用域 → 启动/配置恢复 → 每行可用试听/静音 → 播放设置 →
@@ -86,6 +94,25 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         if hasMasterVolume { order.append(.masterVolume) }
         if hasOpenSoundSettings { order.append(.openSoundSettings) }
         if hasResetSurface { order.append(.resetSurface) }
+        order.append(.quitApplication)
+        return order
+
+    case .activityOperational(
+        let events,
+        let hasActivityOverview,
+        let hasMasterVolume,
+        let hasConfigFailureNotice):
+        var order: [PanelFocusTarget] = [.headerSettings, .soundScope]
+        if hasActivityOverview {
+            order.append(.activityRange)
+            order.append(contentsOf: ActivityOverviewBarLayout.events.map { .activityMetric($0) })
+        }
+        if hasConfigFailureNotice { order.append(.configReveal) }
+        for event in events {
+            if event.controls.previewEnabled { order.append(.eventPreview(event.event)) }
+            if event.controls.muteEnabled { order.append(.eventMute(event.event)) }
+        }
+        if hasMasterVolume { order.append(.masterVolume) }
         order.append(.quitApplication)
         return order
     }
