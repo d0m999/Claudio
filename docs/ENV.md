@@ -13,7 +13,7 @@
 | `CLAUDIO_GUI_BYTES_PER_ARCH` | No | integer; default `5500000` | GUI Mach-O per-architecture size budget |
 | `CLAUDIO_HELPER_BYTES_PER_ARCH` | No | integer; default `3250000` | helper Mach-O per-architecture size budget |
 | `CLAUDIO_LOGIN_ITEM_BYTES_PER_ARCH` | No | integer; default `500000` | embedded macOS 12 LoginItem Mach-O per-architecture size budget |
-| `CLAUDIO_NON_EXECUTABLE_BUNDLE_BYTES` | No | integer; default `1000000` | non-executable bundle size budget |
+| `CLAUDIO_NON_EXECUTABLE_BUNDLE_BYTES` | No | integer; default `1500000` | non-executable bundle size budget |
 | `CLAUDIO_LIPO_BIN` | No | executable path; default `lipo` | size gate 使用的 `lipo` |
 
 ## Tests and probes

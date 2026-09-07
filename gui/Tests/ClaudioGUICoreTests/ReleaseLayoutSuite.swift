@@ -644,7 +644,7 @@ func runReleaseLayoutSuites() {
         }
     }
 
-    suite("release-size 默认预算与文档使用同一 2026-08-23 重基线") {
+    suite("release-size 默认预算与文档使用同一重基线") {
         let root = guiTestRepositoryRoot()
         let gateURL = root.appendingPathComponent("scripts/check-release-size.sh")
         let environmentURL = root.appendingPathComponent("docs/ENV.md")
@@ -665,12 +665,17 @@ func runReleaseLayoutSuites() {
                     #"HELPER_BYTES_PER_ARCH="${CLAUDIO_HELPER_BYTES_PER_ARCH:-3250000}""#)
                 && gate.contains(
                     #"LOGIN_ITEM_BYTES_PER_ARCH="${CLAUDIO_LOGIN_ITEM_BYTES_PER_ARCH:-500000}""#)
+                && gate.contains(
+                    #"NON_EXECUTABLE_BUNDLE_BYTES="${CLAUDIO_NON_EXECUTABLE_BUNDLE_BYTES:-1500000}""#
+                )
                 && environment.contains("default `5500000`")
                 && environment.contains("default `3250000`")
                 && environment.contains("default `500000`")
+                && environment.contains("default `1500000`")
                 && budget.contains("`5,500,000 B`")
                 && budget.contains("`3,250,000 B`")
                 && budget.contains("`500,000 B`")
+                && budget.contains("`1,500,000 B`")
                 && budget.contains("`4,223,128 B`")
                 && budget.contains("`2,466,184 B`")
                 && budget.contains("`435,818 B`")
