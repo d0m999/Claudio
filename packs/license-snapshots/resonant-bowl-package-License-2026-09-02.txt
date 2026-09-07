@@ -1,0 +1,16 @@
+RESONANT-BOWL AUDIO PACKAGE LICENSE DECLARATION
+Captured: 2026-09-02
+
+The five resonant-bowl audio files are original deterministic procedural
+renderings made for Claudio. The generator uses mathematical oscillators,
+inharmonic partials, envelopes, a soft synthetic strike transient, and short
+delays only. It contains no third-party recording, sample, field recording,
+melody recording, or licensed audio source, and does not copy a particular
+bowl performance.
+
+The rendered audio files in this package are dedicated to the public domain
+under Creative Commons CC0 1.0 Universal:
+https://creativecommons.org/publicdomain/zero/1.0/
+
+No attribution is required. This declaration is the package-level source
+license record.

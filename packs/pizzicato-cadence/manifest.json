@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "pizzicato-cadence",
+  "name": "拨弦旋律",
+  "author": "Claudio / Kenney",
+  "license": "CC0-1.0",
+  "version": "0.2.0",
+  "events": {
+    "task_start": "task_start.mp3",
+    "stop": "stop.mp3",
+    "stop_failure": "stop_failure.mp3",
+    "notification": "notification.mp3",
+    "subagent_stop": "subagent_stop.mp3"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "soft-mallet",
+  "name": "柔槌信号",
+  "author": "Claudio / Versilian Studios LLC",
+  "license": "CC0-1.0",
+  "version": "0.1.0",
+  "events": {
+    "task_start": "task_start.wav",
+    "stop": "stop.wav",
+    "stop_failure": "stop_failure.wav",
+    "notification": "notification.wav",
+    "subagent_stop": "subagent_stop.wav"
+  }
+}

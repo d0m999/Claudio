@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "resonant-bowl",
+  "name": "共鸣钵音",
+  "author": "Claudio",
+  "license": "CC0-1.0",
+  "version": "0.1.4",
+  "events": {
+    "task_start": "task_start.mp3",
+    "stop": "stop.mp3",
+    "stop_failure": "stop_failure.mp3",
+    "notification": "notification.mp3",
+    "subagent_stop": "subagent_stop.mp3"
+  }
+}
