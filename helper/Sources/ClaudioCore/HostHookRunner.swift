@@ -8,6 +8,7 @@ public struct HostHookEnvironment: Sendable {
     public let taskStartDebounceStateFile: URL
     public let taskStartDebounceInterval: TimeInterval
     public let receiptStore: HostHookReceiptStore
+    public let activityStore: LocalActivitySummaryStore?
     public let now: @Sendable () -> Date
 
     public init(
@@ -16,6 +17,7 @@ public struct HostHookEnvironment: Sendable {
         taskStartDebounceStateFile: URL? = nil,
         taskStartDebounceInterval: TimeInterval = 0.25,
         receiptStore: HostHookReceiptStore,
+        activityStore: LocalActivitySummaryStore? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.host = host
@@ -26,6 +28,7 @@ public struct HostHookEnvironment: Sendable {
             .appendingPathComponent("task-start.state")
         self.taskStartDebounceInterval = taskStartDebounceInterval
         self.receiptStore = receiptStore
+        self.activityStore = activityStore
         self.now = now
     }
 }
@@ -43,7 +46,8 @@ public func systemHostHookEnvironment(for host: HostID) -> HostHookEnvironment {
             receiptsRoot: ClaudioPaths.receiptsDirectory,
             locksRoot: ClaudioPaths.receiptLocksDirectory,
             installationsRoot: ClaudioPaths.activeInstallationsDirectory,
-            installationLocksRoot: ClaudioPaths.activeInstallationLocksDirectory))
+            installationLocksRoot: ClaudioPaths.activeInstallationLocksDirectory),
+        activityStore: .production)
 }
 
 public struct HostHookHandlingOutcome: Sendable, Equatable {
@@ -51,6 +55,7 @@ public struct HostHookHandlingOutcome: Sendable, Equatable {
     public let nativeEvent: String
     public let event: Event
     public let playbackResult: HostHookPlaybackResult
+    public let activityRecordOutcome: LocalActivityRecordOutcome
     public let receiptWritten: Bool
 
     public init(
@@ -58,12 +63,14 @@ public struct HostHookHandlingOutcome: Sendable, Equatable {
         nativeEvent: String,
         event: Event,
         playbackResult: HostHookPlaybackResult,
+        activityRecordOutcome: LocalActivityRecordOutcome,
         receiptWritten: Bool
     ) {
         self.host = host
         self.nativeEvent = nativeEvent
         self.event = event
         self.playbackResult = playbackResult
+        self.activityRecordOutcome = activityRecordOutcome
         self.receiptWritten = receiptWritten
     }
 }
@@ -79,6 +86,23 @@ public func handleHostHook(
     guard environment.host == host,
         let event = HostCapabilityCatalog.semanticEvent(host: host, nativeEvent: nativeEvent)
     else { return nil }
+
+    // This is the single timestamp shared by the activity fact, receipt, and any related
+    // diagnostic line.  The marker is read at the acceptance boundary; stale callbacks may
+    // still be played according to the existing hook contract, but they never count as activity.
+    let occurredAt = environment.now()
+    let activeInstallationID = environment.receiptStore.currentInstallationID(host: host)
+    let activityRecordOutcome: LocalActivityRecordOutcome
+    if let activityStore = environment.activityStore {
+        activityRecordOutcome = activityStore.record(
+            host: host,
+            event: event,
+            installationID: installationID,
+            activeInstallationID: activeInstallationID,
+            occurredAt: occurredAt)
+    } else {
+        activityRecordOutcome = .failed
+    }
 
     let capture = SpawnResultCapture()
     let base = environment.playEnvironment
@@ -111,7 +135,7 @@ public func handleHostHook(
         host: host,
         nativeEvent: nativeEvent,
         semanticEvent: event,
-        timestamp: environment.now(),
+        timestamp: occurredAt,
         playbackResult: playbackResult)
     let written: Bool
     switch environment.receiptStore.store(receipt) {
@@ -125,7 +149,7 @@ public func handleHostHook(
         appendLogLine(
             event: event.cliName,
             reason: "回执写入失败（\(redactedReceiptStoreError(error))）",
-            timestamp: environment.now(),
+            timestamp: occurredAt,
             to: base.logFile,
             lockFile: base.logLockFile)
     }
@@ -134,6 +158,7 @@ public func handleHostHook(
         nativeEvent: nativeEvent,
         event: event,
         playbackResult: playbackResult,
+        activityRecordOutcome: activityRecordOutcome,
         receiptWritten: written)
 }
 

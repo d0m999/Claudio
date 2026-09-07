@@ -130,17 +130,6 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let interfaceLanguage: Self = "interface.language"
     public static let interfaceChinese: Self = "interface.language.chinese"
     public static let interfaceEnglish: Self = "interface.language.english"
-    public static let interfaceTextSize: Self = "interface.text-size"
-    public static let interfaceTextSizeDecrease: Self = "interface.text-size.decrease"
-    public static let interfaceTextSizeIncrease: Self = "interface.text-size.increase"
-    public static let interfaceTextSizeCurrent: Self = "interface.text-size.current"
-    public static let interfaceTextSizeLevel: Self = "interface.text-size.level"
-    public static let interfaceTextSizeMinimum: Self = "interface.text-size.minimum"
-    public static let interfaceTextSizeMaximum: Self = "interface.text-size.maximum"
-    public static let interfaceTextSizeCompact: Self = "interface.text-size.compact"
-    public static let interfaceTextSizeStandard: Self = "interface.text-size.standard"
-    public static let interfaceTextSizeLarge: Self = "interface.text-size.large"
-    public static let panelOptionsHint: Self = "panel.options.hint"
     public static let panelTitle: Self = "panel.title"
     public static let panelBaseLabel: Self = "panel.base-label"
     public static let panelHeader: Self = "panel.header"
@@ -479,13 +468,6 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     /// One exported namespace avoids a separate public global for every Display leaf in the
     /// size-constrained menu-bar executable.
     public static let settingsDisplay = (
-        textSizeDescription: Self("settings.display.text-size.description"),
-        panelWidthTitle: Self("settings.display.panel-width.title"),
-        panelWidthDescription: Self("settings.display.panel-width.description"),
-        panelWidthAutomatic: Self("settings.display.panel-width.automatic"),
-        panelWidthCompact: Self("settings.display.panel-width.compact"),
-        panelWidthRoomy: Self("settings.display.panel-width.roomy"),
-        panelWidthClamped: Self("settings.display.panel-width.clamped"),
         statusDotTitle: Self("settings.display.status-dot.title"),
         statusDotDescription: Self("settings.display.status-dot.description"),
         statusRunning: Self("menu-bar.status.running")
@@ -633,6 +615,42 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let settingsUsageFailureLogClear: Self = "settings.usage.failure.log-clear"
     public static let settingsUsageFailureFinder: Self = "settings.usage.failure.finder"
     public static let settingsUsageFailureClipboard: Self = "settings.usage.failure.clipboard"
+    public static let settingsActivityTodayMessages: Self = "settings.activity.today.messages"
+    public static let settingsActivitySevenDayMessages: Self =
+        "settings.activity.seven-days.messages"
+    public static let settingsActivitySevenDaySubtasks: Self =
+        "settings.activity.seven-days.subtasks"
+    public static let settingsActivityTitle: Self = "settings.activity.title"
+    public static let settingsActivityRangeToday: Self = "settings.activity.range.today"
+    public static let settingsActivityRangeSevenDays: Self = "settings.activity.range.seven-days"
+    public static let settingsActivityMessages: Self = "settings.activity.messages"
+    public static let settingsActivityEventsTitle: Self = "settings.activity.events.title"
+    public static let settingsActivityCoverage: Self = "settings.activity.coverage"
+    public static let settingsActivityStatusReady: Self = "settings.activity.status.ready"
+    public static let settingsActivityStatusEmpty: Self = "settings.activity.status.empty"
+    public static let settingsActivityStatusUnobserved: Self =
+        "settings.activity.status.unobserved"
+    public static let settingsActivityStatusUnavailable: Self =
+        "settings.activity.status.unavailable"
+    public static let settingsActivityStatusStale: Self = "settings.activity.status.stale"
+    public static let settingsActivityStatusPartial: Self = "settings.activity.status.partial"
+    public static let settingsActivityFailureLockBusy: Self =
+        "settings.activity.failure.lock-busy"
+    public static let settingsActivityFailureClear: Self = "settings.activity.failure.clear"
+    public static let settingsActivityActionCleared: Self =
+        "settings.activity.action.cleared"
+    public static let settingsActivityConnectionConnected: Self =
+        "settings.activity.connection.connected"
+    public static let settingsActivityConnectionAwaiting: Self =
+        "settings.activity.connection.awaiting"
+    public static let settingsActivityConnectionNotConnected: Self =
+        "settings.activity.connection.not-connected"
+    public static let settingsActivityConnectionUnavailable: Self =
+        "settings.activity.connection.unavailable"
+    public static let settingsDisplayFixedLayoutTitle: Self =
+        "settings.display.fixed-layout.title"
+    public static let settingsDisplayFixedLayoutDescription: Self =
+        "settings.display.fixed-layout.description"
     public static let settingsShortcutsDescription: Self = "settings.shortcuts.description"
     public static let settingsShortcutsRequirement: Self = "settings.shortcuts.requirement"
     public static let settingsShortcutsActionTogglePanel: Self =
@@ -1086,10 +1104,6 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
 
     public static let allKnown: [Self] = [
         .interfaceTitle, .interfaceLanguage, .interfaceChinese, .interfaceEnglish,
-        .interfaceTextSize, .interfaceTextSizeDecrease, .interfaceTextSizeIncrease,
-        .interfaceTextSizeCurrent, .interfaceTextSizeLevel, .interfaceTextSizeMinimum,
-        .interfaceTextSizeMaximum, .interfaceTextSizeCompact, .interfaceTextSizeStandard,
-        .interfaceTextSizeLarge, .panelOptionsHint,
         .panelTitle, .panelBaseLabel, .panelHeader, .panelHeaderWithPack, .panelSources,
         .panelSelectedPackNone, .panelAudibleEventsLoading,
         .panelAudibleEventsUnavailable, .panelAudibleEventsCount, .panelEvents, .panelSoundPacks,
@@ -1172,10 +1186,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .settingsAboutCopyDiagnosticsHint, .settingsAboutVersionCopied,
         .settingsAboutDiagnosticsCopied, .settingsAboutClipboardFailed,
         .settingsAboutOpenFailed,
-        settingsDisplay.textSizeDescription, settingsDisplay.panelWidthTitle,
-        settingsDisplay.panelWidthDescription, settingsDisplay.panelWidthAutomatic,
-        settingsDisplay.panelWidthCompact, settingsDisplay.panelWidthRoomy,
-        settingsDisplay.panelWidthClamped, settingsDisplay.statusDotTitle,
+        settingsDisplay.statusDotTitle,
         settingsDisplay.statusDotDescription, settingsDisplay.statusRunning,
         .settingsDisplayStatusDotEnabled, .settingsDisplayStatusDotDisabled,
         .settingsGeneralLanguageTitle,
@@ -1408,6 +1419,18 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .settingsUsageFailureHistoryLockBusy, .settingsUsageFailureLogLockBusy,
         .settingsUsageFailureHistoryClear, .settingsUsageFailureLogClear,
         .settingsUsageFailureFinder, .settingsUsageFailureClipboard,
+        .settingsActivityTodayMessages, .settingsActivitySevenDayMessages,
+        .settingsActivitySevenDaySubtasks, .settingsActivityTitle,
+        .settingsActivityRangeToday, .settingsActivityRangeSevenDays,
+        .settingsActivityMessages, .settingsActivityEventsTitle,
+        .settingsActivityCoverage, .settingsActivityStatusReady, .settingsActivityStatusEmpty,
+        .settingsActivityStatusUnobserved, .settingsActivityStatusUnavailable,
+        .settingsActivityStatusStale, .settingsActivityStatusPartial,
+        .settingsActivityFailureLockBusy, .settingsActivityFailureClear,
+        .settingsActivityActionCleared, .settingsActivityConnectionConnected,
+        .settingsActivityConnectionAwaiting, .settingsActivityConnectionNotConnected,
+        .settingsActivityConnectionUnavailable,
+        .settingsDisplayFixedLayoutTitle, .settingsDisplayFixedLayoutDescription,
     ]
 }
 

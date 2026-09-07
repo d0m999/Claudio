@@ -70,7 +70,7 @@ public struct EventRowView: View {
         previewAvailability: EventPreviewAvailability? = nil,
         language: ClaudioAppLanguage = .zhHans,
         focusedTarget: FocusState<PanelFocusTarget?>.Binding,
-        adaptation: PanelLayoutAdaptation = panelLayoutAdaptation(for: .standard),
+        adaptation: PanelLayoutAdaptation = panelLayoutAdaptation(),
         onOpenEditor: @escaping () -> Void = {},
         onPreview: @escaping () -> Void = {},
         onToggleMute: @escaping () -> Void = {}

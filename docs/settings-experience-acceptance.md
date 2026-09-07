@@ -36,7 +36,7 @@ bash scripts/verify-settings-experience.sh <BASE_SHA>
 | ElevenLabs legacy account、MiniMax hex MP3、Qwen SSE PCM→WAV | `AICueElevenLabsProviderSuite`、`AICueMiniMaxProviderSuite`、`QwenAICueProviderSuite` |
 | Qwen 保存零请求、60 秒 deadline、3 候选、late-result cleanup 与 adoption rollback | `AICueCredentialSuite`、`AICueGenerationEngineSuite`、`AICueGenerationViewModelSuite`、`AICueAdoptionSuite` |
 | Dynamic Quiet State、receipt retention 与手工试听正交 | `DynamicQuietStateSuite`、`DynamicQuietPolicySuite`、`HostHookRunnerSuite` |
-| 每 Surface 20 条/30 天、诊断脱敏、独立清理与失败保留旧事实 | `UsageActivitySuite` |
+| 七日本地活动摘要、事件覆盖、诊断脱敏、独立清理与失败保留旧事实 | `ActivityOverviewSuite`、`LocalActivitySummarySuite`、`ActivityDiagnosticsSuite` |
 | Carbon shortcut 注册、替换事务、冲突回滚与损坏持久化 fail closed | `GlobalShortcutsSuite` |
 | 登录项状态、显示偏好、关于页脱敏摘要与双语 catalog | `LoginItemManagementSuite`、`DisplayPreferencesSuite`、`AboutInformationSuite`、`LocalizationSuite` |
 
@@ -65,7 +65,7 @@ bash scripts/verify-settings-experience.sh <BASE_SHA>
 | 单一窗口与九页导航 | NOT VERIFIED | panel/deep link/页间路由、重复打开、关闭后 handback |
 | 键盘与焦点 | NOT VERIFIED | Tab/Shift-Tab、方向键、Return/Space、Escape、焦点顺序 |
 | VoiceOver | NOT VERIFIED | 九页标题、状态、错误、帮助、状态点关闭后的完整语义 |
-| 四文字档与窗口尺寸 | NOT VERIFIED | 中文/英文 × 四档，1240×820、960×640、放大，无水平裁切 |
+| 固定紧凑布局与窗口尺寸 | NOT VERIFIED | 中文/英文 × 固定紧凑布局，1240×820、960×640、系统辅助功能缩放，无水平裁切 |
 | 外观与动画 | NOT VERIFIED | light/dark、Increase Contrast、Reduce Transparency、Reduce Motion |
 | profile 选择与披露 | NOT VERIFIED | 四 profile 各自供应商、地区、费用/配额、留存/模型改进边界 |
 | credential 状态 | NOT VERIFIED | missing/verified/deferred/rejected/pending/unavailable 与替换/取消/删除 |

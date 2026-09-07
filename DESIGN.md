@@ -66,18 +66,30 @@
 
 **2026-08-02 落地结论**：两笔旧债均已关闭。`ClaudioColorHex` 与 `ContrastSuite` 已按最深渐变底 `#FBF7F1` 验证；未立项的全局静音控件正式删除，主音量行只保留滑块。
 
-## 全产品界面职责（现行 · 2026-08-26）
+## 全产品界面职责（现行 · 2026-09-06）
 
 产品只保留两个顶层 surface，不再以多个平行窗口复制职责：
 
-- **菜单栏主面板**只负责选择 Global/Surface 声音作用域、扫读当前来源的五个事件、试听、自动播放静音、主音量与当前 effective pack。它不再渲染三张来源卡片、宿主 chips、紧凑 `Picker`、声音包画廊或旧「管理声音包」行；播放设置组的「打开设置」携带当前 scope 深链接到统一设置的「事件与提示音」。
+- **菜单栏主面板**由固定品牌/设置头、独立滚动内容和固定关闭 footer 组成，固定宽 312pt、首选高 560pt。内容只负责选择 Global/Surface 声音作用域、活动概览、当前作用域的五个事件试听/静音和唯一全局主音量；不显示字号入口、声音包摘要、来源数量、包管理、重置或第二个设置入口。头部「设置」明确提交 `.destination(.general)`，关闭设置后按 retained handback 恢复该按钮焦点。
+- **活动概览**显示今日/7 日、用户发起、响应结束、严格由 `task_start + stop` 得出的消息往来，以及四段固定顺序色条（用户发起、响应结束、等待介入、子任务结束）。执行中断独立显示，不占第五段；零、unsupported、unavailable、stale 和 partial 由文字/形状共同表达。
 - **统一设置窗口**对应仓库内原型 `mockups/ai-app-manager-native-macos.html`，以固定侧栏承载「通用、集成、事件与提示音、通知、显示、声音、用量、快捷键、关于」九个真实目的页。窗口在 app 生命周期内复用，所有菜单与页间动作只提交类型化路由；关闭后由这一处统一归还焦点。
   - **集成**复用现有 capability、连接、回执与恢复事实，按 Host Product 分组但以 `HostSurfaceID` 为动作目标。
   - **事件与提示音**保留 Global/Surface、五事件、试听/静音和 effective profile；AI 使用“描述 → 3 个候选与命名 → 明确采用”，内部声音方案隐藏。
   - **声音**迁入完整 Sound Packs 编辑能力，并继续是唯一包级映射写入面；Global 写顶层 `selected_pack`，Surface 写稀疏覆盖，不制造 per-surface manifest 副本。
   - **通用、通知、显示、用量、快捷键、关于**不得是占位或演示常量；各自的真实事实源、权限、失败、持久化和验收边界见 `plan/PLAN-SETTINGS-EXPERIENCE.md`。
 
-共享基线：菜单栏面板独占 `#FFFDFA → #FBF7F1` 糖果盘渐变，统一设置使用温暖实色与少量分组；字体统一 SF Pro Rounded，只有 manifest ID、原生事件与路径使用等宽字体；圆角固定为 18 / 13 / 11；图标按钮至少 28×28pt。claudi0 自有「界面文字」提供紧凑、标准、较大、最大四档并注入两个顶层 surface，不能再把 macOS 的 SwiftUI `dynamicTypeSize` 描述成会自动跟随系统文字大小。
+共享基线：菜单栏面板独占 `#FFFDFA → #FBF7F1` 糖果盘渐变，统一设置使用温暖实色与少量分组；字体统一 SF Pro Rounded，只有 manifest ID、原生事件与路径使用等宽字体；圆角固定为 18 / 13 / 11；图标按钮至少 28×28pt。生产界面固定使用原第一档紧凑密度：不读取、不写入字号或面板宽度偏好，不以用户偏好改变 Panel 宽度；系统辅助功能缩放、VoiceOver 和 Zoom 仍由 macOS 原生能力负责。
+
+### 本地活动概览（现行 · 2026-09-06）
+
+活动数字只来自当前安装确认、成功映射到公共 `Event` 的真实宿主回调。播放成功、静音、动态静默、去抖、
+主音量为零、音频缺失和播放失败都不减少回调计数；`stop` 只表示响应结束，不表示任务成功。Panel 与
+「活动与诊断」消费同一 `ActivityDiagnosticsModel` 和 `ActivityOverviewProjector`，不允许 View 内另算。
+
+- Panel 的自然 Tab 顺序是 Settings → Sound Scope → 今日/7 日 → 四段活动色条 → 可用事件的试听/静音 → 主音量 → 关闭；自动打开可把初始焦点落在 Sound Scope，Settings handback 才显式恢复 Header Settings。
+- 活动色条目标命中高至少 29pt，可见条高 13pt；权重按当前范围计数分配，零值保留空心段，unsupported 使用斜纹和 `—`，unavailable、stale、partial 另有状态说明。悬停或聚焦提供今日、近七日和来源覆盖。
+- Settings 活动页显示今日消息、近七日消息、近七日子任务、三个来源卡、五个事件行、诊断日志和隐私边界；活动清除与诊断日志清除互不触碰对方事实。
+- 窗口默认 1240×820、最小 960×640；侧栏在 1100pt 处由 252pt 收敛到 210pt，内容最大 820pt。页面内滚动不得带动整个窗口横向溢出。
 
 下文 `Sound Packs Window` 与 `Integrations Window` 的详细解剖继续规范其可复用内容与领域交互；其中关于独立窗口 ownership、尺寸和焦点 handback 的文字自统一设置迁移完成后仅作历史记录，不再是生产形态。
 
@@ -191,19 +203,19 @@
 ## Layout（布局）
 
 - **策略**：App = grid-disciplined（系统设置式分组圆角卡片、行=左标签右控件、可预期对齐）；营销 = hybrid（落地页可编辑化、真机构图）。
-- **菜单栏面板**：标准宽 **312pt**，最大文字档 **360pt**；高度在 **400–560pt** 内随可用屏幕自适应，`NSPopover` 带尖角。
-- **固定退出 footer（2026-08-19）**：面板根布局为「上方独立滚动区 + 下方固定 footer」，总高度继续服从既有 **400–560pt** 规则，footer 只压缩滚动视口、不扩大 popover。footer 横向内边距 13pt、纵向各 2pt；右侧按钮保持内容宽度，使用 `power` +「关闭」、图文间距 6pt、SF Pro Rounded medium `11pt × typeScale`、最小高 28pt，标准总高约 32pt。空白区域不响应点击；没有 `Divider`、整行点击、大底色、危险红或品牌色。默认文字/图标用 `text-2`，hover 与键盘焦点切到 `text + surface-2`；按钮保留 `.borderless` 原生按压态和焦点环，不加动画。四档界面文字允许自然增高，不能裁切。State Gallery 直接渲染同一个 `PanelQuitFooter`，覆盖双语 × 四字号；标准三档宽 312pt，最大档宽 360pt。
+- **菜单栏面板**：固定宽 **312pt**，首选高 **560pt**；屏幕可用高度不足时只缩短中间滚动视口，头部和 footer 不滚动。`NSPopover` 带尖角，生产树固定使用紧凑密度。
+- **固定退出 footer（2026-09-06）**：面板根布局为「固定品牌/设置头 + 独立滚动区 + 固定关闭 footer」。footer 横向内边距 13pt、纵向各 2pt；右侧按钮保持内容宽度，使用 `power` +「关闭」、最小高 28pt。空白区域不响应点击；没有大底色、危险红或品牌色。State Gallery 直接渲染同一个 `PanelQuitFooter`，只覆盖双语 × 固定紧凑密度。
 - **面板材质（关键决策）**：**近实心暖表面（`panel`）+ 1px `hairline-strong` 描边 + 柔和阴影**，**不用**满毛玻璃 vibrancy —— 因为 vibrancy 会被壁纸「染色」，而 claudi0 是颜色即语义的产品，事件色必须显示为真色（参照 Itsycal 的实心表面做法）。
 - **圆角阶梯**（**⚠ 2026-07-17 糖果盘上调，现行见「现行视觉皮肤：糖果盘」②；下列 v1 值存档**）：〔v1 存档〕控件 / 芯片 6px · 卡片 / 行 10px · 面板 14–16px · 开关 / 声音芯片 pill(999)；覆盖轨 slot 两档：面板行档 = **胶囊（pill 999 档的半高应用）**；管理窗口微型档 9×9 radius 2（阶梯外微几何）。〔糖果盘现行〕控件 / 芯片 6 · **行卡 13** · tile 11 · **面板 18** · 微型 tile 9 · 开关 / 胶囊 pill(999)；覆盖轨改**横排糖豆胶囊**（present 实心 ≈14×7、missing 空壳 + 斜杠，见 ⑥）。
 - **最大内容宽（营销）**：~1060px。
-- **行结构（每事件行，2026-08-25 现行）**：`[事件色 glyph] · [本地化标题 / 原生事件名或 claudi0 ID（mono） / 能力标签 / 声音文件] · [试听] [静音]`。面板一次只显示当前 Global/Surface 的五行，不再显示宿主 chips，也没有整行事件编辑按钮；声音文件只读，「打开设置」进入同 scope 的事件窗口，逐事件编辑再进入 Sound Packs Window。紧凑 / 标准档保持单行主结构，较大档允许元数据与控制行换行，最大档以 360pt 宽并把动作移到下一行，禁止横向裁切。
+- **行结构（每事件行，2026-09-06 现行）**：`[事件色 glyph] · [本地化标题 / 原生事件名或 claudi0 ID（mono） / 能力标签 / 声音文件] · [试听] [静音]`。面板一次只显示当前 Global/Surface 的五行，不再显示宿主 chips，也没有整行事件编辑按钮；声音文件只读，「打开设置」进入同 scope 的事件窗口，逐事件编辑再进入 Sound Packs Window。生产只使用固定紧凑行结构，禁止通过字号或宽度偏好改变动作位置。
 - **控件行（Control Row）—— 面板里一切非事件的设置行**（主音量滑块 · 未来的开关 / 步进器 / 行内按钮）。**这一节管的是既成事实，不是新发明**：`OnboardingView` 主 CTA 早已是「原生外壳 + `.tint(clay)`」，此处只是把它升格成全 App 规则。
   - **原生外壳，不自绘**：`Slider` / `Button` / `Toggle` / `Stepper` 一律保留系统绘制的**轨道 · 拇指 · 焦点环 · 按下态 · hover**。品牌强调**只经 `.tint(ClaudioColor.clay(colorScheme))` 一个入口**施加。理由同「App 内 UI = 系统 SF Pro」：自绘控件会连带丢掉 macOS 的焦点环、按下反馈与辅助功能行为，为一点视觉自由付整套原生正确性的账。**先例**：`OnboardingView.swift:102-103` `.buttonStyle(.borderedProminent) + .tint(clay)`。故本设计系统**不定义**轨道高度 / 拇指直径 / 焦点环 —— 那不是我们的决策面。
   - **行解剖**：播放设置使用一个统一描边的两行组：主音量行与声音包行之间用系统 `Divider`；内边距沿用面板 12–13pt。控件行没有事件色 glyph，这是它与事件行的结构差别。
   - **不加图标（默认）**：五个事件行已各自带试听与静音操作字形。控件行再上一枚喇叭 = 同一个 312pt 面板里的**第三套**音量语义，读者无从分辨哪个才是"音量"。**标签用文字**。确需图标时，须挑一个不与事件行撞的字形并登记在此。
   - **数值读数（现行显示）**：主音量行固定显示百分比，使用 SF Mono / `.monospacedDigit()` 与可容纳 `100%` 的定宽槽；同一值继续作为 `accessibilityValue` 播报。
   - **禁用态**：`.disabled(true)`，用原生灰 —— 即 State Components「事件行三态」那条的同一口径「**控件置灰 + 图标降饱和，不整行降 opacity**」，行内文字始终 ≥4.5:1。
-  - **Dynamic Type**：使用产品的 compact / standard / large / maximum 四档。compact/standard 保持主结构单行；large 允许说明与控制换行；maximum 使用 360pt 并让事件动作落到下一行。档位来自 `PanelLayoutAdaptation`，不依赖系统 `dynamicTypeSize` 猜测。
+- **密度**：生产只使用固定 compact `PanelLayoutAdaptation`；不保留只有一个 case 的字号模型，也不根据用户字号或宽度偏好分支。Settings 使用窗口自身的内容滚动和系统辅助功能，不把菜单栏 Panel 的紧凑 token 传播为第二套用户偏好。
   - **对比度**：控件的品牌填充是**非文本图形**，判 **≥3:1**（亮色 `clay` `#C4633C` 对 `panel` = **3.97:1** ✅），与已拍板的 drop-zone hover 边框同规则。
     - **两个主题今天都断住了**（2026-07-14 补齐，PLAN-MASTER-VOLUME **D25 ①**）：亮色一对早已在 `ContrastSuite` 的 drop-zone 决议 suite 里（`clayLight` vs `panelLight` ≥3:1）；暗色的**专名**一对随第一个控件行（`MasterVolumeRow`）一并补上。**诚实标注它的射程**：`ClaudioColorHex` 里 `notificationDark` 是 `clayDark` 的**字面别名**，所以 `nonTextPairs` 那条 "Notification dark glyph vs panel" 算的本就是同两个 hex —— 新断言并不更早捕获「clay 被调坏」（两条会同时红）。它买到的是另外两样：① 暗色从此也有一个**以自己名字**存在的守卫，与亮色对称；② 万一将来有人把事件色 `notificationDark` 与品牌色 `clayDark` 解耦（本就是两个概念，只是今天同值），它就是**唯一**还钉着控件行填充色的断言。
     - ⚠️ **但纯 hex 数学的 `ContrastSuite` 结构上捕获不了这条规则真正的回归**：它看不见 `NSSlider` 实际填了什么色。**有人删掉 `.tint(clay)` → 填充退回系统强调色**（实测裸 `Slider` = `#3275F0` 系统蓝；用户可把系统强调色设成**红**，而真红只许给真错误）—— 这个回归只能靠**真机走查 + state gallery** 兜住，测试兜不住。写进走查清单，别假装测试覆盖了它。
@@ -213,17 +225,25 @@
   - **动效：控件行不加 `.animation()`**。连续拖拽必须跟手无动画；值的吸附 / 回滚一律**瞬跳**。理由是**手感与诚实**：滑块是直接操纵控件，任何补间都会让拇指与填充段脱钩；而写盘失败后的回滚若被动画柔化，用户会以为值还在路上，而它其实已经没了。
     ⚠️ **（2026-08-01 双宿主覆盖）**：旧单宿主 Panel 曾含 `disconnectRow` / onboarding in-flight 动画并读取 `accessibilityReduceMotion`；现行双宿主 Panel 已移除这两类连接动作，视图树没有自定义动画，因此不再持有无消费者的 Reduce Motion 环境值。**规矩本身不变**：未来往 Panel 添加动画，必须在同一落点接入 Reduce Motion。统一 Settings 的集成目的页仍有 opacity transition，并已在开启 Reduce Motion 时改为瞬时替换。
 
-- **界面文字步进调节（方案 C · 2026-08-05）**：面板标题栏右侧固定 `Aa⌄` 原生触发器（约 54×32pt），子 Popover 固定 280pt 宽；触发器不直接显示当前档位，当前值只经 VoiceOver value 暴露。内容依次为「界面文字」标题、分隔线、固定横向列的小 `A` / 当前档位 / 大 `A`，以及四个仅表达状态的圆点。两侧为原生中性 bordered 按钮，点击相邻档位后即时写入共享 `@AppStorage`，Popover 保持打开；紧凑档聚焦大 `A`，其余档位聚焦小 `A`，触达边界时焦点转移到仍可用的一侧。
+> **历史存档边界（2026-09-06）**：下面的「界面文字步进调节」与其四档画廊，以及所有依赖可变 Panel 宽度的文字，仅记录旧方案，不属于生产合同。生产停止读取旧 UserDefaults key，不新增迁移清理；显示页只保留菜单栏活动状态点和固定紧凑布局说明。
+
+- **界面文字步进调节（历史存档，2026-08-05）**：面板标题栏右侧固定 `Aa⌄` 原生触发器（约 54×32pt），子 Popover 固定 280pt 宽；触发器不直接显示当前档位，当前值只经 VoiceOver value 暴露。内容依次为「界面文字」标题、分隔线、固定横向列的小 `A` / 当前档位 / 大 `A`，以及四个仅表达状态的圆点。两侧为原生中性 bordered 按钮，点击相邻档位后即时写入共享 `@AppStorage`，Popover 保持打开；紧凑档聚焦大 `A`，其余档位聚焦小 `A`，触达边界时焦点转移到仍可用的一侧。
   - 小 `A` 向前一步、大 `A` 向后一步；两端禁用、不循环、不 Toast、不自定义动画。当前档位使用 semibold，`第 n 档，共 4 档` 使用等宽数字；圆点同时用尺寸 / 外环和 clay 状态表达，且从 VoiceOver 树隐藏。
   - `panel.options` 容器与 `panel.options.text-size` 触发器保持稳定标识，并新增 `.decrease` / `.increase` / `.status` 子标识。控件不加入 `PanelFocusTarget`，所以面板首次打开仍落在第一个可操作声音来源；子 Popover 关闭时焦点回到 `Aa⌄`。非法持久化值仍只在读取时回落为标准，下一次调节才写回合法 raw value。
   - **语言切换（2026-08-11）**：方案 C 的 280pt 子 Popover 在标题下固定显示原生 segmented control `中文 | English`；双选项持续可见，入口仍为 `Aa⌄`。默认语言固定为简体中文，选择持久化到 `Claudio.InterfaceLanguage`，由 app-lifetime `ClaudioLanguageStore` 同时注入面板、声音包窗口与集成窗口；切换只重新投影当前内存状态，不重启、不重读磁盘、不关闭 Popover。所有显示文案经显式 `ClaudioL10n` 查找，英文缺项回退中文并在测试环境报错。
   - 语言 selector 打开时取得焦点，切换后焦点留在 selector，`Tab` 进入四档文字大小控件；`Esc` 先关闭子 Popover，父 Popover 关闭时清理子状态并把焦点交还 `Aa⌄`。State Gallery 使用生产 `PanelView` 覆盖 `2 种语言 × 4 档字号 × 5 个关键状态`，并由 PreviewProvider 分别渲染浅色与深色；真实 macOS 的 VoiceOver、Full Keyboard Access、主题、强调色和最大字号仍需人工走查。
 
-### 菜单栏 Agent 集成面板（现行 · 2026-08-25）
+### 菜单栏 Agent 集成面板（现行 · 2026-09-06）
 
 菜单栏面板使用最终 HTML 原型的信息结构，同时继续跟随 macOS 浅色/深色主题并只使用
-`ClaudioTheme`、事件色与语义色。标准宽度 **312pt**，maximum 档 **360pt**，高度保持
-**400–560pt** 自适应；生产视图中没有硬编码 hex。
+`ClaudioTheme`、事件色与语义色。生产宽度固定 **312pt**，首选高度 **560pt**；高度不足只压缩
+中间滚动视口，生产视图不再有 maximum 档或用户宽度分支。
+
+头部固定 Orbit/`claudi0` wordmark 与齿轮「设置」，头部不随内容滚动；中间是独立 `ScrollView`，按
+Sound Scope → 活动概览 → 五事件 → 仅主音量的播放设置排列；底部固定「关闭」。活动概览的四段交互
+目标高至少 29pt，但可见色条高 13pt；四段固定为用户发起、响应结束、等待介入、子任务结束，执行中断
+单独显示。旧字号入口、声音包标题/数量、管理声音、重置 Surface、bootstrap 管理卡和第二个设置 CTA
+均不进入生产面板。
 
 ```text
 Orbit Zero                                                            Aa⌄
@@ -305,8 +325,11 @@ N 个已发布来源 · 5 个声音事件
 - **招牌动效**：
   1. **动效跟随音高轮廓**：本轮结束=上扬两音→勾上跳；执行中断=下沉且保持→暂停条淡入并停住；待响应=双击→双弹；子任务结束=单 blip→空心勾静静填上。
   2. **视觉回放**：播声音时，菜单栏单色字形按事件色重放那段波形 —— 你能*看见*刚听到的声音。
-  3. 试听 ▶ 触发 4–5 根 EQ 条弹跳。
-- **无障碍**：尊重 `prefers-reduced-motion` / macOS「减弱动态效果」，降级为静态字形与瞬时状态切换。
+  3. Events 与 Panel 的试听 ▶ 仅在音频实际开始播放后执行一次字形脉冲：`1.0 → 1.12 → 1.0`，
+     单程 `110ms ease-out`；播放失败、停止动作和普通 hover 不触发。重复试听用新的触发序号重新开始，
+     不引入常驻 EQ 或无限循环动画。
+- **无障碍**：尊重 `prefers-reduced-motion` / macOS「减弱动态效果」；试听脉冲直接保持 `1.0`，
+  其余动效降级为静态字形与瞬时状态切换。
 
 ## Sound Visual Language（声音视觉语言 · 产品独有）
 

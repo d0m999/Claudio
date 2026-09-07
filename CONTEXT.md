@@ -69,8 +69,15 @@ _Avoid_: 设置项目、独立管理窗口、把侧栏条目当成数据模型
 _Avoid_: 全局静音配置、把主音量写成零、批量关闭事件
 
 **本地活动摘要（Local Activity Summary）**:
-从现有脱敏宿主回执与诊断日志投影出的有限近期活动，只反映这些本地保留数据的范围。它不是完整用量、分析遥测、供应商账单或网络字节统计。
-_Avoid_: 用量分析、云端遥测、完整历史、ElevenLabs 账单
+由 `LocalActivitySummaryStore` 唯一持有的本地七日事实：只记录已确认 installation 的、能够映射到
+公共 `Event` 的宿主回调，按发生时的本地 Gregorian 日期入桶，并以 `HostID × Event` 饱和计数保存。
+Panel 与「活动与诊断」共享同一个 app-lifetime `ActivityDiagnosticsModel` 和
+`ActivityOverviewProjector`；不得从最多 20 条 receipt history、播放结果或日志重新推算活动。摘要不保存
+prompt、response、项目路径、provider、token、网络字节或音频路径，也不是完整用量、分析遥测或供应商账单。
+摘要损坏、超限或锁忙时 fail closed；已有成功快照显示 stale，没有快照显示 unavailable。清除在专用锁内
+原子发布空摘要并记录清除边界，迟到的清除前 delta 不会重新出现，且不触碰 activation marker、receipt、
+receipt history、声音配置或诊断日志。近七日固定为今天和之前六个本地日期；切换时区不改写旧日期键。
+_Avoid_: 用量分析、云端遥测、完整历史、以回执结果冒充活动、ElevenLabs 账单
 
 **AI 提示音（AI Cue）**:
 用户以自然语言描述、由外部生成服务创建并在明确采用后进入普通用户声音包的短音频。它可以是语音、动物叫声、纯音效或混合声音；`TTS` 只保留在历史文件名和原型路由中。

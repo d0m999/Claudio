@@ -74,6 +74,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator
     private let soundPackLibrary: SoundPackLibrary
     private let settingsWindowController: SettingsWindowController
+    private let activityDiagnostics: ActivityDiagnosticsModel
     private let eventSettingsModel: PanelConfigController
     private let globalShortcutRegistrar: CarbonGlobalShortcutRegistrar
     private let globalShortcutSettings: GlobalShortcutSettingsModel
@@ -226,6 +227,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             credentialManager: aiCueCredentialManager,
             generator: aiCueGenerator)
         let eventSettingsSelection = EventSettingsWindowSelection()
+        let activityDiagnostics = makeActivityDiagnosticsModel()
         let adoptAICue:
             @MainActor (AICueAdoptionRequest) async -> Result<
                 AICueAdoptionOutcome, AICueAdoptionError
@@ -247,7 +249,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let settingsWindowController = SettingsWindowController(
             preferences: languageStore,
             loginItemSettings: loginItemSettings,
-            usageSettings: makeUsageSettingsModel(),
+            activityDiagnostics: activityDiagnostics,
             globalShortcutSettings: globalShortcutSettings,
             soundPacksEditorOwner: soundPacksEditorOwner,
             eventSettingsModel: eventSettingsModel,
@@ -261,59 +263,32 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             },
             onAdoptAICue: adoptAICue)
 
-        // Built BEFORE the panel so the panel's width callback can capture it (the callback can't
-        // capture `self` — we're still pre-`super.init()` here).
+        // Build the popover before the panel so AppKit owns the fixed outer geometry from the
+        // moment the SwiftUI content is attached; no user preference or resize callback enters
+        // this path.
         let popover = NSPopover()
         // `standardPanelWidth` (`ClaudioGUICore`), never a second hardcoded `312`: DESIGN.md's
         // 312pt panel width already exists as a constant, and `PanelLayoutAdaptation/panelWidth`
         // — the value the SwiftUI side actually sizes itself to — is derived from it.
-        // Height is intrinsic-content-driven at runtime.
-        popover.contentSize = NSSize(width: standardPanelWidth, height: 520)
+        // The production panel has one fixed compact width and a 560pt preferred height.
+        popover.contentSize = NSSize(width: standardPanelWidth, height: 560)
 
         let panel = PanelView(
             audioEnvironment: audioEnvironment,
             focusCoordinator: focusCoordinator,
             hostIntegrations: hostIntegrations,
-            bootstrapReports: bootstrapReports,
             languageStore: languageStore,
+            activityDiagnostics: activityDiagnostics,
             soundPackLibrary: soundPackLibrary,
             soundPacksRefreshCoordinator: soundPacksRefreshCoordinator,
-            onManageSounds: { [weak actionRouter] route, focusTarget in
-                actionRouter?.requestSoundsSettings(
-                    route: route,
-                    returnFocusTo: focusTarget)
-            },
-            onOpenEventSettings: { [weak actionRouter] route, focusTarget in
-                actionRouter?.requestEventsSettings(
-                    route: route,
-                    returnFocusTo: focusTarget)
-            },
-            onManageIntegrations: { [weak actionRouter] host, target in
-                actionRouter?.requestIntegrationsSettings(preselect: host, returnFocusTo: target)
-            },
-            onRetryBootstrap: { [weak actionRouter] in
-                actionRouter?.owner?.requestHostIntegrationRefresh(bootstrapSharedRuntime: true)
-            },
             onAudibilityInputsChanged: { [weak actionRouter] in
                 actionRouter?.audibilityInputsChanged()
             },
+            onOpenSettings: { [weak actionRouter] in
+                actionRouter?.owner?.requestGeneralSettingsPresentation()
+            },
             onQuit: {
                 NSApp.terminate(nil)
-            },
-            // T15 D5「极大 → 加宽 popover」, now actually in effect (TODOS.md:257): `PanelView`
-            // widens ITSELF to `widenedPanelWidth` (360pt) at the `.maximum` Dynamic Type tier,
-            // but this AppKit popover around it kept its hardcoded 312pt `contentSize` — so the
-            // widened panel was being rendered inside a container that never grew, which is
-            // exactly the 「不裁切、不溢出」 the degradation rule exists to prevent. `PanelView`
-            // reports its real width here (on appear and on every tier change) and the popover
-            // follows. Captures `popover` (a class), never `self`.
-            // `[weak popover]`：强捕获会成环——`popover → contentViewController → rootView(PanelView)
-            // → 这个闭包 → popover`，于是 popover 与它整棵 SwiftUI 视图树永不释放（本轮 /ship 评审：
-            // Claude 对抗子代理）。今天菜单栏 app 的 popover 与进程同生共死，所以泄漏不可见；一旦将来
-            // 有人重建 popover（换皮肤、换尺寸策略、多状态栏图标），它就会变成一个真实的、每次重建都
-            // 涨一份的泄漏。捕获 popover 而不是 self 本来就是对的，只是漏了 weak。
-            onPanelWidthChange: { [weak popover] width in
-                popover?.contentSize.width = CGFloat(width)
             }
         )
         hostingController = NSHostingController(rootView: panel)
@@ -323,6 +298,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         self.soundPacksRefreshCoordinator = soundPacksRefreshCoordinator
         self.soundPackLibrary = soundPackLibrary
         self.settingsWindowController = settingsWindowController
+        self.activityDiagnostics = activityDiagnostics
         self.eventSettingsModel = eventSettingsModel
         self.globalShortcutRegistrar = globalShortcutRegistrar
         self.globalShortcutSettings = globalShortcutSettings
@@ -349,6 +325,12 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             to: statusItem)
 
         super.init()
+
+        activityDiagnostics.updateIntegrationStatuses(
+            Dictionary(
+                uniqueKeysWithValues: hostIntegrationState.snapshots.map {
+                    ($0.host, ActivityOverviewProjector.integrationStatus(from: $0))
+                }))
 
         actionRouter.owner = self
         popover.delegate = self
@@ -453,6 +435,11 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 else { return }
                 let content = self.hostIntegrations.replace(state: state)
                 self.integrationsModel.replaceExternalContent(content)
+                self.activityDiagnostics.updateIntegrationStatuses(
+                    Dictionary(
+                        uniqueKeysWithValues: state.snapshots.map {
+                            ($0.host, ActivityOverviewProjector.integrationStatus(from: $0))
+                        }))
             } catch {
                 // 集成目的页的显式“重新检测”会显示错误反馈；后台/打开面板刷新只保留
                 // 上一份事实，避免一次瞬时 I/O 失败把两条宿主行抹成伪造状态。
@@ -467,7 +454,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     ) -> IntegrationDestinationContent {
         hostIntegrationRefreshRevision &+= 1
         hostIntegrationRefreshTask?.cancel()
-        return hostIntegrations.replace(state: state)
+        let content = hostIntegrations.replace(state: state)
+        activityDiagnostics.updateIntegrationStatuses(
+            Dictionary(
+                uniqueKeysWithValues: state.snapshots.map {
+                    ($0.host, ActivityOverviewProjector.integrationStatus(from: $0))
+                }))
+        return content
     }
 
     @objc private func togglePopover() {
@@ -622,6 +615,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             route: nil,
             returnFocusTo: nil,
             handbackApplication: globalShortcutHandbackApplication())
+    }
+
+    /// The panel header is an explicit General entry; it never reopens the last Settings page.
+    fileprivate func requestGeneralSettingsPresentation() {
+        requestSettingsPresentation(
+            route: .destination(.general),
+            returnFocusTo: .headerSettings)
     }
 
     private func requestSettingsPresentation(

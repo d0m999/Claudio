@@ -42,7 +42,6 @@ struct EventSettingsWindowView: View {
     @State private var previewAllCoordinator = EventPreviewSequenceCoordinator()
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
-    private var interfaceTextSize: ClaudioInterfaceTextSize { languageStore.interfaceTextSize }
     private var scopes: [PanelSoundScopePresentation] {
         panelSoundScopePresentations(
             sourceRows: hostIntegrations.content.sourceRows,
@@ -84,8 +83,8 @@ struct EventSettingsWindowView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(ClaudioTheme.panel(colorScheme))
+        .tint(ClaudioTheme.clay(colorScheme))
         .frame(minWidth: 680, minHeight: 520)
-        .environment(\.dynamicTypeSize, interfaceTextSize.dynamicTypeSize)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.eventSettingsWindowTitle))
         .onReceive(selection.$focusRequestRevision) { revision in
@@ -215,10 +214,10 @@ struct EventSettingsWindowView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
                     .fill(
                         resolvedScope == scope.scope
-                            ? ClaudioTheme.clay(colorScheme).opacity(0.14)
+                            ? ClaudioTheme.claySoft(colorScheme)
                             : Color.clear))
         }
         .buttonStyle(ClaudioFullRowButtonStyle())
@@ -244,7 +243,7 @@ struct EventSettingsWindowView: View {
                             .eventSettingsUnavailableShortcutScope,
                             unavailableScope as NSString)
                     )
-                    .foregroundColor(.secondary)
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
                 } icon: {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -301,7 +300,7 @@ struct EventSettingsWindowView: View {
                             unavailableScope as NSString)
                     )
                     .font(ClaudioTheme.font(.body))
-                    .foregroundColor(ClaudioTheme.error(colorScheme))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 } else {
                     Text(selectedScope.name + " · " + selectedScope.summaryText)
                         .font(ClaudioTheme.font(.body))
@@ -383,7 +382,7 @@ struct EventSettingsWindowView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .background(ClaudioTheme.elevated(colorScheme))
-        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("event-settings.ai-cue.eligibility")
     }
@@ -462,10 +461,10 @@ struct EventSettingsWindowView: View {
             .padding(14)
             .background(ClaudioTheme.elevated(colorScheme))
             .overlay(
-                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section)
                     .strokeBorder(ClaudioTheme.hairline(colorScheme), lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+            .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section))
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("event-settings.playback-settings")
@@ -561,7 +560,7 @@ struct EventSettingsWindowView: View {
     private func eventRows(availableWidth: CGFloat) -> some View {
         let windowLayout = eventSettingsWindowLayout(
             availableWidth: Double(availableWidth),
-            typeScale: interfaceTextSize.scale)
+            typeScale: 1)
         if routeIsUnavailable {
             EmptyView()
         } else {
@@ -755,7 +754,7 @@ struct EventSettingsWindowView: View {
         }
     }
 
-    private func playPreview(_ event: Event) {
+    private func playPreview(_ event: Event) -> Bool {
         stopCandidatePreview()
         stopAllPreviews()
         guard
@@ -766,7 +765,7 @@ struct EventSettingsWindowView: View {
                 environment: audioEnvironment)
         else {
             model.reload()
-            return
+            return false
         }
         guard
             previewPlayer.play(
@@ -775,8 +774,9 @@ struct EventSettingsWindowView: View {
             )
         else {
             model.reload()
-            return
+            return false
         }
+        return true
     }
 
     private func openAICueComposer(_ eligibility: AICueAdoptionEligibility) {
@@ -886,7 +886,7 @@ private struct EventSettingsEventRow: View {
     let windowLayout: EventSettingsWindowLayout
     let language: ClaudioAppLanguage
     let onGenerateAICue: () -> Void
-    let onPreview: () -> Void
+    let onPreview: () -> Bool
     let onToggleMute: () -> Void
     let onConfigureSound: () -> Void
     let inheritanceText: String?
@@ -897,7 +897,8 @@ private struct EventSettingsEventRow: View {
     private let focusedTarget: FocusState<EventSettingsFocusTarget?>.Binding
 
     @Environment(\.colorScheme) private var colorScheme
-    @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
+    @State private var previewPulseTrigger = 0
+    private let typeScale: CGFloat = 1
 
     init(
         presentation: PanelEventPresentation,
@@ -905,7 +906,7 @@ private struct EventSettingsEventRow: View {
         language: ClaudioAppLanguage,
         focusedTarget: FocusState<EventSettingsFocusTarget?>.Binding,
         onGenerateAICue: @escaping () -> Void,
-        onPreview: @escaping () -> Void,
+        onPreview: @escaping () -> Bool,
         onToggleMute: @escaping () -> Void,
         onConfigureSound: @escaping () -> Void,
         inheritanceText: String?,
@@ -945,6 +946,13 @@ private struct EventSettingsEventRow: View {
             }
         }
         .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background(ClaudioTheme.surface(colorScheme))
+        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row))
+        .overlay(
+            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
+                .stroke(ClaudioTheme.hairline(colorScheme), lineWidth: 1)
+        )
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("event-settings.event.\(presentation.event.rawValue).row")
     }
@@ -1028,7 +1036,7 @@ private struct EventSettingsEventRow: View {
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(ClaudioTheme.elevated(colorScheme))
-            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.chip))
     }
 
     private var soundFileText: some View {
@@ -1047,7 +1055,7 @@ private struct EventSettingsEventRow: View {
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
                 .background(ClaudioTheme.elevated(colorScheme))
-                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.chip))
         }
     }
 
@@ -1082,15 +1090,15 @@ private struct EventSettingsEventRow: View {
             .accessibilityIdentifier(
                 "event-settings.event.\(presentation.event.rawValue).configure")
 
-            Button(action: onPreview) {
+            Button {
+                if onPreview() {
+                    previewPulseTrigger &+= 1
+                }
+            } label: {
                 Image(systemName: "play.fill")
+                    .claudioPreviewPulse(trigger: previewPulseTrigger)
             }
             .buttonStyle(ClaudioIconButtonStyle())
-            .foregroundColor(
-                presentation.controls.previewEnabled
-                    ? ClaudioTheme.event(presentation.event, colorScheme)
-                    : ClaudioTheme.secondaryText(colorScheme)
-            )
             .disabled(!presentation.controls.previewEnabled)
             .focused(focusedTarget, equals: .preview(presentation.event))
             .help(previewHint)
@@ -1139,6 +1147,7 @@ private struct EventSettingsMasterVolumeControl: View {
     let isEnabled: Bool
     let language: ClaudioAppLanguage
     let onCommit: (Double) -> Double?
+    @Environment(\.colorScheme) private var colorScheme
     private let focusedTarget: FocusState<EventSettingsFocusTarget?>.Binding
 
     init(
@@ -1162,7 +1171,7 @@ private struct EventSettingsMasterVolumeControl: View {
                     .font(ClaudioTheme.font(.body).weight(.semibold))
                 Text(ClaudioL10n(language: language).text(.panelMasterVolumeDescription))
                     .font(ClaudioTheme.font(.caption))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
             }
             Spacer(minLength: 10)
             SharedMasterVolumeSlider(

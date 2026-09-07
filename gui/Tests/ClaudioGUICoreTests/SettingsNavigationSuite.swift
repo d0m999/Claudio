@@ -25,7 +25,7 @@ func runSettingsNavigationSuites() {
             (.notifications, "通知", "Notifications"),
             (.display, "显示", "Display"),
             (.sounds, "声音", "Sounds"),
-            (.usage, "用量", "Usage"),
+            (.usage, "活动与诊断", "Activity & Diagnostics"),
             (.shortcuts, "快捷键", "Shortcuts"),
             (.about, "关于", "About"),
         ]
@@ -365,11 +365,9 @@ func runSettingsNavigationSuites() {
                 && SettingsWindowGeometry.minimumHeight == 640,
             "最小窗口尺寸必须匹配批准原型")
         expect(
-            settingsSidebarWidth(windowWidth: 960, interfaceTextSize: .standard) == 220
-                && settingsSidebarWidth(windowWidth: 1_240, interfaceTextSize: .standard) == 252
-                && settingsSidebarWidth(windowWidth: 1_240, interfaceTextSize: .maximum) == 276
-                && settingsSidebarWidth(windowWidth: 960, interfaceTextSize: .maximum) == 252,
-            "侧栏必须在最小窗口收紧，并为最大文字档保留额外阅读宽度")
+            settingsSidebarWidth(windowWidth: 960) == 210
+                && settingsSidebarWidth(windowWidth: 1_240) == 252,
+            "侧栏必须只按窗口宽度在最小窗口收紧，不再为字号偏好改变")
         let sidebarSections = settingsSidebarSections(
             availableDestinations: SettingsDestination.allCases)
         expect(
@@ -555,10 +553,10 @@ func runSettingsNavigationSuites() {
             "DEBUG state gallery 必须遍历九个 route slot 与全部可见失败态")
         expect(
             gallery.contains("SettingsExperienceGalleryView()")
-                && gallery.contains("ForEach(ClaudioInterfaceTextSize.allCases)")
+                && !gallery.contains("ForEach(ClaudioInterfaceTextSize.allCases)")
                 && gallery.contains("ForEach(PreviewFixtures.settingsExperienceScenarios)")
                 && gallery.contains("experienceScenario: scenario"),
-            "基础六页 gallery 必须用 production Settings view 覆盖双语与四档文字")
+            "设置 gallery 必须用 production Settings view 覆盖双语与固定紧凑布局")
         expect(
             gallery.contains("EventSettingsLayoutGalleryView()")
                 && gallery.contains("AICueExperienceGalleryView()")

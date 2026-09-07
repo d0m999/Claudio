@@ -142,13 +142,14 @@ runPanelFocusCoordinatorSuites()
 await runSettingsPreferencesSuites()
 runDynamicQuietPolicySuites()
 runDisplayPreferencesSuites()
-await runUsageActivitySuites()
+await runActivityDiagnosticsSuites()
 runGlobalShortcutsSuites()
 runSettingsNavigationSuites()
 runPreviewFixturesSuites()
 runMultiProviderPrototypeContractSuites()
 runVolumeDragSessionSuites()
 runPanelWriteFailuresSuites()
+runActivityOverviewSuites()
 
 // MARK: - Summary
 

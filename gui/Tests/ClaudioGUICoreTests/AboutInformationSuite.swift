@@ -146,7 +146,7 @@ func runAboutInformationSuites() {
             "AICueCandidate", "providerResponse", "UsageDiagnosticFailure", "ClaudioConfig",
             "FocusQuiet", "EKEventStore", "ClaudioPaths", "soundDescription",
             "AICueHTTPRequest", "AICueHTTPResponse", "selectedPack", "packCards",
-            "UsageDiagnosticLogSnapshot",
+            "ActivityDiagnosticLogSnapshot",
         ]
         for forbidden in forbiddenAccesses {
             expect(

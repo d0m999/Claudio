@@ -1,8 +1,8 @@
 # PLAN — 统一设置体验完整实施计划
 
-> 状态：**统一设置迁移、allowlisted 多 Provider Swift 实现与自动合同已落地；原生 UI、VoiceOver、真实 Provider、双架构、签名、公证与发布仍未验证**
+> 状态：**统一设置迁移、allowlisted 多 Provider Swift 实现、固定紧凑面板、本地活动摘要与自动合同已落地；原生 UI、VoiceOver、真实 Provider、双架构、签名、公证与发布仍未验证**
 >
-> 日期：2026-08-26
+> 日期：2026-09-06
 >
 > 范围：把当前分散的集成、事件、声音包与零散偏好收口到一个原生 macOS 统一设置窗口，
 > 完整交付「通用、集成、事件与提示音、通知、显示、声音、用量、快捷键、关于」九个设置目的页。
@@ -18,6 +18,12 @@
 >
 > AI 提示音的 Provider/profile、凭据、候选与采用领域合同由
 > `plan/PLAN-CONSUMER-TTS-EXECUTION.md` 定义；本计划固定其统一设置投影并完成周边页面。
+
+> **2026-09-06 当前合同覆盖说明**：本文件早期关于四档界面文字、可变 Panel 宽度、`Aa` 入口及以
+> 每 Surface 最多 20 条 receipt history 推算用量的文字均为历史计划，不再是生产要求。当前 SoT 是
+> `finalized.html`、`REPORT.md`、`CONTEXT.md`、ADR 0001–0010 与已落地代码：Panel 固定 312pt/紧凑密度，
+> Display 只保留活动状态点；「活动与诊断」消费七日本地活动摘要而不是 receipt 播放结果投影。历史段落
+> 保留用于追溯，但不得作为实现验收标准。
 
 ## 0. 目标与完成定义
 
@@ -45,7 +51,7 @@
 | 完整度 | 九页都必须是真功能；占位、演示常量和无副作用按钮不算完成 |
 | 实施方式 | 按依赖拆成可独立验收的纵向 tickets；全部通过后才声明统一设置完成 |
 | 文档归属 | 本计划是总计划；TTS 计划只保留 AI 提示音子域，并与本计划互相引用 |
-| 视觉验收 | 原生视觉合同，不逐像素复制 CSS；覆盖明暗模式、窗口断点、四档界面文字和 VoiceOver |
+| 视觉验收 | 原生视觉合同，不逐像素复制 CSS；覆盖明暗模式、窗口断点、固定紧凑密度和 VoiceOver |
 
 ## 1. 当前事实与逐页差距
 
@@ -60,9 +66,9 @@
 | 集成 | Agent 列表、状态、开关、检测、连接方式、事件能力与回执 | `IntegrationDestinationModel`、typed presentation、manager bridge/store | 已迁入统一设置；旧 matrix/Inspector 展示退役，原生视觉与真实宿主回调仍需人工门禁 |
 | 事件与提示音 | Surface、五事件、播放设置、BYOK AI 生成 | `EventSettingsWindowView`、`PanelConfigController`、AI cue 闭环 | 独立窗口；外壳、层级、行密度与原型差距大；路由仍跳声音包窗口 |
 | 通知 | 提醒开关、专注/会议静默 | 逐事件开关；暂无系统静默策略 | 原型前三个开关重复事件配置；Focus/Calendar 无权限与跨进程模型 |
-| 显示 | 面板宽度、菜单栏状态点 | 四档界面文字、固定/自适应面板宽度、模板图标 | 无页面；无用户宽度偏好与状态点开关 |
+| 显示 | 菜单栏活动状态点、固定紧凑布局说明 | `ClaudioPreferences.showsMenuBarStatusDot`、固定 Panel 几何 | 不再读取或写入字号/宽度旧偏好 |
 | 声音 | 包列表、导入、试听、使用 | 完整 Sound Packs window、共享 `SoundPackLibrary` | 独立窗口；原型只有演示两行，未覆盖真实编辑能力 |
-| 用量 | 近期数字、诊断日志 | 每 Surface 20 条/30 天脱敏回执、滚动诊断日志 | 无页面；原型统计为假数据；`0 B 网络上传` 与 BYOK 事实冲突 |
+| 活动与诊断 | 今日/近 7 日活动、来源覆盖、诊断日志 | `LocalActivitySummaryStore`、`ActivityDiagnosticsModel`、共享 `ActivityOverviewProjector` | 真实宿主 callback、VoiceOver 和 native layout 仍需人工门禁 |
 | 快捷键 | 面板、试听、静音快捷键 | 无全局快捷键基础设施 | 原型明确是占位；试听/静音缺少稳定的全局目标语义 |
 | 关于 | 产品信息 | Bundle 与本地许可/资产 | 原型明确是占位；无版本、许可、隐私与复制诊断信息界面 |
 
@@ -397,19 +403,19 @@ GUI 把授权后的最小事实发布成 ADR 0009 定义的动态静默快照。
 
 ### 5.5 显示
 
-用户结果：从一个页面调整界面文字、面板宽度和菜单栏状态点；主面板现有 `Aa` 快速入口继续镜像
-同一份偏好，不产生第二套状态。
+用户结果：在显示页确认菜单栏活动状态点，并明确知道 Panel 固定使用紧凑布局；不产生字号或面板宽度
+第二套状态。
 
 内容与行为：
 
-- **界面文字**：紧凑、标准、较大、最大四档，复用现有 `ClaudioInterfaceTextSize`；
-- **面板宽度**：自动、紧凑、宽松。自动使用当前内容/文字档决策；显式选择仍要被最小安全宽度 clamp，
-  最大文字档不得因用户选紧凑而裁切；
+- **固定布局说明**：生产 UI 使用原第一档紧凑密度，Panel 固定 312pt 宽，设置窗口仍由 1240×820
+  默认值和 960×640 最小值控制；旧 `Claudio.InterfaceTextSize`、`Claudio.PanelWidthPreference`
+  值停止读取和写入，不新增一次性清理迁移；
 - **菜单栏显示状态点**：只控制 Orbit Zero 的状态点/活动变体，不隐藏状态项、不改变事件语义；
-- 变化即时作用于当前窗口/面板，持久化失败或非法 raw value 回落到安全默认并可测试。
+- 状态点写入继续通过现有 typed preferences；固定布局说明不提供可写控件。
 
-验收：三种宽度 × 四档文字 × 中英文 × 明暗模式没有横向裁切；状态点关闭后 VoiceOver 仍播报
-完整 app/活动状态，不能把唯一状态信息只藏在像素中。
+验收：显示页只有一个生产 Toggle；Panel 不存在 `Aa`、宽度选择器、动态宽度分支或旧 preference 读取；
+状态点关闭后 VoiceOver 仍播报完整 app/活动状态，不能把唯一状态信息只藏在像素中。
 
 ### 5.6 声音
 
@@ -436,15 +442,23 @@ adoption 和 route resolution；不得同时保留可写的 standalone 与 embed
 
 内容与行为：
 
-- 摘要卡显示「已保留回执」「其中已播放」「静音/去抖/失败」，从全部 Surface 的现有历史投影；
-- 明确标注范围：最近 30 天、每 Surface 最多 20 条，因此不称「本周总事件」或完整用量；
-- 按 Surface 与公共 `Event` 展示有限分组，不显示提示词、响应、项目、会话、日历或声音路径；
+- 页面用户可见名称为「活动与诊断」，raw route token 仍为 `usage`；摘要卡显示今日消息、近 7 日消息和
+  近 7 日子任务结束，来源卡同时显示今日/近 7 日消息、近 7 日子任务和真实事件覆盖；
+- 活动范围是今天及之前六个本地 Gregorian 日期，按回调发生时的本地日期入桶；切换时区不重分旧桶；
+  清除后立即从零继续计数，并分别表示今日和七日的 partial 恢复边界；
+- 按 Surface 与公共 `Event` 展示活动，不显示提示词、响应、项目、会话、日历、provider、token 或声音路径；
+- 只有当前安装确认且成功映射的宿主回调计数。静音、动态静默、去抖、主音量为零、音频缺失、播放失败
+  和 receipt 写入失败均不减少活动；未知、不支持和旧 installation callback 不计数；
+- Global 只汇总支持该事件的来源，并显示覆盖比例；不支持事件显示 `—`；
 - 诊断区显示滚动日志是否存在、大小、最近失败数量；提供在 Finder 显示与复制路径；
-- 清除历史/日志是显式破坏动作，分别确认、分别加锁，不能影响连接 marker、当前回执或声音配置；
+- 清除活动/日志是显式破坏动作，分别确认、分别加锁；活动清除只重建本地摘要，不影响连接 marker、当前
+  回执、receipt history、声音配置或日志；日志清除不影响活动；
 - 隐私说明区分：宿主内容不上传；用户点击 AI 生成时描述和音频与所选 Provider 交换；供应商费用和
   配额必须去对应 Provider 查看，claudi0 不伪造成本。
 
-本页不新增完整 analytics ledger，不扩大回执保留量，也不从诊断日志反推成功事件。
+本页不新增完整 analytics ledger，不扩大 receipt 保留量，也不从诊断日志或播放结果反推活动事件。Panel
+与 Settings 共用一个 `ActivityDiagnosticsModel` 和 `ActivityOverviewProjector`，不创建第二个 activity
+cache 或 projector。
 
 ### 5.8 快捷键
 
@@ -619,15 +633,16 @@ S0 文档与契约锁定
 
 ### S10 — 显示页
 
-- 完成文字档、面板宽度和状态点；把 panel `Aa` 入口接到同一 store；
-- 菜单栏和 popover 对偏好变化即时响应，宽度始终满足内容安全下限；
-- 覆盖明暗、四文字档、三宽度和 VoiceOver 不依赖状态点。
+- 删除文字档、面板宽度的 production 依赖链，停止读取旧 UserDefaults 值，不新增清理迁移；
+- 保留菜单栏活动状态点 Toggle 和固定紧凑布局说明；
+- State Gallery 只覆盖固定密度，不生成字号/宽度矩阵。
 
 ### S11 — 用量页
 
-- 从现有 history/log reader 建立只读 activity summary projector；
-- 完成范围披露、Surface/Event 分组、Finder/复制路径、分别清除与错误恢复；
-- 证明没有新增 prompt/response/provider billing/网络字节持久化。
+- 从 `LocalActivitySummaryStore` 建立七日本地活动事实，并把 hook 接受边界与播放/receipt 结果并列；
+- 以唯一 `ActivityOverviewProjector` 供 Panel 和「活动与诊断」共用，完成 Global/Surface、今日/七日、覆盖、
+  stale/unavailable/partial、Finder/复制路径、分别清除与错误恢复；
+- 证明没有新增 prompt/response/provider billing/网络字节持久化，也没有第二缓存或 receipt history 用量投影。
 
 ### S12 — 快捷键页
 
@@ -658,7 +673,7 @@ S0 文档与契约锁定
 ### S16 — 完整验证与交付门禁
 
 - 运行 helper/gui 全 harness、GUI debug build、xcstrings JSON、bundle、size、format baseline 和 diff check；
-- 真机完成九页视觉/键盘/VoiceOver/四文字档/明暗/Reduce Motion；
+- 真机完成九页视觉/键盘/VoiceOver/固定紧凑布局/明暗/Reduce Motion；
 - 单独验证签名 login item、Focus、Calendar、global hot key 和各 Provider/region 的真实 smoke；
 - 双架构、签名、公证、发布仍按 release 流程另行授权，不由本地 ad-hoc 证明。
 
@@ -670,7 +685,7 @@ S0 文档与契约锁定
 - typed preference migration、默认值、非法值与 observation；
 - ServiceManagement status projector（系统调用注入）；
 - quiet snapshot encode/decode、expiry、revision、文件安全与 automatic/manual policy；
-- activity summary 的 20 条/30 天边界、损坏历史与 log 解析；
+- activity summary 的七日日期桶、清除边界、pending delta、饱和计数、损坏/超限/锁争用与 log 解析；
 - shortcut normalization、注册事务、冲突回滚；
 - about diagnostic redaction；
 - helper 读取动态静默但不改变现有 config/receipt 语义。
@@ -681,7 +696,7 @@ S0 文档与契约锁定
 - 生产 root 挂载 `SettingsShellView`，不存在 `EmptyView`/placeholder copy/Toast-only action；
 - Integrations/Events/Sounds 消费共享 owner，不创建幽灵 model；
 - 所有跨页动作提交 typed route；
-- 语言、文字、宽度变化不重建磁盘/host owners；
+- 语言变化不重建磁盘/host owners；固定紧凑布局不创建文字/宽度 owner；
 - AI credential sheet、candidate playback 和 adoption session 生命周期保持原契约。
 
 ### 8.3 必跑命令
@@ -706,7 +721,7 @@ git diff --check
 |---|---|
 | 外观 | light、dark、Increase Contrast、Reduce Transparency |
 | 尺寸 | 1240×820、960×640、手动放大；无水平裁切 |
-| 文字 | 中文/英文 × 紧凑/标准/较大/最大 |
+| 文字 | 中文/英文 × 固定紧凑布局；系统 VoiceOver/Zoom 单独验证 |
 | 输入 | 鼠标、Tab/Shift-Tab、方向键、Return/Space、Escape、VoiceOver |
 | 生命周期 | panel → deep link → settings、页间路由、关闭 handback、重复打开 |
 | 失败 | 权限拒绝、config/pack/receipt/log 不可读、锁忙、磁盘写失败、陈旧 route |
@@ -730,7 +745,7 @@ git diff --check
 | 通知页改写事件/音量 | expiring quiet snapshot | 原设置不变，静默结束自动恢复 |
 | 陈旧静默永久无声 | expiry + revision + stale ignore | 页面提示监控失效，automatic 恢复 |
 | 登录项按钮假成功 | 读取 SM status，不信本地 toggle | 显示等待批准或失败 |
-| 用量数字冒充完整统计 | 只投影现有 retention，并明确范围 | 不显示「本周总量」 |
+| 活动数字冒充完整统计 | 只投影七日本地合格 callback，并明确范围 | 不显示 lifetime、账单或播放结果 |
 | BYOK 页面仍写「0 B 上传」 | 隐私边界分层文案 | 区分宿主内容与 provider 流量 |
 | 快捷键变按键记录器 | Carbon registration；本地一次录制 | 不申请 AX/Input Monitoring |
 | AI 迁页后候选泄漏 | destination/session lifecycle 清理 | 未采用候选失效，旧声音保留 |
@@ -752,7 +767,7 @@ git diff --check
 统一设置体验只有在以下条件全部成立时才算完成：
 
 - 九个目的页在同一 retained window 中完整可用，生产导航无占位；
-- 原型视觉层级在默认窗口明显对齐，并在小窗口、四文字档、双语和明暗模式下原生适配；
+- 原型视觉层级在默认窗口明显对齐，并在小窗口、固定紧凑布局、双语和明暗模式下原生适配；
 - Integrations、Events、Sounds 复用原 owner，独立旧窗口不再进入 production composition；
 - General、Notifications、Display、Usage、Shortcuts、About 的真实模型、权限、失败和持久化均落地；
 - AI 提示音维持描述 → 三候选与命名 → 显式采用，内部声音方案隐藏，BYOK 边界不退化；

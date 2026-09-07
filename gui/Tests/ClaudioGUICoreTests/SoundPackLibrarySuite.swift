@@ -527,7 +527,7 @@ func runSoundPackLibrarySuites() async {
                 && source.contains("soundPacksEditorOwner: soundPacksEditorOwner")
                 && !source.contains("SoundPacksWindowController(")
                 && source.contains(
-                    "PanelView(\n            audioEnvironment: audioEnvironment,\n            focusCoordinator: focusCoordinator,\n            hostIntegrations: hostIntegrations,\n            bootstrapReports: bootstrapReports,\n            languageStore: languageStore,\n            soundPackLibrary: soundPackLibrary"
+                    "PanelView(\n            audioEnvironment: audioEnvironment,\n            focusCoordinator: focusCoordinator,\n            hostIntegrations: hostIntegrations,\n            languageStore: languageStore,\n            activityDiagnostics: activityDiagnostics,\n            soundPackLibrary: soundPackLibrary"
                 ),
             "同一个 library 必须注入面板与唯一 editor owner，并只由 Settings 共享该 owner")
         expect(

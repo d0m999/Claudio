@@ -83,8 +83,6 @@ func runPreviewFixturesSuites() {
             "packCard.complete", "packCard.partial", "packCard.broken",
             "panelPack.loading", "panelPack.pinned.one", "panelPack.pinned.four",
             "panelPack.noPinned", "panelPack.noPacks", "panelPack.readFailed",
-            "interfaceText.compact", "interfaceText.standard",
-            "interfaceText.large", "interfaceText.maximum",
             "settingsRoute.general", "settingsRoute.integrations",
             "settingsRoute.events-and-sounds", "settingsRoute.notifications",
             "settingsRoute.display", "settingsRoute.sounds", "settingsRoute.usage",
@@ -168,14 +166,8 @@ func runPreviewFixturesSuites() {
             "eventHostIndicator.all-gray",
             "eventHostIndicator.legacy",
             "eventHostIndicator.awaiting-narrow",
-            "eventRowLayout.zh-Hans-compact",
-            "eventRowLayout.zh-Hans-standard",
-            "eventRowLayout.zh-Hans-large",
-            "eventRowLayout.zh-Hans-maximum",
-            "eventRowLayout.en-compact",
-            "eventRowLayout.en-standard",
-            "eventRowLayout.en-large",
-            "eventRowLayout.en-maximum",
+            "eventRowLayout.zh-Hans",
+            "eventRowLayout.en",
         ]
         expect(
             visited == expected,
@@ -313,8 +305,8 @@ func runPreviewFixturesSuites() {
             "全彩帧必须检查标准单行布局")
         expect(
             scenarios.first(where: { $0.id == "awaiting-narrow" })?.adaptation
-                .rowWrapsToTwoLines == true,
-            "待激活帧必须检查窄版两行布局")
+                == panelLayoutAdaptation(),
+            "待激活帧必须消费固定紧凑布局")
         expect(
             scenarios.first(where: { $0.id == "full-color" })?.title.contains("Logo 12pt") == true
                 && scenarios.first(where: { $0.id == "awaiting-narrow" })?.title
@@ -327,33 +319,24 @@ func runPreviewFixturesSuites() {
     }
 
     suite(
-        "PreviewFixtures.eventRowLayoutScenarios covers 2 languages × 4 sizes × 3 coverage states"
+        "PreviewFixtures.eventRowLayoutScenarios covers 2 languages × 3 coverage states at fixed density"
     ) {
         let scenarios = PreviewFixtures.eventRowLayoutScenarios
-        expect(scenarios.count == 8, "事件行 C 布局必须恰好有 8 个语言×字号面板")
+        expect(scenarios.count == ClaudioAppLanguage.allCases.count, "事件行布局每种语言恰好一帧")
 
-        let languageAndSize = Set(
-            scenarios.map {
-                "\($0.language.rawValue)-\($0.interfaceTextSize.rawValue)"
-            })
-        let expectedLanguageAndSize = Set(
-            ClaudioAppLanguage.allCases.flatMap { language in
-                ClaudioInterfaceTextSize.allCases.map { size in
-                    "\(language.rawValue)-\(size.rawValue)"
-                }
-            })
+        let languages = Set(scenarios.map(\.language))
         expect(
-            languageAndSize == expectedLanguageAndSize,
-            "事件行 C 布局缺少语言×字号组合：\(expectedLanguageAndSize.subtracting(languageAndSize))")
+            languages == Set(ClaudioAppLanguage.allCases),
+            "事件行布局必须覆盖两种产品语言")
 
         for scenario in scenarios {
             expect(
                 Set(scenario.samples.map { coverageStateLabel($0.row.coverage) })
                     == ["present", "unmapped", "broken"],
-                "每个面板必须同帧混排 present/unmapped/broken：\(scenario.id)")
+                "每个固定密度面板必须同帧混排 present/unmapped/broken：\(scenario.id)")
             expect(
                 scenario.samples.first?.row.event == .stopFailure,
-                "每个字号与语言帧都必须渲染最长英文标题 Execution interrupted")
+                "每个语言帧都必须渲染最长英文标题 Execution interrupted")
 
             let disconnectedSample = scenario.samples.first {
                 if case .unmapped = $0.row.coverage { return true }
@@ -377,17 +360,11 @@ func runPreviewFixturesSuites() {
                 "unmapped 样例必须区分已实现能力未连接与未实现能力：\(scenario.id)")
         }
 
-        for size in ClaudioInterfaceTextSize.allCases {
-            let layouts =
-                scenarios
-                .filter { $0.interfaceTextSize == size }
-                .map(\.adaptation.eventActionsMoveBelow)
-            let expected = size == .maximum
-            expect(
-                layouts.count == ClaudioAppLanguage.allCases.count
-                    && layouts.allSatisfy { $0 == expected },
-                "\(size.rawValue) 的双语动作布局错误：\(layouts)")
-        }
+        expect(
+            scenarios.allSatisfy {
+                $0.adaptation == panelLayoutAdaptation()
+            },
+            "所有事件行画廊帧必须消费同一固定紧凑布局")
     }
 
     // MARK: - PackCard: PackCardState × isSelected, every combination — plus the coverage
@@ -470,7 +447,7 @@ func runPreviewFixturesSuites() {
     }
 
     suite(
-        "PreviewFixtures covers panel pack loading/four-result rendering plus 1-row/4-row density and all text sizes"
+        "PreviewFixtures covers panel pack loading/four-result rendering plus 1-row/4-row density"
     ) {
         expect(
             PreviewFixtures.panelPackSectionStates.count == 6,
@@ -480,9 +457,6 @@ func runPreviewFixturesSuites() {
             return cards.count
         }
         expect(pinnedCounts == [1, 4], "固定包密度必须覆盖 1 与 4 行，实得 \(pinnedCounts)")
-        expect(
-            PreviewFixtures.interfaceTextSizes == ClaudioInterfaceTextSize.allCases,
-            "state gallery 必须逐档渲染 Claudio 的全部四档界面文字")
     }
 
     suite("PreviewFixtures.settingsRouteScenarios pins the fixed nine-slot route gallery") {
@@ -603,6 +577,46 @@ func runPreviewFixturesSuites() {
             PreviewFixtures.AICueGalleryScenario.displayNameFailure.previewState.failure
                 == .displayName(.displayNameTooLong(maximumCharacters: 40)),
             "候选采用前的 display-name validation failure 必须进入 gallery")
+    }
+
+    suite("Finalized Events fixture pins Claude ElevenLabs verified prompt state") {
+        let state = PreviewFixtures.finalizedClaudeEventsAICuePreviewState
+        expect(
+            state.providerProfileID == .elevenLabsGlobal,
+            "finalized Events fixture 必须使用 elevenlabs-global")
+        expect(
+            state.credentialStatus
+                == .stored(verification: .verified, hasPendingReplacement: false),
+            "finalized Events fixture 必须呈现 verified credential")
+        expect(
+            state.phase == .editing && state.target?.surface == .claudeCode,
+            "finalized Events fixture 必须是 Claude surface 的 prompt/editing 阶段")
+        expect(
+            state.generation == nil && state.failure == nil,
+            "prompt/editing fixture 不得伪造候选或失败")
+    }
+
+    suite("Finalized Panel fixture keeps Claude 5/5 truth and real unsupported coverage") {
+        let presentation = PreviewFixtures.finalizedActivityDiagnosticsPresentation
+        let claude = presentation.projection.presentation(for: .surface(.claudeCode))
+        let workBuddy = presentation.projection.presentation(for: .surface(.workBuddy))
+
+        expect(
+            claude.scope == .surface(.claudeCode)
+                && claude.integrationStatus == .connected
+                && claude.eventRows.count == Event.allCases.count,
+            "finalized Panel fixture 必须投影 Claude 的完整五事件事实")
+        expect(
+            claude.event(.taskStart)?.sevenDayCount == 22
+                && claude.event(.stop)?.todayCount == 0
+                && claude.event(.stopFailure)?.sevenDayCount == 2,
+            "Claude sevenDays fixture 必须同时覆盖非零、零值与 StopFailure")
+        expect(
+            claude.eventRows.allSatisfy { $0.availability == .supported },
+            "Claude Code 的 5/5 能力不得为了画廊 unsupported 视觉而被伪造")
+        expect(
+            workBuddy.eventRows.contains { $0.availability == .unsupported },
+            "unsupported 视觉必须来自真实 WorkBuddy 2/5 能力，而不是篡改 Claude")
     }
 
     // MARK: - All-product integration scenarios

@@ -64,6 +64,11 @@ public enum ClaudioColorHex {
     public static let clayDark = "D97757"
     public static let clayLight = "C4633C"
 
+    /// `clay-hover`——交互控件 hover / focus 的品牌强调色。它与 `clay-soft` 分工：前者用于
+    /// 非文本图形强调，后者仍由 `clay` 带透明度派生为命中背景。
+    public static let clayHoverDark = "E68A5C"
+    public static let clayHoverLight = "D97757"
+
     // MARK: 宿主连接状态（不是官方品牌色）
 
     /// 只用于事件行宿主 Logo 的“已连接”事实。几何标识归各宿主商标权利人所有；这些颜色属于

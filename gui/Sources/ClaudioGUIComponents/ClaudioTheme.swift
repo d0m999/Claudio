@@ -3,8 +3,8 @@ import ClaudioGUICore
 import Foundation
 import SwiftUI
 
-private extension Color {
-    init(claudioHex: String) {
+extension Color {
+    fileprivate init(claudioHex: String) {
         var value: UInt64 = 0
         Scanner(string: claudioHex).scanHexInt64(&value)
         self.init(
@@ -18,8 +18,12 @@ private extension Color {
 public enum ClaudioTheme {
     public enum Radius {
         public static let panel: CGFloat = 18
-        public static let section: CGFloat = 13
-        public static let control: CGFloat = 11
+        public static let row: CGFloat = 13
+        public static let section = row
+        public static let tile: CGFloat = 11
+        public static let control: CGFloat = 6
+        public static let chip = control
+        public static let pill: CGFloat = 999
     }
 
     public enum Metrics {
@@ -85,6 +89,16 @@ public enum ClaudioTheme {
             : Color(claudioHex: ClaudioColorHex.clayLight)
     }
 
+    public static func clayHover(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(claudioHex: ClaudioColorHex.clayHoverDark)
+            : Color(claudioHex: ClaudioColorHex.clayHoverLight)
+    }
+
+    public static func claySoft(_ scheme: ColorScheme) -> Color {
+        clay(scheme).opacity(scheme == .dark ? 0.15 : 0.12)
+    }
+
     public static func success(_ scheme: ColorScheme) -> Color {
         scheme == .dark
             ? Color(claudioHex: ClaudioColorHex.successDark)
@@ -98,7 +112,8 @@ public enum ClaudioTheme {
     }
 
     public static func hairline(_ scheme: ColorScheme) -> Color {
-        let base = scheme == .dark
+        let base =
+            scheme == .dark
             ? Color(claudioHex: ClaudioColorHex.hairlineBaseDark)
             : Color(claudioHex: ClaudioColorHex.hairlineBaseLight)
         return base.opacity(scheme == .dark ? 0.16 : 0.14)
@@ -139,17 +154,6 @@ public enum ClaudioTheme {
     }
 }
 
-public extension ClaudioInterfaceTextSize {
-    var dynamicTypeSize: DynamicTypeSize {
-        switch self {
-        case .compact: .medium
-        case .standard: .large
-        case .large: .xxLarge
-        case .maximum: .accessibility2
-        }
-    }
-}
-
 public func claudioEventGlyphName(_ event: Event) -> String {
     switch event {
     case .taskStart: "paperplane.fill"
@@ -171,7 +175,7 @@ public struct ClaudioEventGlyph: View {
     }
 
     public var body: some View {
-        RoundedRectangle(cornerRadius: min(6, size / 4))
+        RoundedRectangle(cornerRadius: min(ClaudioTheme.Radius.tile, size / 2))
             .fill(ClaudioTheme.event(event, colorScheme).opacity(0.15))
             .frame(width: size, height: size)
             .overlay {
@@ -197,7 +201,9 @@ public struct ClaudioStatusCapsule: View {
         Text(text)
             .font(ClaudioTheme.font(.caption).weight(.semibold))
             .foregroundColor(
-                isEmphasized ? ClaudioTheme.clay(colorScheme) : ClaudioTheme.secondaryText(colorScheme))
+                isEmphasized
+                    ? ClaudioTheme.clay(colorScheme) : ClaudioTheme.secondaryText(colorScheme)
+            )
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
             .background(
@@ -205,27 +211,196 @@ public struct ClaudioStatusCapsule: View {
                     .fill(
                         isEmphasized
                             ? ClaudioTheme.clay(colorScheme).opacity(0.12)
-                            : ClaudioTheme.elevated(colorScheme)))
+                            : ClaudioTheme.elevated(colorScheme))
+            )
             .overlay(Capsule().stroke(ClaudioTheme.hairline(colorScheme)))
             .accessibilityLabel(text)
     }
 }
 
-public struct ClaudioIconButtonStyle: ButtonStyle {
-    @Environment(\.colorScheme) private var colorScheme
+public enum ClaudioIconButtonInteractionState: Equatable, Sendable {
+    case rest
+    case hovered
+    case focused
+    case pressed
+    case disabled
 
+    public init(
+        isEnabled: Bool,
+        isHovered: Bool,
+        isFocused: Bool,
+        isPressed: Bool
+    ) {
+        if !isEnabled {
+            self = .disabled
+        } else if isPressed {
+            self = .pressed
+        } else if isFocused {
+            self = .focused
+        } else if isHovered {
+            self = .hovered
+        } else {
+            self = .rest
+        }
+    }
+
+    public func scale(reduceMotion: Bool) -> CGFloat {
+        self == .pressed && !reduceMotion ? 0.96 : 1
+    }
+
+    public func transitionDuration(reduceMotion: Bool) -> Double? {
+        guard !reduceMotion, self != .disabled else { return nil }
+        switch self {
+        case .hovered, .focused:
+            return 0.12
+        case .pressed, .rest:
+            return 0.10
+        case .disabled:
+            return nil
+        }
+    }
+}
+
+public enum ClaudioPreviewPulseMotion {
+    public static let peakScale: CGFloat = 1.12
+    public static let halfDuration: Double = 0.11
+    public static let totalDuration: Double = halfDuration * 2
+
+    public static func scale(isAtPeak: Bool, reduceMotion: Bool) -> CGFloat {
+        isAtPeak && !reduceMotion ? peakScale : 1
+    }
+}
+
+public struct ClaudioPreviewPulseModifier: ViewModifier {
+    public let trigger: Int
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isAtPeak = false
+    @State private var generation = 0
+
+    public init(trigger: Int) {
+        self.trigger = trigger
+    }
+
+    public func body(content: Content) -> some View {
+        content
+            .scaleEffect(
+                ClaudioPreviewPulseMotion.scale(
+                    isAtPeak: isAtPeak,
+                    reduceMotion: reduceMotion)
+            )
+            .onChange(of: trigger) { newTrigger in
+                generation &+= 1
+                let currentGeneration = generation
+                var resetTransaction = Transaction(animation: nil)
+                resetTransaction.disablesAnimations = true
+                withTransaction(resetTransaction) {
+                    isAtPeak = false
+                }
+                guard newTrigger > 0, !reduceMotion else { return }
+                DispatchQueue.main.async {
+                    guard generation == currentGeneration else { return }
+                    withAnimation(.easeOut(duration: ClaudioPreviewPulseMotion.halfDuration)) {
+                        isAtPeak = true
+                    }
+                    scheduleReturnToRest(for: currentGeneration)
+                }
+            }
+    }
+
+    private func scheduleReturnToRest(for currentGeneration: Int) {
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + ClaudioPreviewPulseMotion.halfDuration
+        ) {
+            guard generation == currentGeneration else { return }
+            withAnimation(.easeOut(duration: ClaudioPreviewPulseMotion.halfDuration)) {
+                isAtPeak = false
+            }
+        }
+    }
+}
+
+extension View {
+    public func claudioPreviewPulse(trigger: Int) -> some View {
+        modifier(ClaudioPreviewPulseModifier(trigger: trigger))
+    }
+}
+
+public struct ClaudioIconButtonStyle: ButtonStyle {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
+        ClaudioIconButtonStyleBody(configuration: configuration)
+    }
+}
+
+private struct ClaudioIconButtonStyleBody: View {
+    let configuration: ButtonStyleConfiguration
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.isFocused) private var isFocused
+    @State private var isHovered = false
+
+    private var interactionState: ClaudioIconButtonInteractionState {
+        ClaudioIconButtonInteractionState(
+            isEnabled: isEnabled,
+            isHovered: isHovered,
+            isFocused: isFocused,
+            isPressed: configuration.isPressed)
+    }
+
+    private var foregroundColor: Color {
+        switch interactionState {
+        case .hovered, .focused:
+            colorScheme == .dark
+                ? ClaudioTheme.clayHover(colorScheme)
+                : ClaudioTheme.clay(colorScheme)
+        case .pressed:
+            ClaudioTheme.clay(colorScheme)
+        case .disabled:
+            ClaudioTheme.secondaryText(colorScheme).opacity(0.45)
+        case .rest:
+            ClaudioTheme.secondaryText(colorScheme)
+        }
+    }
+
+    private var backgroundColor: Color {
+        switch interactionState {
+        case .hovered, .focused:
+            ClaudioTheme.claySoft(colorScheme)
+        case .pressed:
+            ClaudioTheme.elevated(colorScheme)
+        case .rest, .disabled:
+            .clear
+        }
+    }
+
+    private var transition: Animation? {
+        guard let duration = interactionState.transitionDuration(reduceMotion: reduceMotion) else {
+            return nil
+        }
+        return interactionState == .rest
+            ? .easeIn(duration: duration)
+            : .easeOut(duration: duration)
+    }
+
+    var body: some View {
         configuration.label
+            .scaleEffect(interactionState.scale(reduceMotion: reduceMotion))
             .frame(
                 minWidth: ClaudioTheme.Metrics.iconTarget,
-                minHeight: ClaudioTheme.Metrics.iconTarget)
-            .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                minHeight: ClaudioTheme.Metrics.iconTarget
+            )
+            .foregroundColor(foregroundColor)
             .background(
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
-                    .fill(configuration.isPressed ? ClaudioTheme.elevated(colorScheme) : .clear))
+                    .fill(backgroundColor)
+            )
             .contentShape(Rectangle())
+            .animation(transition, value: interactionState)
+            .onHover { isHovered = $0 }
     }
 }
 
@@ -257,7 +432,7 @@ public struct ClaudioFullRowButtonStyle: ButtonStyle {
                 alignment: .leading
             )
             .overlay(
-                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
                     .fill(Color.primary.opacity(configuration.isPressed ? 0.08 : 0))
             )
             .contentShape(Rectangle())

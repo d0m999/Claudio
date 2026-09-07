@@ -17,7 +17,7 @@ import SwiftUI
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let preferences: ClaudioPreferences
     private let loginItemSettings: LoginItemSettingsModel
-    private let usageSettings: UsageSettingsModel
+    private let activityDiagnostics: ActivityDiagnosticsModel
     private let globalShortcutSettings: GlobalShortcutSettingsModel
     private let aboutSettings: AboutSettingsModel
     private let model: SettingsWindowPresentationModel<NSRunningApplication>
@@ -52,7 +52,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     init(
         preferences: ClaudioPreferences,
         loginItemSettings: LoginItemSettingsModel,
-        usageSettings: UsageSettingsModel,
+        activityDiagnostics: ActivityDiagnosticsModel,
         globalShortcutSettings: GlobalShortcutSettingsModel,
         soundPacksEditorOwner: SoundPacksEditorOwner,
         eventSettingsModel: PanelConfigController,
@@ -69,7 +69,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     ) {
         self.preferences = preferences
         self.loginItemSettings = loginItemSettings
-        self.usageSettings = usageSettings
+        self.activityDiagnostics = activityDiagnostics
         self.globalShortcutSettings = globalShortcutSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner
         self.eventSettingsModel = eventSettingsModel
@@ -177,6 +177,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
         presentedWindow.makeKeyAndOrderFront(nil)
         updateIntegrationsPresentationState()
+        activityDiagnostics.refresh()
         if !presentation.wasAlreadyPresented {
             presentedWindow.makeFirstResponder(presentedWindow.contentViewController?.view)
         }
@@ -206,6 +207,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         else { return }
         loginItemSettings.refresh()
         updateIntegrationsPresentationState()
+        activityDiagnostics.refresh()
         announceLatestSoundPackStatusIfNeeded(in: keyWindow)
     }
 
@@ -243,7 +245,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             preferences: preferences,
             dynamicQuietPolicy: dynamicQuietObserver.policy,
             loginItemSettings: loginItemSettings,
-            usageSettings: usageSettings,
+            activityDiagnostics: activityDiagnostics,
             globalShortcutSettings: globalShortcutSettings,
             aboutSettings: aboutSettings,
             soundPacksEditorOwner: soundPacksEditorOwner,

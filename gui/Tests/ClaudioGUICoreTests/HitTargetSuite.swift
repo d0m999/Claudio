@@ -9,6 +9,85 @@ import SwiftUI
 /// final source assertions bind those contracts to the production call sites.
 @MainActor
 func runHitTargetSuites() {
+    suite("Claudio icon action：语义 radius 与交互状态优先级") {
+        expect(ClaudioTheme.Radius.panel == 18, "panel radius 必须为 18")
+        expect(ClaudioTheme.Radius.row == 13, "row radius 必须为 13")
+        expect(ClaudioTheme.Radius.section == 13, "section 兼容别名必须保持 13")
+        expect(ClaudioTheme.Radius.tile == 11, "tile radius 必须为 11")
+        expect(ClaudioTheme.Radius.control == 6, "control radius 必须为 6")
+        expect(ClaudioTheme.Radius.chip == 6, "chip radius 必须为 6")
+
+        expect(
+            ClaudioIconButtonInteractionState(
+                isEnabled: true,
+                isHovered: false,
+                isFocused: false,
+                isPressed: false) == .rest,
+            "无交互输入必须解析为 rest")
+        expect(
+            ClaudioIconButtonInteractionState(
+                isEnabled: true,
+                isHovered: true,
+                isFocused: false,
+                isPressed: false) == .hovered,
+            "hover 必须解析为 hovered")
+        expect(
+            ClaudioIconButtonInteractionState(
+                isEnabled: true,
+                isHovered: true,
+                isFocused: true,
+                isPressed: false) == .focused,
+            "focus 必须覆盖 hover，以保留键盘焦点语义")
+        expect(
+            ClaudioIconButtonInteractionState(
+                isEnabled: true,
+                isHovered: true,
+                isFocused: true,
+                isPressed: true) == .pressed,
+            "pressed 必须覆盖 focus/hover")
+        expect(
+            ClaudioIconButtonInteractionState(
+                isEnabled: false,
+                isHovered: true,
+                isFocused: true,
+                isPressed: true) == .disabled,
+            "disabled 必须覆盖全部瞬时交互状态")
+    }
+
+    suite("Claudio icon action：Reduce Motion 只移除几何与补间反馈") {
+        let hovered = ClaudioIconButtonInteractionState.hovered
+        let pressed = ClaudioIconButtonInteractionState.pressed
+        let disabled = ClaudioIconButtonInteractionState.disabled
+
+        expect(hovered.transitionDuration(reduceMotion: false) == 0.12, "hover 应使用 120ms")
+        expect(pressed.transitionDuration(reduceMotion: false) == 0.10, "pressed 应使用 100ms")
+        expect(pressed.scale(reduceMotion: false) == 0.96, "pressed 应缩放到 0.96")
+        expect(pressed.scale(reduceMotion: true) == 1, "Reduce Motion 下不得缩放")
+        expect(
+            hovered.transitionDuration(reduceMotion: true) == nil,
+            "Reduce Motion 下颜色状态必须瞬时切换")
+        expect(
+            disabled.transitionDuration(reduceMotion: false) == nil,
+            "disabled 不得保留误导性的交互动效")
+    }
+
+    suite("Claudio preview pulse：仅播放成功后提供一次 220ms 几何反馈") {
+        expect(ClaudioPreviewPulseMotion.peakScale == 1.12, "试听 pulse 峰值必须为 1.12")
+        expect(
+            ClaudioPreviewPulseMotion.halfDuration == 0.11
+                && ClaudioPreviewPulseMotion.totalDuration == 0.22,
+            "试听 pulse 必须在 220ms 内完成放大与回落")
+        expect(
+            ClaudioPreviewPulseMotion.scale(isAtPeak: true, reduceMotion: false) == 1.12,
+            "正常动效环境必须渲染 pulse 峰值")
+        expect(
+            ClaudioPreviewPulseMotion.scale(isAtPeak: true, reduceMotion: true) == 1,
+            "Reduce Motion 下试听成功不得产生几何缩放")
+        expect(
+            ClaudioPreviewPulseMotion.scale(isAtPeak: false, reduceMotion: false) == 1,
+            "pulse 完成后必须回到稳定比例")
+    }
+
     suite("ClaudioFullRowButtonStyle：选中与未选中透明行的整行命中") {
         let recorder = HitTargetRecorder()
         let probe = NativeHitTargetProbe(
@@ -91,6 +170,15 @@ func runHitTargetSuites() {
         expect(
             targetRecorder.actions == ["icon", "compact"],
             "图标与紧凑动作都只能触发自身，实得 \(targetRecorder.actions)")
+
+        let disabledRecorder = HitTargetRecorder()
+        let disabledProbe = NativeHitTargetProbe(
+            rootView: DisabledIconTargetFixture(recorder: disabledRecorder),
+            size: CGSize(width: 48, height: 48))
+        defer { disabledProbe.close() }
+
+        expect(disabledProbe.click(x: 24, yFromTop: 24), "禁用 icon action 的命中路由不应崩溃")
+        expect(disabledRecorder.actions.isEmpty, "禁用 icon action 不得执行动作")
     }
 
     suite("生产接线：Events、声音包、onboarding 与 AI composer 使用显式命中合同") {
@@ -282,6 +370,23 @@ private struct CompactTargetsFixture: View {
         }
         .padding(10)
         .frame(width: 160, height: 48, alignment: .topLeading)
+    }
+}
+
+@MainActor
+private struct DisabledIconTargetFixture: View {
+    let recorder: HitTargetRecorder
+
+    var body: some View {
+        Button {
+            recorder.record("disabled-icon")
+        } label: {
+            Image(systemName: "play.fill")
+        }
+        .buttonStyle(ClaudioIconButtonStyle())
+        .disabled(true)
+        .padding(10)
+        .frame(width: 48, height: 48)
     }
 }
 
