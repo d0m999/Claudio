@@ -14,6 +14,8 @@ Thank you for helping improve Claudio. Small, focused changes with evidence are 
 - macOS 12 or later.
 - Xcode Command Line Tools with Swift 6.
 - `jq` for validating the string catalog.
+- Node.js for the standalone sound-pack selector state regression.
+- `ffmpeg` and `ffprobe` for curated sound-pack measurements.
 
 Clone the repository and run commands from its root. The helper and GUI are separate Swift packages; always pass the explicit package path and product shown below.
 
@@ -22,6 +24,8 @@ Clone the repository and run commands from its root. The helper and GUI are sepa
 ```bash
 swift run --package-path helper claudio-tests
 swift run --package-path gui claudio-gui-tests
+node scripts/test-sound-pack-selector-state.js
+python3 scripts/test-sound-pack-candidates.py
 
 swift build -c debug --package-path gui --product ClaudioGUI
 swift build -c release --package-path gui --product ClaudioGUI

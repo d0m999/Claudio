@@ -22,10 +22,10 @@
 | `bash scripts/benchmark-sound-pack-library.sh` | 构建并运行 Release sound-pack benchmark |
 | `git diff --check` | 检查 patch whitespace |
 
-Prerequisites: macOS 12+, Swift 6 / Xcode Command Line Tools, and `jq`. `helper/` and `gui/`
-are separate packages; always pass the explicit package path and production product. The project
-uses executable test harnesses rather than `swift test` because the supported local environment
-does not assume XCTest or Swift Testing.
+Prerequisites: macOS 12+, Swift 6 / Xcode Command Line Tools, `jq`, Node.js, `ffmpeg`, and
+`ffprobe`. `helper/` and `gui/` are separate packages; always pass the explicit package path and
+production product. The project uses executable test harnesses rather than `swift test` because the
+supported local environment does not assume XCTest or Swift Testing.
 <!-- AUTO-GENERATED:END setup-and-commands -->
 
 <!-- AUTO-GENERATED:BEGIN script-reference -->
@@ -36,7 +36,9 @@ does not assume XCTest or Swift Testing.
 | `scripts/dev-bundle.sh [--native-host-card-probe]` | Build the local inspection bundle; never a release artifact |
 | `scripts/check-release-size.sh [APP]` | Enforce per-architecture GUI/helper and bundle budgets |
 | `scripts/local-pre-rc.sh` | Run the commit-bound local pre-RC gates and write `dist/local-pre-rc-report.json` |
-| `scripts/copy-bundled-packs.sh SOURCE DEST` | Validate the license ledger and copy all bundled packs |
+| `scripts/copy-bundled-packs.sh SOURCE DEST` | Validate the approved selection and license ledger, then copy only approved bundled packs |
+| `node scripts/test-sound-pack-selector-state.js` | Execute selector catalog, persistence, blind-reset, and redraw-order regressions |
+| `python3 scripts/test-sound-pack-candidates.py` | Verify candidate audio duration, continuity, normalization, trailing silence, and ledger hashes |
 | `scripts/test-hook-cli-contract.sh` | Run Debug/Release hook subprocess contract checks |
 | `scripts/test-legacy-install-cli-contract.sh` | Test legacy install with isolated `CLAUDIO_TEST_*` roots |
 | `scripts/test-host-card-height.sh` | Native AppKit screenshot regression probe |

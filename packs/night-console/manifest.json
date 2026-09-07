@@ -4,7 +4,7 @@
   "name": "夜间控制台",
   "author": "Claudio",
   "license": "CC0-1.0",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "events": {
     "task_start": "task_start.mp3",
     "stop": "stop.mp3",

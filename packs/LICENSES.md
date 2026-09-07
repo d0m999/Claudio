@@ -97,9 +97,11 @@ CC0（Public Domain Dedication）在法律性质上是**不可撤销**的——�
 
 ## 重设计试听候选包：2026-09-02
 
-本轮根据盲听区分度反馈重做。当前保留的本地候选为：现有 `minimal-chime` 基准、`pizzicato-cadence`，以及程序化合成的 `night-console` / `resonant-bowl`。上一轮 UI click 候选已在上方明确标记为历史撤回，不会被打包脚本复制。
+本轮根据盲听区分度反馈重做。当前试听集合为：现有 `minimal-chime` 基准、`pizzicato-cadence`、程序化合成的 `night-console` / `resonant-bowl`，以及真实乐器候选 `soft-mallet`。上一轮 UI click 候选已在上方明确标记为历史撤回，不会被打包脚本复制。
 
 重设计普通事件统一采用：先裁剪或组合源素材，再淡入 8ms、淡出 30ms、响度校准、真峰值保护，最后编码为 44.1kHz 单声道 192kbps MP3；长尾疗愈例外改用连续自然释放并在末尾增加明确数字静音保护区。事件语法固定为：`task_start` 短上行启动；`stop` 上行完成收束；`stop_failure` 下行或暗尾；`notification` 分离双脉冲；`subagent_stop` 最短回应音。最终是否进入默认发行集合仍以试听页盲听为准。
+
+发布组装只消费 [`bundled-pack-selection.json`](./bundled-pack-selection.json) 中显式批准的 ID；当前批准集合仍只有 `minimal-chime`。候选目录存在于策展工作区不代表获准作为 Factory Pack 分发。
 
 ### pizzicato-cadence（拨弦旋律，主方案）
 
@@ -123,7 +125,7 @@ CC0（Public Domain Dedication）在法律性质上是**不可撤销**的——�
 - 统一源记录：[`claude-default-synth-source-2026-09-02.html`](./license-snapshots/claude-default-synth-source-2026-09-02.html)
 - 源包许可证声明：[`claude-default-synth-package-License-2026-09-02.txt`](./license-snapshots/claude-default-synth-package-License-2026-09-02.txt)
 - 官方 CC0 文本快照：[`cc0-1.0-deed-2026-09-02.png`](./license-snapshots/cc0-1.0-deed-2026-09-02.png)
-- 生成器：[`scripts/generate-claude-default-packs.py`](../scripts/generate-claude-default-packs.py)，SHA256：`360070097ab489f9f396cf8f08d216e6f0cc9bd1bc2c7a1fde1ddcbab350e839`
+- 生成器：[`scripts/generate-claude-default-packs.py`](../scripts/generate-claude-default-packs.py)，SHA256：`799f11bbfb42a86fbea6069a645dc5da7b105191c55addac44509e63ad302644`
 
 ### night-console（夜间控制台）
 
@@ -135,10 +137,12 @@ CC0（Public Domain Dedication）在法律性质上是**不可撤销**的——�
 | `task_start` | `night-console/task_start.mp3` | G3 → B3，280ms，低位上行 | `f8d8e81d4645892b691ebf870f56f02c386e3470ac84e80a7d6a58096ba72b6e` |
 | `stop` | `night-console/stop.mp3` | G3 → B3 → D4，720ms，低音解决 | `aa358aa43b911ec710200417d6a30fb9eee452b489511fa2bef225c4373f2335` |
 | `stop_failure` | `night-console/stop_failure.mp3` | D4 → A#3 → G3，700ms，低位下行 | `16380a25e55dac81b3d1b4649e168a4e10cd0f7a13a22ce7abcc37327b9e6f77` |
-| `notification` | `night-console/notification.mp3` | B3 × 2，间隔 330ms，690ms | `072e65c9c2ee5eef2def7da12f27d416ab23c53776bc4aa2508918ee3e240b1a` |
+| `notification` | `night-console/notification.mp3` | B3 × 2，间隔 330ms，490ms | `9d5fe331c93136f5822de8799b469eafaca9b2d478aaf0a665a9593c706ea53f` |
 | `subagent_stop` | `night-console/subagent_stop.mp3` | D3 单音，205ms | `bf13d0a1b0adc742024c129e41e2bb4ba6464b7e28917038f64b4b81f720095c` |
 
 **本组验收状态**：当前已通过 manifest、格式、时长、峰值和精确哈希校验；本组仍属于候选，是否“好听、耐听、适合 Claude”以用户试听为准，不自动改变正式默认选择。
+
+- 2026-09-08：`night-console` 升至 0.1.1；把 `notification` 的无声占位尾部裁短，按标准命令测得尾静音约 55ms。
 
 ## resonant-bowl（共鸣钵音，程序化基准样片）：2026-09-02
 
@@ -148,21 +152,22 @@ CC0（Public Domain Dedication）在法律性质上是**不可撤销**的——�
 - 源记录快照：[`resonant-bowl-source-2026-09-02.html`](./license-snapshots/resonant-bowl-source-2026-09-02.html)
 - 源包许可证声明：[`resonant-bowl-package-License-2026-09-02.txt`](./license-snapshots/resonant-bowl-package-License-2026-09-02.txt)
 - 官方 CC0 文本快照：[`cc0-1.0-deed-2026-09-02.png`](./license-snapshots/cc0-1.0-deed-2026-09-02.png)
-- 生成器：[`scripts/generate-resonant-bowl.py`](../scripts/generate-resonant-bowl.py)，SHA256：`407afd556b7ebc79e2b703439b989aa68d52f005e8d124a12d16b8de04daa959`
-- 统一处理：44.1kHz、单声道、192kbps MP3；`task_start` 最终时长 1.15s，前 320ms 完成启动辨识，随后连续 260ms 自然释放并保留 60ms 数字静音收尾，峰值不高于 -6dBFS；其余事件保留 740ms–1.84s 的自然共鸣，并统一保留 8ms 淡入和 30ms 边界淡出。
+- 生成器：[`scripts/generate-resonant-bowl.py`](../scripts/generate-resonant-bowl.py)，SHA256：`08dfd38d466900c71bafdb577fd0767b8e09e7e3e69385b1e9eec38f196f6d5b`
+- 统一处理：44.1kHz、单声道、192kbps MP3；`task_start` 最终时长 1.15s，前 320ms 完成启动辨识，随后连续 260ms 自然释放并保留 40ms 数字静音收尾，峰值不高于 -6dBFS；其余事件保留 740ms–1.84s 的自然共鸣，以同一种峰值法归一化，并统一保留 8ms 淡入和 30ms 边界淡出。
 
 | event | 分发文件 | 原始生成语法 | 分发文件 SHA256 |
 |---|---|---|---|
-| `task_start` | `resonant-bowl/task_start.mp3` | C4 轻触 → G4 共鸣展开，前 320ms 为启动触发，260ms 连续自然释放 + 60ms 数字静音，1.15s 总长 | `7c0894ead693e0328448ae107c6a7ff3046b961429a6af844e82a5c022b6adf6` |
-| `stop` | `resonant-bowl/stop.mp3` | D4 单次完整钵声长尾，1.84s | `12cc422bc07fba618552015ed6ab56ba5c81bdc215c94cfd0926c83bfba6d904` |
-| `stop_failure` | `resonant-bowl/stop_failure.mp3` | A4 → F4 → D4 阻尼下行，1.42s | `198a86e46383a2f7aa222880f17179e0ed383b438e549b558c32127bfbc40d3c` |
-| `notification` | `resonant-bowl/notification.mp3` | G4 × 2，间隔 390ms，1.38s | `de912c10cea98345cbeb9817d23515ca024844345f29fd133ebaebb31e86ca05` |
-| `subagent_stop` | `resonant-bowl/subagent_stop.mp3` | G3 单回应，740ms | `711abc9ed34b3b6da2ac542859ec30429ae406e10919c044bf39638bcb803419` |
+| `task_start` | `resonant-bowl/task_start.mp3` | C4 轻触 → G4 共鸣展开，前 320ms 为启动触发，260ms 连续自然释放 + 40ms 数字静音，1.15s 总长 | `c24f76eb9ac82d6e49c8447ebefd20dda0f54d6b13b902a905d768c6a6026ab8` |
+| `stop` | `resonant-bowl/stop.mp3` | D4 单次完整钵声长尾，1.84s | `d21623f4ce7a248ca536c40a3679894474d6bb8773a08fed1223c08e94fcc64e` |
+| `stop_failure` | `resonant-bowl/stop_failure.mp3` | A4 → F4 → D4 阻尼下行，1.42s | `4a134ee15bf84426f455237ef0e59549b62d077396e6112718661e573b6254d9` |
+| `notification` | `resonant-bowl/notification.mp3` | G4 × 2，间隔 390ms，1.38s | `c7c07735969c3d677e270b53bb608cbe386e8b229aaaffb5c0cb877eb1df2481` |
+| `subagent_stop` | `resonant-bowl/subagent_stop.mp3` | G3 单回应，740ms | `e0baa3d465b7f2c2d0a93a2a912909eae23ee0f01736ab118b227e23cbceb63f` |
 
-**本组客观核验**：5 个 MP3 均为 44.1kHz、单声道、192kbps；`task_start` 为 1.15s，符合长尾疗愈例外（前 320ms 完成启动触发，随后连续自然释放，最终 60ms 解码后为全零静音），其它事件均低于 2.02s；最终解码采样峰值与真峰值仍需按试听页的人耳体验做最终判断。本组是基准样片，不自动替换 `minimal-chime` 或正式默认选择。
+**本组客观核验**：5 个 MP3 均为 44.1kHz、单声道、192kbps；`task_start` 为 1.15s，符合长尾疗愈例外（前 320ms 完成启动触发，随后连续自然释放，最终尾静音约 72ms）；其它事件均低于 2.02s。四个 lifecycle 音统一按峰值法处理，最终解码采样峰值约 -1.07dBFS；`task_start` 约 -6.76dBFS。本组是基准样片，不自动替换 `minimal-chime` 或正式默认选择。
 
 - 2026-09-02：`resonant-bowl` 升至 0.1.3；`task_start` 增加自然释放段并延长至 1.15s，按长尾疗愈例外保留前 320ms 的启动辨识段。
 - 2026-09-02：`resonant-bowl` 升至 0.1.4；修复自然释放与边界淡出之间的电平回跳，改为连续 260ms 释放并增加 60ms 全零静音收尾。
+- 2026-09-08：`resonant-bowl` 升至 0.1.5；逐 Tone 淡出改在混入共享缓冲前完成，消除 0.84s 电平跳变；四个 lifecycle 音统一峰值归一，并把最终尾静音收紧到约 72ms。
 
 ## soft-mallet（柔槌信号，真实乐器候选）：2026-09-04
 
@@ -173,8 +178,8 @@ CC0（Public Domain Dedication）在法律性质上是**不可撤销**的——�
 - 官方发布页：[Versilian Community Sample Library](https://versilian-studios.com/vcsl/)，页面明确说明整套录音采用 Creative Commons Zero、可用于商业软件且无需署名或版税。
 - 原始源码包：[sgossner/VCSL](https://github.com/sgossner/VCSL)，固定提交：`c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e`。该提交根目录的 `LICENSE` 是完整 CC0 1.0 Universal 法律文本，`README.md` 再次明确整套声音采用 CC0。
 - 证据快照：[`vcsl-source-2026-09-04.png`](./license-snapshots/vcsl-source-2026-09-04.png)、[`vcsl-source-2026-09-04.html`](./license-snapshots/vcsl-source-2026-09-04.html)、[`vcsl-package-License-2026-09-04.txt`](./license-snapshots/vcsl-package-License-2026-09-04.txt)、[`vcsl-package-README-2026-09-04.md`](./license-snapshots/vcsl-package-README-2026-09-04.md)、[`cc0-1.0-deed-2026-09-02.png`](./license-snapshots/cc0-1.0-deed-2026-09-02.png)。
-- 生成器：[`scripts/generate-soft-mallet.py`](../scripts/generate-soft-mallet.py)，SHA256：`662d255ee3ceab7c00222c024c771ac1f1b49b891ce314ce61544473b13471fe`。
-- 统一处理：固定源文件哈希 → 合并为单声道 44.1kHz → 70Hz 高通和 4.2–6.5kHz 温和低通 → 最多三层真实录音节奏编排 → 8–18ms 起始柔化 → 80–220ms 连续淡出 → 60ms 全零保护区 → 16-bit PCM WAV。普通事件按 `-16 LUFS ±1 LU` 校准；`task_start` 按峰值不高于 `-6dBFS` 的例外校准。
+- 生成器：[`scripts/generate-soft-mallet.py`](../scripts/generate-soft-mallet.py)，SHA256：`40325e975283123cd073bc87cbc229eea9a9eb70cd5b161a45abd45190386e7b`。
+- 统一处理：固定源文件哈希 → 合并为单声道 44.1kHz → 70Hz 高通和 4.2–6.5kHz 温和低通 → 最多三层真实录音节奏编排 → 8–18ms 起始柔化与逐击自然淡出 → 30ms 末端淡出 → 30ms 全零保护区 → 16-bit PCM WAV。普通事件按 `-16 LUFS ±1 LU` 校准；`task_start` 按峰值不高于 `-6dBFS` 的例外校准。
 
 ### 原始录音成员
 
@@ -192,10 +197,12 @@ CC0（Public Domain Dedication）在法律性质上是**不可撤销**的——�
 
 | event | 分发文件 | 真实录音语法 | 时长 / 响度 / 尾部 | 分发文件 SHA256 |
 |---|---|---|---|---|
-| `task_start` | `soft-mallet/task_start.wav` | 马林巴 C4 → G4，短上行双击 | 0.560s；峰值 -7.0dBFS；约 63ms 全零尾部 | `9bcaf07cb4c1f65fb84d5932b5b18793d8aa9daa055a8e0af6837b8de17fde39` |
-| `stop` | `soft-mallet/stop.wav` | 马林巴 C4 → G4，落到软槌颤音琴 C5；前两击与最终落点局部峰值差低于 10dB | 1.040s；-16.0 LUFS；真峰值约 -8.2dBTP；约 62ms 全零尾部 | `afc147b8966a5ebe082e29f2917247c15bf77220e55813ab22c8a2b30400da9b` |
-| `stop_failure` | `soft-mallet/stop_failure.wav` | 狭缝鼓高音 → 低音，闷木双击下行 | 0.740s；-16.5 LUFS；真峰值约 -1.4dBTP；约 67ms 全零尾部 | `b424f51a1a9891cce57d321563d7500e43852a2f6a4347354948b183c13a8bd9` |
-| `notification` | `soft-mallet/notification.wav` | 手铃 E4 × 2，间隔 280ms | 0.760s；-17.0 LUFS；真峰值约 -7.5dBTP；约 62ms 全零尾部 | `96c608757bc3c2a0e58fa939d23201aeccbd1f4c72120426b4a3ea620d040207` |
-| `subagent_stop` | `soft-mallet/subagent_stop.wav` | 马林巴 F3 单次低位回应 | 0.520s；-17.0 LUFS；真峰值约 -7.8dBTP；约 61ms 全零尾部 | `4f36af21ddadaddd3016ff09f6d1bb8ccc71e0321c54d2a94f35bc72c8502345` |
+| `task_start` | `soft-mallet/task_start.wav` | 马林巴 C4 → G4，短上行双击 | 0.530s；峰值 -7.0dBFS；尾静音约 46ms | `77129919204ffcba7fe9c98a27719921846779b6b043abccdae53a2732e38a8b` |
+| `stop` | `soft-mallet/stop.wav` | 马林巴 C4 → G4，落到软槌颤音琴 C5；前两击与最终落点局部峰值差低于 10dB | 1.010s；-16.0 LUFS；真峰值约 -8.2dBTP；尾静音约 41ms | `96904072281bfb5d46139cfed2897e393204e49d573073aa45e1fc3df478d4fd` |
+| `stop_failure` | `soft-mallet/stop_failure.wav` | 狭缝鼓高音 → 低音，闷木双击下行 | 0.710s；-16.5 LUFS；真峰值约 -1.4dBTP；尾静音约 76ms | `5b4cc9a746fd5574583e3b0b69a5629eeb58dcb7c0c39e658687f0b34e639f84` |
+| `notification` | `soft-mallet/notification.wav` | 手铃 E4 × 2，间隔 280ms | 0.730s；-17.0 LUFS；真峰值约 -7.5dBTP；尾静音约 40ms | `7b5b953ed7aa5fd0c2ca22087fa89c205572e565cf7feaf7edabac3474e72cac` |
+| `subagent_stop` | `soft-mallet/subagent_stop.wav` | 马林巴 F3 单次低位回应 | 0.490s；-17.0 LUFS；真峰值约 -8.7dBTP；尾静音约 41ms | `d8ae9fc4a132357fa1275ee7d5a198d53cbb1047b561167af6d15ece67cfb240` |
+
+- 2026-09-08：`soft-mallet` 升至 0.1.1；统一使用 30ms 末端淡出和 30ms 全零保护区，按标准命令将五个事件尾静音收紧到约 40–76ms。
 
 **本组验收状态**：源授权、源文件哈希、格式、时长、响度、真峰值、末尾全零区和 10 对事件的频谱/时序差异已核验；真人“悦耳度”、随机盲辨和十分钟疲劳测试尚未完成。本组只加入试听页，不自动替换当前默认选择。

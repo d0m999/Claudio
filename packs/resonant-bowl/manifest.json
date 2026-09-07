@@ -4,7 +4,7 @@
   "name": "共鸣钵音",
   "author": "Claudio",
   "license": "CC0-1.0",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "events": {
     "task_start": "task_start.mp3",
     "stop": "stop.mp3",

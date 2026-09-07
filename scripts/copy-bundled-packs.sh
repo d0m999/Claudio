@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Validate and copy every distributable first-party sound pack. Any new top-level pack directory is
-# therefore either included or fails loudly; release assembly cannot silently keep shipping a
-# hard-coded subset.
+# Validate and copy the explicitly approved first-party sound packs. Candidate directories may live
+# beside the approved set for listening, but their presence alone never authorizes distribution.
 set -euo pipefail
 
 SOURCE_ROOT="${1:-packs}"
@@ -19,23 +18,32 @@ if [[ ! -f "$SOURCE_ROOT/LICENSES.md" || -L "$SOURCE_ROOT/LICENSES.md" || ! -s "
     echo "❌ bundled packs license ledger is missing, empty, or a symlink: $SOURCE_ROOT/LICENSES.md" >&2
     exit 1
 fi
+SELECTION_FILE="$SOURCE_ROOT/bundled-pack-selection.json"
+if [[ ! -f "$SELECTION_FILE" || -L "$SELECTION_FILE" || ! -s "$SELECTION_FILE" ]]; then
+    echo "❌ bundled pack selection is missing, empty, or a symlink: $SELECTION_FILE" >&2
+    exit 1
+fi
+if ! jq -e '
+    type == "object"
+    and .schema == 1
+    and .purpose == "claudi0 default bundled sound pack selection"
+    and (.selected_pack_ids | type == "array" and length > 0)
+    and ([.selected_pack_ids[] |
+        (type == "string" and test("^[a-z0-9][a-z0-9-]*$"))
+    ] | all)
+    and ((.selected_pack_ids | unique | length) == (.selected_pack_ids | length))
+' "$SELECTION_FILE" >/dev/null; then
+    echo "❌ invalid bundled pack selection: $SELECTION_FILE" >&2
+    exit 1
+fi
 
 mkdir -p "$DESTINATION_ROOT"
 pack_count=0
-shopt -s nullglob dotglob
-entries=("$SOURCE_ROOT"/*)
-shopt -u nullglob dotglob
 
-for entry in "${entries[@]}"; do
-    entry_name="$(basename "$entry")"
-    case "$entry_name" in
-        LICENSES.md|license-snapshots)
-            continue
-            ;;
-    esac
-
+while IFS= read -r entry_name; do
+    entry="$SOURCE_ROOT/$entry_name"
     if [[ -L "$entry" || ! -d "$entry" ]]; then
-        echo "❌ unexpected bundled packs entry (expected a real pack directory): $entry" >&2
+        echo "❌ approved bundled pack must be a real directory: $entry" >&2
         exit 1
     fi
 
@@ -96,7 +104,7 @@ for entry in "${entries[@]}"; do
 
     cp -R "$entry" "$DESTINATION_ROOT/$entry_name"
     pack_count=$((pack_count + 1))
-done
+done < <(jq -r '.selected_pack_ids[]' "$SELECTION_FILE")
 
 if [[ "$pack_count" -eq 0 ]]; then
     echo "❌ no bundled sound packs found in $SOURCE_ROOT" >&2
@@ -104,4 +112,5 @@ if [[ "$pack_count" -eq 0 ]]; then
 fi
 
 cp "$SOURCE_ROOT/LICENSES.md" "$DESTINATION_ROOT/LICENSES.md"
+cp "$SELECTION_FILE" "$DESTINATION_ROOT/bundled-pack-selection.json"
 echo "✅ validated and copied $pack_count bundled sound pack(s)"

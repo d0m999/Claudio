@@ -9,7 +9,8 @@
 
 ## 适用范围
 
-- 适用对象：`packs/`（随 app 分发的策展包）与 `local-packs/`（IP 角色包，仅本机个人使用，见其 `SOURCES.md`）的五个现行事件
+- 适用对象：`packs/`（策展工作区；只有 `bundled-pack-selection.json` 显式批准的子集随 app 分发）与
+  `local-packs/`（IP 角色包，仅本机个人使用，见其 `SOURCES.md`）的五个现行事件
   音频文件：`task_start` / `stop` / `stop_failure` / `notification` / `subagent_stop`。旧包缺少 `task_start` 仍合法，覆盖度明确显示为 `4/5`。
 - 不适用：用户通过 GUI 拖入自带音频（T8, `gui/Sources/ClaudioGUICore/AudioImport.swift`）——那条通道是"合法皮卡丘的唯一通道"，
   走的是格式白名单 + 大小/时长上限的**技术兜底**（防滥用/防崩），不是这里的"策展音质标准"（音质好坏由用户自己承担）。两者数值

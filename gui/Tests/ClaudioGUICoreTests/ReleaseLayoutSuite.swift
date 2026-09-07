@@ -110,6 +110,87 @@ private struct ReleaseWorkflowSources {
 
 @MainActor
 func runReleaseLayoutSuites() {
+    suite("Factory Pack 组装只复制已批准选择") {
+        let root = guiTestRepositoryRoot()
+        let selectionURL = root.appendingPathComponent("packs/bundled-pack-selection.json")
+        guard let selectionData = try? Data(contentsOf: selectionURL),
+            let selection = try? JSONSerialization.jsonObject(with: selectionData)
+                as? [String: Any],
+            let approvedIDs = selection["selected_pack_ids"] as? [String]
+        else {
+            expect(false, "读不到已批准声音包选择")
+            return
+        }
+
+        withTempDirectory { destination in
+            let result = runTestProcess(
+                executableURL: URL(fileURLWithPath: "/bin/bash"),
+                arguments: [
+                    root.appendingPathComponent("scripts/copy-bundled-packs.sh").path,
+                    root.appendingPathComponent("packs").path,
+                    destination.path,
+                ])
+            let entries = Set(
+                (try? FileManager.default.contentsOfDirectory(
+                    atPath: destination.path)) ?? [])
+            let expected = Set(approvedIDs + ["LICENSES.md", "bundled-pack-selection.json"])
+            expect(result.status == 0, "Factory Pack 组装失败：\(result.output)")
+            expect(entries == expected, "Factory Pack 组装结果必须精确等于批准集合：\(entries)")
+        }
+    }
+
+    suite("Factory Pack 批准选择异常时失败关闭") {
+        let root = guiTestRepositoryRoot()
+        let script = root.appendingPathComponent("scripts/copy-bundled-packs.sh")
+        let invalidSelections: [(String, String?)] = [
+            ("missing", nil),
+            ("malformed", "{"),
+            (
+                "empty",
+                #"{"schema":1,"purpose":"claudi0 default bundled sound pack selection","selected_pack_ids":[]}"#
+            ),
+            (
+                "duplicate",
+                #"{"schema":1,"purpose":"claudi0 default bundled sound pack selection","selected_pack_ids":["minimal-chime","minimal-chime"]}"#
+            ),
+            (
+                "unknown",
+                #"{"schema":1,"purpose":"claudi0 default bundled sound pack selection","selected_pack_ids":["not-a-pack"]}"#
+            ),
+        ]
+
+        for (name, selection) in invalidSelections {
+            withTempDirectory { temporary in
+                let source = temporary.appendingPathComponent("source", isDirectory: true)
+                let destination = temporary.appendingPathComponent("destination", isDirectory: true)
+                try? FileManager.default.createDirectory(
+                    at: source, withIntermediateDirectories: true)
+                try? Data("ledger".utf8).write(
+                    to: source.appendingPathComponent("LICENSES.md"))
+                if let selection {
+                    try? Data(selection.utf8).write(
+                        to: source.appendingPathComponent("bundled-pack-selection.json"))
+                }
+
+                let result = runTestProcess(
+                    executableURL: URL(fileURLWithPath: "/bin/bash"),
+                    arguments: [script.path, source.path, destination.path])
+                expect(result.status != 0, "非法批准选择必须失败关闭：\(name)")
+            }
+        }
+    }
+
+    suite("声音包选型板通过可执行状态 seam 覆盖完整候选与重置行为") {
+        let root = guiTestRepositoryRoot()
+        let result = runTestProcess(
+            executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+            arguments: [
+                "node",
+                root.appendingPathComponent("scripts/test-sound-pack-selector-state.js").path,
+            ])
+        expect(result.status == 0, "声音包选型板状态回归失败：\(result.output)")
+    }
+
     suite("release.yml 真的把 helper 放在 GUI 会去找的那个位置") {
         let packCopyScriptURL = guiTestRepositoryRoot()
             .appendingPathComponent("scripts/copy-bundled-packs.sh")
@@ -145,17 +226,21 @@ func runReleaseLayoutSuites() {
                 + "实际的 cp 行：\(copyLines)")
 
         // `performFirstRunSetup` 从 helper 路径去掉两级、拼 `packs` 反推内置包目录。发布流程通过
-        // 独立脚本遍历所有 pack，而不是把当前唯一的 minimal-chime 写死在 workflow 里。
+        // 独立脚本读取批准清单，而不是把目录里尚待试听的候选一起装进 app。
         expect(
             yaml.contains(
                 #"bash scripts/copy-bundled-packs.sh packs "$APP/Contents/Resources/packs""#),
-            "release.yml 必须把所有内置包交给 fail-closed 遍历脚本复制到 Contents/Resources/packs")
+            "release.yml 必须把已批准内置包交给 fail-closed 组装脚本复制到 Contents/Resources/packs")
         expect(
-            packCopyScript.contains(#"entries=("$SOURCE_ROOT"/*)"#)
+            packCopyScript.contains(#".selected_pack_ids[]"#)
+                && packCopyScript.contains(
+                    #"SELECTION_FILE="$SOURCE_ROOT/bundled-pack-selection.json""#)
                 && packCopyScript.contains(#"cp -R "$entry" "$DESTINATION_ROOT/$entry_name""#)
                 && packCopyScript.contains(
-                    #"cp "$SOURCE_ROOT/LICENSES.md" "$DESTINATION_ROOT/LICENSES.md""#),
-            "内置包脚本必须遍历全部顶层 pack，并把音频许可台账一起装入 app bundle")
+                    #"cp "$SOURCE_ROOT/LICENSES.md" "$DESTINATION_ROOT/LICENSES.md""#)
+                && packCopyScript.contains(
+                    #"cp "$SELECTION_FILE" "$DESTINATION_ROOT/bundled-pack-selection.json""#),
+            "内置包脚本必须只复制批准清单，并把选择证据与音频许可台账一起装入 app bundle")
         expect(
             yaml.contains("swift build -c release --arch arm64 --product claudio")
                 && yaml.contains("swift build -c release --arch x86_64 --product claudio"),
@@ -485,12 +570,13 @@ func runReleaseLayoutSuites() {
 
         expect(
             devBundle.contains(#"bash "$repo_root/scripts/copy-bundled-packs.sh""#)
-                && packCopyScript.contains(#"entries=("$SOURCE_ROOT"/*)"#)
+                && packCopyScript.contains(#".selected_pack_ids[]"#)
+                && packCopyScript.contains("bundled-pack-selection.json")
                 && packCopyScript.contains("LICENSES.md")
                 && !packCopyScript.contains("packs/minimal-chime")
                 && devBundle.contains(
                     #"--package-path "$repo_root/helper" --product claudio"#),
-            "dev bundle 必须遍历复制所有 pack 与许可证，并显式构建 claudio helper product")
+            "dev bundle 必须按批准选择复制 pack 与许可证，并显式构建 claudio helper product")
         expect(
             devBundle.contains("--product ClaudioLoginItem")
                 && devBundle.contains(#"scripts/assemble-login-item.sh"#)

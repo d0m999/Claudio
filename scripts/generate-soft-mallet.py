@@ -25,7 +25,7 @@ from pathlib import Path
 COMMIT = "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e"
 RAW_ROOT = f"https://raw.githubusercontent.com/sgossner/VCSL/{COMMIT}"
 SAMPLE_RATE = 44_100
-TERMINAL_SILENCE = 0.060
+TERMINAL_SILENCE = 0.030
 
 
 @dataclass(frozen=True)
@@ -130,14 +130,14 @@ CUES = {
             Strike("ChimeE4", 0.000, -2.0, length=0.42, fade_in=0.018),
             Strike("ChimeE4", 0.280, -3.5, length=0.42, fade_in=0.018),
         ),
-        target_lufs=-17.0,
+        target_lufs=-16.9,
         lowpass_hz=5_200,
     ),
     # A single low answer is intentionally subordinate to the main completion.
     "subagent_stop": Cue(
         0.46,
         (Strike("F3", 0.000, 0.0, length=0.46, fade_in=0.012),),
-        target_lufs=-17.0,
+        target_lufs=-16.9,
         lowpass_hz=4_800,
     ),
 }
@@ -207,7 +207,7 @@ def render_intermediate(cue: Cue, sources: dict[str, Path], destination: Path) -
         )
         mix_inputs.append(f"[s{index}]")
 
-    final_fade = min(0.22, cue.audible_seconds * 0.24)
+    final_fade = min(0.030, cue.audible_seconds)
     final_fade_start = cue.audible_seconds - final_fade
     filters.append(
         "".join(mix_inputs)

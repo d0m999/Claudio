@@ -61,7 +61,7 @@ PARTIALS = (
 
 EVENTS = {
     # The calm long-tail profile keeps the first 320ms clear as the event onset,
-    # then gives the bowl body a continuous natural release. The final 60ms is
+    # then gives the bowl body a continuous natural release. The final 40ms is
     # an explicit digital-silence guard so the encoded file cannot end with a
     # residual tail or a boundary click. This is the curated exception
     # documented in docs/pack-standard.md.
@@ -75,13 +75,13 @@ EVENTS = {
         ),
         -6.5,
         natural_release=0.260,
-        terminal_silence=0.060,
+        terminal_silence=0.040,
     ),
     # A full, single ring is the calmest and longest event in the set.
     "stop": Event(
         1.840,
         (Tone(0.000, 1.800, 62.0, 0.86, 0.92, strike_gain=0.095, seed=21),),
-        -2.5,
+        -0.8,
     ),
     # A damped descending three-touch phrase makes interruption recognizable
     # without resorting to a harsh alarm or a dissonant buzzer.
@@ -92,7 +92,7 @@ EVENTS = {
             Tone(0.190, 0.650, 65.0, 0.47, 0.44, damping=1.30, strike_gain=0.050, bloom_cents=1.0, seed=37),
             Tone(0.390, 1.000, 62.0, 0.48, 0.60, damping=1.18, strike_gain=0.045, bloom_cents=-3.0, seed=41),
         ),
-        -3.5,
+        -0.8,
     ),
     # Two separated touches are easy to recognize as a notification and leave
     # enough space for each resonance to be heard as its own event.
@@ -102,14 +102,14 @@ EVENTS = {
             Tone(0.000, 0.570, 67.0, 0.62, 0.42, damping=1.10, strike_gain=0.070, seed=51),
             Tone(0.390, 0.940, 67.0, 0.53, 0.54, damping=1.05, strike_gain=0.060, seed=59),
         ),
-        -4.0,
+        -0.8,
     ),
     # A small, low acknowledgement remains shorter than completion, but has a
     # real body and tail instead of behaving like a dry click.
     "subagent_stop": Event(
         0.740,
         (Tone(0.000, 0.700, 55.0, 0.60, 0.42, damping=1.10, strike_gain=0.065, seed=71),),
-        -5.5,
+        -0.8,
     ),
 }
 
@@ -135,6 +135,8 @@ def add_tone(samples: list[float], tone: Tone) -> None:
     phases = [0.0] * len(PARTIALS)
     noise_state = tone.seed
     smoothed_noise = 0.0
+    fade_length = max(1, int(round(tone.fade_out * SAMPLE_RATE)))
+    fade_start_offset = max(0, tone_length - fade_length)
 
     for offset in range(tone_length):
         index = start_index + offset
@@ -162,13 +164,11 @@ def add_tone(samples: list[float], tone: Tone) -> None:
         strike = tone.strike_gain * strike_envelope * (
             0.72 * smoothed_noise + 0.28 * math.sin(phases[3])
         )
-        samples[index] += tone.amplitude * (attack * body + strike)
-
-    if tone.fade_out > 0.0:
-        fade_length = max(1, int(round(tone.fade_out * SAMPLE_RATE)))
-        fade_start = max(start_index, start_index + tone_length - fade_length)
-        for index in range(fade_start, min(start_index + tone_length, len(samples))):
-            samples[index] *= 1.0 - smoothstep((index - fade_start) / fade_length)
+        contribution = tone.amplitude * (attack * body + strike)
+        if tone.fade_out > 0.0 and offset >= fade_start_offset:
+            fade_progress = (offset - fade_start_offset) / max(1, fade_length - 1)
+            contribution *= 1.0 - smoothstep(fade_progress)
+        samples[index] += contribution
 
 
 def render_event(event: Event) -> list[float]:

@@ -245,6 +245,7 @@
     </div>
   </footer>
 
+  <script src="sound-pack-selector-state.js"></script>
   <script>
     const events = [
       { key: "task_start", label: "任务开始", hint: "短促上行" },
@@ -281,6 +282,60 @@
         }
       },
       {
+        id: "pizzicato-cadence",
+        name: "拨弦旋律",
+        source: "Kenney · Music Jingles",
+        sourceUrl: "https://kenney.nl/assets/music-jingles",
+        licenseEvidence: "官方发布页 + 包内 License.txt + CC0 官方文本",
+        accent: "#f2cc8f",
+        style: "拨弦旋律",
+        grammar: "短上行 / 上行收束 / 下行 / 双脉冲 / 短回应",
+        description: "主方案候选：用真实拨弦乐句的方向和节奏区分五个事件，保持轻快但不依赖同一种单点提示音。",
+        candidate: true,
+        sources: {
+          task_start: "Audio/Pizzicato jingles/jingles_PIZZI04.ogg",
+          stop: "Audio/Pizzicato jingles/jingles_PIZZI02.ogg",
+          stop_failure: "Audio/Pizzicato jingles/jingles_PIZZI01.ogg",
+          notification: "Audio/Pizzicato jingles/jingles_PIZZI16.ogg × 2",
+          subagent_stop: "Audio/Pizzicato jingles/jingles_PIZZI00.ogg"
+        },
+        signatures: {
+          task_start: "短上行启动 · 300ms",
+          stop: "上行旋律收束 · 956ms",
+          stop_failure: "下行旋律 · 1.00s",
+          notification: "分离双脉冲 · 1.04s",
+          subagent_stop: "最短拨弦回应 · 240ms"
+        }
+      },
+      {
+        id: "night-console",
+        name: "夜间控制台",
+        source: "Claudio · 自有确定性合成器",
+        sourceUrl: "scripts/generate-claude-default-packs.py",
+        sourceLinkLabel: "查看生成器源码",
+        licenseEvidence: "无第三方采样 · CC0 声明见 LICENSES.md",
+        processing: "低音区、缓启动、少高次谐波；五个事件使用同一低扰动合成音色，并以音高方向、音符数量和间隔区分。",
+        accent: "#8fb8d8",
+        style: "低扰动合成",
+        grammar: "低位上行 / 三音解决 / 低位下行 / 宽间隔双脉冲 / 最短回应",
+        description: "夜间候选：把存在感压在较低音区，用更缓和的起音和更少的高次谐波减少长时间运行时的打扰。",
+        candidate: true,
+        sources: {
+          task_start: "scripts/generate-claude-default-packs.py · G3 → B3",
+          stop: "scripts/generate-claude-default-packs.py · G3 → B3 → D4",
+          stop_failure: "scripts/generate-claude-default-packs.py · D4 → A#3 → G3",
+          notification: "scripts/generate-claude-default-packs.py · B3 × 2",
+          subagent_stop: "scripts/generate-claude-default-packs.py · D3"
+        },
+        signatures: {
+          task_start: "低位上行 · 280ms",
+          stop: "低音三音解决 · 720ms",
+          stop_failure: "低位下行 · 700ms",
+          notification: "宽间隔双脉冲 · 490ms",
+          subagent_stop: "最低短回应 · 205ms"
+        }
+      },
+      {
         id: "resonant-bowl",
         name: "共鸣钵音",
         source: "Claudio · 自有确定性共鸣合成器",
@@ -301,7 +356,7 @@
           subagent_stop: "scripts/generate-resonant-bowl.py · G3 单回应"
         },
         signatures: {
-          task_start: "上扬自然释放 · 1.15s · 60ms 静音收尾",
+          task_start: "上扬自然释放 · 1.15s · 40ms 静音收尾",
           stop: "单钵长尾 · 1.84s",
           stop_failure: "阻尼下行 · 1.42s",
           notification: "双钵回应 · 1.38s",
@@ -330,16 +385,17 @@
           subagent_stop: "VCSL Marimba · F3 单音"
         },
         signatures: {
-          task_start: "轻上行双击 · 560ms",
-          stop: "三段柔和落定 · 1.04s",
-          stop_failure: "闷木双击下行 · 740ms",
-          notification: "柔铃双击 · 760ms",
-          subagent_stop: "低位单回应 · 520ms"
+          task_start: "轻上行双击 · 530ms",
+          stop: "三段柔和落定 · 1.01s",
+          stop_failure: "闷木双击下行 · 710ms",
+          notification: "柔铃双击 · 730ms",
+          subagent_stop: "低位单回应 · 490ms"
         }
       }
     ];
 
     const packById = new Map(packs.map(pack => [pack.id, pack]));
+    const selectorState = globalThis.ClaudioSoundPackSelectorState;
     const storageKey = "claudi0-sound-pack-selection-v2";
     const defaultSelection = new Set(["minimal-chime"]);
     let selected = loadSelection();
@@ -354,10 +410,7 @@
     function loadSelection() {
       try {
         const stored = JSON.parse(localStorage.getItem(storageKey) || "null");
-        if (Array.isArray(stored)) {
-          const valid = stored.filter(id => packById.has(id));
-          return valid.length ? new Set(valid) : new Set(defaultSelection);
-        }
+        return new Set(selectorState.resolveStoredSelection(stored, packById.keys(), defaultSelection));
       } catch (_) {
         // file:// pages may deny localStorage; the page remains fully usable without it.
       }
@@ -554,6 +607,19 @@
       });
     }
 
+    function changeBlindPack(nextPackId) {
+      const reset = selectorState.changeBlindPack(nextPackId, stopAllAudio);
+      blindPackId = reset.packId;
+      blindRound = reset.round;
+      blindCorrect = reset.correct;
+      blindTotal = reset.total;
+      document.getElementById("blind-start").textContent = reset.startLabel;
+      document.getElementById("blind-prompt").textContent = reset.prompt;
+      document.getElementById("blind-result").textContent = reset.result;
+      updateBlindScore();
+      resetBlindChoices();
+    }
+
     function startBlindRound() {
       const pack = packById.get(document.getElementById("blind-pack").value);
       if (!pack) return;
@@ -616,6 +682,16 @@
       statusTimer = window.setTimeout(() => status.classList.remove("visible"), 3200);
     }
 
+    function replaceSelection(nextSelection, message) {
+      selectorState.replaceSelection(nextSelection, {
+        stopAllAudio,
+        setSelection(next) { selected = next; },
+        saveSelection,
+        render
+      });
+      showStatus(message, false);
+    }
+
     function exportSelection() {
       const ids = packs.filter(pack => selected.has(pack.id)).map(pack => pack.id);
       const payload = {
@@ -642,14 +718,14 @@
     }
 
     document.getElementById("play-kept").addEventListener("click", playSelectedSequences);
-    document.getElementById("blind-pack").addEventListener("change", event => { blindPackId = event.target.value; });
+    document.getElementById("blind-pack").addEventListener("change", event => { changeBlindPack(event.target.value); });
     document.getElementById("blind-start").addEventListener("click", startBlindRound);
     document.querySelectorAll("[data-blind-event]").forEach(button => {
       button.addEventListener("click", () => answerBlindRound(button.dataset.blindEvent));
     });
-    document.getElementById("keep-all").addEventListener("click", () => { selected = new Set(packs.map(pack => pack.id)); saveSelection(); render(); showStatus("已勾选全部候选。", false); });
-    document.getElementById("clear-all").addEventListener("click", () => { selected.clear(); saveSelection(); render(); showStatus("已清空选择；文件仍然保留。", false); });
-    document.getElementById("reset-selection").addEventListener("click", () => { selected = new Set(defaultSelection); saveSelection(); render(); showStatus("已恢复 minimal-chime 基准选择。", false); });
+    document.getElementById("keep-all").addEventListener("click", () => { replaceSelection(new Set(packs.map(pack => pack.id)), "已勾选全部候选。"); });
+    document.getElementById("clear-all").addEventListener("click", () => { replaceSelection(new Set(), "已清空选择；文件仍然保留。"); });
+    document.getElementById("reset-selection").addEventListener("click", () => { replaceSelection(new Set(defaultSelection), "已恢复 minimal-chime 基准选择。"); });
     document.getElementById("export-selection").addEventListener("click", exportSelection);
     updateBlindScore();
     render();
