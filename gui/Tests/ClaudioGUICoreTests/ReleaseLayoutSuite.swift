@@ -554,9 +554,11 @@ func runReleaseLayoutSuites() {
                 encoding: .utf8),
             let release = try? String(
                 contentsOf: root.appendingPathComponent(".github/workflows/release.yml"),
-                encoding: .utf8)
+                encoding: .utf8),
+            let package = try? String(
+                contentsOf: root.appendingPathComponent("gui/Package.swift"), encoding: .utf8)
         else {
-            expect(false, "读不到 dev、CI 或 release 分发入口")
+            expect(false, "读不到 GUI package、dev、CI 或 release 分发入口")
             return
         }
 
@@ -589,6 +591,27 @@ func runReleaseLayoutSuites() {
                 && optimizedCommands.allSatisfy(isReleaseGUIBuildCommand),
             "-Osize 只能出现在五条 Release ClaudioGUI 命令，不能扩散到 Debug、harness、"
                 + "LoginItem 或 helper；实际命令：\(optimizedCommands)")
+
+        guard
+            let guiTargetStart = package.range(
+                of: ".executableTarget(\n            name: \"ClaudioGUI\""),
+            let loginItemTargetStart = package.range(
+                of: ".executableTarget(\n            name: \"ClaudioLoginItem\"",
+                range: guiTargetStart.upperBound..<package.endIndex)
+        else {
+            expect(false, "无法从 Package.swift 定位 ClaudioGUI 与 ClaudioLoginItem target")
+            return
+        }
+        let guiTarget = String(package[guiTargetStart.lowerBound..<loginItemTargetStart.lowerBound])
+        expect(
+            guiTarget.contains(#"["-Xlinker", "-no_exported_symbols"]"#)
+                && guiTarget.contains(#".when(configuration: .release)"#),
+            "最终 ClaudioGUI executable 必须仅在 Release 链接阶段关闭符号导出，"
+                + "让所有分发入口在 strip 前使用同一 LINKEDIT 体积合同")
+        expect(
+            package.components(separatedBy: "-no_exported_symbols").count == 2,
+            "-no_exported_symbols 必须只属于 ClaudioGUI executable，不能扩散到 LoginItem、"
+                + "library target 或测试 harness")
     }
 
     suite("体积优化合同跨行与参数调序仍会拒绝错误目标") {

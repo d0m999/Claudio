@@ -70,3 +70,36 @@ bundle 总量门禁。GUI 与 helper 分别保留 `1,276,872 B` 和 `783,816 B` 
 这次重基线只覆盖本机 arm64、ad-hoc 签名前的同口径体积门禁。它不建立 universal 双架构、
 Developer ID 签名、公证或正式 release 产物证据；CI 仍会对真实产物重新执行同一个失败关闭
 门禁。
+
+## 2026-09-09 Settings 与声音包编辑器深化归因
+
+`44bc846` 在 GitHub `macos-15` / Xcode 16.4 的 CI 上把 arm64 GUI 推到 `5,632,280 B`，
+超过既有 `5,500,000 B` 预算 `132,280 B`。同机 Swift 6.3.3、相同 `-Osize` 与完整 `strip`
+口径下复测父提交和目标提交，确认这不是资源增长或陈旧构建产物：
+
+| 项目 | arm64 GUI | 相对父提交 |
+|---|---:|---:|
+| 父提交 `592b74e` | `5,196,360 B` | — |
+| `44bc846` 修复前 | `5,419,256 B` | `+222,896 B` |
+
+链接图按 live symbol 归属统计，`ClaudioGUICore` 净增 `217,304 B`；其中深化后的
+`SoundPacksEditorOwner.swift` 与新增 `SoundPacksEditorPresentation.swift` 合计净增约
+`210,672 B`。移动进 `ClaudioSettingsPresentation` 的 Settings 视图与剩余 `ClaudioGUI`
+合计反而减少约 `25,097 B`，所以新增 target 本身不是主要代码段回归。GitHub 与本机的额外
+差值来自 Xcode 16.4 和本机 Swift 6.3.3 的产物差异，但两边都暴露了同一个问题：最终 app
+仍携带不供外部二进制调用的 Swift 导出链接元数据。
+
+修复在 `ClaudioGUI` executable target 上仅为 Release 配置传入
+`-Xlinker -no_exported_symbols`。它位于 `gui/Package.swift`，因此 CI、开发 bundle、双架构
+release workflow 和直接 SwiftPM Release 构建自动消费同一合同。没有提高预算，也没有禁用
+Swift 反射。修复后的本机签名前门禁结果为 `5,043,944 B`，比修复前减少 `375,312 B`，在
+现有预算下保留 `456,056 B` 余量。
+
+Mach-O 对照中 `__TEXT`（`4,472,832 B`）、`__text`（`3,450,536 B`）、
+`__DATA_CONST`（`147,456 B`）和 `__DATA`（`360,448 B`）保持不变；ad-hoc 签名后的
+`__LINKEDIT` 从 `638,976 B` 降为 `278,528 B`。这次修复只移除最终 app 不需要的导出
+链接负载，不改变 GUI 代码或数据段。同一源树的本机交叉构建得到 `5,184,000 B` 的 x86_64
+slice；按 release workflow 顺序先合成再 strip 的 universal GUI 为 `10,237,672 B`，重新拆出的
+arm64 与 x86_64 slice 分别仍是 `5,043,944 B` 和 `5,184,000 B`。这些数据验证双架构构建与
+链接体积合同，不等同于 Intel 真机运行；GitHub Xcode 16.4、Developer ID 签名和公证结果仍
+必须由后续 CI/RC 各自验证。

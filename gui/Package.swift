@@ -113,7 +113,13 @@ let package = Package(
                 .process("Resources/HostIcons")
             ],
             linkerSettings: [
-                .linkedFramework("Carbon")
+                .linkedFramework("Carbon"),
+                // ClaudioGUI is a final app executable, not a library ABI. Tell the linker before
+                // dead stripping and the later full `strip` that no Swift symbols need exporting;
+                // otherwise package-level presentation seams inflate the shipped LINKEDIT payload.
+                .unsafeFlags(
+                    ["-Xlinker", "-no_exported_symbols"],
+                    .when(configuration: .release)),
             ]
         ),
         // macOS 12 compatibility helper. Packaging embeds this executable in a separately signed
