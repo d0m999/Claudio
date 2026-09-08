@@ -8,12 +8,10 @@ import SwiftUI
 /// ``VolumeDragSession`` so drag coalescing, rollback, external rebase, close flush, and
 /// termination flush cannot drift between the panel and unified Settings.
 @MainActor
-struct SharedMasterVolumeSlider<FocusTarget: Hashable>: View {
+package struct SharedMasterVolumeSlider: View {
     let diskVolume: Double
     let isEnabled: Bool
     let language: ClaudioAppLanguage
-    let focusedTarget: FocusState<FocusTarget?>.Binding
-    let focusIdentity: FocusTarget
     let accessibilityIdentifier: String
     let percentageWidth: CGFloat
     let flushRevision: Int?
@@ -24,12 +22,10 @@ struct SharedMasterVolumeSlider<FocusTarget: Hashable>: View {
     @Environment(\.colorScheme) private var colorScheme
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
 
-    init(
+    package init(
         diskVolume: Double,
         isEnabled: Bool,
         language: ClaudioAppLanguage,
-        focusedTarget: FocusState<FocusTarget?>.Binding,
-        focusIdentity: FocusTarget,
         accessibilityIdentifier: String,
         percentageWidth: CGFloat = 42,
         flushRevision: Int? = nil,
@@ -39,8 +35,6 @@ struct SharedMasterVolumeSlider<FocusTarget: Hashable>: View {
         self.diskVolume = diskVolume
         self.isEnabled = isEnabled
         self.language = language
-        self.focusedTarget = focusedTarget
-        self.focusIdentity = focusIdentity
         self.accessibilityIdentifier = accessibilityIdentifier
         self.percentageWidth = percentageWidth
         self.flushRevision = flushRevision
@@ -49,7 +43,7 @@ struct SharedMasterVolumeSlider<FocusTarget: Hashable>: View {
         _session = State(initialValue: VolumeDragSession(baseline: diskVolume))
     }
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: 7) {
             Slider(
                 value: Binding(
@@ -71,12 +65,11 @@ struct SharedMasterVolumeSlider<FocusTarget: Hashable>: View {
                 })
             Text("\(Int((session.draft * 100).rounded()))%")
                 .font(.system(size: 10.5 * typeScale, design: .monospaced))
-                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 .frame(width: percentageWidth, alignment: .trailing)
                 .accessibilityHidden(true)
         }
-        .tint(ClaudioColor.clay(colorScheme))
-        .focused(focusedTarget, equals: focusIdentity)
+        .tint(ClaudioTheme.clay(colorScheme))
         .accessibilityLabel(ClaudioL10n(language: language).text(.panelMasterVolume))
         .accessibilityValue("\(Int((session.draft * 100).rounded()))%")
         .accessibilityIdentifier(accessibilityIdentifier)

@@ -1,3 +1,4 @@
+import ClaudioCore
 import Combine
 import Foundation
 
@@ -25,7 +26,31 @@ public enum AICueCredentialFailure: Sendable, Equatable {
 public enum AICueComposerFailure: Sendable, Equatable {
     case generation(AICueGenerationError)
     case displayName(AICueValidationError)
-    case adoption(AICueAdoptionError)
+    case adoption(AICueComposerAdoptionFailure)
+}
+
+public enum AICueComposerAdoptionFailure: Sendable, Equatable {
+    case targetChanged
+    case rejected
+    case importedButNotBound(fileName: String)
+}
+
+public struct AICueComposerSession: Sendable, Equatable {
+    public let scope: PanelSoundScopeID
+    public let event: Event
+
+    public init(scope: PanelSoundScopeID, event: Event) {
+        self.scope = scope
+        self.event = event
+    }
+}
+
+public struct AICueComposerAdoptionOutcome: Sendable, Equatable {
+    public let finalDisplayName: String
+
+    public init(finalDisplayName: String) {
+        self.finalDisplayName = finalDisplayName
+    }
 }
 
 /// Main-actor state machine for the visible two-step flow. It owns no secret value and knows no
@@ -41,10 +66,10 @@ public final class AICueGenerationViewModel: ObservableObject {
     @Published public private(set) var adoptingCandidateID: UUID?
     @Published public private(set) var soundDescription = ""
     @Published public private(set) var displayName = ""
-    @Published public private(set) var target: AICueAdoptionTarget?
+    @Published public private(set) var session: AICueComposerSession?
     @Published public private(set) var generation: AICueGeneration?
     @Published public private(set) var failure: AICueComposerFailure?
-    @Published public private(set) var adoptionOutcome: AICueAdoptionOutcome?
+    @Published public private(set) var adoptionOutcome: AICueComposerAdoptionOutcome?
 
     private let credentialManager: any AICueCredentialManaging
     private let generator: any AICueGenerating
@@ -90,7 +115,7 @@ public final class AICueGenerationViewModel: ObservableObject {
         adoptingCandidateID = previewState.adoptingCandidateID
         soundDescription = previewState.soundDescription
         displayName = previewState.displayName
-        target = previewState.target
+        session = previewState.session
         generation = previewState.generation
         failure = previewState.failure
         adoptionOutcome = previewState.adoptionOutcome
@@ -118,12 +143,13 @@ public final class AICueGenerationViewModel: ObservableObject {
         phase == .generating || phase == .adopting || credentialActivity != .idle
     }
 
-    /// Opens one event-scoped composer. Re-entering the same live target is a no-op; changing any
-    /// part of the target invalidates the old candidate identities before the new session appears.
-    public func begin(target: AICueAdoptionTarget) {
-        guard self.target != target else { return }
-        resetComposer(clearTarget: true)
-        self.target = target
+    /// Opens one event-scoped composer. The owner remains solely responsible for resolving the
+    /// current pack and signing a permit; this UI state stores only navigation identity.
+    public func begin(scope: PanelSoundScopeID, event: Event) {
+        let session = AICueComposerSession(scope: scope, event: event)
+        guard self.session != session else { return }
+        resetComposer(clearSession: true)
+        self.session = session
     }
 
     public func updateDescription(_ value: String) {
@@ -252,7 +278,7 @@ public final class AICueGenerationViewModel: ObservableObject {
     }
 
     public func startGeneration(locale: String) {
-        guard target != nil, phase != .generating, phase != .adopting else { return }
+        guard session != nil, phase != .generating, phase != .adopting else { return }
         let deadline = AICueGenerationDeadline.startingNow()
 
         generationTask?.cancel()
@@ -320,18 +346,21 @@ public final class AICueGenerationViewModel: ObservableObject {
         }
     }
 
-    public func adopt(
+    package func adopt(
         candidateID: UUID,
+        permit: SoundPackAdoptionPermit,
         using operation:
-            @escaping @MainActor (AICueAdoptionRequest) async -> Result<
-                AICueAdoptionOutcome, AICueAdoptionError
-            >
+            @escaping @MainActor (
+                AICueCandidate,
+                AICueDisplayName,
+                SoundPackAdoptionPermit
+            ) async -> SoundPacksEditorOperationResult
     ) {
         guard
             phase == .candidatesReady,
             let generation,
             let candidate = generation.candidates.first(where: { $0.id == candidateID }),
-            let target
+            session != nil
         else { return }
 
         let name: AICueDisplayName
@@ -350,12 +379,8 @@ public final class AICueGenerationViewModel: ObservableObject {
         adoptingCandidateID = candidateID
         let revision = sessionRevision
         let generator = self.generator
-        let request = AICueAdoptionRequest(
-            candidate: candidate,
-            displayName: name,
-            target: target)
         adoptionTask = Task { [weak self] in
-            let result = await operation(request)
+            let result = await operation(candidate, name, permit)
             guard let self else {
                 await generator.discard(generationID: generation.id)
                 return
@@ -367,21 +392,30 @@ public final class AICueGenerationViewModel: ObservableObject {
             self.adoptionTask = nil
             self.adoptingCandidateID = nil
             switch result {
-            case .success(let outcome):
+            case .adopted(let outcome):
                 await generator.discard(generationID: generation.id)
                 guard self.sessionRevision == revision else { return }
                 self.generation = nil
-                self.adoptionOutcome = outcome
+                self.adoptionOutcome = AICueComposerAdoptionOutcome(
+                    finalDisplayName: outcome.finalDisplayName)
                 self.phase = .applied
-            case .failure(let error):
+            case .adoptionOrphan(let imported, _):
                 self.phase = .candidatesReady
-                self.failure = .adoption(error)
+                self.failure = .adoption(
+                    .importedButNotBound(fileName: imported.fileName))
+            case .rejected(let failure):
+                self.phase = .candidatesReady
+                self.failure = .adoption(
+                    failure == .targetChanged ? .targetChanged : .rejected)
+            case .imported:
+                self.phase = .candidatesReady
+                self.failure = .adoption(.rejected)
             }
         }
     }
 
     public func endSession() {
-        resetComposer(clearTarget: true)
+        resetComposer(clearSession: true)
     }
 
     public func dismissFailure() {
@@ -404,7 +438,7 @@ public final class AICueGenerationViewModel: ObservableObject {
         phase = .editing
     }
 
-    private func resetComposer(clearTarget: Bool) {
+    private func resetComposer(clearSession: Bool) {
         let adoptionWasRunning = phase == .adopting
         generationTask?.cancel()
         generationTask = nil
@@ -419,7 +453,7 @@ public final class AICueGenerationViewModel: ObservableObject {
         displayName = ""
         failure = nil
         phase = .editing
-        if clearTarget { target = nil }
+        if clearSession { session = nil }
     }
 
     private func discard(_ generation: AICueGeneration) {
@@ -441,10 +475,10 @@ public struct AICueGenerationPreviewState: Sendable, Equatable {
     public let adoptingCandidateID: UUID?
     public let soundDescription: String
     public let displayName: String
-    public let target: AICueAdoptionTarget?
+    public let session: AICueComposerSession?
     public let generation: AICueGeneration?
     public let failure: AICueComposerFailure?
-    public let adoptionOutcome: AICueAdoptionOutcome?
+    public let adoptionOutcome: AICueComposerAdoptionOutcome?
 
     public init(
         providerProfileID: AICueProviderProfileID,
@@ -455,10 +489,10 @@ public struct AICueGenerationPreviewState: Sendable, Equatable {
         adoptingCandidateID: UUID? = nil,
         soundDescription: String = "",
         displayName: String = "",
-        target: AICueAdoptionTarget? = nil,
+        session: AICueComposerSession? = nil,
         generation: AICueGeneration? = nil,
         failure: AICueComposerFailure? = nil,
-        adoptionOutcome: AICueAdoptionOutcome? = nil
+        adoptionOutcome: AICueComposerAdoptionOutcome? = nil
     ) {
         self.providerProfileID = providerProfileID
         self.credentialStatus = credentialStatus
@@ -468,7 +502,7 @@ public struct AICueGenerationPreviewState: Sendable, Equatable {
         self.adoptingCandidateID = adoptingCandidateID
         self.soundDescription = soundDescription
         self.displayName = displayName
-        self.target = target
+        self.session = session
         self.generation = generation
         self.failure = failure
         self.adoptionOutcome = adoptionOutcome

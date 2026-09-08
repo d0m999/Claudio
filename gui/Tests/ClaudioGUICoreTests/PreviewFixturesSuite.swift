@@ -589,7 +589,7 @@ func runPreviewFixturesSuites() {
                 == .stored(verification: .verified, hasPendingReplacement: false),
             "finalized Events fixture 必须呈现 verified credential")
         expect(
-            state.phase == .editing && state.target?.surface == .claudeCode,
+            state.phase == .editing && state.session?.scope.surface == .claudeCode,
             "finalized Events fixture 必须是 Claude surface 的 prompt/editing 阶段")
         expect(
             state.generation == nil && state.failure == nil,

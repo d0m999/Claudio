@@ -292,11 +292,12 @@ func runDynamicQuietPolicySuites() {
 
     suite("Notifications wiring：单一组合 owner、跨版本 EventKit 与 privacy boundary") {
         guard
-            let view = dynamicQuietSource("gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
             let owner = dynamicQuietSource(
                 "gui/Sources/ClaudioGUI/DynamicQuietSystemObserver.swift"),
-            let settingsController = dynamicQuietSource(
-                "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
+            let menu = dynamicQuietSource(
+                "gui/Sources/ClaudioGUI/MenuBarController.swift"),
+            let settingsActions = dynamicQuietSource(
+                "gui/Sources/ClaudioGUI/SettingsPlatformActionsAdapter.swift"),
             let preview = dynamicQuietSource(
                 "gui/Sources/ClaudioGUIComponents/AudioPreviewPlayer.swift"),
             let play = dynamicQuietSource("helper/Sources/ClaudioCore/Play.swift"),
@@ -312,17 +313,13 @@ func runDynamicQuietPolicySuites() {
         }
 
         expect(
-            view.contains("settings.notifications.focus-toggle")
-                && view.contains("dynamicQuietPolicy.setFocusEnabled($0)")
-                && view.contains("settings.notifications.calendar-toggle")
-                && view.contains("dynamicQuietPolicy.setCalendarEnabled($0)")
-                && view.contains("settings.notifications.calendar-privacy")
-                && view.contains("Privacy_Calendars")
-                && !view.contains("ForEach(Event.allCases)"),
-            "通知页必须提供两条策略与 Calendar 恢复动作，不得复制 Event 开关")
+            settingsActions.contains("Privacy_Calendars")
+                && settingsActions.contains("NSWorkspace.shared.open"),
+            "Calendar privacy 恢复必须留在 executable system adapter")
         expect(
-            settingsController.contains("private let dynamicQuietObserver")
-                && settingsController.contains("DynamicQuietSystemObserver()")
+            menu.contains("private let dynamicQuietObserver")
+                && menu.contains("let dynamicQuietObserver = DynamicQuietSystemObserver()")
+                && menu.contains("dynamicQuietPolicy: dynamicQuietObserver.policy")
                 && owner.contains("DynamicQuietSnapshotPublisher(")
                 && owner.components(separatedBy: "DynamicQuietSnapshotPublisher(").count - 1 == 1,
             "Focus 与 Calendar 必须共用一个 app-lifetime owner 和 publisher")

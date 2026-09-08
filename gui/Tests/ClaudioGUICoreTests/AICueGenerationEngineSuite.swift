@@ -206,18 +206,56 @@ private actor GenerationIgnoringCancellationProviderFixture: AICueProvider {
     }
 }
 
-private final class GenerationSlowThirdDurationProbe: AudioDurationProbing, @unchecked Sendable {
+private final class GenerationControlledThirdDurationProbe:
+    AudioDurationProbing, @unchecked Sendable
+{
     private let lock = NSLock()
     private var invocationCount = 0
+    private var thirdProbeEntered = false
+    private var thirdProbeCompleted = false
+    private let thirdProbeRelease = DispatchSemaphore(value: 0)
+
+    var didEnterThirdProbe: Bool { lock.withLock { thirdProbeEntered } }
+    var didCompleteThirdProbe: Bool { lock.withLock { thirdProbeCompleted } }
 
     func probeDuration(of fileURL: URL) -> TimeInterval? {
         let invocation = lock.withLock {
             invocationCount += 1
             return invocationCount
         }
-        if invocation == 3 { Thread.sleep(forTimeInterval: 0.3) }
+        if invocation == 3 {
+            lock.withLock { thirdProbeEntered = true }
+            thirdProbeRelease.wait()
+            lock.withLock { thirdProbeCompleted = true }
+        }
         return 1
     }
+
+    func releaseThirdProbe() {
+        thirdProbeRelease.signal()
+    }
+}
+
+@MainActor
+private func waitForThirdDurationProbeToEnter(
+    _ probe: GenerationControlledThirdDurationProbe
+) async -> Bool {
+    for _ in 0..<2_000 {
+        if probe.didEnterThirdProbe { return true }
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+    return probe.didEnterThirdProbe
+}
+
+@MainActor
+private func waitForThirdDurationProbeToComplete(
+    _ probe: GenerationControlledThirdDurationProbe
+) async {
+    for _ in 0..<2_000 {
+        if probe.didCompleteThirdProbe { return }
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+    expect(false, "释放后的第三次 duration probe 必须在 safety deadline 内完成")
 }
 
 private actor GenerationSlowRetrySleeperFixture: AICueRetrySleeping {
@@ -314,7 +352,9 @@ func runAICueGenerationEngineSuites() async {
                 locale: "zh-Hans",
                 providerProfileID: .elevenLabsGlobal,
                 deadline: .startingNow())
-            expect(generation.candidates.map(\.variant) == [.clear, .brisk, .restrained], "候选必须稳定按 A/B/C 返回")
+            expect(
+                generation.candidates.map(\.variant) == [.clear, .brisk, .restrained],
+                "候选必须稳定按 A/B/C 返回")
             expect(generation.candidates.count == 3, "不能展示少于或多于三个候选")
             expect(generation.profileID == .elevenLabsGlobal, "generation 必须冻结 profile identity")
             expect(
@@ -335,7 +375,9 @@ func runAICueGenerationEngineSuites() async {
             expect(posixPermissions(at: tempRoot) == 0o700, "临时根目录必须是 0700")
             expect(posixPermissions(at: directory) == 0o700, "generation 目录必须是 0700")
             expect(
-                generation.candidates.allSatisfy { posixPermissions(at: $0.asset.fileURL) == 0o600 },
+                generation.candidates.allSatisfy {
+                    posixPermissions(at: $0.asset.fileURL) == 0o600
+                },
                 "每个临时候选必须是 0600")
         }
     }
@@ -548,25 +590,37 @@ func runAICueGenerationEngineSuites() async {
                 .success(audio), .success(audio), .success(audio),
             ])
             let tempRoot = root.appendingPathComponent("slow-third-probe", isDirectory: true)
+            let probe = GenerationControlledThirdDurationProbe()
             let engine = AICueGenerationEngine(
                 vault: GenerationVaultFixture(configured: true),
                 provider: provider,
                 temporaryRoot: tempRoot,
-                durationProbe: GenerationSlowThirdDurationProbe())
-            let start = Date()
-            var deadlineExceeded = false
-            do {
-                _ = try await engine.generate(
+                durationProbe: probe)
+            let generation = Task {
+                try await engine.generate(
                     description: "短促木琴音效",
                     locale: "zh-Hans",
                     providerProfileID: .elevenLabsGlobal,
                     deadline: generationDeadline(durationNanoseconds: 100_000_000))
+            }
+            guard await waitForThirdDurationProbeToEnter(probe) else {
+                generation.cancel()
+                probe.releaseThirdProbe()
+                expect(false, "可观测 probe 必须在 safety deadline 前进入第三次校验")
+                return
+            }
+            var deadlineExceeded = false
+            do {
+                _ = try await generation.value
             } catch AICueGenerationError.deadlineExceeded {
                 deadlineExceeded = true
             } catch {}
             expect(deadlineExceeded, "第三项本地校验也受同一 absolute deadline")
-            expect(Date().timeIntervalSince(start) < 0.25, "慢 probe 不得拖过调用方硬上限")
-            try? await Task.sleep(nanoseconds: 350_000_000)
+            expect(
+                probe.didEnterThirdProbe && !probe.didCompleteThirdProbe,
+                "deadline race 必须在迟到 probe 完成前先结束调用方")
+            probe.releaseThirdProbe()
+            await waitForThirdDurationProbeToComplete(probe)
             expect(generationDirectories(in: tempRoot).isEmpty, "迟到 probe 不得发布 candidates")
         }
     }
@@ -752,10 +806,14 @@ func runAICueGenerationEngineSuites() async {
                 deadline: .startingNow())
             await engine.discard(generationID: first.id)
             expect(
-                first.candidates.allSatisfy { !FileManager.default.fileExists(atPath: $0.asset.fileURL.path) },
+                first.candidates.allSatisfy {
+                    !FileManager.default.fileExists(atPath: $0.asset.fileURL.path)
+                },
                 "丢弃必须删除该 generation 的全部候选")
             expect(
-                second.candidates.allSatisfy { FileManager.default.fileExists(atPath: $0.asset.fileURL.path) },
+                second.candidates.allSatisfy {
+                    FileManager.default.fileExists(atPath: $0.asset.fileURL.path)
+                },
                 "丢弃一个 generation 不能误删另一个")
         }
     }

@@ -144,11 +144,11 @@ func runActivityDiagnosticsSuites() async {
             encoding: .utf8)
         let activityView = try? String(
             contentsOf: root.appendingPathComponent(
-                "gui/Sources/ClaudioGUI/ActivityDiagnosticsView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/ActivityDiagnosticsView.swift"),
             encoding: .utf8)
         let settings = try? String(
             contentsOf: root.appendingPathComponent(
-                "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             encoding: .utf8)
         expect(
             adapter?.contains("LocalActivitySummaryStore.production") == true
@@ -183,7 +183,7 @@ func runActivityDiagnosticsSuites() async {
         expect(
             !FileManager.default.fileExists(
                 atPath: root.appendingPathComponent(
-                    "gui/Sources/ClaudioGUI/UsageSettingsView.swift"
+                    "gui/Sources/ClaudioSettingsPresentation/UsageSettingsView.swift"
                 ).path),
             "the receipt-history settings view must be retired")
     }

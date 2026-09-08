@@ -26,22 +26,6 @@ public enum AICueAdoptionEligibility: Sendable, Equatable {
     case ineligible(AICueAdoptionIneligibility)
 }
 
-public struct AICueAdoptionRequest: Sendable, Equatable {
-    public let candidate: AICueCandidate
-    public let displayName: AICueDisplayName
-    public let target: AICueAdoptionTarget
-
-    public init(
-        candidate: AICueCandidate,
-        displayName: AICueDisplayName,
-        target: AICueAdoptionTarget
-    ) {
-        self.candidate = candidate
-        self.displayName = displayName
-        self.target = target
-    }
-}
-
 /// Pure fail-closed proof that a pack-wide manifest mutation affects only the requested surface.
 public func aiCueAdoptionEligibility(
     surface: HostSurfaceID?,
@@ -126,16 +110,4 @@ public struct AICueAdoptionOutcome: Sendable, Equatable {
         self.importedFile = importedFile
         self.finalDisplayName = finalDisplayName
     }
-}
-
-public enum AICuePostImportFailure: Sendable, Equatable {
-    case ineligible(AICueAdoptionIneligibility)
-    case manifest(ManifestBindError)
-}
-
-public enum AICueAdoptionError: Error, Sendable, Equatable {
-    case ineligible(AICueAdoptionIneligibility)
-    case importRejected(DropRejectionReason)
-    case importUnavailable(SoundPacksWindowAudioActionError)
-    case importedButNotBound(imported: ImportedAudioFile, reason: AICuePostImportFailure)
 }

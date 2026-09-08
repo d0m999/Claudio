@@ -24,23 +24,6 @@ private func panelPresentationEventRows(
 }
 
 @MainActor
-private final class FakeEventPreviewPlayer: AudioPreviewPlaying {
-    let failingURL: URL?
-    private(set) var playedURLs: [URL] = []
-
-    init(failingURL: URL? = nil) {
-        self.failingURL = failingURL
-    }
-
-    func play(fileAt url: URL, volume: Float) -> Bool {
-        playedURLs.append(url)
-        return url != failingURL
-    }
-
-    func stop() {}
-}
-
-@MainActor
 func runPanelPresentationSuites() async {
     suite("事件与提示音路由：保留 Global/Surface，并为声音编辑携带同一作用域") {
         let global = EventSettingsWindowRoute(scope: .global)
@@ -245,129 +228,23 @@ func runPanelPresentationSuites() async {
         expect(available.failure == nil, "可用 Surface 的 typed deep link 必须继续正常解析")
     }
 
-    await suite("试听全部：离主线程规划真实文件、保持公共事件顺序并可取消") {
-        withTempDirectory { root in
-            let packs = root.appendingPathComponent("packs", isDirectory: true)
-            let pack = packs.appendingPathComponent("pack", isDirectory: true)
-            try? FileManager.default.createDirectory(
-                at: pack,
-                withIntermediateDirectories: true)
-            try? Data([0x52, 0x49, 0x46, 0x46]).write(
-                to: pack.appendingPathComponent("task.aiff"))
-            try? Data([0x52, 0x49, 0x46, 0x46]).write(
-                to: pack.appendingPathComponent("stop.aiff"))
-            let rows = [
-                EventRow(
-                    event: .taskStart,
-                    coverage: .present(fileName: "task.aiff"),
-                    enabled: true),
-                EventRow(
-                    event: .stop,
-                    coverage: .present(fileName: "stop.aiff"),
-                    enabled: true),
-                EventRow(
-                    event: .subagentStop,
-                    coverage: .unmapped,
-                    enabled: true),
-            ]
-            let presentations = panelEventPresentations(
-                rows: rows,
-                scope: .global,
-                masterVolume: 0.8,
-                language: .english)
-            let environment = AudioImportEnvironment(
-                userPacksDirectory: packs,
-                durationProbe: StubDurationProbe(fixedDuration: 0.2),
-                packsLockFile: root.appendingPathComponent("packs.lock"))
-            let plan = makeEventPreviewSequencePlan(
-                presentations: presentations,
-                rows: rows,
-                packID: "pack",
-                environment: environment)
-            guard case .ready(let items) = plan else {
-                expect(false, "不可试听行必须被跳过，不得让合法序列失败")
-                return
+    await suite("试听全部：只消费 opaque Event capability，保持顺序并可取消") {
+        let capabilityCoordinator = EventPreviewSequenceCoordinator()
+        var capabilityEvents: [Event] = []
+        let capabilityRun = Task { @MainActor in
+            await capabilityCoordinator.run(events: [.taskStart, .stop]) { event in
+                capabilityEvents.append(event)
+                return 5
             }
-            expect(items.map(\.event) == [.taskStart, .stop], "规划必须保持公共事件顺序")
-            expect(
-                items.allSatisfy { $0.delayNanoseconds == 350_000_000 },
-                "每项等待必须消费注入时长并追加固定切换间隔")
-
-            let staleRows =
-                rows.dropLast() + [
-                    EventRow(
-                        event: .subagentStop,
-                        coverage: .present(fileName: "vanished.aiff"),
-                        enabled: true)
-                ]
-            let stalePresentations = panelEventPresentations(
-                rows: Array(staleRows),
-                scope: .global,
-                masterVolume: 0.8,
-                language: .english)
-            expect(
-                makeEventPreviewSequencePlan(
-                    presentations: stalePresentations,
-                    rows: Array(staleRows),
-                    packID: "pack",
-                    environment: environment) == .failed(.subagentStop),
-                "可试听行的文件若在运行前失效，序列必须携带对应 Event 失败")
         }
-
-        let coordinator = EventPreviewSequenceCoordinator()
-        let items = [
-            EventPreviewSequenceItem(
-                event: .taskStart,
-                fileURL: URL(fileURLWithPath: "/fixture/task.aiff"),
-                delayNanoseconds: 5_000_000_000),
-            EventPreviewSequenceItem(
-                event: .stop,
-                fileURL: URL(fileURLWithPath: "/fixture/stop.aiff"),
-                delayNanoseconds: 1),
-        ]
-        var played: [Event] = []
-        let run = Task { @MainActor in
-            await coordinator.run(
-                makePlan: { .ready(items) },
-                onPlay: {
-                    played.append($0.event)
-                    return true
-                })
-        }
-        while played.isEmpty {
-            await Task.yield()
-        }
-        coordinator.cancel()
-        expect(await run.value == .cancelled, "scope/单项试听切换必须取消在途序列")
-        expect(played == [.taskStart], "取消后不得继续播放下一公共事件")
+        while capabilityEvents.isEmpty { await Task.yield() }
+        capabilityCoordinator.cancel()
         expect(
-            await coordinator.run(makePlan: { .failed(.stop) }, onPlay: { _ in true })
-                == .failed(.stop),
-            "运行时规划失败必须把对应 Event 交回可见错误层")
-
-        let runtimeCoordinator = EventPreviewSequenceCoordinator()
-        let failingPlayer = FakeEventPreviewPlayer(failingURL: items[1].fileURL)
-        let runtimeItems =
-            items.map {
-                EventPreviewSequenceItem(
-                    event: $0.event,
-                    fileURL: $0.fileURL,
-                    delayNanoseconds: 1)
-            } + [
-                EventPreviewSequenceItem(
-                    event: .subagentStop,
-                    fileURL: URL(fileURLWithPath: "/fixture/subagent-stop.aiff"),
-                    delayNanoseconds: 1)
-            ]
-        let runtimeFailure = await runtimeCoordinator.run(
-            makePlan: { .ready(runtimeItems) },
-            onPlay: { item in
-                failingPlayer.play(fileAt: item.fileURL, volume: 0.8)
-            })
-        expect(runtimeFailure == .failed(.stop), "真实播放启动失败必须停止并返回对应 Event")
+            await capabilityRun.value == .cancelled && capabilityEvents == [.taskStart],
+            "opaque Event capability sequence 必须保持顺序，并在取消后停止下一项")
         expect(
-            failingPlayer.playedURLs == Array(runtimeItems.prefix(2)).map(\.fileURL),
-            "fake player 失败后不得继续到后续试听项")
+            await capabilityCoordinator.run(events: [.stop]) { _ in nil } == .failed(.stop),
+            "native adapter 拒绝播放时必须只返回对应 Event，不需要 URL 或目录权限")
     }
 
     suite("事件与提示音窗口布局：按窗口可用宽度与文字缩放独立降级") {

@@ -107,6 +107,14 @@ public final class PanelConfigController: ObservableObject {
     private var configFactRefreshCancellable: AnyCancellable?
     private var baseConfig: ClaudioConfig
 
+    #if DEBUG
+    /// State-gallery controllers own an injected projection and must not replace it with a
+    /// `/dev/null` disk reload when their production view is mounted by a compiled fixture.
+    package var usesInjectedPreviewState: Bool {
+        !readSource.readsSharedSnapshot
+    }
+    #endif
+
     public convenience init(
         configFile: URL,
         lockFile: URL,

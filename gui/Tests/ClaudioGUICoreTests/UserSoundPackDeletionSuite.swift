@@ -331,6 +331,27 @@ func runUserSoundPackDeletionSuites() {
                 "lockBusy 后用户声音包必须原样保留")
         }
     }
+
+    suite("User Sound Pack 删除：Release 测试 seam 保持 Xcode 16.4 Sendable 合同") {
+        let sourceURL = guiTestRepositoryRoot().appendingPathComponent(
+            "gui/Sources/ClaudioGUICore/UserSoundPackDeletion.swift")
+        guard let source = try? String(contentsOf: sourceURL, encoding: .utf8) else {
+            expect(false, "必须能读取 UserSoundPackDeletion.swift 以检查 Release 条件编译合同")
+            return
+        }
+        let code = strippingComments(source).code.filter { !$0.isWhitespace }
+        let explicitDeclaration =
+            "letafterIsolation:@MainActor@Sendable(URL)throws->Void="
+
+        // The DEBUG value gets its type from the injectable seam, while the Release no-op has no
+        // such context. Xcode 16.4 rejects the latter if either branch returns to inferred type.
+        expect(
+            code.components(separatedBy: explicitDeclaration).count - 1 == 2,
+            "DEBUG 与 Release 分支都必须显式声明同一个 @MainActor @Sendable hook 类型")
+        expect(
+            code.contains("afterIsolation:@MainActor@Sendable(URL)throws->Void"),
+            "锁内 private callee 必须消费与条件编译两侧一致的 Sendable hook 类型")
+    }
 }
 
 private struct DeletionConfigFixture {

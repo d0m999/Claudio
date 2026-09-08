@@ -4,7 +4,13 @@ import ClaudioGUICore
 func runRetainedWindowHandbackTrackerSuites() {
     suite("RetainedWindowHandbackTracker：只消费可见期间最近一次外部激活，关闭后不回填旧债务") {
         var tracker = RetainedWindowHandbackTracker<String>()
-        tracker.beginPresentation()
+        tracker.beginPresentation(returnTo: "App Before Presentation")
+
+        expect(
+            tracker.consumeOnClose() == "App Before Presentation",
+            "没有后续外部 activation 时必须交回打开 retained window 前的原始 app")
+
+        tracker.beginPresentation(returnTo: "App Before Presentation")
 
         tracker.noteExternalActivation(
             "hidden-app", isWindowVisible: false, isCurrentApplication: false)

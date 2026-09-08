@@ -99,6 +99,7 @@ struct ActivityDiagnosticsView: View {
                     secondaryButton: .cancel(Text(l10n.text(.commonCancel))))
             }
         }
+        .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.usage))
     }
 
     private var summaryCards: some View {

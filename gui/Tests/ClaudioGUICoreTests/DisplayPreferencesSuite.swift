@@ -6,7 +6,8 @@ import Foundation
 func runDisplayPreferencesSuites() {
     suite("Display：只保留菜单栏活动状态点与固定紧凑布局") {
         guard
-            let settings = displaySource("gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+            let settings = displaySource(
+                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let preferences = displaySource("gui/Sources/ClaudioGUICore/SettingsPreferences.swift"),
             let panel = displaySource("gui/Sources/ClaudioGUI/PanelView.swift")
         else {
@@ -36,8 +37,8 @@ func runDisplayPreferencesSuites() {
     suite("Display：旧 UserDefaults 值停止读取且不新增迁移") {
         let sourcePaths = [
             "gui/Sources/ClaudioGUI/PanelView.swift",
-            "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift",
-            "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift",
+            "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift",
+            "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift",
             "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift",
         ]
         for path in sourcePaths {

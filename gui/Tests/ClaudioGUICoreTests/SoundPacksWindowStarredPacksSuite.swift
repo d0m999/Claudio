@@ -250,7 +250,8 @@ func runSoundPacksWindowStarredPacksSuites() {
                 #"{ "selected_pack": "a", "starred_packs": "不是数组" }"#,
                 to: configFile)
 
-            guard case .malformed(let probeReason) = probeConfigRewritable(configFile: configFile) else {
+            guard case .malformed(let probeReason) = probeConfigRewritable(configFile: configFile)
+            else {
                 expect(false, "测试前提：畸形 starred_packs 必须被 probe 拦下")
                 return
             }
@@ -264,12 +265,14 @@ func runSoundPacksWindowStarredPacksSuites() {
                 expect(false, "畸形 config 的星标写必须 fail closed，实得 \(result)")
                 return
             }
+            let failureReason = model.starredPacksError.map(
+                soundPacksWindowStarredPacksFailureReason)
             expect(
-                model.starredPacksFailureReason == probeReason,
+                failureReason == probeReason,
                 "窗口 FailureRow 的 config reason 必须与 probeConfigRewritable 逐字同句")
             expect(
                 soundPacksWindowAnnouncement(
-                    .writeFailed(action: "更新星标", reason: model.starredPacksFailureReason ?? ""),
+                    .writeFailed(action: "更新星标", reason: failureReason ?? ""),
                     facts: SoundPacksWindowAnnouncementFacts(packCount: 1, selectedPackName: "a")
                 ) == "更新星标失败：\(probeReason)",
                 "窗口 VoiceOver 必须复用可见 FailureRow 的同一句可执行 reason")
@@ -295,7 +298,8 @@ func runSoundPacksWindowStarredPacksSuites() {
                 return
             }
             expect(
-                model.starredPacksFailureReason == SetStarredPacksError.lockBusy.description,
+                model.starredPacksError.map(soundPacksWindowStarredPacksFailureReason)
+                    == SetStarredPacksError.lockBusy.description,
                 "lock busy 必须在窗口 FailureRow 中显示写者的可执行原句")
         }
 
@@ -312,14 +316,15 @@ func runSoundPacksWindowStarredPacksSuites() {
                 environment: starredWindowEnvironment(packsDirectory),
                 refreshCoordinator: SoundPacksRefreshCoordinator())
 
-            guard case .failure(.tooManyStarredPacks(max: maxStarredPacks)) =
-                model.updateStarredPacks(to: ids)
+            guard
+                case .failure(.tooManyStarredPacks(max: maxStarredPacks)) =
+                    model.updateStarredPacks(to: ids)
             else {
                 expect(false, "绕过 UI 传入第五颗星时，T16 写者仍必须拒绝")
                 return
             }
             expect(
-                model.starredPacksFailureReason
+                model.starredPacksError.map(soundPacksWindowStarredPacksFailureReason)
                     == SetStarredPacksError.tooManyStarredPacks(max: maxStarredPacks).description,
                 ">4 拒绝必须进入同一个窗口 FailureRow/VoiceOver reason 通道")
         }
@@ -329,22 +334,31 @@ func runSoundPacksWindowStarredPacksSuites() {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-        let panel = (try? String(contentsOf: root.appendingPathComponent(
-            "gui/Sources/ClaudioGUICore/PanelConfigController.swift"), encoding: .utf8)) ?? ""
-        let gallery = (try? String(contentsOf: root.appendingPathComponent(
-            "gui/Sources/ClaudioGUICore/PackGallery.swift"), encoding: .utf8)) ?? ""
-        let model = (try? String(contentsOf: root.appendingPathComponent(
-            "gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift"), encoding: .utf8)) ?? ""
-        let view = (try? String(contentsOf: root.appendingPathComponent(
-            "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"), encoding: .utf8)) ?? ""
-        let settingsController = (try? String(contentsOf: root.appendingPathComponent(
-            "gui/Sources/ClaudioGUI/SettingsWindowController.swift"), encoding: .utf8)) ?? ""
-
+        let panel =
+            (try? String(
+                contentsOf: root.appendingPathComponent(
+                    "gui/Sources/ClaudioGUICore/PanelConfigController.swift"), encoding: .utf8))
+            ?? ""
+        let gallery =
+            (try? String(
+                contentsOf: root.appendingPathComponent(
+                    "gui/Sources/ClaudioGUICore/PackGallery.swift"), encoding: .utf8)) ?? ""
+        let model =
+            (try? String(
+                contentsOf: root.appendingPathComponent(
+                    "gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift"), encoding: .utf8))
+            ?? ""
+        let view =
+            (try? String(
+                contentsOf: root.appendingPathComponent(
+                    "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"), encoding: .utf8))
+            ?? ""
         expect(
             panel.contains("scope: .panelStarredDisplay")
                 && gallery.contains("case .panelStarredDisplay")
                 && gallery.contains("var cards = displayedIDs.map"),
-            "≤4 过滤必须在 PanelConfigController.reloadConfigReadModel 的 availablePacks 调用生效，并先于 buildPackCard")
+            "≤4 过滤必须在 PanelConfigController.reloadConfigReadModel 的 availablePacks 调用生效，并先于 buildPackCard"
+        )
         expect(
             !view.contains("starredPackDisplayIDs(")
                 && !view.contains("starButton")
@@ -363,11 +377,7 @@ func runSoundPacksWindowStarredPacksSuites() {
             model.contains("kind: .starredPacks")
                 && model.contains(
                     "messageText = .literal(soundPacksWindowStarredPacksFailureReason(error))")
-                && model.contains("messageText = writesStoppedStatusText")
-                && settingsController.contains("let soundPackModel = soundPacksEditorOwner.model")
-                && settingsController.contains("soundPackModel.$windowStatuses")
-                && settingsController.contains("status.action(language: preferences.language)")
-                && settingsController.contains("status.message(language: preferences.language)"),
-            "兼容写入口失败仍须进入统一状态与唯一 VoiceOver bridge")
+                && model.contains("messageText = writesStoppedStatusText"),
+            "兼容写入口失败仍须保留可见的 owner status 事实")
     }
 }

@@ -706,24 +706,31 @@ public final class ActivityDiagnosticsModel: ObservableObject {
     }
 
     #if DEBUG
-    public convenience init(previewPresentation: ActivityDiagnosticsPresentation) {
+    public convenience init(
+        previewPresentation: ActivityDiagnosticsPresentation,
+        previewLoadResult: ActivityDiagnosticsLoadResult? = nil,
+        previewClearActivityResult:
+            Result<ActivityDiagnosticsLoadResult, ActivityDiagnosticsFailure>? = nil,
+        previewIsRefreshing: Bool = false,
+        previewFeedback: ActivityDiagnosticsFeedback? = nil
+    ) {
+        let fallbackLoadResult = ActivityDiagnosticsLoadResult(
+            readResult: LocalActivitySummaryReadResult(state: .missing),
+            log: previewPresentation.log)
         self.init(
             initialPresentation: previewPresentation,
             operations: ActivityDiagnosticsOperations(
                 load: {
-                    ActivityDiagnosticsLoadResult(
-                        readResult: LocalActivitySummaryReadResult(state: .missing),
-                        log: previewPresentation.log)
+                    previewLoadResult ?? fallbackLoadResult
                 },
                 clearActivity: {
-                    .success(
-                        ActivityDiagnosticsLoadResult(
-                            readResult: LocalActivitySummaryReadResult(state: .missing),
-                            log: previewPresentation.log))
+                    previewClearActivityResult ?? .success(fallbackLoadResult)
                 },
                 clearLog: { .success(previewPresentation.log) },
                 revealLog: { true },
                 copyLogPath: { true }))
+        isRefreshing = previewIsRefreshing
+        feedback = previewFeedback
     }
     #endif
 

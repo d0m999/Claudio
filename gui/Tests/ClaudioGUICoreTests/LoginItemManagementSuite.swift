@@ -30,26 +30,22 @@ func runLoginItemManagementSuites() {
     suite("Login item adapter：首次读取和刷新只投影系统事实") {
         var status = LoginItemRegistrationState.disabled
         var setCalls: [Bool] = []
-        var settingsOpenCount = 0
         let adapter = makeLoginItemServiceAdapter(
             status: { status },
             setEnabled: { enabled in
                 setCalls.append(enabled)
                 return enabled ? .enabled : .disabled
-            },
-            openSystemSettings: { settingsOpenCount += 1 })
+            })
         var projection = makeLoginItemSettingsProjection(registration: adapter.status())
 
         expect(projection.registration == .disabled, "初始化必须只读未注册事实")
-        expect(setCalls.isEmpty && settingsOpenCount == 0, "首次进入不得注册或打开系统设置")
+        expect(setCalls.isEmpty, "首次进入不得注册")
         status = .requiresApproval
         projection = makeLoginItemSettingsProjection(registration: adapter.status())
         expect(
             projection.registration == .requiresApproval
-                && setCalls.isEmpty && settingsOpenCount == 0,
+                && setCalls.isEmpty,
             "刷新必须投影等待批准且无副作用")
-        adapter.openSystemSettings?()
-        expect(settingsOpenCount == 1, "系统设置只能由明确用户动作打开")
     }
 
     suite("Login item adapter：成功后采用返回事实，失败保留旧状态并可重试") {
@@ -111,7 +107,6 @@ func runLoginItemManagementSuites() {
         var status = notRegisteredValue
         var registerCalls = 0
         var unregisterCalls = 0
-        var settingsCalls = 0
         var shouldReject = false
         let adapter = makeModernLoginItemServiceAdapter(
             status: { status },
@@ -128,17 +123,13 @@ func runLoginItemManagementSuites() {
                 unregisterCalls += 1
                 if shouldReject { throw LoginItemOperationFailureReason.systemRejected }
                 status = notRegisteredValue
-            },
-            openSystemSettings: { settingsCalls += 1 })
+            })
         var projection = makeLoginItemSettingsProjection(registration: adapter.status())
 
         projection = projectLoginItemRequest(true, from: projection, using: adapter)
         expect(
             registerCalls == 1 && projection.registration == .requiresApproval,
             "modern register 成功后必须重读 requiresApproval 系统状态")
-        adapter.openSystemSettings?()
-        expect(settingsCalls == 1, "modern 恢复动作必须调用注入的系统设置入口")
-
         shouldReject = true
         projection = projectLoginItemRequest(false, from: projection, using: adapter)
         expect(
@@ -237,14 +228,45 @@ func runLoginItemManagementSuites() {
         }
     }
 
+    suite("Login item projector：跨 Xcode toolchain 保持显式 MainActor Sendable closure") {
+        let sourceURL = guiTestRepositoryRoot().appendingPathComponent(
+            "gui/Sources/ClaudioGUICore/LoginItemManagement.swift")
+        guard let source = try? String(contentsOf: sourceURL, encoding: .utf8) else {
+            expect(false, "读不到 LoginItemManagement.swift")
+            return
+        }
+        let scanned = strippingComments(source)
+        let code = scanned.codeWithoutStringLiterals
+        guard scanned.unmodeledConstructs.isEmpty,
+            let modern = bracedBlock(
+                after: "package func makeModernLoginItemServiceAdapter", in: code),
+            let legacy = bracedBlock(
+                after: "package func makeLegacyLoginItemServiceAdapter", in: code)
+        else {
+            expect(false, "必须能完整解析 modern/legacy Login item factories")
+            return
+        }
+        let typedProjector =
+            "let projectedStatus: @MainActor @Sendable () -> LoginItemRegistrationState = {"
+        expect(
+            modern.contains(typedProjector)
+                && legacy.contains(typedProjector)
+                && !modern.contains("func projectedStatus")
+                && !legacy.contains("func projectedStatus"),
+            "两处 projector 必须显式 typed 为 @MainActor @Sendable closure，禁止退回 nested func")
+    }
+
     suite("Production login item wiring：modern/legacy API 与 macOS 12 floor 完整") {
         let root = guiTestRepositoryRoot()
         let adapterURL = root.appendingPathComponent(
             "gui/Sources/ClaudioGUI/LoginItemServiceAdapter.swift")
+        let actionsURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioGUI/SettingsPlatformActionsAdapter.swift")
         let packageURL = root.appendingPathComponent("gui/Package.swift")
         let helperURL = root.appendingPathComponent(
             "gui/Sources/ClaudioLoginItem/main.swift")
         guard let adapter = try? String(contentsOf: adapterURL, encoding: .utf8),
+            let actions = try? String(contentsOf: actionsURL, encoding: .utf8),
             let package = try? String(contentsOf: packageURL, encoding: .utf8),
             let helper = try? String(contentsOf: helperURL, encoding: .utf8)
         else {
@@ -257,13 +279,13 @@ func runLoginItemManagementSuites() {
                 && adapter.contains("makeModernLoginItemServiceAdapter")
                 && adapter.contains("register: { try service.register() }")
                 && adapter.contains("unregister: { try service.unregister() }")
-                && adapter.contains("SMAppService.openSystemSettingsLoginItems()")
+                && actions.contains("SMAppService.openSystemSettingsLoginItems()")
                 && adapter.contains("service.status.rawValue")
                 && adapter.contains("SMAppService.Status.notRegistered.rawValue")
                 && adapter.contains("SMAppService.Status.enabled.rawValue")
                 && adapter.contains("SMAppService.Status.requiresApproval.rawValue")
                 && adapter.contains("SMAppService.Status.notFound.rawValue"),
-            "macOS 13+ 必须投影 mainApp 全状态并提供正确系统设置恢复动作")
+            "macOS 13+ 必须投影 mainApp 全状态，恢复动作由 Settings native adapter 拥有")
         expect(
             adapter.contains("makeLegacyLoginItemServiceAdapter")
                 && adapter.contains("SMLoginItemSetEnabled")
@@ -278,30 +300,6 @@ func runLoginItemManagementSuites() {
                 && helper.contains("application.run()")
                 && helper.contains("exit(error == nil ? EXIT_SUCCESS : EXIT_FAILURE)"),
             "最低版本必须保持 macOS 12，内嵌 helper 必须启动主 app 并在回调后退出")
-    }
-
-    suite("Settings 生命周期：从 Login Items 设置返回后刷新可见页面") {
-        let root = guiTestRepositoryRoot()
-        let controllerURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
-        guard let controller = try? String(contentsOf: controllerURL, encoding: .utf8) else {
-            expect(false, "读不到 SettingsWindowController production wiring")
-            return
-        }
-        let scanned = strippingComments(controller)
-        let code = scanned.codeWithoutStringLiterals
-        guard
-            scanned.unmodeledConstructs.isEmpty,
-            let keyHandler = bracedBlock(after: "func windowDidBecomeKey", in: code),
-            let identityGuard = keyHandler.range(of: "keyWindow === window"),
-            let refresh = keyHandler.range(of: "loginItemSettings.refresh()")
-        else {
-            expect(false, "必须能完整解析 Settings 重获 key 状态后的刷新接线")
-            return
-        }
-        expect(
-            identityGuard.lowerBound < refresh.lowerBound,
-            "必须先确认单一 retained Settings window 重获 key 状态，再重读登录项系统事实")
     }
 
     suite("Login item 人工门禁：真实签名登录/重启与自动证据分离") {

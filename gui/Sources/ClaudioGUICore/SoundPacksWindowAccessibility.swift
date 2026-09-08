@@ -181,33 +181,6 @@ public final class SoundPacksWindowFocusCoordinator: ObservableObject {
     }
 }
 
-/// Tracks status announcements across the AppKit bridge's asynchronous key-window recheck.
-/// A revision is consumed only after `NSAccessibility.post` is actually reached; an attempt that
-/// loses key status remains retryable when the retained window becomes key again.
-public struct SoundPacksWindowStatusAnnouncementTracker: Sendable, Equatable {
-    public private(set) var lastPostedRevision = 0
-    private var inFlightRevisions: Set<Int> = []
-
-    public init() {}
-
-    public mutating func beginAttempt(revision: Int, isWindowKey: Bool) -> Bool {
-        guard
-            isWindowKey,
-            revision > lastPostedRevision,
-            !inFlightRevisions.contains(revision)
-        else { return false }
-        inFlightRevisions.insert(revision)
-        return true
-    }
-
-    public mutating func finishAttempt(revision: Int, didPost: Bool) {
-        inFlightRevisions.remove(revision)
-        if didPost {
-            lastPostedRevision = max(lastPostedRevision, revision)
-        }
-    }
-}
-
 /// Window-specific Dynamic Type tiers. They describe this standard window, not the panel's width
 /// ladder.
 public enum SoundPacksWindowTypeSizeTier: Sendable, CaseIterable {
