@@ -139,6 +139,76 @@ func runReleaseLayoutSuites() {
         }
     }
 
+    suite("Factory Pack 组装拒绝复用非空目标目录") {
+        let root = guiTestRepositoryRoot()
+        let script = root.appendingPathComponent("scripts/copy-bundled-packs.sh")
+
+        withTempDirectory { temporary in
+            let destination = temporary.appendingPathComponent("destination", isDirectory: true)
+            let stalePack = destination.appendingPathComponent("night-console", isDirectory: true)
+            let staleMarker = stalePack.appendingPathComponent("stale.txt")
+            try? FileManager.default.createDirectory(
+                at: stalePack, withIntermediateDirectories: true)
+            try? Data("stale candidate".utf8).write(to: staleMarker)
+
+            let result = runTestProcess(
+                executableURL: URL(fileURLWithPath: "/bin/bash"),
+                arguments: [
+                    script.path,
+                    root.appendingPathComponent("packs").path,
+                    destination.path,
+                ])
+
+            expect(result.status != 0, "非空 Factory Pack 目标必须失败关闭")
+            expect(
+                result.output.contains("destination must be empty"),
+                "拒绝信息必须明确说明目标目录非空：\(result.output)")
+            expect(
+                FileManager.default.fileExists(atPath: staleMarker.path),
+                "失败关闭不应改写已有目标内容")
+            expect(
+                !FileManager.default.fileExists(
+                    atPath: destination.appendingPathComponent("minimal-chime").path),
+                "拒绝复用后不得部分复制当前批准包")
+        }
+    }
+
+    suite("Factory Pack 组装拒绝带尾随斜杠的目标符号链接") {
+        let root = guiTestRepositoryRoot()
+        let script = root.appendingPathComponent("scripts/copy-bundled-packs.sh")
+
+        withTempDirectory { temporary in
+            let target = temporary.appendingPathComponent("target", isDirectory: true)
+            let destinationLink = temporary.appendingPathComponent(
+                "destination-link", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(
+                    at: target, withIntermediateDirectories: true)
+                try FileManager.default.createSymbolicLink(
+                    at: destinationLink, withDestinationURL: target)
+            } catch {
+                expect(false, "无法创建目标符号链接夹具：\(error)")
+                return
+            }
+
+            let result = runTestProcess(
+                executableURL: URL(fileURLWithPath: "/bin/bash"),
+                arguments: [
+                    script.path,
+                    root.appendingPathComponent("packs").path,
+                    destinationLink.path + "/",
+                ])
+
+            expect(result.status != 0, "带尾随斜杠的目标符号链接必须失败关闭")
+            expect(
+                result.output.contains("destination must be a real directory"),
+                "拒绝信息必须明确说明目标不是实际目录：\(result.output)")
+            let targetEntries =
+                (try? FileManager.default.contentsOfDirectory(atPath: target.path)) ?? []
+            expect(targetEntries.isEmpty, "拒绝目标符号链接后不得写入链接目标")
+        }
+    }
+
     suite("Factory Pack 批准选择异常时失败关闭") {
         let root = guiTestRepositoryRoot()
         let script = root.appendingPathComponent("scripts/copy-bundled-packs.sh")

@@ -270,6 +270,51 @@ class SoundPackCandidateRegressionTests(unittest.TestCase):
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             self.assertIn(digest, ledger, str(path.relative_to(ROOT)))
 
+    def test_ledger_links_current_generator_source_records(self) -> None:
+        ledger = (ROOT / "packs/LICENSES.md").read_text(encoding="utf-8")
+        records = [
+            (
+                ROOT / "scripts/generate-claude-default-packs.py",
+                ROOT
+                / "packs/license-snapshots/claude-default-synth-source-2026-09-08.html",
+                ROOT
+                / "packs/license-snapshots/claude-default-synth-package-License-2026-09-08.txt",
+                "490ms",
+                "claude-default-synth-source-2026-09-08.html",
+            ),
+            (
+                ROOT / "scripts/generate-resonant-bowl.py",
+                ROOT / "packs/license-snapshots/resonant-bowl-source-2026-09-08.html",
+                ROOT
+                / "packs/license-snapshots/resonant-bowl-package-License-2026-09-02.txt",
+                "final 40 ms",
+                None,
+            ),
+        ]
+
+        for generator, record, package_license, current_recipe, package_source in records:
+            relative_record = record.relative_to(ROOT / "packs")
+            relative_package_license = package_license.relative_to(ROOT / "packs")
+            self.assertIn(
+                f"(./{relative_record})",
+                ledger,
+                f"ledger does not link {relative_record}",
+            )
+            self.assertIn(
+                f"(./{relative_package_license})",
+                ledger,
+                f"ledger does not link {relative_package_license}",
+            )
+            source_record = record.read_text(encoding="utf-8")
+            package_license_text = package_license.read_text(encoding="utf-8")
+            digest = hashlib.sha256(generator.read_bytes()).hexdigest()
+            self.assertIn(digest, source_record, str(relative_record))
+            self.assertIn(current_recipe, source_record, str(relative_record))
+            if package_source is not None:
+                self.assertIn(
+                    package_source, package_license_text, str(relative_package_license)
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

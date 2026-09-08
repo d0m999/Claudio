@@ -122,8 +122,8 @@ CC0（Public Domain Dedication）在法律性质上是**不可撤销**的——�
 
 这一轮根据本机 Vibe Island 可观察到的产品选择重新设计：保留一个统一的合成音色，五个事件共享同一套语义骨架；通过音高方向、音符数量、停顿、音区和包络表达状态。本候选由项目自有确定性合成器生成，不含第三方录音或采样，渲染文件以 `CC0-1.0` 发布。
 
-- 统一源记录：[`claude-default-synth-source-2026-09-02.html`](./license-snapshots/claude-default-synth-source-2026-09-02.html)
-- 源包许可证声明：[`claude-default-synth-package-License-2026-09-02.txt`](./license-snapshots/claude-default-synth-package-License-2026-09-02.txt)
+- 统一源记录：[`claude-default-synth-source-2026-09-08.html`](./license-snapshots/claude-default-synth-source-2026-09-08.html)
+- 源包许可证声明：[`claude-default-synth-package-License-2026-09-08.txt`](./license-snapshots/claude-default-synth-package-License-2026-09-08.txt)
 - 官方 CC0 文本快照：[`cc0-1.0-deed-2026-09-02.png`](./license-snapshots/cc0-1.0-deed-2026-09-02.png)
 - 生成器：[`scripts/generate-claude-default-packs.py`](../scripts/generate-claude-default-packs.py)，SHA256：`799f11bbfb42a86fbea6069a645dc5da7b105191c55addac44509e63ad302644`
 
@@ -149,7 +149,7 @@ CC0（Public Domain Dedication）在法律性质上是**不可撤销**的——�
 这是根据“敲钵般的圆润共鸣、疗愈感和更长自然尾韵”制作的独立基准样片。它不是对某一段真实钵声录音的复制，而是由项目自有确定性合成器直接生成：柔和合成敲击、非整数共鸣泛音、轻微音高回落、事件专属阻尼和短房间回声。生成器不读取第三方录音或采样；本组渲染文件声明为 `CC0-1.0`。
 
 - manifest：[`resonant-bowl/manifest.json`](./resonant-bowl/manifest.json)
-- 源记录快照：[`resonant-bowl-source-2026-09-02.html`](./license-snapshots/resonant-bowl-source-2026-09-02.html)
+- 源记录快照：[`resonant-bowl-source-2026-09-08.html`](./license-snapshots/resonant-bowl-source-2026-09-08.html)
 - 源包许可证声明：[`resonant-bowl-package-License-2026-09-02.txt`](./license-snapshots/resonant-bowl-package-License-2026-09-02.txt)
 - 官方 CC0 文本快照：[`cc0-1.0-deed-2026-09-02.png`](./license-snapshots/cc0-1.0-deed-2026-09-02.png)
 - 生成器：[`scripts/generate-resonant-bowl.py`](../scripts/generate-resonant-bowl.py)，SHA256：`08dfd38d466900c71bafdb577fd0767b8e09e7e3e69385b1e9eec38f196f6d5b`

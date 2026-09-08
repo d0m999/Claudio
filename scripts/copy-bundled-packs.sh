@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Validate and copy the explicitly approved first-party sound packs. Candidate directories may live
 # beside the approved set for listening, but their presence alone never authorizes distribution.
+# The destination must be new or empty so an older assembly cannot retain an unapproved pack.
 set -euo pipefail
 
 SOURCE_ROOT="${1:-packs}"
@@ -10,6 +11,9 @@ if [[ -z "$DESTINATION_ROOT" ]]; then
     echo "usage: $0 <source-packs-directory> <destination-packs-directory>" >&2
     exit 2
 fi
+while [[ "$DESTINATION_ROOT" != "/" && "$DESTINATION_ROOT" == */ ]]; do
+    DESTINATION_ROOT="${DESTINATION_ROOT%/}"
+done
 if [[ ! -d "$SOURCE_ROOT" || -L "$SOURCE_ROOT" ]]; then
     echo "❌ bundled packs source must be a real directory: $SOURCE_ROOT" >&2
     exit 1
@@ -37,7 +41,21 @@ if ! jq -e '
     exit 1
 fi
 
-mkdir -p "$DESTINATION_ROOT"
+if [[ -e "$DESTINATION_ROOT" || -L "$DESTINATION_ROOT" ]]; then
+    if [[ ! -d "$DESTINATION_ROOT" || -L "$DESTINATION_ROOT" ]]; then
+        echo "❌ bundled packs destination must be a real directory: $DESTINATION_ROOT" >&2
+        exit 1
+    fi
+    shopt -s nullglob dotglob
+    destination_entries=("$DESTINATION_ROOT"/*)
+    shopt -u nullglob dotglob
+    if [[ "${#destination_entries[@]}" -ne 0 ]]; then
+        echo "❌ bundled packs destination must be empty: $DESTINATION_ROOT" >&2
+        exit 1
+    fi
+else
+    mkdir -p "$DESTINATION_ROOT"
+fi
 pack_count=0
 
 while IFS= read -r entry_name; do

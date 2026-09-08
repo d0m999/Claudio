@@ -1,0 +1,19 @@
+CC0 1.0 Universal — Public Domain Dedication
+Captured: 2026-09-08
+
+The author of the following rendered audio files dedicates them to the public
+domain under Creative Commons CC0 1.0 Universal, to the extent permitted by law.
+No attribution is required. The files may be copied, modified, bundled,
+redistributed, and used commercially.
+
+This declaration covers the deterministic, sample-free renders in:
+
+packs/night-console/task_start.mp3
+packs/night-console/stop.mp3
+packs/night-console/stop_failure.mp3
+packs/night-console/notification.mp3
+packs/night-console/subagent_stop.mp3
+
+The current source recipe is recorded in
+claude-default-synth-source-2026-09-08.html. The official CC0 deed snapshot is
+cc0-1.0-deed-2026-09-02.png.

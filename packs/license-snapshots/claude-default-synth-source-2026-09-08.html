@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Claudio Claude default synth candidate · source record</title>
+<h1>Claudio Claude default synth candidate</h1>
+<p>采集日期：2026-09-08</p>
+<p>本组声音包由 Claudio 项目自有的确定性数学合成器生成，不含第三方录音、采样或外部音频文件，不访问网络。生成器源码为 <code>scripts/generate-claude-default-packs.py</code>，SHA-256 为 <code>799f11bbfb42a86fbea6069a645dc5da7b105191c55addac44509e63ad302644</code>。</p>
+<p>所有渲染后的 MP3 文件在本项目中以 <code>CC0-1.0</code> 发布；CC0 官方文本快照见 <code>cc0-1.0-deed-2026-09-02.png</code>。</p>
+<table>
+  <thead><tr><th>声音包</th><th>统一音色</th><th>事件语法</th></tr></thead>
+  <tbody>
+    <tr><td><code>night-console</code></td><td>低音区、缓启动、少高次谐波的低扰动合成器</td><td>低位上行；低音三音解决；低位下行；宽间隔双脉冲；最低短回应</td></tr>
+  </tbody>
+</table>
+<p>五个事件均使用相同的语义骨架：<code>task_start</code> 是短上行，<code>stop</code> 是有落点的上行，<code>stop_failure</code> 是镜像下行，<code>notification</code> 是分离双脉冲，<code>subagent_stop</code> 是最短单音回应。<code>notification</code> 的两次脉冲间隔为 330ms，总时长为 490ms，以避免无声占位长尾。<code>task_start</code> 的目标峰值为 -7.2 dBFS，其余事件目标峰值为 -0.8 dBFS；最终统一转码为 44.1 kHz、单声道、192 kbps MP3。</p>
