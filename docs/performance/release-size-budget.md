@@ -85,21 +85,39 @@ Developer ID 签名、公证或正式 release 产物证据；CI 仍会对真实�
 链接图按 live symbol 归属统计，`ClaudioGUICore` 净增 `217,304 B`；其中深化后的
 `SoundPacksEditorOwner.swift` 与新增 `SoundPacksEditorPresentation.swift` 合计净增约
 `210,672 B`。移动进 `ClaudioSettingsPresentation` 的 Settings 视图与剩余 `ClaudioGUI`
-合计反而减少约 `25,097 B`，所以新增 target 本身不是主要代码段回归。GitHub 与本机的额外
-差值来自 Xcode 16.4 和本机 Swift 6.3.3 的产物差异，但两边都暴露了同一个问题：最终 app
-仍携带不供外部二进制调用的 Swift 导出链接元数据。
+合计反而减少约 `25,097 B`。这两项合计解释 `192,207 B` 净增，距离 GUI 总增量仍有
+`30,689 B` 未按 source owner 归因；`210,672 B` 是 `ClaudioGUICore` 的子集，不能重复相加。
+因此现有链接图只证明新增 target 不是主要代码段回归，不构成完整逐字节归因。
+
+GitHub 与本机的额外差值尚未经过同一 commit、两套工具链的受控对照。Xcode 16.4 与本机
+Swift 6.3.3 的产物差异是当前推测，不是已经隔离验证的原因；两边能共同证明的事实只有：最终
+app 当时仍携带不供外部二进制调用的 Swift 导出链接元数据。
 
 修复在 `ClaudioGUI` executable target 上仅为 Release 配置传入
 `-Xlinker -no_exported_symbols`。它位于 `gui/Package.swift`，因此 CI、开发 bundle、双架构
-release workflow 和直接 SwiftPM Release 构建自动消费同一合同。没有提高预算，也没有禁用
-Swift 反射。修复后的本机签名前门禁结果为 `5,043,944 B`，比修复前减少 `375,312 B`，在
-现有预算下保留 `456,056 B` 余量。
+release workflow 和直接 SwiftPM Release 构建在各自实际运行时消费同一合同。push / PR CI
+已经声明 Release build、开发 bundle 组装与共享门禁；workflow 定义存在不等于某个尚未运行的
+commit 已取得远程 CI 回执。修复没有提高预算，也没有禁用 Swift 反射。
 
-Mach-O 对照中 `__TEXT`（`4,472,832 B`）、`__text`（`3,450,536 B`）、
-`__DATA_CONST`（`147,456 B`）和 `__DATA`（`360,448 B`）保持不变；ad-hoc 签名后的
-`__LINKEDIT` 从 `638,976 B` 降为 `278,528 B`。这次修复只移除最终 app 不需要的导出
-链接负载，不改变 GUI 代码或数据段。同一源树的本机交叉构建得到 `5,184,000 B` 的 x86_64
-slice；按 release workflow 顺序先合成再 strip 的 universal GUI 为 `10,237,672 B`，重新拆出的
-arm64 与 x86_64 slice 分别仍是 `5,043,944 B` 和 `5,184,000 B`。这些数据验证双架构构建与
-链接体积合同，不等同于 Intel 真机运行；GitHub Xcode 16.4、Developer ID 签名和公证结果仍
-必须由后续 CI/RC 各自验证。
+签名前、完整 `strip` 后的同口径文件总量如下：
+
+| arm64 GUI | 修复前 | 修复后 | 变化 |
+|---|---:|---:|---:|
+| 签名前文件总量 | `5,419,256 B` | `5,043,944 B` | `-375,312 B` |
+
+修复后在现有预算下保留 `456,056 B` 余量。
+
+另一组 ad-hoc 签名后的 Mach-O 段对照中，`__TEXT`（`4,472,832 B`）、`__text`
+（`3,450,536 B`）、`__DATA_CONST`（`147,456 B`）和 `__DATA`（`360,448 B`）保持不变，
+`__LINKEDIT` 从 `638,976 B` 降为 `278,528 B`，变化 `-360,448 B`。它与上表签名前文件总量
+属于不同阶段，两个降幅相差的 `14,864 B` 不能直接归给导出元数据、签名或对齐；需要同一签名
+阶段的完整段清单才能继续对账。现有证据支持「代码与数据段未变、导出链接负载减少」，不支持
+「文件总量变化已逐字节完整归因」。
+
+同一源树的本机交叉构建得到 `5,184,000 B` 的 x86_64 slice；按 release workflow 顺序先合成
+再 strip 的 universal GUI 为 `10,237,672 B`，重新拆出的 arm64 与 x86_64 slice 分别仍是
+`5,043,944 B` 和 `5,184,000 B`。共享 release bundle gate 会对 strip 后的每个 GUI slice
+执行 defined external symbol 检查：任何非空结果或检查工具失败都失败关闭。该门禁把 manifest
+配置与最终产物事实分开验证，但这些数据和自动化仍不等同于 GUI 原生启动、Intel 真机运行、
+Developer ID 签名、公证或正式 release；本次没有执行 Release GUI 启动 smoke，相关运行时证据
+保持未验证。

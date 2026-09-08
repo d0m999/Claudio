@@ -19,6 +19,7 @@ import Foundation
 private func runReleaseSizeGate(
     app: URL,
     fakeLipo: URL,
+    fakeNM: URL,
     overrides: [String: String] = [:]
 ) -> TestProcessResult {
     var environment = [
@@ -27,6 +28,7 @@ private func runReleaseSizeGate(
         "CLAUDIO_LOGIN_ITEM_BYTES_PER_ARCH": "40",
         "CLAUDIO_NON_EXECUTABLE_BUNDLE_BYTES": "1000",
         "CLAUDIO_LIPO_BIN": fakeLipo.path,
+        "CLAUDIO_NM_BIN": fakeNM.path,
         "FAKE_GUI_ARCHS": "arm64 x86_64",
         "FAKE_HELPER_ARCHS": "arm64 x86_64",
         "FAKE_LOGIN_ITEM_ARCHS": "arm64 x86_64",
@@ -36,6 +38,9 @@ private func runReleaseSizeGate(
         "FAKE_HELPER_X86_64_BYTES": "80",
         "FAKE_LOGIN_ITEM_ARM64_BYTES": "40",
         "FAKE_LOGIN_ITEM_X86_64_BYTES": "40",
+        "FAKE_GUI_ARM64_EXPORTS": "",
+        "FAKE_GUI_X86_64_EXPORTS": "",
+        "FAKE_NM_FAILURE_ARCH": "",
     ]
     environment.merge(overrides) { _, new in new }
     return runTestProcess(
@@ -84,6 +89,77 @@ private func isReleaseGUIBuildCommand(_ command: String) -> Bool {
 
 private func usesSwiftSizeOptimization(_ command: String) -> Bool {
     command.contains("-Xswiftc -Osize")
+}
+
+private struct ReleaseExportSettingPlacement {
+    let targetName: String
+    let tool: String?
+    let flags: [String]
+    let configuration: String?
+}
+
+private func releaseExportContractViolations(in packageDump: Data) -> [String] {
+    guard
+        let package = try? JSONSerialization.jsonObject(with: packageDump) as? [String: Any],
+        let targets = package["targets"] as? [[String: Any]]
+    else {
+        return ["SwiftPM package description 不是可解析的 target JSON"]
+    }
+
+    let namedTargets = targets.compactMap { target -> (String, [[String: Any]])? in
+        guard let name = target["name"] as? String else { return nil }
+        return (name, target["settings"] as? [[String: Any]] ?? [])
+    }
+    guard namedTargets.count == targets.count else {
+        return ["SwiftPM package description 含无法识别的 target"]
+    }
+    guard namedTargets.filter({ $0.0 == "ClaudioGUI" }).count == 1 else {
+        return ["SwiftPM package description 必须恰好包含一个 ClaudioGUI target"]
+    }
+
+    let placements = namedTargets.flatMap { targetName, settings in
+        settings.compactMap { setting -> ReleaseExportSettingPlacement? in
+            guard let kind = setting["kind"] as? [String: Any],
+                let unsafeFlags = kind["unsafeFlags"] as? [String: Any],
+                let flags = unsafeFlags["_0"] as? [String],
+                flags.contains("-no_exported_symbols")
+            else {
+                return nil
+            }
+            let condition = setting["condition"] as? [String: Any]
+            return ReleaseExportSettingPlacement(
+                targetName: targetName,
+                tool: setting["tool"] as? String,
+                flags: flags,
+                configuration: condition?["config"] as? String)
+        }
+    }
+
+    guard placements.count == 1 else {
+        return ["-no_exported_symbols 必须在全部 SwiftPM targets 中恰好出现一次"]
+    }
+    let placement = placements[0]
+    guard placement.targetName == "ClaudioGUI" else {
+        return ["-no_exported_symbols 只能属于 ClaudioGUI，实际属于 \(placement.targetName)"]
+    }
+    guard placement.tool == "linker",
+        placement.flags == ["-Xlinker", "-no_exported_symbols"],
+        placement.configuration == "release"
+    else {
+        return ["ClaudioGUI no-export setting 必须是仅限 Release 的精确 linker 参数"]
+    }
+    return []
+}
+
+private func dumpGUIPackageDescription(
+    repositoryRoot: URL = guiTestRepositoryRoot()
+) -> TestProcessResult {
+    runTestProcess(
+        executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+        arguments: [
+            "swift", "package", "dump-package", "--package-path",
+            repositoryRoot.appendingPathComponent("gui", isDirectory: true).path,
+        ])
 }
 
 private struct ReleaseWorkflowSources {
@@ -554,11 +630,9 @@ func runReleaseLayoutSuites() {
                 encoding: .utf8),
             let release = try? String(
                 contentsOf: root.appendingPathComponent(".github/workflows/release.yml"),
-                encoding: .utf8),
-            let package = try? String(
-                contentsOf: root.appendingPathComponent("gui/Package.swift"), encoding: .utf8)
+                encoding: .utf8)
         else {
-            expect(false, "读不到 GUI package、dev、CI 或 release 分发入口")
+            expect(false, "读不到 dev、CI 或 release 分发入口")
             return
         }
 
@@ -592,26 +666,17 @@ func runReleaseLayoutSuites() {
             "-Osize 只能出现在五条 Release ClaudioGUI 命令，不能扩散到 Debug、harness、"
                 + "LoginItem 或 helper；实际命令：\(optimizedCommands)")
 
-        guard
-            let guiTargetStart = package.range(
-                of: ".executableTarget(\n            name: \"ClaudioGUI\""),
-            let loginItemTargetStart = package.range(
-                of: ".executableTarget(\n            name: \"ClaudioLoginItem\"",
-                range: guiTargetStart.upperBound..<package.endIndex)
-        else {
-            expect(false, "无法从 Package.swift 定位 ClaudioGUI 与 ClaudioLoginItem target")
+        let packageDump = dumpGUIPackageDescription(repositoryRoot: root)
+        guard packageDump.status == 0 else {
+            expect(false, "SwiftPM 无法解析 GUI package：\(packageDump.output)")
             return
         }
-        let guiTarget = String(package[guiTargetStart.lowerBound..<loginItemTargetStart.lowerBound])
+        let exportContractViolations = releaseExportContractViolations(
+            in: Data(packageDump.output.utf8))
         expect(
-            guiTarget.contains(#"["-Xlinker", "-no_exported_symbols"]"#)
-                && guiTarget.contains(#".when(configuration: .release)"#),
-            "最终 ClaudioGUI executable 必须仅在 Release 链接阶段关闭符号导出，"
-                + "让所有分发入口在 strip 前使用同一 LINKEDIT 体积合同")
-        expect(
-            package.components(separatedBy: "-no_exported_symbols").count == 2,
-            "-no_exported_symbols 必须只属于 ClaudioGUI executable，不能扩散到 LoginItem、"
-                + "library target 或测试 harness")
+            exportContractViolations.isEmpty,
+            "最终 ClaudioGUI executable 必须以 SwiftPM 语义合同仅在 Release 关闭符号导出："
+                + exportContractViolations.joined(separator: "；"))
     }
 
     suite("体积优化合同跨行与参数调序仍会拒绝错误目标") {
@@ -637,6 +702,28 @@ func runReleaseLayoutSuites() {
             !isReleaseGUIBuildCommand(commands[1])
                 && !isReleaseGUIBuildCommand(commands[2]),
             "跨行 helper 与 Debug ClaudioGUI 的 -Osize 必须被识别为错误扩散")
+    }
+
+    suite("Release 导出合同按 SwiftPM target 与配置绑定") {
+        let valid = Data(
+            #"{"targets":[{"name":"ClaudioGUI","settings":[{"condition":{"config":"release","platformNames":[]},"kind":{"unsafeFlags":{"_0":["-Xlinker","-no_exported_symbols"]}},"tool":"linker"}]},{"name":"ClaudioLoginItem","settings":[]}]}"#
+                .utf8)
+        let adjacentTarget = Data(
+            #"{"targets":[{"name":"ClaudioGUI","settings":[]},{"name":"InsertedTool","settings":[{"condition":{"config":"release","platformNames":[]},"kind":{"unsafeFlags":{"_0":["-Xlinker","-no_exported_symbols"]}},"tool":"linker"}]},{"name":"ClaudioLoginItem","settings":[]}]}"#
+                .utf8)
+        let separatelyMatchedCondition = Data(
+            #"{"targets":[{"name":"ClaudioGUI","settings":[{"condition":{"config":"debug","platformNames":[]},"kind":{"unsafeFlags":{"_0":["-Xlinker","-no_exported_symbols"]}},"tool":"linker"},{"condition":{"config":"release","platformNames":[]},"kind":{"linkedFramework":{"_0":"Carbon"}},"tool":"linker"}]}]}"#
+                .utf8)
+
+        expect(
+            releaseExportContractViolations(in: valid).isEmpty,
+            "精确属于 ClaudioGUI Release linker setting 的 no-export 合同必须通过")
+        expect(
+            !releaseExportContractViolations(in: adjacentTarget).isEmpty,
+            "相邻 target 上的 no-export flag 不能替 ClaudioGUI 满足合同")
+        expect(
+            !releaseExportContractViolations(in: separatelyMatchedCondition).isEmpty,
+            "flag 与 Release 条件分属不同 setting 时必须失败关闭")
     }
 
     suite("HostIcons：SwiftPM、开发 bundle 与双架构 release 都 fail closed 复制同一资源 bundle") {
@@ -904,14 +991,60 @@ func runReleaseLayoutSuites() {
             try? FileManager.default.setAttributes(
                 [.posixPermissions: 0o755], ofItemAtPath: fakeLipo.path)
 
-            let exact = runReleaseSizeGate(app: app, fakeLipo: fakeLipo)
+            let fakeNM = root.appendingPathComponent("fake-nm.sh")
+            writeFixture(
+                #"""
+                #!/bin/bash
+                set -euo pipefail
+                if [[ "$1" != "-gUj" ]]; then
+                  exit 2
+                fi
+                case "$(basename "$2")" in
+                  claudi0-app.arm64) arch="arm64"; exports="$FAKE_GUI_ARM64_EXPORTS" ;;
+                  claudi0-app.x86_64) arch="x86_64"; exports="$FAKE_GUI_X86_64_EXPORTS" ;;
+                  *) exit 3 ;;
+                esac
+                if [[ "$FAKE_NM_FAILURE_ARCH" == "$arch" ]]; then
+                  printf 'fixture nm failure for %s\n' "$arch" >&2
+                  exit 7
+                fi
+                printf '%s' "$exports"
+                """#,
+                to: fakeNM)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: fakeNM.path)
+
+            let exact = runReleaseSizeGate(app: app, fakeLipo: fakeLipo, fakeNM: fakeNM)
             expect(
                 exact.status == 0,
                 "每个切片恰好等于预算必须通过，status=\(exact.status)：\(exact.output)")
 
+            let exported = runReleaseSizeGate(
+                app: app,
+                fakeLipo: fakeLipo,
+                fakeNM: fakeNM,
+                overrides: ["FAKE_GUI_X86_64_EXPORTS": "_$s11ClaudioGUI6LeakedyyF"])
+            expect(
+                exported.status != 0
+                    && exported.output.contains("claudi0-app [x86_64]")
+                    && exported.output.contains("_$s11ClaudioGUI6LeakedyyF"),
+                "任一 GUI 架构仍有导出符号时必须失败关闭并指出切片：\(exported.output)")
+
+            let inspectionFailure = runReleaseSizeGate(
+                app: app,
+                fakeLipo: fakeLipo,
+                fakeNM: fakeNM,
+                overrides: ["FAKE_NM_FAILURE_ARCH": "arm64"])
+            expect(
+                inspectionFailure.status != 0
+                    && inspectionFailure.output.contains("无法检查 claudi0-app [arm64] 导出符号")
+                    && inspectionFailure.output.contains("fixture nm failure for arm64"),
+                "nm 失败不能伪装成零导出：\(inspectionFailure.output)")
+
             let asymmetric = runReleaseSizeGate(
                 app: app,
                 fakeLipo: fakeLipo,
+                fakeNM: fakeNM,
                 overrides: ["FAKE_GUI_X86_64_BYTES": "101"])
             expect(
                 asymmetric.status != 0
@@ -922,6 +1055,7 @@ func runReleaseLayoutSuites() {
             let mismatched = runReleaseSizeGate(
                 app: app,
                 fakeLipo: fakeLipo,
+                fakeNM: fakeNM,
                 overrides: ["FAKE_HELPER_ARCHS": "arm64"])
             expect(
                 mismatched.status != 0 && mismatched.output.contains("架构不一致"),
@@ -930,6 +1064,7 @@ func runReleaseLayoutSuites() {
             let mismatchedLoginItem = runReleaseSizeGate(
                 app: app,
                 fakeLipo: fakeLipo,
+                fakeNM: fakeNM,
                 overrides: ["FAKE_LOGIN_ITEM_ARCHS": "arm64"])
             expect(
                 mismatchedLoginItem.status != 0
@@ -939,7 +1074,8 @@ func runReleaseLayoutSuites() {
             try? FileManager.default.removeItem(at: alias)
             try? FileManager.default.createSymbolicLink(
                 atPath: alias.path, withDestinationPath: "wrong-helper")
-            let wrongAlias = runReleaseSizeGate(app: app, fakeLipo: fakeLipo)
+            let wrongAlias = runReleaseSizeGate(
+                app: app, fakeLipo: fakeLipo, fakeNM: fakeNM)
             expect(
                 wrongAlias.status != 0 && wrongAlias.output.contains("精确指向"),
                 "legacy alias 指错目标必须拒绝：\(wrongAlias.output)")
@@ -949,7 +1085,8 @@ func runReleaseLayoutSuites() {
 
             let payload = app.appendingPathComponent("Contents/Resources/payload.bin")
             writeFixture(String(repeating: "x", count: 1_001), to: payload)
-            let resourceOverflow = runReleaseSizeGate(app: app, fakeLipo: fakeLipo)
+            let resourceOverflow = runReleaseSizeGate(
+                app: app, fakeLipo: fakeLipo, fakeNM: fakeNM)
             expect(
                 resourceOverflow.status != 0
                     && resourceOverflow.output.contains("非可执行资源超出体积预算")
@@ -959,7 +1096,8 @@ func runReleaseLayoutSuites() {
 
             writeFixture(String(repeating: "g", count: 1_000), to: gui)
             writeFixture(String(repeating: "h", count: 1_000), to: helper)
-            let bundleOverflow = runReleaseSizeGate(app: app, fakeLipo: fakeLipo)
+            let bundleOverflow = runReleaseSizeGate(
+                app: app, fakeLipo: fakeLipo, fakeNM: fakeNM)
             expect(
                 bundleOverflow.status != 0
                     && bundleOverflow.output.contains("app bundle 超出体积预算"),
@@ -968,13 +1106,14 @@ func runReleaseLayoutSuites() {
             writeFixture("h", to: helper)
 
             try? FileManager.default.removeItem(at: helper)
-            let missing = runReleaseSizeGate(app: app, fakeLipo: fakeLipo)
+            let missing = runReleaseSizeGate(app: app, fakeLipo: fakeLipo, fakeNM: fakeNM)
             expect(
                 missing.status != 0 && missing.output.contains("缺少 Release 可执行文件"),
                 "缺 helper 必须在任何预算计算前 fail closed：\(missing.output)")
             writeFixture("h", to: helper)
             try? FileManager.default.removeItem(at: loginItemBinary)
-            let missingLoginItem = runReleaseSizeGate(app: app, fakeLipo: fakeLipo)
+            let missingLoginItem = runReleaseSizeGate(
+                app: app, fakeLipo: fakeLipo, fakeNM: fakeNM)
             expect(
                 missingLoginItem.status != 0
                     && missingLoginItem.output.contains("claudi0-login-item"),

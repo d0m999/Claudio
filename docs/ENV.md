@@ -15,6 +15,7 @@
 | `CLAUDIO_LOGIN_ITEM_BYTES_PER_ARCH` | No | integer; default `500000` | embedded macOS 12 LoginItem Mach-O per-architecture size budget |
 | `CLAUDIO_NON_EXECUTABLE_BUNDLE_BYTES` | No | integer; default `1500000` | non-executable bundle size budget |
 | `CLAUDIO_LIPO_BIN` | No | executable path; default `lipo` | size gate 使用的 `lipo` |
+| `CLAUDIO_NM_BIN` | No | executable path; default `/usr/bin/nm` | release gate 检查 GUI 每架构导出符号；仅测试可覆盖 |
 
 ## Tests and probes
 

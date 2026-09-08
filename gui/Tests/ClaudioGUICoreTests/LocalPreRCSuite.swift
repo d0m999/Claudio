@@ -150,17 +150,20 @@ func runLocalPreRCSuites() {
             script.contains("sw_vers -productVersion")
                 && script.contains("uname -m")
                 && script.contains("lipo -archs")
+                && script.contains(
+                    "for required_tool in git sw_vers uname swift jq bash lipo nm codesign plutil")
                 && script.contains("Signature=adhoc")
                 && script.contains("local-pre-rc-contract.json"),
-            "报告必须采集 macOS/CPU，并实证 dev bundle 是当前单架构 ad-hoc 产物")
+            "报告必须预检 release inspection tools、采集 macOS/CPU，并实证 dev bundle 是当前单架构 ad-hoc 产物")
         expect(
             script.contains("unset CLAUDIO_GUI_BYTES_PER_ARCH")
                 && script.contains("CLAUDIO_HELPER_BYTES_PER_ARCH")
                 && script.contains("CLAUDIO_LOGIN_ITEM_BYTES_PER_ARCH")
                 && script.contains("CLAUDIO_NON_EXECUTABLE_BUNDLE_BYTES")
                 && script.contains("CLAUDIO_LIPO_BIN")
+                && script.contains("CLAUDIO_NM_BIN")
                 && script.contains("CLAUDIO_VERSION"),
-            "本机 pre-RC 必须清除可放宽 size gate 或改变 bundle 身份的环境覆盖")
+            "本机 pre-RC 必须清除可放宽 release gate 或改变 bundle 身份的环境覆盖")
 
         let staleRemoval = script.range(of: #"rm -f -- "$report_name""#)
         let toolPreflight = script.range(of: "for required_tool in")

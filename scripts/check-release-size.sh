@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Release bundle executable-size contract. Budgets are per Mach-O architecture so the same gate
-# applies to local arm64 bundles and CI's arm64+x86_64 universal bundle.
+# Release bundle executable-size and export contract.
+# Budgets are per Mach-O architecture so the same gate applies to local arm64 bundles and CI's
+# arm64+x86_64 universal bundle.
 set -euo pipefail
 
 APP="${1:-dist/claudi0.app}"
@@ -16,6 +17,7 @@ HELPER_BYTES_PER_ARCH="${CLAUDIO_HELPER_BYTES_PER_ARCH:-3250000}"
 LOGIN_ITEM_BYTES_PER_ARCH="${CLAUDIO_LOGIN_ITEM_BYTES_PER_ARCH:-500000}"
 NON_EXECUTABLE_BUNDLE_BYTES="${CLAUDIO_NON_EXECUTABLE_BUNDLE_BYTES:-1500000}"
 LIPO_BIN="${CLAUDIO_LIPO_BIN:-lipo}"
+NM_BIN="${CLAUDIO_NM_BIN:-/usr/bin/nm}"
 
 for path in "$GUI_BINARY" "$HELPER_BINARY" "$LOGIN_ITEM_BINARY"; do
   if [ ! -f "$path" ] || [ -L "$path" ]; then
@@ -83,10 +85,35 @@ check_binary_budget() {
   done
 }
 
+check_gui_exports() {
+  local arch slice exports_file errors_file
+  for arch in $GUI_ARCHS; do
+    if [ "$ARCH_COUNT" -eq 1 ]; then
+      slice="$GUI_BINARY"
+    else
+      slice="$SLICE_DIR/$(basename "$GUI_BINARY").$arch"
+    fi
+    exports_file="$SLICE_DIR/$(basename "$GUI_BINARY").$arch.exports"
+    errors_file="$SLICE_DIR/$(basename "$GUI_BINARY").$arch.nm-errors"
+    if ! "$NM_BIN" -gUj "$slice" >"$exports_file" 2>"$errors_file"; then
+      echo "❌ 无法检查 claudi0-app [$arch] 导出符号：" >&2
+      sed -n '1,5p' "$errors_file" >&2
+      exit 1
+    fi
+    if [ -s "$exports_file" ]; then
+      echo "❌ claudi0-app [$arch] 仍有导出符号：" >&2
+      sed -n '1,5p' "$exports_file" >&2
+      exit 1
+    fi
+    echo "✅ claudi0-app [$arch]：无导出符号"
+  done
+}
+
 SLICE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/claudio-release-slices.XXXXXX")"
 trap 'rm -rf "$SLICE_DIR"' EXIT
 
 check_binary_budget "claudi0-app" "$GUI_BINARY" "$GUI_BYTES_PER_ARCH"
+check_gui_exports
 check_binary_budget "claudi0 helper" "$HELPER_BINARY" "$HELPER_BYTES_PER_ARCH"
 check_binary_budget "claudi0 LoginItem" "$LOGIN_ITEM_BINARY" "$LOGIN_ITEM_BYTES_PER_ARCH"
 
