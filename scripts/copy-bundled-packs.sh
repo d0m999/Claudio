@@ -11,8 +11,19 @@ if [[ -z "$DESTINATION_ROOT" ]]; then
     echo "usage: $0 <source-packs-directory> <destination-packs-directory>" >&2
     exit 2
 fi
-while [[ "$DESTINATION_ROOT" != "/" && "$DESTINATION_ROOT" == */ ]]; do
-    DESTINATION_ROOT="${DESTINATION_ROOT%/}"
+while [[ "$DESTINATION_ROOT" != "/" ]]; do
+    case "$DESTINATION_ROOT" in
+        */)
+            DESTINATION_ROOT="${DESTINATION_ROOT%/}"
+            ;;
+        */.)
+            DESTINATION_ROOT="${DESTINATION_ROOT%/.}"
+            [[ -n "$DESTINATION_ROOT" ]] || DESTINATION_ROOT="/"
+            ;;
+        *)
+            break
+            ;;
+    esac
 done
 if [[ ! -d "$SOURCE_ROOT" || -L "$SOURCE_ROOT" ]]; then
     echo "❌ bundled packs source must be a real directory: $SOURCE_ROOT" >&2

@@ -173,39 +173,43 @@ func runReleaseLayoutSuites() {
         }
     }
 
-    suite("Factory Pack 组装拒绝带尾随斜杠的目标符号链接") {
+    suite("Factory Pack 组装拒绝带尾随路径分量的目标符号链接") {
         let root = guiTestRepositoryRoot()
         let script = root.appendingPathComponent("scripts/copy-bundled-packs.sh")
 
-        withTempDirectory { temporary in
-            let target = temporary.appendingPathComponent("target", isDirectory: true)
-            let destinationLink = temporary.appendingPathComponent(
-                "destination-link", isDirectory: true)
-            do {
-                try FileManager.default.createDirectory(
-                    at: target, withIntermediateDirectories: true)
-                try FileManager.default.createSymbolicLink(
-                    at: destinationLink, withDestinationURL: target)
-            } catch {
-                expect(false, "无法创建目标符号链接夹具：\(error)")
-                return
+        for suffix in ["/", "/."] {
+            withTempDirectory { temporary in
+                let target = temporary.appendingPathComponent("target", isDirectory: true)
+                let destinationLink = temporary.appendingPathComponent(
+                    "destination-link", isDirectory: true)
+                do {
+                    try FileManager.default.createDirectory(
+                        at: target, withIntermediateDirectories: true)
+                    try FileManager.default.createSymbolicLink(
+                        at: destinationLink, withDestinationURL: target)
+                } catch {
+                    expect(false, "无法创建目标符号链接夹具：\(error)")
+                    return
+                }
+
+                let result = runTestProcess(
+                    executableURL: URL(fileURLWithPath: "/bin/bash"),
+                    arguments: [
+                        script.path,
+                        root.appendingPathComponent("packs").path,
+                        destinationLink.path + suffix,
+                    ])
+
+                expect(result.status != 0, "尾随 \(suffix) 的目标符号链接必须失败关闭")
+                expect(
+                    result.output.contains("destination must be a real directory"),
+                    "拒绝信息必须明确说明目标不是实际目录：\(result.output)")
+                let targetEntries =
+                    (try? FileManager.default.contentsOfDirectory(atPath: target.path)) ?? []
+                expect(
+                    targetEntries.isEmpty,
+                    "拒绝尾随 \(suffix) 的目标符号链接后不得写入链接目标")
             }
-
-            let result = runTestProcess(
-                executableURL: URL(fileURLWithPath: "/bin/bash"),
-                arguments: [
-                    script.path,
-                    root.appendingPathComponent("packs").path,
-                    destinationLink.path + "/",
-                ])
-
-            expect(result.status != 0, "带尾随斜杠的目标符号链接必须失败关闭")
-            expect(
-                result.output.contains("destination must be a real directory"),
-                "拒绝信息必须明确说明目标不是实际目录：\(result.output)")
-            let targetEntries =
-                (try? FileManager.default.contentsOfDirectory(atPath: target.path)) ?? []
-            expect(targetEntries.isEmpty, "拒绝目标符号链接后不得写入链接目标")
         }
     }
 
