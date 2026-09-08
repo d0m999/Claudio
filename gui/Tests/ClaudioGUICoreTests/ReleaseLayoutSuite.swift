@@ -256,6 +256,67 @@ func runReleaseLayoutSuites() {
         }
     }
 
+    suite("Factory Pack 组装拒绝以换行结尾的源与目标符号链接") {
+        let root = guiTestRepositoryRoot()
+        let script = root.appendingPathComponent("scripts/copy-bundled-packs.sh")
+
+        withTempDirectory { temporary in
+            let sourceLink = temporary.appendingPathComponent("source-link", isDirectory: true)
+            let destination = temporary.appendingPathComponent("destination", isDirectory: true)
+            do {
+                try FileManager.default.createSymbolicLink(
+                    at: sourceLink,
+                    withDestinationURL: root.appendingPathComponent("packs", isDirectory: true))
+            } catch {
+                expect(false, "无法创建源符号链接夹具：\(error)")
+                return
+            }
+
+            let result = runTestProcess(
+                executableURL: URL(fileURLWithPath: "/bin/bash"),
+                arguments: [script.path, sourceLink.path + "/\n", destination.path])
+
+            expect(result.status != 0, "以换行结尾的源符号链接必须失败关闭")
+            expect(
+                result.output.contains("must not end in a newline"),
+                "拒绝必须来自换行路径形状守卫：\(result.output)")
+            expect(
+                !FileManager.default.fileExists(atPath: destination.path),
+                "拒绝换行结尾的源符号链接后不得创建目标目录")
+        }
+
+        withTempDirectory { temporary in
+            let target = temporary.appendingPathComponent("target", isDirectory: true)
+            let destinationLink = temporary.appendingPathComponent(
+                "destination-link", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(
+                    at: target, withIntermediateDirectories: true)
+                try FileManager.default.createSymbolicLink(
+                    at: destinationLink, withDestinationURL: target)
+            } catch {
+                expect(false, "无法创建目标符号链接夹具：\(error)")
+                return
+            }
+
+            let result = runTestProcess(
+                executableURL: URL(fileURLWithPath: "/bin/bash"),
+                arguments: [
+                    script.path,
+                    root.appendingPathComponent("packs").path,
+                    destinationLink.path + "/\n",
+                ])
+
+            expect(result.status != 0, "以换行结尾的目标符号链接必须失败关闭")
+            expect(
+                result.output.contains("must not end in a newline"),
+                "拒绝必须来自换行路径形状守卫：\(result.output)")
+            let targetEntries =
+                (try? FileManager.default.contentsOfDirectory(atPath: target.path)) ?? []
+            expect(targetEntries.isEmpty, "拒绝换行结尾的目标符号链接后不得写入链接目标")
+        }
+    }
+
     suite("Factory Pack 组装拒绝以 .. 结尾的源与目标路径") {
         let root = guiTestRepositoryRoot()
         let script = root.appendingPathComponent("scripts/copy-bundled-packs.sh")

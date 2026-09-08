@@ -11,6 +11,11 @@ set -euo pipefail
 # not `a`), so it is refused outright for both arguments.
 normalize_path_argument() {
     local path="$1"
+    local output_variable="$2"
+    if [[ "$path" == *$'\n' ]]; then
+        echo "❌ path arguments must not end in a newline" >&2
+        exit 1
+    fi
     while [[ "$path" != "/" ]]; do
         case "$path" in
             */)
@@ -29,11 +34,15 @@ normalize_path_argument() {
         echo "❌ path arguments must not end in a '..' component: $1" >&2
         exit 1
     fi
-    printf '%s\n' "$path"
+    # Command substitution strips every trailing newline from stdout. Write into the caller's
+    # variable in this shell so validation cannot change the argument's final bytes afterward.
+    printf -v "$output_variable" '%s' "$path"
 }
 
-SOURCE_ROOT="$(normalize_path_argument "${1:-packs}")"
-DESTINATION_ROOT="$(normalize_path_argument "${2:-}")"
+SOURCE_ROOT=
+DESTINATION_ROOT=
+normalize_path_argument "${1:-packs}" SOURCE_ROOT
+normalize_path_argument "${2:-}" DESTINATION_ROOT
 
 if [[ -z "$DESTINATION_ROOT" ]]; then
     echo "usage: $0 <source-packs-directory> <destination-packs-directory>" >&2
