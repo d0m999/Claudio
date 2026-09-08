@@ -4,27 +4,41 @@
 # The destination must be new or empty so an older assembly cannot retain an unapproved pack.
 set -euo pipefail
 
-SOURCE_ROOT="${1:-packs}"
-DESTINATION_ROOT="${2:-}"
+# bash -L follows the final symlink (reporting false) when the path ends in `/`, `/.`, or
+# `/..`, which would silently defeat the real-directory rejections below. Strip the first two
+# shapes so the symlink test always sees the real final component. A trailing `..` cannot be
+# resolved textually once symlinks are involved (`a/link/..` is the parent of the link target,
+# not `a`), so it is refused outright for both arguments.
+normalize_path_argument() {
+    local path="$1"
+    while [[ "$path" != "/" ]]; do
+        case "$path" in
+            */)
+                path="${path%/}"
+                ;;
+            */.)
+                path="${path%/.}"
+                [[ -n "$path" ]] || path="/"
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+    if [[ "$path" == ".." || "$path" == */.. ]]; then
+        echo "❌ path arguments must not end in a '..' component: $1" >&2
+        exit 1
+    fi
+    printf '%s\n' "$path"
+}
+
+SOURCE_ROOT="$(normalize_path_argument "${1:-packs}")"
+DESTINATION_ROOT="$(normalize_path_argument "${2:-}")"
 
 if [[ -z "$DESTINATION_ROOT" ]]; then
     echo "usage: $0 <source-packs-directory> <destination-packs-directory>" >&2
     exit 2
 fi
-while [[ "$DESTINATION_ROOT" != "/" ]]; do
-    case "$DESTINATION_ROOT" in
-        */)
-            DESTINATION_ROOT="${DESTINATION_ROOT%/}"
-            ;;
-        */.)
-            DESTINATION_ROOT="${DESTINATION_ROOT%/.}"
-            [[ -n "$DESTINATION_ROOT" ]] || DESTINATION_ROOT="/"
-            ;;
-        *)
-            break
-            ;;
-    esac
-done
 if [[ ! -d "$SOURCE_ROOT" || -L "$SOURCE_ROOT" ]]; then
     echo "❌ bundled packs source must be a real directory: $SOURCE_ROOT" >&2
     exit 1

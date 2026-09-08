@@ -213,6 +213,100 @@ func runReleaseLayoutSuites() {
         }
     }
 
+    suite("Factory Pack 组装拒绝带尾随路径分量的源符号链接") {
+        let root = guiTestRepositoryRoot()
+        let script = root.appendingPathComponent("scripts/copy-bundled-packs.sh")
+
+        // `-d link/` 为真而 `-L link/` 为假：尾随分量会让符号链接检查跟穿链接。
+        // 只断言非零退出是恒真的 —— RED 下脚本也会在后面的 LICENSES.md 检查上失败关闭，
+        // 但那是错误的守卫在兜底；必须断言拒绝来自「源必须是实际目录」这一道。
+        for suffix in ["/", "/."] {
+            withTempDirectory { temporary in
+                let target = temporary.appendingPathComponent("source-target", isDirectory: true)
+                let sourceLink = temporary.appendingPathComponent(
+                    "source-link", isDirectory: true)
+                let destination = temporary.appendingPathComponent(
+                    "destination", isDirectory: true)
+                do {
+                    try FileManager.default.createDirectory(
+                        at: target, withIntermediateDirectories: true)
+                    try FileManager.default.createSymbolicLink(
+                        at: sourceLink, withDestinationURL: target)
+                } catch {
+                    expect(false, "无法创建源符号链接夹具：\(error)")
+                    return
+                }
+
+                let result = runTestProcess(
+                    executableURL: URL(fileURLWithPath: "/bin/bash"),
+                    arguments: [
+                        script.path,
+                        sourceLink.path + suffix,
+                        destination.path,
+                    ])
+
+                expect(result.status != 0, "尾随 \(suffix) 的源符号链接必须失败关闭")
+                expect(
+                    result.output.contains("source must be a real directory"),
+                    "拒绝必须来自源目录守卫而非下游内容检查兜底：\(result.output)")
+                expect(
+                    !FileManager.default.fileExists(atPath: destination.path),
+                    "拒绝尾随 \(suffix) 的源符号链接后不得创建目标目录")
+            }
+        }
+    }
+
+    suite("Factory Pack 组装拒绝以 .. 结尾的源与目标路径") {
+        let root = guiTestRepositoryRoot()
+        let script = root.appendingPathComponent("scripts/copy-bundled-packs.sh")
+
+        // `link/..` 同样让 -L 报 false、-d 报真，而一旦涉及符号链接，`..` 无法按文本安全
+        // 归一化（`a/link/..` 是 resolve(a/link) 的父目录，不是 `a`）——只能按路径形状拒绝。
+        // RED 下目标会被「必须为空」偶然兜住、源会被 LICENSES.md 缺失兜住，两者都非零退出，
+        // 所以断言必须钉住拒绝信息本身，否则这条测试在 bug 在场时照样全绿。
+        withTempDirectory { temporary in
+            let target = temporary.appendingPathComponent("target", isDirectory: true)
+            let link = temporary.appendingPathComponent("link", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(
+                    at: target, withIntermediateDirectories: true)
+                try FileManager.default.createSymbolicLink(
+                    at: link, withDestinationURL: target)
+            } catch {
+                expect(false, "无法创建符号链接夹具：\(error)")
+                return
+            }
+
+            let destinationResult = runTestProcess(
+                executableURL: URL(fileURLWithPath: "/bin/bash"),
+                arguments: [
+                    script.path,
+                    root.appendingPathComponent("packs").path,
+                    link.path + "/..",
+                ])
+            expect(destinationResult.status != 0, "以 /.. 结尾的目标必须失败关闭")
+            expect(
+                destinationResult.output.contains("must not end in a '..' component"),
+                "目标拒绝必须来自路径形状守卫而非 emptiness 兜底：\(destinationResult.output)")
+            let targetEntries =
+                (try? FileManager.default.contentsOfDirectory(atPath: target.path)) ?? []
+            expect(targetEntries.isEmpty, "拒绝 /.. 目标后不得写入链接目标")
+
+            let sourceDestination = temporary.appendingPathComponent(
+                "destination", isDirectory: true)
+            let sourceResult = runTestProcess(
+                executableURL: URL(fileURLWithPath: "/bin/bash"),
+                arguments: [script.path, link.path + "/..", sourceDestination.path])
+            expect(sourceResult.status != 0, "以 /.. 结尾的源必须失败关闭")
+            expect(
+                sourceResult.output.contains("must not end in a '..' component"),
+                "源拒绝必须来自路径形状守卫而非下游内容检查兜底：\(sourceResult.output)")
+            expect(
+                !FileManager.default.fileExists(atPath: sourceDestination.path),
+                "拒绝 /.. 源后不得创建目标目录")
+        }
+    }
+
     suite("Factory Pack 批准选择异常时失败关闭") {
         let root = guiTestRepositoryRoot()
         let script = root.appendingPathComponent("scripts/copy-bundled-packs.sh")
