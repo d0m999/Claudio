@@ -107,7 +107,7 @@ func runHitTargetSuites() {
         recorder.reset()
         for x in [15.0, 140.0, 268.0] {
             expect(
-                probe.click(x: x, yFromTop: 84),
+                probe.click(x: x, yFromTop: 56),
                 "未选中透明 Codex 行的前部、中部和尾部都必须能合成点击")
         }
         expect(
@@ -115,28 +115,27 @@ func runHitTargetSuites() {
             "未选中透明行的三个位置都只能触发 Codex，实得 \(recorder.actions)")
     }
 
-    suite("Sound Scope 行：行外、分组间隙、相邻行和禁用行保持隔离") {
+    suite("Sound Scope 行：行外、相邻行空隙和禁用行保持隔离") {
         let recorder = HitTargetRecorder()
         let probe = NativeHitTargetProbe(
             rootView: ScopeRowsFixture(recorder: recorder),
             size: CGSize(width: 280, height: 150))
         defer { probe.close() }
 
-        expect(probe.click(x: 15, yFromTop: 50), "分组标题不是 Sound Scope 选择按钮")
-        expect(probe.click(x: 15, yFromTop: 66), "分组间隙不是 Sound Scope 选择按钮")
-        expect(probe.click(x: 278, yFromTop: 84), "条目外部空白不能命中相邻 Sound Scope")
+        expect(probe.click(x: 15, yFromTop: 41), "相邻作用域间隙不是 Sound Scope 选择按钮")
+        expect(probe.click(x: 278, yFromTop: 56), "条目外部空白不能命中相邻 Sound Scope")
         expect(
             recorder.actions.isEmpty,
-            "标题、间隙和行外点击都不能切换作用域，实得 \(recorder.actions)")
+            "间隙和行外点击都不能切换作用域，实得 \(recorder.actions)")
 
-        expect(probe.click(x: 15, yFromTop: 84), "相邻 Codex 行应只命中自身")
+        expect(probe.click(x: 15, yFromTop: 56), "相邻 Codex 行应只命中自身")
         expect(
             recorder.actions == ["codex"],
             "点击相邻行不能误触发 Global，实得 \(recorder.actions)")
 
         recorder.reset()
         for x in [15.0, 140.0, 268.0] {
-            expect(probe.click(x: x, yFromTop: 112), "禁用 WorkBuddy 行仍应可命中但不可执行")
+            expect(probe.click(x: x, yFromTop: 90), "禁用 WorkBuddy 行仍应可命中但不可执行")
         }
         expect(
             recorder.actions.isEmpty,
@@ -282,12 +281,8 @@ private struct ScopeRowsFixture: View {
     let recorder: HitTargetRecorder
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 6) {
             scopeRow(id: "global", isSelected: true)
-            Text("Claude Code")
-                .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
-                .padding(.horizontal, 12)
-            Spacer().frame(height: 8)
             scopeRow(id: "codex", isSelected: false)
             scopeRow(id: "workbuddy", isSelected: false)
                 .disabled(true)

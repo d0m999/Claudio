@@ -93,6 +93,28 @@ func runSettingsPresentationTargetSuites() {
         )
     }
 
+    suite("Events & Sounds scope sidebar：不显示重复的 Product 分组标题") {
+        let root = guiTestRepositoryRoot()
+        let url = root.appendingPathComponent(
+            "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift")
+        guard let source = try? String(contentsOf: url, encoding: .utf8) else {
+            expect(false, "读不到 EventSettingsWindowView.swift")
+            return
+        }
+        let scanned = strippingComments(source)
+        guard scanned.unmodeledConstructs.isEmpty else {
+            expect(false, "EventSettingsWindowView.swift 源码审计遇到无法建模的构造")
+            return
+        }
+        let code = scanned.codeWithoutStringLiterals
+        expect(
+            code.contains(
+                "ForEach(hostSourceProductGroups(from: hostIntegrations.content.sourceRows))")
+                && code.contains("ForEach(scopesForProduct(group.product))")
+                && !code.contains("Text(group.title)"),
+            "作用域侧栏仍按 Product 保持 Surface 顺序，但不得渲染重复的 Product 标题")
+    }
+
     suite("Settings presentation target：Release view tree 不携带 DEBUG recorder modifier") {
         let root = guiTestRepositoryRoot()
         let mountURL = root.appendingPathComponent(

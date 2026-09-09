@@ -245,13 +245,6 @@ struct EventSettingsWindowView: View {
             scopeButton(global)
         }
         ForEach(hostSourceProductGroups(from: hostIntegrations.content.sourceRows)) { group in
-            Text(group.title)
-                .font(ClaudioTheme.font(.caption).weight(.semibold))
-                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.top, 9)
-                .accessibilityAddTraits(.isHeader)
             ForEach(scopesForProduct(group.product)) { scope in
                 scopeButton(scope)
             }
