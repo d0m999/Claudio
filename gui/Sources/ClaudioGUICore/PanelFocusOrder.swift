@@ -35,10 +35,11 @@ public enum PanelFocusTarget: Sendable, Hashable {
 }
 
 /// 作用域浮层存在期间的临时焦点空间。收起后仍只向生产面板暴露一个 `.soundScope`
-/// 焦点目标，避免把当前可见来源数固化进主面板焦点模型。
+/// 焦点目标，避免把当前可见来源数固化进主面板焦点模型。行内状态动作（2026-09-10
+/// 起替换菜单底部 footer）只进入 Tab 焦点序，方向键顺序仍只遍历作用域选项。
 public enum PanelSoundScopePickerFocusTarget: Sendable, Equatable, Hashable {
     case scope(PanelSoundScopeID)
-    case integrations
+    case integrationAction(PanelSoundScopeID)
 }
 
 public func panelSoundScopePickerFocusOrder(

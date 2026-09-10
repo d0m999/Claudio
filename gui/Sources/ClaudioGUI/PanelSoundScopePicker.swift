@@ -1,11 +1,13 @@
 import AppKit
+import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
 import ClaudioLocalization
 import SwiftUI
 
 /// 面板专属的声音作用域选择器。它只消费纯 presentation 与选择回调，不读取宿主配置、
-/// 不判断回执，也不直接写声音配置。
+/// 不判断回执，也不直接写声音配置。异常状态行的行内状态动作只把宿主身份经
+/// `onOpenIntegration` 上抛，由 MenuBarController 提交既有 typed route。
 @MainActor
 struct PanelSoundScopePicker: View {
     let scopes: [PanelSoundScopePresentation]
@@ -15,11 +17,13 @@ struct PanelSoundScopePicker: View {
     @Binding var isExpanded: Bool
     let focusedTarget: FocusState<PanelFocusTarget?>.Binding
     let onSelect: (PanelSoundScopeID) -> Void
+    let onOpenIntegration: (HostID) -> Void
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focusedMenuTarget: PanelSoundScopePickerFocusTarget?
     @State private var hoveredScope: PanelSoundScopeID?
+    @State private var hoveredIntegrationAction: PanelSoundScopeID?
     @State private var triggerHovered = false
 
     var body: some View {
@@ -173,52 +177,118 @@ struct PanelSoundScopePicker: View {
         let hovered = hoveredScope == scope.scope
         let target = PanelSoundScopePickerFocusTarget.scope(scope.scope)
         let focused = focusedMenuTarget == target
+        return HStack(spacing: 4) {
+            Button {
+                onSelect(scope.scope)
+                dismissMenuAndRestoreTriggerFocus()
+            } label: {
+                HStack(spacing: 9) {
+                    scopeIdentity(scope, prominent: false)
+                    Spacer(minLength: 8)
+                    if panelSoundScopeIntegrationActionHost(scope) == nil {
+                        statusBadge(scope)
+                    }
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: CGFloat(menuLayout.optionHeight),
+                    alignment: .leading
+                )
+                .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+                .background(
+                    RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                        .fill(
+                            selected
+                                ? ClaudioTheme.claySoft(colorScheme)
+                                : hovered || focused
+                                    ? ClaudioTheme.elevated(colorScheme)
+                                    : .clear)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                        .strokeBorder(
+                            selected
+                                ? ClaudioTheme.clay(colorScheme)
+                                : hovered || focused
+                                    ? ClaudioTheme.hairline(colorScheme)
+                                    : .clear,
+                            lineWidth: ClaudioTheme.Metrics.hairline)
+                )
+                .animation(
+                    reduceMotion ? nil : .easeOut(duration: 0.12),
+                    value: selected || hovered || focused)
+            }
+            .buttonStyle(.plain)
+            .focused($focusedMenuTarget, equals: target)
+            .onHover { inside in hoveredScope = inside ? scope.scope : nil }
+            .accessibilityLabel(scope.accessibilityLabel)
+            .accessibilityAddTraits(selected ? [.isSelected] : [])
+            .accessibilityIdentifier("panel.sound-scope.item.\(scope.scope.storedValue)")
+
+            if let actionHost = panelSoundScopeIntegrationActionHost(scope) {
+                integrationActionButton(scope, host: actionHost)
+            }
+        }
+    }
+
+    /// 行内状态动作：异常状态行的状态徽标成为独立按钮（描边胶囊 + ›），点击只把宿主身份
+    /// 经 `onOpenIntegration` 上抛——不改变当前选中作用域，也不在菜单内复制任何修复动作。
+    /// 命中目标 29pt 高于紧凑控件 token 28pt，是 DESIGN.md 行内动作合同的显式要求。
+    private func integrationActionButton(
+        _ scope: PanelSoundScopePresentation,
+        host: HostID
+    ) -> some View {
+        let target = PanelSoundScopePickerFocusTarget.integrationAction(scope.scope)
+        let focused = focusedMenuTarget == target
+        let hovered = hoveredIntegrationAction == scope.scope
         return Button {
-            onSelect(scope.scope)
+            onOpenIntegration(host)
             dismissMenuAndRestoreTriggerFocus()
         } label: {
-            HStack(spacing: 9) {
-                scopeIdentity(scope, prominent: false)
-                Spacer(minLength: 8)
-                statusBadge(scope)
+            HStack(spacing: 4) {
+                Image(systemName: statusSymbol(scope))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(statusColor(scope.status))
+                    .accessibilityHidden(true)
+                Text(scope.stateText)
+                    .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                    .foregroundColor(ClaudioTheme.text(colorScheme))
+                    .lineLimit(1)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                    .accessibilityHidden(true)
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .frame(
-                maxWidth: .infinity,
-                minHeight: CGFloat(menuLayout.optionHeight),
-                alignment: .leading
-            )
-            .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+            .padding(.horizontal, 8)
+            .frame(minHeight: 29)
+            .contentShape(Capsule())
             .background(
-                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                Capsule()
                     .fill(
-                        selected
-                            ? ClaudioTheme.claySoft(colorScheme)
-                            : hovered || focused
-                                ? ClaudioTheme.elevated(colorScheme)
-                                : .clear)
+                        hovered || focused
+                            ? ClaudioTheme.elevated(colorScheme)
+                            : ClaudioTheme.surface(colorScheme))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                Capsule()
                     .strokeBorder(
-                        selected
-                            ? ClaudioTheme.clay(colorScheme)
-                            : hovered || focused
-                                ? ClaudioTheme.hairline(colorScheme)
-                                : .clear,
+                        hovered || focused
+                            ? statusColor(scope.status)
+                            : ClaudioTheme.hairline(colorScheme),
                         lineWidth: ClaudioTheme.Metrics.hairline)
             )
             .animation(
                 reduceMotion ? nil : .easeOut(duration: 0.12),
-                value: selected || hovered || focused)
+                value: hovered || focused)
         }
         .buttonStyle(.plain)
-        .focused($focusedMenuTarget, equals: target)
-        .onHover { inside in hoveredScope = inside ? scope.scope : nil }
-        .accessibilityLabel(scope.accessibilityLabel)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
-        .accessibilityIdentifier("panel.sound-scope.item.\(scope.scope.storedValue)")
+        .focused($focusedMenuTarget, equals: .integrationAction(scope.scope))
+        .onHover { inside in hoveredIntegrationAction = inside ? scope.scope : nil }
+        .accessibilityLabel(
+            panelSoundScopeIntegrationActionLabel(name: scope.name, language: language))
+        .accessibilityIdentifier("panel.sound-scope.integration-action.\(scope.scope.storedValue)")
     }
 
     private func scopeIdentity(

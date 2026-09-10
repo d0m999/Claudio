@@ -251,7 +251,8 @@ public struct PanelSoundScopePresentation: Sendable, Equatable, Identifiable {
 }
 
 /// 声音作用域浮层在当前滚动视口内的尺寸决策。面板只负责选择 Scope；集成管理与诊断
-/// 由 Settings 目的页承载，因此菜单不再保留第二个入口。
+/// 由 Settings 目的页承载。菜单底部不再保留 footer 入口（2026-09-10 起改为异常状态行的
+/// 行内状态动作），因此诊断入口不占用纵向高度。
 public struct PanelSoundScopeMenuLayout: Sendable, Equatable {
     public let optionHeight: Double
     public let optionsContentHeight: Double
@@ -376,6 +377,30 @@ private func panelSoundScopeStateText(
     case .notConnected: l10n.text(.panelSoundScopeStatusNotConnected)
     case .needsAttention: l10n.text(.panelSoundScopeStatusNeedsAttention)
     }
+}
+
+/// 行内状态动作的决策级投影：只有异常状态（待回执 / 旧版 / 需要处理）的 Surface 行产生
+/// 集成入口，返回值为 typed route `.integrations(surface:)` 需要的真实宿主身份。Global 与
+/// 「已激活」行保持只读；`.notConnected` 本就不进入选择器，即使出现也 fail closed。
+/// 视图只原样转发此结果，不做二次判断。
+public func panelSoundScopeIntegrationActionHost(
+    _ scope: PanelSoundScopePresentation
+) -> HostID? {
+    guard let host = scope.host, scope.scope.surface != nil else { return nil }
+    switch scope.status {
+    case .awaitingActivation, .legacy, .needsAttention:
+        return host
+    case .ready, .notConnected:
+        return nil
+    }
+}
+
+/// 行内状态动作的无障碍 label：与选择按钮的「名称 + 状态摘要」明确区分。
+public func panelSoundScopeIntegrationActionLabel(
+    name: String,
+    language: ClaudioAppLanguage
+) -> String {
+    ClaudioL10n(language: language).format(.panelSoundScopeIntegrationAction, name)
 }
 
 /// 持久化选择的恢复规则：显式 `global` 永远保留；合法历史 Surface 原样恢复；从未选择或

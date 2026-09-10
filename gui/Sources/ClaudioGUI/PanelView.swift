@@ -53,6 +53,7 @@ public struct PanelView: View {
     private let refreshesActivityOnLifecycle: Bool
     private let onAudibilityInputsChanged: @MainActor () -> Void
     private let onOpenSettings: @MainActor () -> Void
+    private let onOpenIntegration: @MainActor (HostID) -> Void
     private let onQuit: @MainActor () -> Void
 
     public init(
@@ -67,6 +68,7 @@ public struct PanelView: View {
         soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator,
         onAudibilityInputsChanged: @escaping @MainActor () -> Void,
         onOpenSettings: @escaping @MainActor () -> Void,
+        onOpenIntegration: @escaping @MainActor (HostID) -> Void,
         onQuit: @escaping @MainActor () -> Void,
     ) {
         self.audioEnvironment = audioEnvironment
@@ -77,6 +79,7 @@ public struct PanelView: View {
         self.activityDiagnostics = activityDiagnostics
         self.onAudibilityInputsChanged = onAudibilityInputsChanged
         self.onOpenSettings = onOpenSettings
+        self.onOpenIntegration = onOpenIntegration
         self.onQuit = onQuit
         previewPlayer = NSSoundAudioPreviewPlayer()
         refreshesActivityOnLifecycle = true
@@ -129,6 +132,7 @@ public struct PanelView: View {
         self.refreshesActivityOnLifecycle = false
         self.onAudibilityInputsChanged = {}
         self.onOpenSettings = {}
+        self.onOpenIntegration = { _ in }
         self.onQuit = {}
     }
     #endif
@@ -289,7 +293,8 @@ public struct PanelView: View {
             availableMenuHeight: availableMenuHeight,
             isExpanded: $isSoundScopeMenuExpanded,
             focusedTarget: $focusedTarget,
-            onSelect: selectSoundScope)
+            onSelect: selectSoundScope,
+            onOpenIntegration: onOpenIntegration)
     }
 
     private func selectSoundScope(_ scope: PanelSoundScopeID) {

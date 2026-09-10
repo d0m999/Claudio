@@ -109,6 +109,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要处理" } }
       }
     },
+    "panel.sound-scope.integration-action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Manage %@ in Integrations" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在集成中处理 %@" } }
+      }
+    },
     "panel.events.title" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ · Events" } },
@@ -155,12 +161,6 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld published sources · 5 sound events" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 个已发布来源 · 5 个声音事件" } }
-      }
-    },
-    "panel.connections-diagnostics" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connections & Diagnostics…" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接与诊断…" } }
       }
     },
     "panel.custom-sound-overrides" : {

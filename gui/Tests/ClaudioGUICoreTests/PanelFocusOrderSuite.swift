@@ -25,6 +25,10 @@ func runPanelFocusOrderSuites() {
             panelSoundScopePickerFocusOrder(scopes: scopes)
                 == scopes.map(PanelSoundScopePickerFocusTarget.scope),
             "浮层焦点顺序必须由当前可见作用域生成，不得注入旧的连接入口")
+        expect(
+            !panelSoundScopePickerFocusOrder(scopes: scopes)
+                .contains(PanelSoundScopePickerFocusTarget.integrationAction(.surface(.codex))),
+            "行内状态动作只进入 Tab 焦点序，不得占用方向键顺序")
     }
 
     suite("panelFocusOrder：onboarding 兼容顺序保持失败详情 → 主动作 → 次动作") {

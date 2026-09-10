@@ -650,6 +650,35 @@ func runViewWiringSuites() {
                 && integrationsModel.contains("func perform("),
             "连接、修复与破坏性断开只存在于集成 destination model/view")
     }
+    suite("行内集成入口接线：选择器只转发宿主身份，typed route 提交留在 MenuBarController") {
+        guard
+            let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift"),
+            let scopePicker = codeOnly("gui/Sources/ClaudioGUI/PanelSoundScopePicker.swift"),
+            let menu = codeOnly("gui/Sources/ClaudioGUI/MenuBarController.swift")
+        else {
+            expect(false, "读不到 PanelView/PanelSoundScopePicker/MenuBarController")
+            return
+        }
+        expect(
+            scopePicker.contains("panelSoundScopeIntegrationActionHost(")
+                && scopePicker.contains("onOpenIntegration"),
+            "行内状态动作必须消费 GUICore 决策级投影，并经回调上抛宿主身份")
+        expect(
+            !scopePicker.contains(".integrations(")
+                && !scopePicker.contains("requestIntegrationsSettings"),
+            "选择器不得自行构造 SettingsRoute 或触碰窗口呈现")
+        expect(
+            collapsingWhitespace(panel).contains("onOpenIntegration: onOpenIntegration")
+                && panel.contains("onOpenIntegration: @escaping @MainActor (HostID) -> Void"),
+            "PanelView 必须把行内动作回调原样转发给选择器，不夹带路由知识")
+        expect(
+            menu.contains("requestIntegrationsSettings(preselect: host, returnFocusTo: .soundScope)"),
+            "MenuBarController 必须把行内动作接到既有 typed route 提交，并把焦点还回触发卡")
+        expect(
+            scopePicker.contains("panel.sound-scope.integration-action.")
+                && scopePicker.contains(".focused($focusedMenuTarget, equals: .integrationAction("),
+            "行内状态动作必须有稳定标识并只进入 Tab 焦点序")
+    }
     suite("PanelView 的 config.lock 只转发给声音控制写者，不再供给宿主连接") {
         guard
             let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift"),

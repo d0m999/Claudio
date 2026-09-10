@@ -1,5 +1,6 @@
 import ClaudioCore
 import ClaudioGUICore
+import ClaudioLocalization
 import Foundation
 
 private func panelPresentationRow(
@@ -263,7 +264,7 @@ func runPanelPresentationSuites() async {
             "最大界面文字必须在同一窗口宽度触发窗口自己的降级：\(maximumText)")
     }
 
-    suite("声音作用域菜单：未取得视口测量时仍提供可见选项与诊断入口") {
+    suite("声音作用域菜单：未取得视口测量时仍完整提供可见选项") {
         let unmeasured = panelSoundScopeMenuLayout(
             scopeCount: 3,
             typeScale: 1,
@@ -280,7 +281,7 @@ func runPanelPresentationSuites() async {
             "非有限几何值必须与尚未测量使用同一安全布局：\(invalidMeasurement)")
     }
 
-    suite("声音作用域菜单：最大字号按滚动视口剩余高度裁定选项区，诊断入口固定可见") {
+    suite("声音作用域菜单：最大字号按滚动视口剩余高度裁定选项区，不再为 footer 保留高度") {
         let layout = panelSoundScopeMenuLayout(
             scopeCount: 4,
             typeScale: 1,
@@ -292,7 +293,7 @@ func runPanelPresentationSuites() async {
             "四来源最大字号必须把溢出的选项留在内部滚动区")
         expect(
             layout.diagnosticsHeight == 0,
-            "生产作用域菜单不再包含连接与诊断入口：\(layout.diagnosticsHeight)")
+            "集成入口已改为行内状态动作，菜单不再保留 footer 高度：\(layout.diagnosticsHeight)")
     }
 
     suite("面板作用域：Global 恒在、Surface 按 registry 排序，notConnected 一律过滤") {
@@ -329,6 +330,64 @@ func runPanelPresentationSuites() async {
         expect(
             !scopes.contains(where: { $0.scope == .surface(.claudeCode) }),
             "即使磁盘残留 Surface 覆盖，notConnected 也不得进入 popup")
+    }
+
+    suite("行内集成入口：仅异常 Surface 行产生动作宿主，Global/已激活/未连接保持只读") {
+        func actionPresentation(
+            scope: PanelSoundScopeID,
+            host: HostID?,
+            status: HostSourceRowStatus
+        ) -> PanelSoundScopePresentation {
+            PanelSoundScopePresentation(
+                scope: scope,
+                host: host,
+                name: host?.displayName ?? "全局默认",
+                supportedCount: 0,
+                totalCount: Event.allCases.count,
+                status: status,
+                coverageText: "0/5",
+                stateText: "fixture",
+                summaryText: "fixture",
+                hasSparseOverride: false,
+                accessibilityLabel: "fixture")
+        }
+
+        expect(
+            panelSoundScopeIntegrationActionHost(
+                actionPresentation(scope: .global, host: nil, status: .ready)) == nil,
+            "Global 行必须保持纯信息，不产生集成动作")
+        expect(
+            panelSoundScopeIntegrationActionHost(
+                actionPresentation(scope: .surface(.codex), host: .codex, status: .ready)) == nil,
+            "已激活行没有待处理问题，状态徽标保持只读")
+        for status in [HostSourceRowStatus.awaitingActivation, .legacy, .needsAttention] {
+            expect(
+                panelSoundScopeIntegrationActionHost(
+                    actionPresentation(
+                        scope: .surface(.workBuddy), host: .workBuddy, status: status))
+                    == .workBuddy,
+                "\(status) 行必须把真实宿主身份交给集成路由：\(status)")
+        }
+        expect(
+            panelSoundScopeIntegrationActionHost(
+                actionPresentation(
+                    scope: .surface(.claudeCode), host: .claudeCode, status: .notConnected))
+                == nil,
+            "notConnected 不进入选择器；即使出现也不得在行内产生动作")
+    }
+
+    suite("行内集成入口文案：动作 label 与选择摘要可区分，双语注册") {
+        expect(
+            panelSoundScopeIntegrationActionLabel(name: "Codex", language: .zhHans)
+                == "在集成中处理 Codex",
+            "中文动作 label 必须指向集成目的页")
+        expect(
+            panelSoundScopeIntegrationActionLabel(name: "Codex", language: .english)
+                == "Manage Codex in Integrations",
+            "英文动作 label 必须指向 Integrations destination")
+        expect(
+            ClaudioL10nKey.allKnown.contains(.panelSoundScopeIntegrationAction),
+            "新动作文案必须注册到 allKnown")
     }
 
     suite("面板作用域文案：英文同样分离覆盖数与状态，不回退共享 readiness 文案") {

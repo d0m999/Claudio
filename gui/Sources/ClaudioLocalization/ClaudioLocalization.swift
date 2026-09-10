@@ -180,13 +180,14 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "panel.sound-scope.status.not-connected"
     public static let panelSoundScopeStatusNeedsAttention: Self =
         "panel.sound-scope.status.needs-attention"
+    public static let panelSoundScopeIntegrationAction: Self =
+        "panel.sound-scope.integration-action"
     public static let panelEventsTitle: Self = "panel.events.title"
     public static let panelEventsMappable: Self = "panel.events.mappable"
     public static let panelGlobalDefaults: Self = "panel.global-defaults"
     public static let panelGlobalName: Self = "panel.global.name"
     public static let panelGlobalStatus: Self = "panel.global.status"
     public static let panelHeaderSummary: Self = "panel.header.summary"
-    public static let panelConnectionsDiagnostics: Self = "panel.connections-diagnostics"
     public static let panelCustomSoundOverrides: Self = "panel.custom-sound-overrides"
     public static let panelNeedsPackSettingsMessage: Self = "panel.needs-pack.settings-message"
     public static let panelPlaybackSettings: Self = "panel.playback-settings"
@@ -1128,7 +1129,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .panelPacksLoading, .panelPacksNoPinnedTitle, .panelPacksNoPinnedMessage,
         .panelPacksNoneTitle, .panelPacksNoneMessage, .panelPacksReadFailed,
         .panelRevealConfig, .panelRevealConfigHint, .panelMasterVolume,
-        .panelMasterVolumeDescription, .panelHeaderSummary, .panelConnectionsDiagnostics,
+        .panelMasterVolumeDescription, .panelHeaderSummary,
         .panelCustomSoundOverrides, .panelNeedsPackSettingsMessage, .panelPlaybackSettings,
         .panelSoundPackLabel, .panelOpenSettings, .panelGlobalInheritance,
         .panelSurfaceOverride, .panelSurfaceOverrideDamaged, .panelInheritedGlobal,
@@ -1358,6 +1359,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .panelSoundScopeStatusDefault, .panelSoundScopeStatusActive,
         .panelSoundScopeStatusAwaitingReceipt, .panelSoundScopeStatusLegacy,
         .panelSoundScopeStatusNotConnected, .panelSoundScopeStatusNeedsAttention,
+        .panelSoundScopeIntegrationAction,
         .panelEventsTitle, .panelEventsMappable,
         .panelGlobalDefaults, .panelGlobalName, .panelGlobalStatus,
         .panelResetSurface, .panelResetSurfaceHint,
