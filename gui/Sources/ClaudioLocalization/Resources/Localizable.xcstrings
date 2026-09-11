@@ -1570,7 +1570,19 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法在钥匙串中读取或保存 API Key；请解锁这台 Mac 后重试。" } }
       }
     },
+    "ai-cue.error.credential-validation-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The Provider could not complete API Key validation. No new key was saved; try again later." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "生成服务未能完成 API Key 验证；没有保存新的 Key，请稍后重试。" } }
+      }
+    },
     "ai-cue.error.required-voice-unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The required voice is not available to this account. No API Key was saved." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前账户无法使用所需音色；未保存 API Key。" } }
+      }
+    },
+    "ai-cue.error.required-voice-unavailable-existing-key" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The required voice is not available to this account. The existing saved key was not changed." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前账户无法使用所需音色；已有的已保存 Key 未被更改。" } }

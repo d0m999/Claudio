@@ -650,7 +650,12 @@ struct EventSettingsAICueCredentialSheet: View {
             if let inputError {
                 credentialErrorNotice(credentialInputErrorText(inputError, l10n: l10n))
             } else if let failure = viewModel.credentialFailure {
-                credentialErrorNotice(aiCueCredentialFailureText(failure, l10n: l10n))
+                credentialErrorNotice(
+                    aiCueCredentialFailureText(
+                        failure,
+                        providerProfileID: viewModel.providerProfileID,
+                        credentialStatus: viewModel.credentialStatus,
+                        l10n: l10n))
             }
 
             HStack(spacing: 10) {
@@ -796,20 +801,30 @@ private func aiCueModalityKey(_ modality: AICueModality) -> ClaudioL10nKey {
     }
 }
 
-private func aiCueCredentialFailureText(
+package func aiCueCredentialFailureText(
     _ failure: AICueCredentialFailure,
+    providerProfileID: AICueProviderProfileID,
+    credentialStatus: AICueCredentialStatus?,
     l10n: ClaudioL10n
 ) -> String {
     switch failure {
     case .provider(.invalidCredential), .provider(.forbidden):
         return l10n.text(.aiCueErrorCredentialInvalid)
     case .provider(.requiredModelsUnavailable):
+        guard providerProfileID == .senseAudioChina else {
+            return l10n.text(.aiCueErrorCredentialValidationFailed)
+        }
+        if case .stored = credentialStatus {
+            return l10n.text(.aiCueErrorRequiredVoiceUnavailableExistingKey)
+        }
         return l10n.text(.aiCueErrorRequiredVoiceUnavailable)
     case .provider(.insufficientCredits):
         return l10n.text(.aiCueErrorCredits)
     case .provider(.rateLimited):
         return l10n.text(.aiCueErrorRateLimited)
-    case .provider, .storageUnavailable:
+    case .provider:
+        return l10n.text(.aiCueErrorCredentialValidationFailed)
+    case .storageUnavailable:
         return l10n.text(.aiCueErrorCredentialUnavailable)
     }
 }
@@ -840,7 +855,7 @@ private func aiCueFailureText(
         .generation(.provider(.forbidden)):
         return l10n.text(.aiCueErrorCredentialInvalid)
     case .generation(.provider(.requiredModelsUnavailable)):
-        return l10n.text(.aiCueErrorRequiredVoiceUnavailable)
+        return l10n.text(.aiCueErrorGeneration)
     case .generation(.provider(.insufficientCredits)):
         return l10n.text(.aiCueErrorCredits)
     case .generation(.provider(.rateLimited)):

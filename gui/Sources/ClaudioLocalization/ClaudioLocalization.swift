@@ -382,8 +382,12 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let aiCueErrorCredentialRequired: Self = "ai-cue.error.credential-required"
     public static let aiCueErrorCredentialInvalid: Self = "ai-cue.error.credential-invalid"
     public static let aiCueErrorCredentialUnavailable: Self = "ai-cue.error.credential-unavailable"
+    public static let aiCueErrorCredentialValidationFailed: Self =
+        "ai-cue.error.credential-validation-failed"
     public static let aiCueErrorRequiredVoiceUnavailable: Self =
         "ai-cue.error.required-voice-unavailable"
+    public static let aiCueErrorRequiredVoiceUnavailableExistingKey: Self =
+        "ai-cue.error.required-voice-unavailable-existing-key"
     public static let aiCueErrorCredits: Self = "ai-cue.error.credits"
     public static let aiCueErrorRateLimited: Self = "ai-cue.error.rate-limited"
     public static let aiCueErrorAudioInvalid: Self = "ai-cue.error.audio-invalid"
@@ -1180,8 +1184,10 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .aiCueErrorDescriptionRequired, .aiCueErrorDescriptionTooLong,
         .aiCueErrorSpeechNeedsText, .aiCueErrorUnsupportedModality,
         .aiCueErrorUnsupportedLocale, .aiCueErrorCredentialRequired,
-        .aiCueErrorCredentialInvalid, .aiCueErrorCredentialUnavailable, .aiCueErrorCredits,
-        .aiCueErrorRequiredVoiceUnavailable, .aiCueErrorRateLimited,
+        .aiCueErrorCredentialInvalid, .aiCueErrorCredentialUnavailable,
+        .aiCueErrorCredentialValidationFailed, .aiCueErrorCredits,
+        .aiCueErrorRequiredVoiceUnavailable, .aiCueErrorRequiredVoiceUnavailableExistingKey,
+        .aiCueErrorRateLimited,
         .aiCueErrorAudioInvalid, .aiCueErrorGeneration, .aiCueErrorNoValidCandidates,
         .aiCueErrorNameRequired, .aiCueErrorNameInvalid, .aiCueErrorAdoptionTarget,
         .aiCueErrorAdoptionPartial, .aiCueErrorAdoption,

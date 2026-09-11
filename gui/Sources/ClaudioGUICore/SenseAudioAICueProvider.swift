@@ -51,27 +51,37 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
                 credential: credential)
         } catch AICueTransportError.httpStatus(401, _) {
             // Only the fixed API origin's HTTP authentication response rejects a new key. Business
-            // statuses and a missing fixed voice are capability failures, preserving the old key.
+            // statuses and a missing fixed voice stay distinct non-credential failures, preserving
+            // the old key.
             throw AICueProviderError.invalidCredential
         } catch {
             throw AICueProviderTransportErrorMapper.map(
                 error,
-                unexpectedMediaType: .requiredModelsUnavailable)
+                unexpectedMediaType: .invalidAudioResponse)
         }
         guard (200..<300).contains(response.statusCode) else {
             if response.statusCode == 401 { throw AICueProviderError.invalidCredential }
-            throw statusError(response.statusCode, unexpectedMediaType: .requiredModelsUnavailable)
+            throw statusError(response.statusCode, unexpectedMediaType: .invalidAudioResponse)
         }
         guard
             response.finalURL == request.url,
             normalizedMediaType(response) == "application/json",
             let root = jsonObject(response.body),
-            providerStatusCode(root) == 0,
-            let systemVoices = root["system_voice"] as? [[String: Any]],
-            systemVoices.contains(where: {
-                $0["voice_id"] as? String == profile.routes[.speech]?.voiceID
-            })
+            let statusCode = providerStatusCode(root)
         else {
+            throw AICueProviderError.invalidAudioResponse
+        }
+        guard statusCode == 0 else {
+            throw AICueProviderError.serviceUnavailable
+        }
+        guard
+            let requiredVoiceID = profile.routes[.speech]?.voiceID,
+            let systemVoices = root["system_voice"] as? [[String: Any]],
+            systemVoices.allSatisfy({ $0["voice_id"] is String })
+        else {
+            throw AICueProviderError.invalidAudioResponse
+        }
+        guard systemVoices.contains(where: { $0["voice_id"] as? String == requiredVoiceID }) else {
             throw AICueProviderError.requiredModelsUnavailable
         }
     }
@@ -345,6 +355,30 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
         let url: URL
     }
 
+    /// The exact network-resource identity used by batch duplicate validation. Origin matching
+    /// already treats hostname case and an omitted HTTPS port as equivalent, so URL spelling must
+    /// not be allowed to define a weaker identity here. Path and signed query bytes stay exact.
+    private struct SFXAssetURLIdentity: Hashable {
+        let scheme: String
+        let hostname: String
+        let effectivePort: Int
+        let percentEncodedPath: String
+        let percentEncodedQuery: String?
+
+        init?(_ url: URL) {
+            guard
+                let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                components.scheme?.lowercased() == "https",
+                let hostname = components.host?.lowercased()
+            else { return nil }
+            scheme = "https"
+            self.hostname = hostname
+            effectivePort = components.port ?? 443
+            percentEncodedPath = components.percentEncodedPath
+            percentEncodedQuery = components.percentEncodedQuery
+        }
+    }
+
     private struct SFXBatch {
         let requestID: String?
         let items: [SFXDownloadItem]
@@ -372,7 +406,7 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
         else { throw AICueProviderError.invalidAudioResponse }
 
         var seenIndexes: Set<Int> = []
-        var seenURLs: Set<URL> = []
+        var seenURLs: Set<SFXAssetURLIdentity> = []
         var declaredCompletedCount = 0
         var downloadable: [SFXDownloadItem] = []
         for rawItem in rawItems {
@@ -390,11 +424,10 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
                     let value = rawURL as? String,
                     !value.isEmpty,
                     let url = URL(string: value),
-                    seenURLs.insert(url).inserted,
                     (try? AICueURLSessionAssetFetcher.request(
-                        url: url,
-                        policy: assetPolicy,
-                        deadline: .startingNow())) != nil
+                        url: url, policy: assetPolicy, deadline: .startingNow())) != nil,
+                    let identity = SFXAssetURLIdentity(url),
+                    seenURLs.insert(identity).inserted
                 else {
                     // Any URL that is present but outside the registry-owned trust boundary rejects
                     // the whole batch before the first asset request is sent.

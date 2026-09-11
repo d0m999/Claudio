@@ -1,4 +1,6 @@
 import ClaudioGUICore
+import ClaudioLocalization
+import ClaudioSettingsPresentation
 import Foundation
 
 private actor SenseAudioUnaryTransportFixture: AICueUnaryTransport {
@@ -210,17 +212,18 @@ func runSenseAudioAICueProviderSuites() async {
         expect(!String(reflecting: request).contains(secret), "request 反射不得泄漏 API key")
     }
 
-    await suite("SenseAudio probe：仅 HTTP 401 拒绝 key，业务失败与缺音色保持 capability 错误") {
+    await suite("SenseAudio probe：仅 HTTP 401 拒绝 key，业务失败、畸形响应与缺音色独立分类") {
         let cases: [(Result<AICueHTTPResponse, Error>, AICueProviderError)] = [
             (
                 .failure(AICueTransportError.httpStatus(code: 401, retryAfterSeconds: nil)),
                 .invalidCredential
             ),
-            (.success(senseAudioProbeResponse(statusCode: 1004)), .requiredModelsUnavailable),
+            (.success(senseAudioProbeResponse(statusCode: 1004)), .serviceUnavailable),
             (
                 .success(senseAudioProbeResponse(voiceID: "fixture-other-voice")),
                 .requiredModelsUnavailable
             ),
+            (.success(senseAudioProbeResponse(voiceID: nil)), .invalidAudioResponse),
             (
                 .success(
                     AICueHTTPResponse(
@@ -228,7 +231,7 @@ func runSenseAudioAICueProviderSuites() async {
                         headers: ["content-type": "application/json"],
                         body: Data("not-json".utf8),
                         finalURL: senseAudioProbeURL)),
-                .requiredModelsUnavailable
+                .invalidAudioResponse
             ),
         ]
         for (result, expected) in cases {
@@ -242,6 +245,51 @@ func runSenseAudioAICueProviderSuites() async {
             } catch {}
             expect(observed == expected, "probe 失败必须映射为稳定且区分 credential/capability 的错误")
         }
+    }
+
+    suite("SenseAudio probe：仅确认缺固定音色时显示音色文案，并按旧 Key 状态区分") {
+        let chinese = ClaudioL10n(language: .zhHans)
+        let english = ClaudioL10n(language: .english)
+        let missingKeyMessage = aiCueCredentialFailureText(
+            .provider(.requiredModelsUnavailable),
+            providerProfileID: .senseAudioChina,
+            credentialStatus: .missing,
+            l10n: chinese)
+        let existingKeyMessage = aiCueCredentialFailureText(
+            .provider(.requiredModelsUnavailable),
+            providerProfileID: .senseAudioChina,
+            credentialStatus: .stored(verification: .verified, hasPendingReplacement: false),
+            l10n: english)
+        expect(
+            missingKeyMessage == chinese.text(.aiCueErrorRequiredVoiceUnavailable)
+                && missingKeyMessage.contains("未保存 API Key")
+                && !missingKeyMessage.contains("已有的已保存 Key"),
+            "首次配置缺固定音色必须说明未保存 Key，不得声称保留不存在的旧 Key")
+        expect(
+            existingKeyMessage
+                == english.text(.aiCueErrorRequiredVoiceUnavailableExistingKey)
+                && existingKeyMessage.contains("existing saved key was not changed"),
+            "替换时缺固定音色必须明确已有 Key 未更改")
+
+        let otherProviderMessage = aiCueCredentialFailureText(
+            .provider(.requiredModelsUnavailable),
+            providerProfileID: .miniMaxGlobal,
+            credentialStatus: .missing,
+            l10n: chinese)
+        let businessFailureMessage = aiCueCredentialFailureText(
+            .provider(.serviceUnavailable),
+            providerProfileID: .senseAudioChina,
+            credentialStatus: .stored(verification: .verified, hasPendingReplacement: false),
+            l10n: chinese)
+        expect(
+            otherProviderMessage == chinese.text(.aiCueErrorCredentialValidationFailed)
+                && !otherProviderMessage.contains("所需音色"),
+            "其他 Provider 的模型/响应错误不得借用 SenseAudio 固定音色文案")
+        expect(
+            businessFailureMessage == chinese.text(.aiCueErrorCredentialValidationFailed)
+                && !businessFailureMessage.contains("所需音色")
+                && !businessFailureMessage.contains("钥匙串"),
+            "SenseAudio 业务错误不得伪装成缺固定音色或 Keychain 故障")
     }
 
     await suite("SenseAudio TTS：同一固定 body 顺序 POST 三次并返回 numbered 候选") {
@@ -450,6 +498,17 @@ func runSenseAudioAICueProviderSuites() async {
             senseAudioSFXResponse(
                 status: "completed",
                 items: [validItems[0], senseAudioSFXItem(index: 1, url: url0), validItems[2]]),
+            senseAudioSFXResponse(
+                status: "completed",
+                items: [
+                    validItems[0],
+                    senseAudioSFXItem(
+                        index: 1,
+                        url:
+                            "HTTPS://ASSETS.FIXTURE.INVALID:443/generated/structure-0.mp3?signature=zero"
+                    ),
+                    validItems[2],
+                ]),
             senseAudioSFXResponse(status: "completed", items: Array(validItems.prefix(2))),
             senseAudioSFXResponse(
                 status: "partial_success",
