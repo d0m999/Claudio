@@ -1,5 +1,7 @@
 import AppKit
 import ClaudioGUIComponents
+import ClaudioGUICore
+import Combine
 import Foundation
 import SwiftUI
 
@@ -180,6 +182,46 @@ func runHitTargetSuites() {
         expect(disabledRecorder.actions.isEmpty, "禁用 icon action 不得执行动作")
     }
 
+    suite("Sound Scope 共享控件：真实挂载验证行级 pressed owner 与条件动作清理") {
+        let model = SoundScopeControlsNativeModel()
+        let recorder = SoundScopeControlsNativeRecorder()
+        let probe = NativeHitTargetProbe(
+            rootView: SoundScopeControlsNativeFixture(model: model, recorder: recorder),
+            size: CGSize(width: 240, height: 110))
+        defer { probe.close() }
+
+        model.integrationActionHovered = true
+        probe.settle()
+        expect(
+            recorder.state(for: "integration")?.actionHovered == true,
+            "共享行 owner 必须接受当前条件动作的 hover Binding")
+        expect(
+            recorder.state(for: "scope")?.scopeHovered == false
+                && recorder.state(for: "scope")?.actionHovered == false,
+            "第一行动作 hover 不得污染相邻行的瞬时状态")
+
+        expect(probe.mouseDown(x: 120, yFromTop: 26), "应能在第一行保持 mouse-down")
+        probe.settle()
+        expect(
+            recorder.state(for: "integration")?.isPressed == true,
+            "共享 ButtonStyle 必须把 native pressed 上报到所在行 owner")
+        expect(
+            recorder.state(for: "scope")?.isPressed == false,
+            "第一行 pressed 不得触发整个 picker 或相邻行状态")
+        expect(probe.mouseUp(x: 120, yFromTop: 26), "应能完成第一行 mouse-up")
+        probe.settle(for: 0.13)
+
+        model.hasIntegrationAction = false
+        probe.settle()
+        model.integrationActionHovered = false
+        probe.settle()
+        model.hasIntegrationAction = true
+        probe.settle()
+        expect(
+            recorder.state(for: "integration")?.actionHovered == false,
+            "条件胶囊卸载再恢复时不得复活陈旧 action hover")
+    }
+
     suite("生产接线：声音包与 onboarding 使用显式命中合同") {
         let packGallery = productionSource("gui/Sources/ClaudioGUI/PackGalleryView.swift")
         let panelRows = productionSource("gui/Sources/ClaudioGUI/PanelRows.swift")
@@ -218,6 +260,7 @@ private final class NativeHitTargetProbe<Content: View> {
 
     init(rootView: Content, size: CGSize) {
         self.size = size
+        _ = NSApplication.shared
 
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
@@ -233,11 +276,10 @@ private final class NativeHitTargetProbe<Content: View> {
         window.isReleasedWhenClosed = false
         window.ignoresMouseEvents = false
         window.orderFrontRegardless()
-        hostingView.layoutSubtreeIfNeeded()
-        window.displayIfNeeded()
 
         self.window = window
         self.hostingView = hostingView
+        settle()
     }
 
     func click(x: CGFloat, yFromTop: CGFloat) -> Bool {
@@ -251,9 +293,34 @@ private final class NativeHitTargetProbe<Content: View> {
 
         window.sendEvent(mouseDown)
         window.sendEvent(mouseUp)
-        hostingView.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
+        settle()
         return true
+    }
+
+    func mouseDown(x: CGFloat, yFromTop: CGFloat) -> Bool {
+        let location = NSPoint(x: x, y: size.height - yFromTop)
+        guard let event = makeMouseEvent(type: .leftMouseDown, location: location) else {
+            return false
+        }
+        window.sendEvent(event)
+        settle()
+        return true
+    }
+
+    func mouseUp(x: CGFloat, yFromTop: CGFloat) -> Bool {
+        let location = NSPoint(x: x, y: size.height - yFromTop)
+        guard let event = makeMouseEvent(type: .leftMouseUp, location: location) else {
+            return false
+        }
+        window.sendEvent(event)
+        settle()
+        return true
+    }
+
+    func settle(for duration: TimeInterval = 0.02) {
+        hostingView.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: duration))
     }
 
     func close() {
@@ -273,6 +340,106 @@ private final class NativeHitTargetProbe<Content: View> {
             eventNumber: eventNumber,
             clickCount: 1,
             pressure: 1)
+    }
+}
+
+@MainActor
+private final class SoundScopeControlsNativeModel: ObservableObject {
+    @Published var hasIntegrationAction = true
+    @Published var integrationActionHovered = false
+}
+
+@MainActor
+private final class SoundScopeControlsNativeRecorder {
+    private var states: [String: PanelSoundScopeRowTransientState] = [:]
+
+    func recordState(_ state: PanelSoundScopeRowTransientState, for row: String) {
+        states[row] = state
+    }
+
+    func state(for row: String) -> PanelSoundScopeRowTransientState? {
+        states[row]
+    }
+}
+
+@MainActor
+private struct SoundScopeControlsNativeFixture: View {
+    @ObservedObject var model: SoundScopeControlsNativeModel
+    let recorder: SoundScopeControlsNativeRecorder
+
+    @StateObject private var actionCoordinator = PanelSoundScopeActionCoordinator()
+    @FocusState private var focusedTarget: PanelSoundScopePickerFocusTarget?
+
+    var body: some View {
+        VStack(spacing: 8) {
+            PanelSoundScopeRowInteractionContainer(
+                hasAction: model.hasIntegrationAction
+            ) { state, actionHovered in
+                Group {
+                    if model.hasIntegrationAction {
+                        PanelSoundScopeSuccessfulActionButton(
+                            action: {},
+                            actionCoordinator: actionCoordinator,
+                            reduceMotion: false,
+                            focusedTarget: $focusedTarget,
+                            target: .integrationAction(.global),
+                            policy: .integrationAction,
+                            onHover: { actionHovered.wrappedValue = $0 }
+                        ) {
+                            Text("Integration")
+                                .frame(maxWidth: .infinity, minHeight: 36)
+                                .contentShape(Rectangle())
+                        }
+                        .onChange(of: model.integrationActionHovered) {
+                            actionHovered.wrappedValue = $0
+                        }
+                    } else {
+                        Color.clear.frame(height: 36)
+                    }
+                }
+                .background(
+                    SoundScopeTransientStateProbe(
+                        row: "integration",
+                        state: state,
+                        recorder: recorder))
+            }
+
+            PanelSoundScopeRowInteractionContainer(hasAction: false) { state, _ in
+                PanelSoundScopeSuccessfulActionButton(
+                    action: {},
+                    actionCoordinator: actionCoordinator,
+                    reduceMotion: false,
+                    focusedTarget: $focusedTarget,
+                    target: .scope(.surface(.codex)),
+                    policy: .scopeAction,
+                    onHover: { _ in }
+                ) {
+                    Text("Scope")
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .contentShape(Rectangle())
+                }
+                .background(
+                    SoundScopeTransientStateProbe(
+                        row: "scope",
+                        state: state,
+                        recorder: recorder))
+            }
+        }
+        .padding(10)
+        .frame(width: 240, height: 110, alignment: .top)
+    }
+}
+
+@MainActor
+private struct SoundScopeTransientStateProbe: View {
+    let row: String
+    let state: PanelSoundScopeRowTransientState
+    let recorder: SoundScopeControlsNativeRecorder
+
+    var body: some View {
+        Color.clear
+            .onAppear { recorder.recordState(state, for: row) }
+            .onChange(of: state) { recorder.recordState($0, for: row) }
     }
 }
 

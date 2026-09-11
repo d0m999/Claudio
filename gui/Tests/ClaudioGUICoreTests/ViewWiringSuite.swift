@@ -654,9 +654,10 @@ func runViewWiringSuites() {
         guard
             let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift"),
             let scopePicker = codeOnly("gui/Sources/ClaudioGUI/PanelSoundScopePicker.swift"),
+            let theme = codeOnly("gui/Sources/ClaudioGUIComponents/ClaudioTheme.swift"),
             let menu = codeOnly("gui/Sources/ClaudioGUI/MenuBarController.swift")
         else {
-            expect(false, "读不到 PanelView/PanelSoundScopePicker/MenuBarController")
+            expect(false, "读不到 PanelView/PanelSoundScopePicker/ClaudioTheme/MenuBarController")
             return
         }
         expect(
@@ -676,86 +677,58 @@ func runViewWiringSuites() {
                 && collapsingWhitespace(menu).contains(
                     "preselect: host, returnFocusTo: .soundScope"),
             "MenuBarController 必须把行内动作接到既有 typed route 提交，并把焦点还回触发卡")
+        // 这里只钉 GUI 对 GUICore/GUIComponents 接缝的消费；纯状态、门闩和
+        // 动画投影的内部行为由 PanelSoundScopeInteractionSuite 编译执行验证。
         expect(
-            scopePicker.contains("panel.sound-scope.integration-action.")
-                && collapsingWhitespace(scopePicker).contains(
-                    ".focusable() .focused($focusedMenuTarget, equals: .integrationAction("),
-            "行内状态动作必须有稳定标识并只进入 Tab 焦点序")
+            scopePicker.contains("PanelSoundScopeActionCoordinator")
+                && scopePicker.contains("!actionCoordinator.isPending")
+                && whitespaceTolerantHitCount(
+                    of: "PanelSoundScopeSuccessfulActionButton(",
+                    in: scopePicker) == 2
+                && whitespaceTolerantHitCount(
+                    of:
+                        "actionCoordinator: actionCoordinator, reduceMotion: reduceMotion",
+                    in: scopePicker) == 2,
+            "作用域选择与 Integrations 动作必须共用 GUIComponents 的单一成功提交路径")
         expect(
-            scopePicker.contains("PanelSoundScopeRowInteractionState")
-                && scopePicker.contains("PanelSoundScopeRowPressedPreferenceKey")
-                && scopePicker.contains(
-                    "onPreferenceChange(PanelSoundScopeRowPressedPreferenceKey.self)"),
-            "选择器必须由单一纯交互状态接缝汇总行级焦点与子按钮 pressed")
+            scopePicker.contains("PanelSoundScopeRowInteractionContainer(")
+                && scopePicker.contains("policy: .trigger")
+                && scopePicker.contains("policy: .scopeAction")
+                && scopePicker.contains("policy: .integrationAction"),
+            "行级瞬时状态与三类按钮必须消费 GUIComponents 的共享 owner/策略")
         expect(
-            whitespaceTolerantHitCount(
-                of: ".panelSoundScopeFocusEffectDisabled()",
-                in: scopePicker) == 3
-                && scopePicker.contains("if #available(macOS 14.0, *)")
-                && scopePicker.contains("focusEffectDisabled()"),
-            "触发卡、作用域按钮与集成动作必须使用 macOS 兼容的焦点效果策略")
+            scopePicker.contains("role: .integrationAction")
+                && scopePicker.contains("role.usesPrimaryText(for: interactionState)"),
+            "行内集成动作必须消费 GUICore 主文字强调策略")
         expect(
-            !scopePicker.contains("value: selected || hovered || focused")
-                && !scopePicker.contains("value: hovered || focused"),
-            "行交互动画必须以完整 PanelSoundScopeRowInteractionState 为触发值")
-
-        guard
-            let optionStart = scopePicker.range(of: "private func scopeOption(")?.lowerBound,
-            let actionStart = scopePicker.range(
-                of: "private func integrationActionButton(")?.lowerBound,
-            optionStart < actionStart
-        else {
-            expect(false, "无法定位声音作用域选项与行内状态动作")
-            return
+            scopePicker.contains("ClaudioTheme.panelSoundScopeSelectedInteractionOverlay(")
+                && scopePicker.contains("ClaudioTheme.panelSoundScopeActionFocusFill(")
+                && scopePicker.contains("ClaudioTheme.panelSoundScopeActionHoverStroke(")
+                && scopePicker.contains("ClaudioTheme.panelSoundScopeFocusGlow(")
+                && theme.contains("public enum PanelSoundScopeOpacity"),
+            "Sound Scope 的选中叠层、动作焦点/hover 与焦点光晕必须由共享主题命名配方提供")
+        for forbidden in [
+            "elevated(colorScheme).opacity(0.22)",
+            "statusColor(scope.status).opacity(0.12)",
+            "statusColor(scope.status).opacity(0.70)",
+            "statusColor(scope.status).opacity(0.55)",
+        ] {
+            expect(
+                !scopePicker.contains(forbidden),
+                "Sound Scope 不得绕开 ClaudioTheme 内联 opacity 配方：\(forbidden)")
         }
-        // 空白折叠后定位（本文件 75-79 行的排版免疫约定）：调用被换行不得假红。
-        let option = collapsingWhitespace(String(scopePicker[optionStart..<actionStart]))
-        guard
-            let actionAt = option.range(
-                of:
-                    "integrationActionButton( scope, host: actionHost, interactionState: interactionState)"
-            )?.upperBound,
-            let rowBackgroundAt = option.range(
-                of: ".background(",
-                range: actionAt..<option.endIndex)?.lowerBound
-        else {
-            expect(false, "无法定位行内动作之后的整行背景")
-            return
-        }
-        // 钉 fill/stroke 表达式本身而不是「后缀里出现过 token」——claySoft 出现在 overlay 或
-        // 动画里不算数（实证：fill 选中分支换成 elevated、stroke 换成 selected ? claySoft 的
-        // 变异必须红）。负向检查只钉结构事实「选择按钮上没有自己的 .background」，
-        // 不禁止按钮内部出现合法的 claySoft 色调。
-        let rowChrome = option[rowBackgroundAt...]
         expect(
-            rowChrome.contains(".fill( selected ? ClaudioTheme.claySoft(colorScheme)")
-                && rowChrome.contains(".strokeBorder( selected ? ClaudioTheme.clay(colorScheme)")
-                && !option[..<actionAt].contains(".background("),
-            "选中态背景必须包住选择按钮与行内状态动作：由行级 fill 的 selected 分支提供"
-                + " claySoft 底与 clay 描边，不得回退到只画左侧选择按钮")
-        // hover 追踪必须挂在行级（不早于整行背景），否则绘制区域与感知区域失配：
-        // 指针跨过按钮与胶囊之间的间距时，行高亮会在指针仍位于行内时消失。
-        expect(
-            option.range(of: ".onHover { inside in hoveredScope = inside ? scope.scope : nil }")
-                .map({ rowBackgroundAt <= $0.lowerBound }) == true,
-            "整行 hover 追踪必须挂在行级（不早于整行背景），不得只挂在左侧选择按钮上")
-
-        guard
-            let identityStart = scopePicker.range(of: "private func scopeIdentity(")?.lowerBound,
-            actionStart < identityStart
-        else {
-            expect(false, "无法定位行内状态动作实现")
-            return
-        }
-        let action = collapsingWhitespace(String(scopePicker[actionStart..<identityStart]))
-        expect(
-            action.contains(".padding(.trailing, 4)"),
-            "行内状态胶囊必须从父行右缘内收，避免胶囊描边与选中行 clay 描边相交")
-        expect(
-            action.contains("value: interactionState")
-                && !action.contains("value: hovered || focused")
-                && !action.contains("value: hovered || focused || rowSelected"),
-            "胶囊、chevron 与状态动画必须跟踪完整行交互状态，不能折叠成布尔键")
+            !scopePicker.contains("value: interactionState)")
+                && scopePicker.contains("value: triggerHighlighted")
+                && scopePicker.contains("value: interactionState.rowSurfaceAppearance")
+                && scopePicker.contains("value: interactionState.isPressed")
+                && scopePicker.contains("value: interactionState.isChevronEngaged")
+                && whitespaceTolerantHitCount(
+                    of: "value: interactionState.actionAppearance",
+                    in: scopePicker) == 1
+                && scopePicker.contains("value: interactionState.statusIconAppearance")
+                && scopePicker.contains("value: interactionState.isInteractive"),
+            "GUI 必须消费 GUICore 的最小动画投影，且胶囊不得靠 chevron 键让断言恒绿")
     }
     suite("PanelView 的 config.lock 只转发给声音控制写者，不再供给宿主连接") {
         guard

@@ -1,49 +1,65 @@
 import Foundation
 
+public struct PanelSoundScopeRowSurfaceAppearance: Hashable, Sendable {
+    public let isSelected: Bool
+    public let isInteractive: Bool
+}
+
+public struct PanelSoundScopeStatusIconAppearance: Hashable, Sendable {
+    public let isInteractive: Bool
+    public let isFocused: Bool
+}
+
+public enum PanelSoundScopeActionAppearance: Hashable, Sendable {
+    case focused
+    case hovered
+    case selected
+    case resting
+}
+
+public enum PanelSoundScopeStatusTextRole: Hashable, Sendable {
+    case badge
+    case integrationAction
+
+    public func usesPrimaryText(for interactionState: PanelSoundScopeRowInteractionState) -> Bool {
+        self == .integrationAction || interactionState.isInteractive
+    }
+}
+
 /// 声音作用域菜单行的纯交互投影。
 ///
 /// 这个接缝只组合视图瞬时状态，不拥有 selected scope、宿主状态或任何配置事实。作用域选择
 /// 按钮和行内集成动作共享同一行状态，因此焦点、hover 和按压反馈不会在两个子按钮之间漂移。
 public struct PanelSoundScopeRowInteractionState: Hashable, Sendable {
     public let isSelected: Bool
-    public let isHovered: Bool
+    public let isScopeHovered: Bool
+    public let isActionHovered: Bool
     public let isScopeFocused: Bool
     public let isActionFocused: Bool
-    public let isActionEngaged: Bool
     public let isPressed: Bool
 
     public init(
         isSelected: Bool,
-        isHovered: Bool,
+        isScopeHovered: Bool,
+        isActionHovered: Bool,
         isScopeFocused: Bool,
         isActionFocused: Bool,
-        isActionEngaged: Bool,
         isPressed: Bool
     ) {
         self.isSelected = isSelected
-        self.isHovered = isHovered
+        self.isScopeHovered = isScopeHovered
+        self.isActionHovered = isActionHovered
         self.isScopeFocused = isScopeFocused
         self.isActionFocused = isActionFocused
-        self.isActionEngaged = isActionEngaged
         self.isPressed = isPressed
     }
 
-    /// Label names without the `is` prefix make fixture construction read like the product spec.
-    public init(
-        selected: Bool,
-        hovered: Bool,
-        scopeFocused: Bool,
-        actionFocused: Bool,
-        actionEngaged: Bool,
-        pressed: Bool
-    ) {
-        self.init(
-            isSelected: selected,
-            isHovered: hovered,
-            isScopeFocused: scopeFocused,
-            isActionFocused: actionFocused,
-            isActionEngaged: actionEngaged,
-            isPressed: pressed)
+    public var isHovered: Bool {
+        isScopeHovered || isActionHovered
+    }
+
+    public var isActionEngaged: Bool {
+        isActionHovered
     }
 
     public var isFocused: Bool {
@@ -51,21 +67,37 @@ public struct PanelSoundScopeRowInteractionState: Hashable, Sendable {
     }
 
     /// A row is visually engaged when either child is focused or the pointer is over the row/action.
-    /// `isActionEngaged` is kept separate so the chevron can respond only to the action itself.
     public var isInteractive: Bool {
-        isHovered || isFocused || isActionEngaged
+        isHovered || isFocused
     }
 
     public var isChevronEngaged: Bool {
-        isActionEngaged || isActionFocused
+        isActionHovered || isActionFocused
     }
 
-    public var selected: Bool { isSelected }
-    public var hovered: Bool { isHovered }
-    public var scopeFocused: Bool { isScopeFocused }
-    public var actionFocused: Bool { isActionFocused }
-    public var actionEngaged: Bool { isActionEngaged }
-    public var pressed: Bool { isPressed }
+    public var rowSurfaceAppearance: PanelSoundScopeRowSurfaceAppearance {
+        PanelSoundScopeRowSurfaceAppearance(
+            isSelected: isSelected,
+            isInteractive: isInteractive)
+    }
+
+    public var statusIconAppearance: PanelSoundScopeStatusIconAppearance {
+        PanelSoundScopeStatusIconAppearance(
+            isInteractive: isInteractive,
+            isFocused: isFocused)
+    }
+
+    public var actionAppearance: PanelSoundScopeActionAppearance {
+        if isActionFocused {
+            .focused
+        } else if isActionHovered {
+            .hovered
+        } else if isSelected {
+            .selected
+        } else {
+            .resting
+        }
+    }
 
     // MARK: Motion contract
 
@@ -81,6 +113,10 @@ public struct PanelSoundScopeRowInteractionState: Hashable, Sendable {
     public static let activeIconOffset: Double = -1
     public static let activeIconScale: Double = 1.06
     public static let activeChevronOffset: Double = 2
+
+    public static func actionCompletionDelay(reduceMotion: Bool) -> Double {
+        reduceMotion ? 0 : pressDuration
+    }
 
     public func rowScale(reduceMotion: Bool) -> Double {
         isPressed && !reduceMotion ? Self.rowPressedScale : 1

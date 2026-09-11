@@ -1,5 +1,7 @@
+import ClaudioGUIComponents
 import ClaudioGUICore
 import Foundation
+import SwiftUI
 
 // MARK: - contrastRatio + DESIGN.md token pairs (ENGINEERING.md T15 D5「对比度」)
 //
@@ -47,6 +49,25 @@ func runContrastSuites() {
         expect(
             ClaudioColorHex.clayHoverLight == "D97757",
             "light clay-hover drifted from DESIGN.md")
+    }
+
+    suite("palette: Sound Scope opacity recipes preserve light/dark interaction contracts") {
+        expect(
+            ClaudioTheme.PanelSoundScopeOpacity.selectedInteractionOverlay(.dark) == 0.22
+                && ClaudioTheme.PanelSoundScopeOpacity.selectedInteractionOverlay(.light) == 0.22,
+            "selected interaction overlay must remain 0.22 in both themes")
+        expect(
+            ClaudioTheme.PanelSoundScopeOpacity.actionFocusFill(.dark) == 0.15
+                && ClaudioTheme.PanelSoundScopeOpacity.actionFocusFill(.light) == 0.12,
+            "action focus fill must reuse the dark/light clay-soft strength")
+        expect(
+            ClaudioTheme.PanelSoundScopeOpacity.actionHoverStroke(.dark) == 0.70
+                && ClaudioTheme.PanelSoundScopeOpacity.actionHoverStroke(.light) == 0.70,
+            "action hover stroke must preserve the reviewed 0.70 strength")
+        expect(
+            ClaudioTheme.PanelSoundScopeOpacity.focusGlow(.dark) == 0.55
+                && ClaudioTheme.PanelSoundScopeOpacity.focusGlow(.light) == 0.55,
+            "status focus glow must preserve the reviewed 0.55 strength")
     }
 
     suite("contrast: icon-action hover foregrounds clear their real clay-soft backgrounds") {

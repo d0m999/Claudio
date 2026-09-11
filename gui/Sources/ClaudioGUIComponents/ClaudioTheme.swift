@@ -33,6 +33,18 @@ public enum ClaudioTheme {
         public static let hairline: CGFloat = 1
     }
 
+    public enum PanelSoundScopeOpacity {
+        public static func selectedInteractionOverlay(_: ColorScheme) -> Double { 0.22 }
+
+        public static func actionFocusFill(_ scheme: ColorScheme) -> Double {
+            scheme == .dark ? 0.15 : 0.12
+        }
+
+        public static func actionHoverStroke(_: ColorScheme) -> Double { 0.70 }
+
+        public static func focusGlow(_: ColorScheme) -> Double { 0.55 }
+    }
+
     public enum FontRole {
         case productTitle
         case sectionTitle
@@ -97,6 +109,33 @@ public enum ClaudioTheme {
 
     public static func claySoft(_ scheme: ColorScheme) -> Color {
         clay(scheme).opacity(scheme == .dark ? 0.15 : 0.12)
+    }
+
+    public static func panelSoundScopeSelectedInteractionOverlay(
+        _ scheme: ColorScheme
+    ) -> Color {
+        elevated(scheme).opacity(PanelSoundScopeOpacity.selectedInteractionOverlay(scheme))
+    }
+
+    public static func panelSoundScopeActionFocusFill(
+        _ statusColor: Color,
+        _ scheme: ColorScheme
+    ) -> Color {
+        statusColor.opacity(PanelSoundScopeOpacity.actionFocusFill(scheme))
+    }
+
+    public static func panelSoundScopeActionHoverStroke(
+        _ statusColor: Color,
+        _ scheme: ColorScheme
+    ) -> Color {
+        statusColor.opacity(PanelSoundScopeOpacity.actionHoverStroke(scheme))
+    }
+
+    public static func panelSoundScopeFocusGlow(
+        _ statusColor: Color,
+        _ scheme: ColorScheme
+    ) -> Color {
+        statusColor.opacity(PanelSoundScopeOpacity.focusGlow(scheme))
     }
 
     public static func success(_ scheme: ColorScheme) -> Color {
