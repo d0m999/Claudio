@@ -174,7 +174,9 @@ struct PanelSoundScopePicker: View {
 
     private func scopeOption(_ scope: PanelSoundScopePresentation) -> some View {
         let selected = scope.scope == selectedScope.scope
-        let hovered = hoveredScope == scope.scope
+        // 行级 hover：选择按钮与行内胶囊之间的间距、以及胶囊本身，都属于这行被绘制的区域。
+        let hovered =
+            hoveredScope == scope.scope || hoveredIntegrationAction == scope.scope
         let target = PanelSoundScopePickerFocusTarget.scope(scope.scope)
         let focused = focusedMenuTarget == target
         return HStack(spacing: 4) {
@@ -200,7 +202,6 @@ struct PanelSoundScopePicker: View {
             }
             .buttonStyle(.plain)
             .focused($focusedMenuTarget, equals: target)
-            .onHover { inside in hoveredScope = inside ? scope.scope : nil }
             .accessibilityLabel(scope.accessibilityLabel)
             .accessibilityAddTraits(selected ? [.isSelected] : [])
             .accessibilityIdentifier("panel.sound-scope.item.\(scope.scope.storedValue)")
@@ -209,36 +210,39 @@ struct PanelSoundScopePicker: View {
                 integrationActionButton(scope, host: actionHost)
             }
         }
-        .frame(
-            maxWidth: .infinity,
-            minHeight: CGFloat(menuLayout.optionHeight),
-            alignment: .leading
-        )
+        // 行高/行宽的唯一来源是上方按钮 label 的 frame（它同时承重点击热区），这里不再重复约束。
+        // 描边收进 .background 的 ZStack（画在内容之下）：行内胶囊右缘与行尾缘齐平，
+        // 若用 .overlay 画在内容之上，两条 1px hairline 会在胶囊最右一列叠加出接缝。
         .background(
-            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
-                .fill(
-                    selected
-                        ? ClaudioTheme.claySoft(colorScheme)
-                        : hovered || focused
-                            ? ClaudioTheme.elevated(colorScheme)
-                            : .clear)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
-                .strokeBorder(
-                    hovered || focused
-                        ? ClaudioTheme.hairline(colorScheme)
-                        : .clear,
-                    lineWidth: ClaudioTheme.Metrics.hairline)
+            ZStack {
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                    .fill(
+                        selected
+                            ? ClaudioTheme.claySoft(colorScheme)
+                            : hovered || focused
+                                ? ClaudioTheme.elevated(colorScheme)
+                                : .clear)
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                    .strokeBorder(
+                        selected
+                            ? ClaudioTheme.clay(colorScheme)
+                            : hovered || focused
+                                ? ClaudioTheme.hairline(colorScheme)
+                                : .clear,
+                        lineWidth: ClaudioTheme.Metrics.hairline)
+            }
         )
         .animation(
             reduceMotion ? nil : .easeOut(duration: 0.12),
             value: selected || hovered || focused)
+        .onHover { inside in hoveredScope = inside ? scope.scope : nil }
     }
 
     /// 行内状态动作：异常状态行的状态徽标成为独立按钮（描边胶囊 + ›），点击只把宿主身份
     /// 经 `onOpenIntegration` 上抛——不改变当前选中作用域，也不在菜单内复制任何修复动作。
     /// 命中目标 29pt 高于紧凑控件 token 28pt，是 DESIGN.md 行内动作合同的显式要求。
+    /// 静止填充跟随所在行：选中行上胶囊保持透明描边（行级 claySoft 透出来），
+    /// 不再以不透明 surface 在选中背景上打洞。
     private func integrationActionButton(
         _ scope: PanelSoundScopePresentation,
         host: HostID
@@ -246,6 +250,7 @@ struct PanelSoundScopePicker: View {
         let target = PanelSoundScopePickerFocusTarget.integrationAction(scope.scope)
         let focused = focusedMenuTarget == target
         let hovered = hoveredIntegrationAction == scope.scope
+        let rowSelected = scope.scope == selectedScope.scope
         return Button {
             onOpenIntegration(host)
             dismissMenuAndRestoreTriggerFocus()
@@ -272,7 +277,9 @@ struct PanelSoundScopePicker: View {
                     .fill(
                         hovered || focused
                             ? ClaudioTheme.elevated(colorScheme)
-                            : ClaudioTheme.surface(colorScheme))
+                            : rowSelected
+                                ? .clear
+                                : ClaudioTheme.surface(colorScheme))
             )
             .overlay(
                 Capsule()
@@ -284,7 +291,7 @@ struct PanelSoundScopePicker: View {
             )
             .animation(
                 reduceMotion ? nil : .easeOut(duration: 0.12),
-                value: hovered || focused)
+                value: hovered || focused || rowSelected)
         }
         .buttonStyle(.plain)
         .focusable()

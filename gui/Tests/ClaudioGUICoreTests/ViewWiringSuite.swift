@@ -691,7 +691,8 @@ func runViewWiringSuites() {
             expect(false, "无法定位声音作用域选项与行内状态动作")
             return
         }
-        let option = scopePicker[optionStart..<actionStart]
+        // 空白折叠后定位（本文件 75-79 行的排版免疫约定）：调用被换行不得假红。
+        let option = collapsingWhitespace(String(scopePicker[optionStart..<actionStart]))
         guard
             let actionAt = option.range(
                 of: "integrationActionButton(scope, host: actionHost)")?.upperBound,
@@ -702,11 +703,23 @@ func runViewWiringSuites() {
             expect(false, "无法定位行内动作之后的整行背景")
             return
         }
+        // 钉 fill/stroke 表达式本身而不是「后缀里出现过 token」——claySoft 出现在 overlay 或
+        // 动画里不算数（实证：fill 选中分支换成 elevated、stroke 换成 selected ? claySoft 的
+        // 变异必须红）。负向检查只钉结构事实「选择按钮上没有自己的 .background」，
+        // 不禁止按钮内部出现合法的 claySoft 色调。
+        let rowChrome = option[rowBackgroundAt...]
         expect(
-            actionAt < rowBackgroundAt
-                && option[rowBackgroundAt...].contains("ClaudioTheme.claySoft(colorScheme)")
-                && !option[..<actionAt].contains("ClaudioTheme.claySoft(colorScheme)"),
-            "选中态背景必须包住选择按钮与行内状态动作，不得只绘制在左侧选择按钮上")
+            rowChrome.contains(".fill( selected ? ClaudioTheme.claySoft(colorScheme)")
+                && rowChrome.contains(".strokeBorder( selected ? ClaudioTheme.clay(colorScheme)")
+                && !option[..<actionAt].contains(".background("),
+            "选中态背景必须包住选择按钮与行内状态动作：由行级 fill 的 selected 分支提供"
+                + " claySoft 底与 clay 描边，不得回退到只画左侧选择按钮")
+        // hover 追踪必须挂在行级（不早于整行背景），否则绘制区域与感知区域失配：
+        // 指针跨过按钮与胶囊之间的间距时，行高亮会在指针仍位于行内时消失。
+        expect(
+            option.range(of: ".onHover { inside in hoveredScope = inside ? scope.scope : nil }")
+                .map({ rowBackgroundAt <= $0.lowerBound }) == true,
+            "整行 hover 追踪必须挂在行级（不早于整行背景），不得只挂在左侧选择按钮上")
     }
     suite("PanelView 的 config.lock 只转发给声音控制写者，不再供给宿主连接") {
         guard
