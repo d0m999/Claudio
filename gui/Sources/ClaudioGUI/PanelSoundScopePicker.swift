@@ -284,10 +284,12 @@ struct PanelSoundScopePicker: View {
                 value: hovered || focused)
         }
         .buttonStyle(.plain)
+        .focusable()
         .focused($focusedMenuTarget, equals: .integrationAction(scope.scope))
         .onHover { inside in hoveredIntegrationAction = inside ? scope.scope : nil }
         .accessibilityLabel(
-            panelSoundScopeIntegrationActionLabel(name: scope.name, language: language))
+            panelSoundScopeIntegrationActionLabel(name: scope.name, language: language)
+        )
         .accessibilityIdentifier("panel.sound-scope.integration-action.\(scope.scope.storedValue)")
     }
 

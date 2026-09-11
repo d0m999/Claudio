@@ -672,11 +672,14 @@ func runViewWiringSuites() {
                 && panel.contains("onOpenIntegration: @escaping @MainActor (HostID) -> Void"),
             "PanelView 必须把行内动作回调原样转发给选择器，不夹带路由知识")
         expect(
-            menu.contains("requestIntegrationsSettings(preselect: host, returnFocusTo: .soundScope)"),
+            menu.contains("requestIntegrationsSettings(")
+                && collapsingWhitespace(menu).contains(
+                    "preselect: host, returnFocusTo: .soundScope"),
             "MenuBarController 必须把行内动作接到既有 typed route 提交，并把焦点还回触发卡")
         expect(
             scopePicker.contains("panel.sound-scope.integration-action.")
-                && scopePicker.contains(".focused($focusedMenuTarget, equals: .integrationAction("),
+                && collapsingWhitespace(scopePicker).contains(
+                    ".focusable() .focused($focusedMenuTarget, equals: .integrationAction("),
             "行内状态动作必须有稳定标识并只进入 Tab 焦点序")
     }
     suite("PanelView 的 config.lock 只转发给声音控制写者，不再供给宿主连接") {

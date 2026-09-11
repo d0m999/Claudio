@@ -279,7 +279,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 actionRouter?.owner?.requestSettingsWindowPresentation()
             },
             onOpenIntegration: { [weak actionRouter] host in
-                actionRouter?.requestIntegrationsSettings(preselect: host, returnFocusTo: .soundScope)
+                actionRouter?.requestIntegrationsSettings(
+                    preselect: host, returnFocusTo: .soundScope)
             },
             onQuit: {
                 NSApp.terminate(nil)
