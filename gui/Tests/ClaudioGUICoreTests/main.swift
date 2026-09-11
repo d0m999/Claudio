@@ -20,6 +20,7 @@ import Foundation
 // `PackRestoreSuite.swift`,
 // `EventMuteControllerSuite.swift`, `MasterVolumeControllerSuite.swift`,
 // `PanelFocusOrderSuite.swift`, `ContrastSuite.swift`,
+// `PanelSoundScopeInteractionSuite.swift`,
 // `ContrastHexParsingSuite.swift`,
 // `PanelTypeSizeSuite.swift`, `PanelAccessibilitySuite.swift`, `PanelConfigSuite.swift`,
 // `PanelFocusCoordinatorSuite.swift`,
@@ -125,6 +126,7 @@ await runSoundPacksEditorViewSuites()
 runEventMuteControllerSuites()
 runMasterVolumeControllerSuites()
 runPanelFocusOrderSuites()
+runPanelSoundScopeInteractionSuites()
 await runPanelPresentationSuites()
 runEventSettingsWindowSelectionSuites()
 runPanelFocusInFlightSuites()

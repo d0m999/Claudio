@@ -681,6 +681,23 @@ func runViewWiringSuites() {
                 && collapsingWhitespace(scopePicker).contains(
                     ".focusable() .focused($focusedMenuTarget, equals: .integrationAction("),
             "行内状态动作必须有稳定标识并只进入 Tab 焦点序")
+        expect(
+            scopePicker.contains("PanelSoundScopeRowInteractionState")
+                && scopePicker.contains("PanelSoundScopeRowPressedPreferenceKey")
+                && scopePicker.contains(
+                    "onPreferenceChange(PanelSoundScopeRowPressedPreferenceKey.self)"),
+            "选择器必须由单一纯交互状态接缝汇总行级焦点与子按钮 pressed")
+        expect(
+            whitespaceTolerantHitCount(
+                of: ".panelSoundScopeFocusEffectDisabled()",
+                in: scopePicker) == 3
+                && scopePicker.contains("if #available(macOS 14.0, *)")
+                && scopePicker.contains("focusEffectDisabled()"),
+            "触发卡、作用域按钮与集成动作必须使用 macOS 兼容的焦点效果策略")
+        expect(
+            !scopePicker.contains("value: selected || hovered || focused")
+                && !scopePicker.contains("value: hovered || focused"),
+            "行交互动画必须以完整 PanelSoundScopeRowInteractionState 为触发值")
 
         guard
             let optionStart = scopePicker.range(of: "private func scopeOption(")?.lowerBound,
@@ -695,7 +712,9 @@ func runViewWiringSuites() {
         let option = collapsingWhitespace(String(scopePicker[optionStart..<actionStart]))
         guard
             let actionAt = option.range(
-                of: "integrationActionButton(scope, host: actionHost)")?.upperBound,
+                of:
+                    "integrationActionButton( scope, host: actionHost, interactionState: interactionState)"
+            )?.upperBound,
             let rowBackgroundAt = option.range(
                 of: ".background(",
                 range: actionAt..<option.endIndex)?.lowerBound
@@ -733,9 +752,10 @@ func runViewWiringSuites() {
             action.contains(".padding(.trailing, 4)"),
             "行内状态胶囊必须从父行右缘内收，避免胶囊描边与选中行 clay 描边相交")
         expect(
-            action.contains("value: hovered || focused)")
+            action.contains("value: interactionState")
+                && !action.contains("value: hovered || focused")
                 && !action.contains("value: hovered || focused || rowSelected"),
-            "胶囊动画必须跟踪 hover/focus 交互变化，不能被选中态压成恒真触发值")
+            "胶囊、chevron 与状态动画必须跟踪完整行交互状态，不能折叠成布尔键")
     }
     suite("PanelView 的 config.lock 只转发给声音控制写者，不再供给宿主连接") {
         guard

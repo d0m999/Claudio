@@ -24,6 +24,7 @@ struct PanelSoundScopePicker: View {
     @FocusState private var focusedMenuTarget: PanelSoundScopePickerFocusTarget?
     @State private var hoveredScope: PanelSoundScopeID?
     @State private var hoveredIntegrationAction: PanelSoundScopeID?
+    @State private var pressedScopeRows: Set<PanelSoundScopeID> = []
     @State private var triggerHovered = false
 
     var body: some View {
@@ -50,6 +51,7 @@ struct PanelSoundScopePicker: View {
                 focusSelectedMenuItem()
             } else {
                 focusedMenuTarget = nil
+                pressedScopeRows.removeAll()
             }
         }
         .onChange(of: focusedMenuTarget) { target in
@@ -61,6 +63,7 @@ struct PanelSoundScopePicker: View {
         .onDisappear {
             isExpanded = false
             focusedMenuTarget = nil
+            pressedScopeRows.removeAll()
         }
         .accessibilityElement(children: .contain)
     }
@@ -86,7 +89,7 @@ struct PanelSoundScopePicker: View {
             HStack(spacing: 9) {
                 scopeIdentity(selectedScope, prominent: true)
                 Spacer(minLength: 8)
-                statusBadge(selectedScope)
+                statusBadge(selectedScope, interactionState: triggerInteractionState)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
@@ -116,11 +119,15 @@ struct PanelSoundScopePicker: View {
                         lineWidth: triggerHighlighted ? 1.5 : 1)
             )
             .animation(
-                reduceMotion ? nil : .easeOut(duration: 0.12),
-                value: triggerHighlighted)
+                reduceMotion
+                    ? nil
+                    : .easeInOut(
+                        duration: PanelSoundScopeRowInteractionState.surfaceDuration),
+                value: triggerInteractionState)
         }
         .buttonStyle(.plain)
         .focused(focusedTarget, equals: .soundScope)
+        .panelSoundScopeFocusEffectDisabled()
         .onHover { triggerHovered = $0 }
         .accessibilityLabel(l10n.text(.panelSoundScope))
         .accessibilityValue(selectedScope.accessibilityLabel)
@@ -131,7 +138,17 @@ struct PanelSoundScopePicker: View {
     }
 
     private var triggerHighlighted: Bool {
-        isExpanded || triggerHovered || focusedTarget.wrappedValue == .soundScope
+        triggerInteractionState.isSelected || triggerInteractionState.isInteractive
+    }
+
+    private var triggerInteractionState: PanelSoundScopeRowInteractionState {
+        PanelSoundScopeRowInteractionState(
+            isSelected: isExpanded,
+            isHovered: triggerHovered,
+            isScopeFocused: focusedTarget.wrappedValue == .soundScope,
+            isActionFocused: false,
+            isActionEngaged: false,
+            isPressed: false)
     }
 
     private var menu: some View {
@@ -168,6 +185,9 @@ struct PanelSoundScopePicker: View {
         )
         .onMoveCommand(perform: moveMenuFocus)
         .onExitCommand(perform: dismissMenuAndRestoreTriggerFocus)
+        .onPreferenceChange(PanelSoundScopeRowPressedPreferenceKey.self) {
+            pressedScopeRows = $0
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.panelSoundScope))
     }
@@ -178,7 +198,16 @@ struct PanelSoundScopePicker: View {
         let hovered =
             hoveredScope == scope.scope || hoveredIntegrationAction == scope.scope
         let target = PanelSoundScopePickerFocusTarget.scope(scope.scope)
-        let focused = focusedMenuTarget == target
+        let scopeFocused = focusedMenuTarget == target
+        let actionFocused =
+            focusedMenuTarget == PanelSoundScopePickerFocusTarget.integrationAction(scope.scope)
+        let interactionState = PanelSoundScopeRowInteractionState(
+            isSelected: selected,
+            isHovered: hovered,
+            isScopeFocused: scopeFocused,
+            isActionFocused: actionFocused,
+            isActionEngaged: hoveredIntegrationAction == scope.scope,
+            isPressed: pressedScopeRows.contains(scope.scope))
         return HStack(spacing: 4) {
             Button {
                 onSelect(scope.scope)
@@ -188,7 +217,7 @@ struct PanelSoundScopePicker: View {
                     scopeIdentity(scope, prominent: false)
                     Spacer(minLength: 8)
                     if panelSoundScopeIntegrationActionHost(scope) == nil {
-                        statusBadge(scope)
+                        statusBadge(scope, interactionState: interactionState)
                     }
                 }
                 .padding(.horizontal, 9)
@@ -200,14 +229,18 @@ struct PanelSoundScopePicker: View {
                 )
                 .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PanelSoundScopeChildButtonStyle(scope: scope.scope))
             .focused($focusedMenuTarget, equals: target)
+            .panelSoundScopeFocusEffectDisabled()
             .accessibilityLabel(scope.accessibilityLabel)
             .accessibilityAddTraits(selected ? [.isSelected] : [])
             .accessibilityIdentifier("panel.sound-scope.item.\(scope.scope.storedValue)")
 
             if let actionHost = panelSoundScopeIntegrationActionHost(scope) {
-                integrationActionButton(scope, host: actionHost)
+                integrationActionButton(
+                    scope,
+                    host: actionHost,
+                    interactionState: interactionState)
             }
         }
         // 行高/行宽的唯一来源是上方按钮 label 的 frame（它同时承重点击热区），这里不再重复约束。
@@ -219,22 +252,33 @@ struct PanelSoundScopePicker: View {
                     .fill(
                         selected
                             ? ClaudioTheme.claySoft(colorScheme)
-                            : hovered || focused
+                            : interactionState.isInteractive
                                 ? ClaudioTheme.elevated(colorScheme)
                                 : .clear)
+                if selected && interactionState.isInteractive {
+                    RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                        .fill(ClaudioTheme.elevated(colorScheme).opacity(0.22))
+                }
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
                     .strokeBorder(
                         selected
                             ? ClaudioTheme.clay(colorScheme)
-                            : hovered || focused
+                            : interactionState.isInteractive
                                 ? ClaudioTheme.hairline(colorScheme)
                                 : .clear,
                         lineWidth: ClaudioTheme.Metrics.hairline)
             }
         )
         .animation(
-            reduceMotion ? nil : .easeOut(duration: 0.12),
-            value: selected || hovered || focused
+            reduceMotion
+                ? nil
+                : .easeInOut(duration: PanelSoundScopeRowInteractionState.surfaceDuration),
+            value: interactionState
+        )
+        .scaleEffect(CGFloat(interactionState.rowScale(reduceMotion: reduceMotion)))
+        .animation(
+            rowPressAnimation(for: interactionState),
+            value: interactionState
         )
         .onHover { inside in hoveredScope = inside ? scope.scope : nil }
     }
@@ -246,29 +290,33 @@ struct PanelSoundScopePicker: View {
     /// 行尾描边内收，避免两条描边相交；未选中行继续使用不透明 surface。
     private func integrationActionButton(
         _ scope: PanelSoundScopePresentation,
-        host: HostID
+        host: HostID,
+        interactionState: PanelSoundScopeRowInteractionState
     ) -> some View {
-        let target = PanelSoundScopePickerFocusTarget.integrationAction(scope.scope)
-        let focused = focusedMenuTarget == target
-        let hovered = hoveredIntegrationAction == scope.scope
+        let actionHovered = hoveredIntegrationAction == scope.scope
+        let actionFocused = interactionState.isActionFocused
         let rowSelected = scope.scope == selectedScope.scope
         return Button {
             onOpenIntegration(host)
             dismissMenuAndRestoreTriggerFocus()
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: statusSymbol(scope))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(statusColor(scope.status))
-                    .accessibilityHidden(true)
-                Text(scope.stateText)
-                    .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                    .foregroundColor(ClaudioTheme.text(colorScheme))
-                    .lineLimit(1)
+                statusIcon(scope, interactionState: interactionState, size: 11)
+                statusText(scope, interactionState: interactionState)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                     .accessibilityHidden(true)
+                    .offset(
+                        x: CGFloat(
+                            interactionState.chevronOffset(reduceMotion: reduceMotion))
+                    )
+                    .animation(
+                        reduceMotion
+                            ? nil
+                            : .easeInOut(
+                                duration: PanelSoundScopeRowInteractionState.chevronDuration),
+                        value: interactionState)
             }
             .padding(.horizontal, 8)
             .frame(minHeight: 29)
@@ -276,27 +324,35 @@ struct PanelSoundScopePicker: View {
             .background(
                 Capsule()
                     .fill(
-                        hovered || focused
-                            ? ClaudioTheme.elevated(colorScheme)
-                            : rowSelected
-                                ? .clear
-                                : ClaudioTheme.surface(colorScheme))
+                        actionFocused
+                            ? statusColor(scope.status).opacity(0.12)
+                            : actionHovered
+                                ? ClaudioTheme.elevated(colorScheme)
+                                : rowSelected
+                                    ? .clear
+                                    : ClaudioTheme.surface(colorScheme))
             )
             .overlay(
                 Capsule()
                     .strokeBorder(
-                        hovered || focused
+                        actionFocused
                             ? statusColor(scope.status)
-                            : ClaudioTheme.hairline(colorScheme),
+                            : actionHovered
+                                ? statusColor(scope.status).opacity(0.70)
+                                : ClaudioTheme.hairline(colorScheme),
                         lineWidth: ClaudioTheme.Metrics.hairline)
             )
             .animation(
-                reduceMotion ? nil : .easeOut(duration: 0.12),
-                value: hovered || focused)
+                reduceMotion
+                    ? nil
+                    : .easeInOut(
+                        duration: PanelSoundScopeRowInteractionState.actionBorderDuration),
+                value: interactionState)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PanelSoundScopeChildButtonStyle(scope: scope.scope))
         .focusable()
         .focused($focusedMenuTarget, equals: .integrationAction(scope.scope))
+        .panelSoundScopeFocusEffectDisabled()
         .onHover { inside in hoveredIntegrationAction = inside ? scope.scope : nil }
         .accessibilityLabel(
             panelSoundScopeIntegrationActionLabel(name: scope.name, language: language)
@@ -332,18 +388,74 @@ struct PanelSoundScopePicker: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func statusBadge(_ scope: PanelSoundScopePresentation) -> some View {
+    private func statusBadge(
+        _ scope: PanelSoundScopePresentation,
+        interactionState: PanelSoundScopeRowInteractionState
+    ) -> some View {
         HStack(spacing: 5) {
-            Image(systemName: statusSymbol(scope))
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(statusColor(scope.status))
-                .accessibilityHidden(true)
-            Text(scope.stateText)
-                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                .lineLimit(1)
+            statusIcon(scope, interactionState: interactionState, size: 13)
+            statusText(scope, interactionState: interactionState)
         }
         .fixedSize()
+    }
+
+    private func statusIcon(
+        _ scope: PanelSoundScopePresentation,
+        interactionState: PanelSoundScopeRowInteractionState,
+        size: CGFloat
+    ) -> some View {
+        Image(systemName: statusSymbol(scope))
+            .font(.system(size: size, weight: .semibold))
+            .foregroundColor(statusColor(scope.status))
+            .scaleEffect(
+                CGFloat(interactionState.iconScale(reduceMotion: reduceMotion))
+            )
+            .offset(x: CGFloat(interactionState.iconOffset(reduceMotion: reduceMotion)))
+            .shadow(
+                color: interactionState.isFocused
+                    ? statusColor(scope.status).opacity(0.55)
+                    : .clear,
+                radius: interactionState.isFocused ? 3 : 0
+            )
+            .animation(
+                reduceMotion
+                    ? nil
+                    : .interpolatingSpring(
+                        stiffness: PanelSoundScopeRowInteractionState.iconSpringStiffness,
+                        damping: PanelSoundScopeRowInteractionState.iconSpringDamping),
+                value: interactionState
+            )
+            .accessibilityHidden(true)
+    }
+
+    private func statusText(
+        _ scope: PanelSoundScopePresentation,
+        interactionState: PanelSoundScopeRowInteractionState
+    ) -> some View {
+        Text(scope.stateText)
+            .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+            .foregroundColor(
+                interactionState.isInteractive
+                    ? ClaudioTheme.text(colorScheme)
+                    : ClaudioTheme.secondaryText(colorScheme)
+            )
+            .lineLimit(1)
+            .offset(x: CGFloat(interactionState.labelOffset(reduceMotion: reduceMotion)))
+            .animation(
+                reduceMotion
+                    ? nil
+                    : .easeInOut(
+                        duration: PanelSoundScopeRowInteractionState.textDuration),
+                value: interactionState)
+    }
+
+    private func rowPressAnimation(
+        for interactionState: PanelSoundScopeRowInteractionState
+    ) -> Animation? {
+        guard !reduceMotion else { return nil }
+        return interactionState.isPressed
+            ? .easeOut(duration: PanelSoundScopeRowInteractionState.pressDuration)
+            : .easeIn(duration: PanelSoundScopeRowInteractionState.pressDuration)
     }
 
     private func statusSymbol(_ scope: PanelSoundScopePresentation) -> String {
@@ -407,6 +519,44 @@ struct PanelSoundScopePicker: View {
     }
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: language) }
+}
+
+/// The two child buttons report their native pressed state to the parent row. The parent owns the
+/// only scale effect, so a pressed scope action and a pressed integration action feel identical.
+private struct PanelSoundScopeRowPressedPreferenceKey: PreferenceKey {
+    static let defaultValue: Set<PanelSoundScopeID> = []
+
+    static func reduce(
+        value: inout Set<PanelSoundScopeID>,
+        nextValue: () -> Set<PanelSoundScopeID>
+    ) {
+        value.formUnion(nextValue())
+    }
+}
+
+private struct PanelSoundScopeChildButtonStyle: ButtonStyle {
+    let scope: PanelSoundScopeID
+
+    func makeBody(configuration: Configuration) -> some View {
+        let pressedScopes: Set<PanelSoundScopeID> = configuration.isPressed ? [scope] : []
+        return configuration.label
+            .preference(
+                key: PanelSoundScopeRowPressedPreferenceKey.self,
+                value: pressedScopes)
+    }
+}
+
+extension View {
+    /// macOS 14 can suppress the system focus effect because this picker draws its own row state.
+    /// macOS 12–13 keep the native ring; the same custom state remains visible on every version.
+    @ViewBuilder
+    fileprivate func panelSoundScopeFocusEffectDisabled() -> some View {
+        if #available(macOS 14.0, *) {
+            focusEffectDisabled()
+        } else {
+            self
+        }
+    }
 }
 
 private struct PanelSoundScopeOutsideClickMonitor: NSViewRepresentable {
