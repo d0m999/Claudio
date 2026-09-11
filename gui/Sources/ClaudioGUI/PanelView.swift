@@ -297,7 +297,15 @@ public struct PanelView: View {
             onOpenIntegration: onOpenIntegration)
     }
 
-    private func selectSoundScope(_ scope: PanelSoundScopeID) {
+    private func selectSoundScope(_ requestedScope: PanelSoundScopeID) {
+        guard
+            let scope = validatedPanelSoundScopeSelection(
+                requestedScope,
+                availableScopes: soundScopePresentations.map(\.scope))
+        else {
+            synchronizeSelectedSoundSurface()
+            return
+        }
         selectedSurfaceRaw = scope.storedValue
         panelModel.selectSoundSurface(scope.surface)
         applyFirstFocus()

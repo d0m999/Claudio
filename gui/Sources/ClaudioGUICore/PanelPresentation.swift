@@ -418,6 +418,15 @@ public func resolvedPanelSoundScopeSelection(
     return scopes.first(where: { $0.scope.surface != nil })?.scope ?? .global
 }
 
+/// 延迟执行的选择动作在写入前必须针对最新可用集合重验目标。失效目标返回 `nil`，调用方据此
+/// 保留已经完成的回退，而不是把陈旧 Surface 再写回持久化选择与声音投影。
+public func validatedPanelSoundScopeSelection(
+    _ requestedSelection: PanelSoundScopeID,
+    availableScopes: [PanelSoundScopeID]
+) -> PanelSoundScopeID? {
+    availableScopes.contains(requestedSelection) ? requestedSelection : nil
+}
+
 /// Produces the typed Events route used by the global shortcut. Known Surface identities remain
 /// intact even when currently unavailable. Unknown persisted identities cannot be represented as a
 /// typed scope, so they retain the exact raw value beside a non-writable Global presentation.

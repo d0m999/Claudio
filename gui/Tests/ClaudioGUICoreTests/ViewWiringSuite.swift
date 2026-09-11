@@ -672,6 +672,22 @@ func runViewWiringSuites() {
             collapsingWhitespace(panel).contains("onOpenIntegration: onOpenIntegration")
                 && panel.contains("onOpenIntegration: @escaping @MainActor (HostID) -> Void"),
             "PanelView 必须把行内动作回调原样转发给选择器，不夹带路由知识")
+        guard
+            let selectionStart = panel.range(of: "private func selectSoundScope")?.lowerBound,
+            let synchronizationStart = panel.range(
+                of: "private func synchronizeSelectedSoundSurface")?.lowerBound,
+            selectionStart < synchronizationStart
+        else {
+            expect(false, "无法定位 PanelView 的作用域选择写入边界")
+            return
+        }
+        let selectionHandler = panel[selectionStart..<synchronizationStart]
+        expect(
+            selectionHandler.contains("validatedPanelSoundScopeSelection(")
+                && selectionHandler.contains(
+                    "availableScopes: soundScopePresentations.map(\\.scope)")
+                && selectionHandler.contains("synchronizeSelectedSoundSurface()"),
+            "延迟选择写入前必须用最新可用作用域重验目标，失效时保持合法回退")
         expect(
             menu.contains("requestIntegrationsSettings(")
                 && collapsingWhitespace(menu).contains(

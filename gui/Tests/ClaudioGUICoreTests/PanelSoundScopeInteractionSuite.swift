@@ -1,3 +1,4 @@
+import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
 import Foundation
@@ -62,6 +63,22 @@ private struct PanelSoundScopeControlsCompileFixture: View {
                 }
             }
         }
+    }
+}
+
+@MainActor
+private final class PanelSoundScopeDeferredSelectionState {
+    var availableScopes: [PanelSoundScopeID]
+    var selectedSurfaceRaw: String
+    var selectedSurface: HostSurfaceID?
+
+    init(
+        availableScopes: [PanelSoundScopeID],
+        selectedScope: PanelSoundScopeID
+    ) {
+        self.availableScopes = availableScopes
+        self.selectedSurfaceRaw = selectedScope.storedValue
+        self.selectedSurface = selectedScope.surface
     }
 }
 
@@ -278,6 +295,40 @@ func runPanelSoundScopeInteractionSuites() {
         expect(accepted && activationCount == 1, "Reduce Motion 下必须立即执行成功动作")
         expect(!didSchedule, "Reduce Motion 下不得创建不可见的延迟任务")
         expect(!coordinator.isPending, "Reduce Motion 同步完成后不得遗留 pending gate")
+    }
+
+    suite("声音作用域菜单：宿主刷新移除目标后拒绝延迟选择写回") {
+        var scheduledCompletion: (@MainActor () -> Void)?
+        let coordinator = PanelSoundScopeActionCoordinator { _, completion in
+            scheduledCompletion = completion
+        }
+        let requestedScope = PanelSoundScopeID.surface(.workBuddy)
+        let fallbackScope = PanelSoundScopeID.surface(.codex)
+        let state = PanelSoundScopeDeferredSelectionState(
+            availableScopes: [.global, fallbackScope, requestedScope],
+            selectedScope: fallbackScope)
+
+        coordinator.submit(reduceMotion: false) {
+            guard
+                let selection = validatedPanelSoundScopeSelection(
+                    requestedScope,
+                    availableScopes: state.availableScopes)
+            else { return }
+            state.selectedSurfaceRaw = selection.storedValue
+            state.selectedSurface = selection.surface
+        }
+
+        // 模拟面板打开后的宿主刷新先将 WorkBuddy 变为 `.notConnected`，并完成合法回退。
+        state.availableScopes = [.global, fallbackScope]
+        state.selectedSurfaceRaw = fallbackScope.storedValue
+        state.selectedSurface = fallbackScope.surface
+        scheduledCompletion?()
+
+        expect(
+            state.selectedSurfaceRaw == fallbackScope.storedValue
+                && state.selectedSurface == fallbackScope.surface,
+            "延迟闭包不得把刷新后已失效的 Surface 写回持久化选择或声音投影")
+        expect(!coordinator.isPending, "拒绝失效目标后必须释放菜单级 gate")
     }
 
     suite("声音作用域行：动画键只投影各自实际渲染事实") {
