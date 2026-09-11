@@ -197,28 +197,6 @@ struct PanelSoundScopePicker: View {
                     alignment: .leading
                 )
                 .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
-                .background(
-                    RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
-                        .fill(
-                            selected
-                                ? ClaudioTheme.claySoft(colorScheme)
-                                : hovered || focused
-                                    ? ClaudioTheme.elevated(colorScheme)
-                                    : .clear)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
-                        .strokeBorder(
-                            selected
-                                ? ClaudioTheme.clay(colorScheme)
-                                : hovered || focused
-                                    ? ClaudioTheme.hairline(colorScheme)
-                                    : .clear,
-                            lineWidth: ClaudioTheme.Metrics.hairline)
-                )
-                .animation(
-                    reduceMotion ? nil : .easeOut(duration: 0.12),
-                    value: selected || hovered || focused)
             }
             .buttonStyle(.plain)
             .focused($focusedMenuTarget, equals: target)
@@ -231,6 +209,31 @@ struct PanelSoundScopePicker: View {
                 integrationActionButton(scope, host: actionHost)
             }
         }
+        .frame(
+            maxWidth: .infinity,
+            minHeight: CGFloat(menuLayout.optionHeight),
+            alignment: .leading
+        )
+        .background(
+            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                .fill(
+                    selected
+                        ? ClaudioTheme.claySoft(colorScheme)
+                        : hovered || focused
+                            ? ClaudioTheme.elevated(colorScheme)
+                            : .clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                .strokeBorder(
+                    hovered || focused
+                        ? ClaudioTheme.hairline(colorScheme)
+                        : .clear,
+                    lineWidth: ClaudioTheme.Metrics.hairline)
+        )
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: 0.12),
+            value: selected || hovered || focused)
     }
 
     /// 行内状态动作：异常状态行的状态徽标成为独立按钮（描边胶囊 + ›），点击只把宿主身份

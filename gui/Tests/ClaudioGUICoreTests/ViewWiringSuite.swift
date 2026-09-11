@@ -681,6 +681,32 @@ func runViewWiringSuites() {
                 && collapsingWhitespace(scopePicker).contains(
                     ".focusable() .focused($focusedMenuTarget, equals: .integrationAction("),
             "行内状态动作必须有稳定标识并只进入 Tab 焦点序")
+
+        guard
+            let optionStart = scopePicker.range(of: "private func scopeOption(")?.lowerBound,
+            let actionStart = scopePicker.range(
+                of: "private func integrationActionButton(")?.lowerBound,
+            optionStart < actionStart
+        else {
+            expect(false, "无法定位声音作用域选项与行内状态动作")
+            return
+        }
+        let option = scopePicker[optionStart..<actionStart]
+        guard
+            let actionAt = option.range(
+                of: "integrationActionButton(scope, host: actionHost)")?.upperBound,
+            let rowBackgroundAt = option.range(
+                of: ".background(",
+                range: actionAt..<option.endIndex)?.lowerBound
+        else {
+            expect(false, "无法定位行内动作之后的整行背景")
+            return
+        }
+        expect(
+            actionAt < rowBackgroundAt
+                && option[rowBackgroundAt...].contains("ClaudioTheme.claySoft(colorScheme)")
+                && !option[..<actionAt].contains("ClaudioTheme.claySoft(colorScheme)"),
+            "选中态背景必须包住选择按钮与行内状态动作，不得只绘制在左侧选择按钮上")
     }
     suite("PanelView 的 config.lock 只转发给声音控制写者，不再供给宿主连接") {
         guard
