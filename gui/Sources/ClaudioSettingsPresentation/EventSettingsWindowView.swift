@@ -245,8 +245,21 @@ struct EventSettingsWindowView: View {
             scopeButton(global)
         }
         ForEach(hostSourceProductGroups(from: hostIntegrations.content.sourceRows)) { group in
-            ForEach(scopesForProduct(group.product)) { scope in
-                scopeButton(scope)
+            if !scopesForProduct(group.product).isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    // AXHeading 必须来自真实 Text；给容器添加 isHeader 仍只会导出 AXGroup。
+                    Text(group.title)
+                        .frame(width: 1, height: 1)
+                        .opacity(0.001)
+                        .accessibilityHidden(false)
+                        .accessibilityAddTraits(.isHeader)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(scopesForProduct(group.product)) { scope in
+                            scopeButton(scope)
+                        }
+                    }
+                }
             }
         }
     }

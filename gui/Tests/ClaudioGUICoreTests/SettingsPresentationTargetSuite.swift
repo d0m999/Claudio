@@ -93,7 +93,7 @@ func runSettingsPresentationTargetSuites() {
         )
     }
 
-    suite("Events & Sounds scope sidebar：不显示重复的 Product 分组标题") {
+    suite("Events & Sounds scope sidebar：视觉隐藏 Product 标题但保留真实 AXHeading") {
         let root = guiTestRepositoryRoot()
         let url = root.appendingPathComponent(
             "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift")
@@ -107,12 +107,28 @@ func runSettingsPresentationTargetSuites() {
             return
         }
         let code = scanned.codeWithoutStringLiterals
+        guard
+            let optionsStart = code.range(of: "private var scopeOptions"),
+            let optionsEnd = code.range(
+                of: "private func scopesForProduct",
+                range: optionsStart.upperBound..<code.endIndex)
+        else {
+            expect(false, "找不到 Events & Sounds scopeOptions 源码边界")
+            return
+        }
+        let optionsCode = String(code[optionsStart.lowerBound..<optionsEnd.lowerBound])
+        let compactOptionsCode = optionsCode.filter { !$0.isWhitespace }
         expect(
-            code.contains(
+            optionsCode.contains(
                 "ForEach(hostSourceProductGroups(from: hostIntegrations.content.sourceRows))")
-                && code.contains("ForEach(scopesForProduct(group.product))")
-                && !code.contains("Text(group.title)"),
-            "作用域侧栏仍按 Product 保持 Surface 顺序，但不得渲染重复的 Product 标题")
+                && optionsCode.contains("ForEach(scopesForProduct(group.product))")
+                && optionsCode.contains("!scopesForProduct(group.product).isEmpty")
+                && compactOptionsCode.contains(
+                    "Text(group.title).frame(width:1,height:1).opacity(0.001)"
+                        + ".accessibilityHidden(false).accessibilityAddTraits(.isHeader)")
+                && !optionsCode.contains(".accessibilityElement(children: .contain)")
+                && !optionsCode.contains(".accessibilityLabel(group.title)"),
+            "作用域侧栏必须用真实 Text 导出 Product AXHeading，不能把标题 trait 放在 AXGroup 上")
     }
 
     suite("Settings presentation target：Release view tree 不携带 DEBUG recorder modifier") {
