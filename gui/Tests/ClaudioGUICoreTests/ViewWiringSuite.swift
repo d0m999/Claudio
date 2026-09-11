@@ -720,6 +720,22 @@ func runViewWiringSuites() {
             option.range(of: ".onHover { inside in hoveredScope = inside ? scope.scope : nil }")
                 .map({ rowBackgroundAt <= $0.lowerBound }) == true,
             "整行 hover 追踪必须挂在行级（不早于整行背景），不得只挂在左侧选择按钮上")
+
+        guard
+            let identityStart = scopePicker.range(of: "private func scopeIdentity(")?.lowerBound,
+            actionStart < identityStart
+        else {
+            expect(false, "无法定位行内状态动作实现")
+            return
+        }
+        let action = collapsingWhitespace(String(scopePicker[actionStart..<identityStart]))
+        expect(
+            action.contains(".padding(.trailing, 4)"),
+            "行内状态胶囊必须从父行右缘内收，避免胶囊描边与选中行 clay 描边相交")
+        expect(
+            action.contains("value: hovered || focused)")
+                && !action.contains("value: hovered || focused || rowSelected"),
+            "胶囊动画必须跟踪 hover/focus 交互变化，不能被选中态压成恒真触发值")
     }
     suite("PanelView 的 config.lock 只转发给声音控制写者，不再供给宿主连接") {
         guard

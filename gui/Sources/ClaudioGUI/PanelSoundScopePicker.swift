@@ -211,8 +211,8 @@ struct PanelSoundScopePicker: View {
             }
         }
         // 行高/行宽的唯一来源是上方按钮 label 的 frame（它同时承重点击热区），这里不再重复约束。
-        // 描边收进 .background 的 ZStack（画在内容之下）：行内胶囊右缘与行尾缘齐平，
-        // 若用 .overlay 画在内容之上，两条 1px hairline 会在胶囊最右一列叠加出接缝。
+        // 描边收进 .background 的 ZStack，让选择与行内动作共享一张完整行面；行内胶囊另在
+        // 自身尾部留出几何间距，避免它的描边与这里的行尾描边占用同一像素。
         .background(
             ZStack {
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
@@ -234,15 +234,16 @@ struct PanelSoundScopePicker: View {
         )
         .animation(
             reduceMotion ? nil : .easeOut(duration: 0.12),
-            value: selected || hovered || focused)
+            value: selected || hovered || focused
+        )
         .onHover { inside in hoveredScope = inside ? scope.scope : nil }
     }
 
     /// 行内状态动作：异常状态行的状态徽标成为独立按钮（描边胶囊 + ›），点击只把宿主身份
     /// 经 `onOpenIntegration` 上抛——不改变当前选中作用域，也不在菜单内复制任何修复动作。
     /// 命中目标 29pt 高于紧凑控件 token 28pt，是 DESIGN.md 行内动作合同的显式要求。
-    /// 静止填充跟随所在行：选中行上胶囊保持透明描边（行级 claySoft 透出来），
-    /// 不再以不透明 surface 在选中背景上打洞。
+    /// 静止填充跟随所在行：选中行上胶囊保持透明描边（行级 claySoft 透出来），并从
+    /// 行尾描边内收，避免两条描边相交；未选中行继续使用不透明 surface。
     private func integrationActionButton(
         _ scope: PanelSoundScopePresentation,
         host: HostID
@@ -291,7 +292,7 @@ struct PanelSoundScopePicker: View {
             )
             .animation(
                 reduceMotion ? nil : .easeOut(duration: 0.12),
-                value: hovered || focused || rowSelected)
+                value: hovered || focused)
         }
         .buttonStyle(.plain)
         .focusable()
@@ -301,6 +302,7 @@ struct PanelSoundScopePicker: View {
             panelSoundScopeIntegrationActionLabel(name: scope.name, language: language)
         )
         .accessibilityIdentifier("panel.sound-scope.integration-action.\(scope.scope.storedValue)")
+        .padding(.trailing, 4)
     }
 
     private func scopeIdentity(
