@@ -30,7 +30,7 @@ public struct QwenAICueProvider: AICueProvider, Sendable {
             profile.providerID == .qwen,
             profile.credentialValidationPolicy == .deferredUntilExplicitGeneration,
             profile.supportedModalities == [.speech],
-            profile.constraints.supportsInstructionControl,
+            profile.routes[.speech]?.candidateSetPolicy.semantics == .styled,
             profile.routes[.speech]?.transport.isPCM == true
         else {
             throw AICueProviderError.invalidRequest

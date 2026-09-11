@@ -1,6 +1,6 @@
 # PLAN — 统一设置体验完整实施计划
 
-> 状态：**统一设置迁移、allowlisted 多 Provider Swift 实现、固定紧凑面板、本地活动摘要与自动合同已落地；原生 UI、VoiceOver、真实 Provider、双架构、签名、公证与发布仍未验证**
+> 状态：**统一设置迁移、既有 allowlisted 多 Provider、受门禁的 SenseAudio fixture、固定紧凑面板、本地活动摘要与自动合同已落地；原生 UI、VoiceOver、真实 Provider、双架构、签名、公证与发布仍未验证**
 >
 > 日期：2026-09-06
 >
@@ -273,13 +273,15 @@ Codex `4/5` 与 WorkBuddy `2/5` 是诚实正常能力，不得为了填满原型
 AI 可见流程固定为：
 
 ~~~text
-选择 Provider/profile -> 描述 -> 显式生成 -> 3 个候选和命名 -> 显式采用
+选择 Provider/profile -> 描述 -> 显式生成 -> 候选集合和命名 -> 显式采用
 ~~~
 
 1. 页面级选择 allowlisted profile，并配置、替换或删除当前 profile 的 BYOK；
 2. 第一阶段只输入声音描述，不输入名称；保存或替换 API Key 后不自动生成；
-3. 本地隐藏的 `AICueSoundPlan` 按当前 profile 的固定 route 编译，顺序请求三个候选；
-4. 候选完整通过校验后一起显示，不自动播放；
+3. 本地隐藏的 `AICueSoundPlan` 按当前 profile 的固定 route 与 candidate-set policy 编译；既有 Provider
+   继续顺序请求三个候选，SenseAudio SFX 使用一次 native batch；
+4. 候选逐项通过校验后一起显示，不自动播放；complete 恰好 3 个，只有路线明确允许时才显示 1–2 个
+   partial 候选并说明实际数量；
 5. 候选阶段建议并允许修改一个最终名称；
 6. 用户明确采用后才进入现有 `AudioImport` + manifest bind；失败保留旧声音。
 
@@ -288,9 +290,10 @@ AI 可见流程固定为：
 
 #### 5.3.1 首批 Provider/profile 目录
 
-用户只能选择以下四个注册 profile；默认 `elevenlabs-global`。UI 不提供任意 endpoint、model、voice
-或 region 输入，不自动 fallback、跨区或跨 Provider 重试。`routes.keys` 是 capability 的唯一真相；
-界面能力标签和本地阻止逻辑都从它投影。
+production 用户只能选择以下四个已注册 profile；默认 `elevenlabs-global`。`senseaudio-cn` 是已实现但
+尚未进入默认 allowlist 的完整 profile 候选，只在 deterministic fixture 中投影。UI 不提供任意
+endpoint、model、voice、region 或资源服务器输入，不自动 fallback、跨区或跨 Provider 重试。
+`routes.keys` 与 `candidateSetPolicy` 分别是 capability 与候选集合的唯一真相；界面只从它们投影。
 
 | Profile | 固定 origin/path | Auth / credential slot | 固定 model、voice、输出 | `routes.keys` / locale | Validation |
 |---|---|---|---|---|---|
@@ -298,10 +301,11 @@ AI 可见流程固定为：
 | `minimax-global` | `https://api.minimax.io`；probe `POST /v1/get_voice`；生成 `POST /v1/t2a_v2` | Bearer；`minimax-global` | `speech-2.8-hd` + `Chinese (Mandarin)_Reliable_Executive`；32 kHz / 128 kbps / mono MP3；JSON hex | 仅 `speech`；`zh` / `zh-Hans` | `readOnlyProbe` |
 | `qwen-singapore` | `https://dashscope-intl.aliyuncs.com`；生成 `POST /api/v1/services/aigc/multimodal-generation/generation`；`X-DashScope-SSE: enable` | Bearer；`qwen-singapore` | `qwen3-tts-instruct-flash` + `Cherry`；SSE Base64 PCM，24 kHz / 16-bit / mono / little-endian，封装 WAV | 仅 `speech`；`zh* -> Chinese`、`en* -> English` | `deferredUntilExplicitGeneration` |
 | `qwen-beijing` | `https://dashscope.aliyuncs.com`；path/header 同 Singapore | Bearer；`qwen-beijing` | 与 Singapore 相同 | 仅 `speech`；与 Singapore 相同 | `deferredUntilExplicitGeneration` |
+| `senseaudio-cn`（gated） | `https://api.senseaudio.cn`；probe `POST /v1/get_voice`；TTS `POST /v1/t2a_v2`；SFX `POST /v1/sound-effects/generations` | Bearer；`senseaudio-cn` | `sensenova-tts-2.0` + `female_0033_b`；`senseaudio-sfx-1.0-260626`；MP3 | `speech`、`animal`、`soundEffect`；`zh*`；不支持 `.mixed` | `readOnlyProbe`；真实资源 origin/MIME 与人工验收前 production 隐藏 |
 
-MiniMax/Qwen 不显示 animal、soundEffect 或 mixed 为可生成；不支持 modality/locale 时保留描述，在读取
-credential 或发网络前显示可修正错误。Qwen Singapore/Beijing 是两个独立 region profile 和 Keychain
-slot，不能交叉读取 key。
+MiniMax/Qwen 不显示 animal、soundEffect 或 mixed 为可生成；SenseAudio 只显示 speech、animal 与
+soundEffect。不支持 modality/locale 时保留描述，在读取 credential 或发网络前显示可修正错误。Qwen
+Singapore/Beijing 是两个独立 region profile 和 Keychain slot，不能交叉读取 key。
 
 #### 5.3.2 逐 profile 凭据状态与动作
 
@@ -316,7 +320,7 @@ slot，不能交叉读取 key。
 
 | Policy | 首次保存 / 替换 | 成功文案 | 失败与旧 key |
 |---|---|---|---|
-| ElevenLabs/MiniMax `readOnlyProbe` | “验证并保存”/“验证并替换”；先调用只读 probe，再原子写 Keychain | “已验证并保存” | probe 或写入失败保留旧 active key，显示失败原因 |
+| ElevenLabs/MiniMax/SenseAudio `readOnlyProbe` | “验证并保存”/“验证并替换”；先调用只读 probe，再原子写 Keychain | “已验证并保存” | probe 或写入失败保留旧 active key；SenseAudio 只有 API origin HTTP 401 表示 key 无效，所需 voice 缺失显示独立 capability 错误 |
 | Qwen `deferredUntilExplicitGeneration` | “保存 API Key”；首次保存写 stored-unverified active，已有 active 时替换才写 pending；均不发模型请求 | “已保存，待首次生成验证”；显式生成成功后首次 active 标记 verified 或 pending 提升为 active | pending replacement 可取消并恢复原 active 的验证状态；仅 pending 的明确 401 丢弃 pending 并保留旧 active，权限、额度、429/5xx、网络或取消不能伪装成 key 无效，也不自动用旧 key 重试 |
 
 未配置当前 profile 时点击生成，保留描述与 profile 选择并打开凭据界面；保存后返回原表单，用户必须
@@ -333,6 +337,7 @@ slot，不能交叉读取 key。
 | `minimax-global` | 本机直连 MiniMax global origin；首批 Mandarin speech；供应商数据处理规则独立适用 | T2A 可能消耗 MiniMax 配额；get-voice probe 不生成音频，不能用 ElevenLabs 状态代替 |
 | `qwen-singapore` | 本机直连新加坡 DashScope origin；只使用此 region 的独立 key；供应商新加坡地区处理规则适用 | 保存 key 不发模型请求、生成费用为零；下一次显式生成才验证并可能计费 |
 | `qwen-beijing` | 本机直连北京 DashScope origin；不复用 Singapore key；供应商北京地区处理规则适用 | 与 Singapore 相同的 deferred 语义，但两地配额、权限和 smoke 证据互不替代 |
+| `senseaudio-cn`（gated） | 本机通过固定 `.cn` API route 直连 SenseAudio；该 route 不构成数据驻留承诺；SFX 资源只允许 registry 固定的精确 origin | 保存前只查询可用音色且不生成音频；TTS/SFX 可能计费；真实资源 origin/MIME、无凭据 GET 与无 redirect 证据完成前 production 隐藏 |
 
 Claudio 不承诺任何供应商 zero retention，不展示统一账单或推算费用。API Key 只存 macOS Keychain；
 不得进入设置、日志、receipt、manifest、截图或仓库。描述、隐藏声音计划、provider 响应和候选音频也
@@ -344,12 +349,14 @@ Claudio 不承诺任何供应商 zero retention，不展示统一账单或推算
 
 `mockups/ai-app-manager-native-macos.html?page=events&app=workbuddy&prototype=tts`
 
-原型同时显示四个 profile，并允许用 `profile`、`credential` 和 `scenario` query 演示：
+原型同时显示四个 production profile 与一个 `productionEnabled: false` 的 SenseAudio fixture，并允许用
+`profile`、`credential` 和 `scenario` query 演示：
 
 - `profile=elevenlabs-global&credential=verified`
 - `profile=minimax-global&credential=missing`
 - `profile=qwen-singapore&credential=deferred`
 - `profile=qwen-beijing&credential=unavailable`
+- `profile=senseaudio-cn&credential=missing&stage=candidates` 用于 numbered/partial 与 production gate；
 - `credential=rejected|pending` 用于拒绝和 pending replacement 状态。
 - `profile=minimax-global&scenario=unsupported-modality|unsupported-locale` 用于能力/语言本地阻止状态。
 - 旧 `credential=ready` 只在缺省、显式或未知 `profile` 最终回落到 `elevenlabs-global` 时兼容为
@@ -361,16 +368,17 @@ Claudio 不承诺任何供应商 zero retention，不展示统一账单或推算
 
 验收必须覆盖 prompt、interpreting、generating、candidates、playing、adopting、applied、逐 profile
 credential missing/unavailable/rejected/pending、unsupported modality/locale、provider failure、validation
-failure、target drift 和 adoption rollback。文档与原型中的四个 profile 必须保持 exact origin/path、
-auth、model/voice、输出、locale、routes、credential slot 与 validation policy 一致；MiniMax/Qwen 只有
-`speech`，ElevenLabs 保留四类 route，所有 UI capability 从 `routes.keys` 派生。
+failure、target drift 和 adoption rollback。文档与原型中的四个 production profile 及 gated
+SenseAudio fixture 必须保持 exact origin/path、auth、model/voice、输出、locale、routes、credential
+slot、validation policy 与 production gate 一致；所有 UI capability 从 `routes.keys` 派生。
 
 自动 fixture、静态原型和本地 bundle 只能证明相应合同与投影。真实 key、真实/付费 Provider smoke、
 真实音频质量、native macOS UI、键盘/焦点、VoiceOver、双架构、签名、公证和发布都需要分别授权和
 记录；一个 Provider 或地区的结果不能替代另一个。
 
 详细 AI 领域、transport 和音频安全合同见 `plan/PLAN-CONSUMER-TTS-EXECUTION.md`；决策摘要见
-`docs/adr/0006-use-elevenlabs-byok-with-fixed-modality-routing.md`。
+`docs/adr/0006-use-elevenlabs-byok-with-fixed-modality-routing.md` 与
+`docs/adr/0011-use-route-owned-candidate-sets-for-senseaudio.md`。
 
 ### 5.4 通知
 
@@ -770,7 +778,8 @@ git diff --check
 - 原型视觉层级在默认窗口明显对齐，并在小窗口、固定紧凑布局、双语和明暗模式下原生适配；
 - Integrations、Events、Sounds 复用原 owner，独立旧窗口不再进入 production composition；
 - General、Notifications、Display、Usage、Shortcuts、About 的真实模型、权限、失败和持久化均落地；
-- AI 提示音维持描述 → 三候选与命名 → 显式采用，内部声音方案隐藏，BYOK 边界不退化；
+- AI 提示音维持描述 → route-owned 候选集合与命名 → 显式采用，内部声音方案隐藏，BYOK 边界不退化；
+  SenseAudio production profile 在资源 origin、真实 TTS/SFX 与人工验收前保持隐藏；
 - 所有自动命令全绿，`git diff --check` 通过且无新增 format diagnostics；
 - 真机视觉、键盘、VoiceOver、登录项、Focus、Calendar、快捷键和音频分别有证据；
 - 真实 Provider/key/付费请求、双架构、签名、公证、发布和正式验收继续单独报告与授权。

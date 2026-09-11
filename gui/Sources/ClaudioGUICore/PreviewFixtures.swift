@@ -459,6 +459,8 @@ public enum PreviewFixtures {
         case qwenSingaporeDeferred = "qwen-singapore.deferred"
         case qwenBeijingPendingReplacement = "qwen-beijing.pending-replacement"
         case qwenBeijingUnavailable = "qwen-beijing.unavailable"
+        case senseAudioMissing = "senseaudio-cn.missing"
+        case senseAudioVoiceUnavailable = "senseaudio-cn.voice-unavailable"
         case elevenLabsProbing = "elevenlabs.probing"
         case qwenSingaporeSaving = "qwen-singapore.saving"
         case qwenBeijingUpdatingReplacement = "qwen-beijing.updating-replacement"
@@ -469,6 +471,7 @@ public enum PreviewFixtures {
         case editing = "composer.editing"
         case generating = "composer.generating"
         case candidates = "composer.candidates"
+        case senseAudioPartial = "composer.senseaudio-partial"
         case playing = "composer.playing"
         case adopting = "composer.adopting"
         case applied = "composer.applied"
@@ -492,7 +495,15 @@ public enum PreviewFixtures {
 
         public var previewState: AICueGenerationPreviewState {
             let session = rendersCredentialSheet ? nil : PreviewFixtures.aiCueSession
-            let generation = facts.needsGeneration ? PreviewFixtures.aiCueGeneration : nil
+            let generation: AICueGeneration?
+            if facts.needsGeneration {
+                generation =
+                    self == .senseAudioPartial
+                    ? PreviewFixtures.senseAudioPartialGeneration
+                    : PreviewFixtures.aiCueGeneration
+            } else {
+                generation = nil
+            }
             let outcome = self == .applied ? PreviewFixtures.aiCueAdoptionOutcome : nil
             return AICueGenerationPreviewState(
                 providerProfileID: providerProfileID,
@@ -542,6 +553,19 @@ public enum PreviewFixtures {
                     providerProfileID: .qwenBeijing,
                     rendersCredentialSheet: true,
                     credentialStatus: .unavailable)
+            case .senseAudioMissing:
+                Facts(
+                    providerProfileID: .senseAudioChina,
+                    rendersCredentialSheet: true,
+                    credentialStatus: .missing)
+            case .senseAudioVoiceUnavailable:
+                Facts(
+                    providerProfileID: .senseAudioChina,
+                    rendersCredentialSheet: true,
+                    credentialStatus: .stored(
+                        verification: .verified,
+                        hasPendingReplacement: false),
+                    credentialFailure: .provider(.requiredModelsUnavailable))
             case .elevenLabsProbing:
                 Facts(rendersCredentialSheet: true, credentialActivity: .probing)
             case .qwenSingaporeSaving:
@@ -587,6 +611,11 @@ public enum PreviewFixtures {
                 Facts(composerPhase: .generating)
             case .candidates, .playing:
                 Facts(composerPhase: .candidatesReady, needsGeneration: true)
+            case .senseAudioPartial:
+                Facts(
+                    providerProfileID: .senseAudioChina,
+                    composerPhase: .candidatesReady,
+                    needsGeneration: true)
             case .adopting:
                 Facts(composerPhase: .adopting, needsGeneration: true)
             case .applied:
@@ -665,6 +694,13 @@ public enum PreviewFixtures {
     }
 
     public static let aiCueGalleryScenarios = AICueGalleryScenario.allCases
+
+    package static var aiCueEvidenceRegistry: AICueProviderRegistry {
+        let policy = try! AICueAssetPolicy(
+            allowedOrigins: [try! AICueAssetOrigin("https://assets.fixture.invalid")],
+            acceptedMediaTypes: ["audio/mpeg"])
+        return AICueProviderRegistry(evidenceGatedSenseAudioAssetPolicy: policy)
+    }
 
     /// The exact finalized Events reference: Claude Code, ElevenLabs verified, prompt editing.
     public static let finalizedClaudeEventsAICuePreviewState: AICueGenerationPreviewState = {
@@ -775,6 +811,42 @@ public enum PreviewFixtures {
                     requestOrdinal: variant.ordinal,
                     providerRequestID: "gallery-\(variant.ordinal)"))
         },
+        generatedAt: Date(timeIntervalSince1970: 1_700_000_000))
+    private static let senseAudioPartialGeneration = AICueGeneration(
+        id: UUID(uuidString: "A1000000-0000-0000-0000-000000000002")!,
+        profileID: .senseAudioChina,
+        plan: AICueSoundPlan(
+            suggestedDisplayName: "短促木琴",
+            modality: .soundEffect,
+            soundDescription: "短促木琴音效",
+            spokenContent: nil,
+            languageTag: nil,
+            styleDescription: "短促木琴音效",
+            targetDurationMilliseconds: 1_500,
+            instructionVersion: AICueSoundPlanner.instructionVersion),
+        candidates: [1, 3].map { ordinalValue in
+            let ordinal = AICueCandidateOrdinal(rawValue: ordinalValue)!
+            return AICueCandidate(
+                id: aiCueCandidateIDs[ordinalValue - 1],
+                identity: .numbered(ordinal),
+                asset: AICueTemporaryAudioAsset(
+                    fileURL: URL(
+                        fileURLWithPath:
+                            "/dev/null/claudio-ai-cue-numbered-\(ordinalValue).mp3"),
+                    byteCount: 96_000,
+                    sniffedFormat: .mp3),
+                durationMilliseconds: 1_400 + ordinalValue * 100,
+                mediaType: "audio/mpeg",
+                provenance: AICueCandidateProvenance(
+                    providerID: .senseAudio,
+                    profileID: .senseAudioChina,
+                    modelID: "senseaudio-sfx-1.0-260626",
+                    generationID: UUID(
+                        uuidString: "A1000000-0000-0000-0000-000000000002")!,
+                    requestOrdinal: ordinalValue,
+                    providerRequestID: "gallery-senseaudio-\(ordinalValue)"))
+        },
+        completion: .partial,
         generatedAt: Date(timeIntervalSince1970: 1_700_000_000))
     private static let aiCueAdoptionOutcome = AICueComposerAdoptionOutcome(
         finalDisplayName: aiCueDisplayName)

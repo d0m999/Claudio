@@ -295,6 +295,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "ai-cue.provider-profile.qwen-singapore"
     public static let aiCueProviderProfileQwenBeijing: Self =
         "ai-cue.provider-profile.qwen-beijing"
+    public static let aiCueProviderProfileSenseAudioChina: Self =
+        "ai-cue.provider-profile.senseaudio-cn"
     public static let aiCueServiceTitle: Self = "ai-cue.service.title"
     public static let aiCueServiceSubtitle: Self = "ai-cue.service.subtitle"
     public static let aiCueServiceChecking: Self = "ai-cue.service.checking"
@@ -328,6 +330,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "ai-cue.credential.privacy.qwen-singapore"
     public static let aiCueCredentialPrivacyQwenBeijing: Self =
         "ai-cue.credential.privacy.qwen-beijing"
+    public static let aiCueCredentialPrivacySenseAudioChina: Self =
+        "ai-cue.credential.privacy.senseaudio-cn"
     public static let aiCueCredentialKeychain: Self = "ai-cue.credential.keychain"
     public static let aiCueCredentialValidateSave: Self = "ai-cue.credential.validate-save"
     public static let aiCueCredentialSave: Self = "ai-cue.credential.save"
@@ -355,6 +359,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let aiCueCandidateClear: Self = "ai-cue.candidate.clear"
     public static let aiCueCandidateBrisk: Self = "ai-cue.candidate.brisk"
     public static let aiCueCandidateRestrained: Self = "ai-cue.candidate.restrained"
+    public static let aiCueCandidateNumbered: Self = "ai-cue.candidate.numbered"
+    public static let aiCueCandidatePartial: Self = "ai-cue.candidate.partial"
     public static let aiCueCandidateDuration: Self = "ai-cue.candidate.duration"
     public static let aiCueCandidatePlayAction: Self = "ai-cue.candidate.play-action"
     public static let aiCueCandidateStopAction: Self = "ai-cue.candidate.stop-action"
@@ -376,10 +382,13 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let aiCueErrorCredentialRequired: Self = "ai-cue.error.credential-required"
     public static let aiCueErrorCredentialInvalid: Self = "ai-cue.error.credential-invalid"
     public static let aiCueErrorCredentialUnavailable: Self = "ai-cue.error.credential-unavailable"
+    public static let aiCueErrorRequiredVoiceUnavailable: Self =
+        "ai-cue.error.required-voice-unavailable"
     public static let aiCueErrorCredits: Self = "ai-cue.error.credits"
     public static let aiCueErrorRateLimited: Self = "ai-cue.error.rate-limited"
     public static let aiCueErrorAudioInvalid: Self = "ai-cue.error.audio-invalid"
     public static let aiCueErrorGeneration: Self = "ai-cue.error.generation"
+    public static let aiCueErrorNoValidCandidates: Self = "ai-cue.error.no-valid-candidates"
     public static let aiCueErrorNameRequired: Self = "ai-cue.error.name-required"
     public static let aiCueErrorNameInvalid: Self = "ai-cue.error.name-invalid"
     public static let aiCueErrorAdoptionTarget: Self = "ai-cue.error.adoption-target"
@@ -1140,7 +1149,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .panelCapabilityUnsupportedNotImplemented, .hostDetailsHint,
         .aiCueGenerateAction, .aiCueGenerateHint, .aiCueProviderProfileElevenLabsGlobal,
         .aiCueProviderProfileMiniMaxGlobal, .aiCueProviderProfileQwenSingapore,
-        .aiCueProviderProfileQwenBeijing, .aiCueServiceTitle, .aiCueServiceSubtitle,
+        .aiCueProviderProfileQwenBeijing, .aiCueProviderProfileSenseAudioChina,
+        .aiCueServiceTitle, .aiCueServiceSubtitle,
         .aiCueServiceChecking, .aiCueServiceMissing, .aiCueServiceConfigured,
         .aiCueServiceStoredVerified, .aiCueServiceStoredDeferred, .aiCueServiceStoredRejected,
         .aiCueServicePendingReplacement, .aiCueServiceUnavailable, .aiCueProviderLabel,
@@ -1151,6 +1161,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .aiCueManageKey, .aiCueCredentialTitle,
         .aiCueCredentialKeyLabel, .aiCueCredentialPrivacy, .aiCueCredentialPrivacyMiniMax,
         .aiCueCredentialPrivacyQwenSingapore, .aiCueCredentialPrivacyQwenBeijing,
+        .aiCueCredentialPrivacySenseAudioChina,
         .aiCueCredentialKeychain, .aiCueCredentialValidateSave, .aiCueCredentialSave,
         .aiCueCredentialCancelReplacement, .aiCueCredentialDelete,
         .aiCueCredentialDeleteTitle,
@@ -1160,6 +1171,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .aiCueDescriptionHelp, .aiCueDescriptionPlaceholder, .aiCueGenerateCandidates,
         .aiCueGenerating, .aiCueDescriptionSummary, .aiCueModifyDescription, .aiCueNameLabel,
         .aiCueNameHelp, .aiCueCandidateClear, .aiCueCandidateBrisk, .aiCueCandidateRestrained,
+        .aiCueCandidateNumbered, .aiCueCandidatePartial,
         .aiCueCandidateDuration, .aiCueCandidatePlayAction, .aiCueCandidateStopAction,
         .aiCueCandidatePlaybackStarted, .aiCueCandidatePlaybackStopped, .aiCueComposerClosed,
         .aiCueComposerClosedCandidatesCleared,
@@ -1169,7 +1181,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .aiCueErrorSpeechNeedsText, .aiCueErrorUnsupportedModality,
         .aiCueErrorUnsupportedLocale, .aiCueErrorCredentialRequired,
         .aiCueErrorCredentialInvalid, .aiCueErrorCredentialUnavailable, .aiCueErrorCredits,
-        .aiCueErrorRateLimited, .aiCueErrorAudioInvalid, .aiCueErrorGeneration,
+        .aiCueErrorRequiredVoiceUnavailable, .aiCueErrorRateLimited,
+        .aiCueErrorAudioInvalid, .aiCueErrorGeneration, .aiCueErrorNoValidCandidates,
         .aiCueErrorNameRequired, .aiCueErrorNameInvalid, .aiCueErrorAdoptionTarget,
         .aiCueErrorAdoptionPartial, .aiCueErrorAdoption,
         .soundPacksWindowTitle, .soundPacksManagingScope, .soundPacksInvalidScope,

@@ -482,8 +482,11 @@ func runAICueMiniMaxProviderSuites() async {
             let requests = await transport.requests()
             expect(requests.count == 3, "一次 generation 必须恰好三个顺序 unary 请求")
             expect(
-                generation.candidates.map(\.variant) == [.clear, .brisk, .restrained],
-                "候选身份必须稳定为 A/B/C")
+                generation.candidates.map(\.identity)
+                    == (1...3).map {
+                        .numbered(AICueCandidateOrdinal(rawValue: $0)!)
+                    },
+                "MiniMax 候选身份必须稳定为候选 1/2/3")
             expect(
                 generation.candidates.map { $0.provenance.providerRequestID } == [
                     "fixture-minimax-1", "fixture-minimax-2", "fixture-minimax-3",

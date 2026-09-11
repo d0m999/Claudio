@@ -12,17 +12,46 @@ public enum AICueProviderRegistryError: Error, Sendable, Equatable {
 public struct AICueProviderRegistry: Sendable {
     private let orderedProfiles: [AICueProviderProfile]
     private let profilesByID: [AICueProviderProfileID: AICueProviderProfile]
+    private let assetPoliciesByProfileID: [AICueProviderProfileID: AICueAssetPolicy]
 
     public init() {
         do {
-            try self.init(validating: Self.allowlistedProfiles)
+            try self.init(
+                validating: Self.allowlistedProfiles,
+                expectedProfiles: Self.allowlistedProfiles,
+                assetPoliciesByProfileID: [:])
         } catch {
             preconditionFailure("Built-in AI cue provider profiles are invalid")
         }
     }
 
     package init(validating profiles: [AICueProviderProfile]) throws {
-        let expected = Self.allowlistedProfiles
+        try self.init(
+            validating: profiles,
+            expectedProfiles: Self.allowlistedProfiles,
+            assetPoliciesByProfileID: [:])
+    }
+
+    /// Deterministic fixtures can exercise the complete SenseAudio contract while production
+    /// remains on the four-profile allowlist. A real build may use this initializer only after an
+    /// official, smoke-verified exact asset origin has replaced the nil evidence gate.
+    package init(evidenceGatedSenseAudioAssetPolicy assetPolicy: AICueAssetPolicy) {
+        let expected = Self.allowlistedProfiles + [Self.senseAudioChina]
+        do {
+            try self.init(
+                validating: expected,
+                expectedProfiles: expected,
+                assetPoliciesByProfileID: [.senseAudioChina: assetPolicy])
+        } catch {
+            preconditionFailure("Evidence-gated SenseAudio provider profile is invalid")
+        }
+    }
+
+    private init(
+        validating profiles: [AICueProviderProfile],
+        expectedProfiles expected: [AICueProviderProfile],
+        assetPoliciesByProfileID: [AICueProviderProfileID: AICueAssetPolicy]
+    ) throws {
         let expectedIDs = Set(expected.map(\.id))
         let actualIDs = Set(profiles.map(\.id))
         guard
@@ -39,16 +68,21 @@ public struct AICueProviderRegistry: Sendable {
                 profile.routes.allSatisfy({ $0.key == $0.value.modality }),
                 profile.supportedModalities == Set(profile.routes.keys),
                 profile.routes.values.allSatisfy({ !$0.supportedLanguageTags.isEmpty }),
+                profile.routes.values.allSatisfy({ $0.candidateSetPolicy.isValid }),
                 expectedByID[profile.id] == profile
             else {
                 throw AICueProviderRegistryError.invalidProfileContract
             }
+        }
+        guard Set(assetPoliciesByProfileID.keys).isSubset(of: actualIDs) else {
+            throw AICueProviderRegistryError.invalidProfileContract
         }
 
         orderedProfiles = expected.map { expectedProfile in
             profiles.first(where: { $0.id == expectedProfile.id })!
         }
         profilesByID = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
+        self.assetPoliciesByProfileID = assetPoliciesByProfileID
     }
 
     public func profiles() -> [AICueProviderProfile] {
@@ -62,12 +96,33 @@ public struct AICueProviderRegistry: Sendable {
         return profile
     }
 
+    package func assetPolicy(for profileID: AICueProviderProfileID) -> AICueAssetPolicy? {
+        assetPoliciesByProfileID[profileID]
+    }
+
     private static let allowlistedProfiles: [AICueProviderProfile] = [
         elevenLabsGlobal,
         miniMaxGlobal,
         qwenSingapore,
         qwenBeijing,
     ]
+
+    /// Intentionally nil until SenseAudio confirms a stable production asset origin and a paid
+    /// smoke proves exact origin, MIME, no-auth GET and no-redirect behavior.
+    package static let productionSenseAudioAssetPolicy: AICueAssetPolicy? = nil
+
+    private static let styledComplete = AICueCandidateSetPolicy(
+        semantics: .styled,
+        requestedCount: 3,
+        minimumAcceptedCount: 3)
+    private static let numberedComplete = AICueCandidateSetPolicy(
+        semantics: .numbered,
+        requestedCount: 3,
+        minimumAcceptedCount: 3)
+    private static let numberedPartial = AICueCandidateSetPolicy(
+        semantics: .numbered,
+        requestedCount: 3,
+        minimumAcceptedCount: 1)
 
     private static let elevenLabsGlobal: AICueProviderProfile = {
         let speechEndpoint = fixedURL(
@@ -81,7 +136,8 @@ public struct AICueProviderRegistry: Sendable {
             voiceID: "JBFqnCBsd6RMkjVDRZzb",
             supportedLanguageTags: languages,
             authentication: .elevenLabsAPIKeyHeader,
-            transport: .directContainer)
+            transport: .directContainer,
+            candidateSetPolicy: styledComplete)
         let mixed = AICueProviderRoute(
             modality: .mixed,
             endpoint: speechEndpoint,
@@ -89,7 +145,8 @@ public struct AICueProviderRegistry: Sendable {
             voiceID: "JBFqnCBsd6RMkjVDRZzb",
             supportedLanguageTags: languages,
             authentication: .elevenLabsAPIKeyHeader,
-            transport: .directContainer)
+            transport: .directContainer,
+            candidateSetPolicy: styledComplete)
         let animal = AICueProviderRoute(
             modality: .animal,
             endpoint: effectsEndpoint,
@@ -97,7 +154,8 @@ public struct AICueProviderRegistry: Sendable {
             voiceID: nil,
             supportedLanguageTags: languages,
             authentication: .elevenLabsAPIKeyHeader,
-            transport: .directContainer)
+            transport: .directContainer,
+            candidateSetPolicy: styledComplete)
         let soundEffect = AICueProviderRoute(
             modality: .soundEffect,
             endpoint: effectsEndpoint,
@@ -105,7 +163,8 @@ public struct AICueProviderRegistry: Sendable {
             voiceID: nil,
             supportedLanguageTags: languages,
             authentication: .elevenLabsAPIKeyHeader,
-            transport: .directContainer)
+            transport: .directContainer,
+            candidateSetPolicy: styledComplete)
         return AICueProviderProfile(
             id: .elevenLabsGlobal,
             providerID: .elevenLabs,
@@ -113,15 +172,14 @@ public struct AICueProviderRegistry: Sendable {
             credentialValidationPolicy: .readOnlyProbe,
             regionID: nil,
             displayNameKey: .aiCueProviderProfileElevenLabsGlobal,
+            privacyDisclosureKey: .aiCueCredentialPrivacy,
             routes: [
                 .speech: speech,
                 .mixed: mixed,
                 .animal: animal,
                 .soundEffect: soundEffect,
             ],
-            constraints: AICueProviderConstraints(
-                supportsInstructionControl: true,
-                maximumDurationMilliseconds: 3_000))
+            constraints: AICueProviderConstraints(maximumDurationMilliseconds: 3_000))
     }()
 
     private static let miniMaxGlobal = AICueProviderProfile(
@@ -131,6 +189,7 @@ public struct AICueProviderRegistry: Sendable {
         credentialValidationPolicy: .readOnlyProbe,
         regionID: nil,
         displayNameKey: .aiCueProviderProfileMiniMaxGlobal,
+        privacyDisclosureKey: .aiCueCredentialPrivacyMiniMax,
         routes: [
             .speech: AICueProviderRoute(
                 modality: .speech,
@@ -139,17 +198,17 @@ public struct AICueProviderRegistry: Sendable {
                 voiceID: "Chinese (Mandarin)_Reliable_Executive",
                 supportedLanguageTags: ["zh", "zh-Hans"],
                 authentication: .bearerAPIKey,
-                transport: .hexEncodedContainer)
+                transport: .hexEncodedContainer,
+                candidateSetPolicy: numberedComplete)
         ],
-        constraints: AICueProviderConstraints(
-            supportsInstructionControl: false,
-            maximumDurationMilliseconds: 3_000))
+        constraints: AICueProviderConstraints(maximumDurationMilliseconds: 3_000))
 
     private static let qwenSingapore = qwenProfile(
         id: .qwenSingapore,
         slotID: .qwenSingapore,
         regionID: "singapore",
         displayNameKey: .aiCueProviderProfileQwenSingapore,
+        privacyDisclosureKey: .aiCueCredentialPrivacyQwenSingapore,
         endpoint:
             "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/"
             + "multimodal-generation/generation")
@@ -159,6 +218,7 @@ public struct AICueProviderRegistry: Sendable {
         slotID: .qwenBeijing,
         regionID: "beijing",
         displayNameKey: .aiCueProviderProfileQwenBeijing,
+        privacyDisclosureKey: .aiCueCredentialPrivacyQwenBeijing,
         endpoint:
             "https://dashscope.aliyuncs.com/api/v1/services/aigc/"
             + "multimodal-generation/generation")
@@ -168,6 +228,7 @@ public struct AICueProviderRegistry: Sendable {
         slotID: AICueCredentialSlotID,
         regionID: String,
         displayNameKey: ClaudioL10nKey,
+        privacyDisclosureKey: ClaudioL10nKey,
         endpoint: String
     ) -> AICueProviderProfile {
         AICueProviderProfile(
@@ -178,6 +239,7 @@ public struct AICueProviderRegistry: Sendable {
             credentialValidationPolicy: .deferredUntilExplicitGeneration,
             regionID: regionID,
             displayNameKey: displayNameKey,
+            privacyDisclosureKey: privacyDisclosureKey,
             routes: [
                 .speech: AICueProviderRoute(
                     modality: .speech,
@@ -191,12 +253,52 @@ public struct AICueProviderRegistry: Sendable {
                             sampleRate: 24_000,
                             bitsPerSample: 16,
                             channels: 1,
-                            isLittleEndian: true)))
+                            isLittleEndian: true)),
+                    candidateSetPolicy: styledComplete)
             ],
-            constraints: AICueProviderConstraints(
-                supportsInstructionControl: true,
-                maximumDurationMilliseconds: 3_000))
+            constraints: AICueProviderConstraints(maximumDurationMilliseconds: 3_000))
     }
+
+    private static let senseAudioChina: AICueProviderProfile = {
+        let speech = AICueProviderRoute(
+            modality: .speech,
+            endpoint: fixedURL("https://api.senseaudio.cn/v1/t2a_v2"),
+            modelID: "sensenova-tts-2.0",
+            voiceID: "female_0033_b",
+            supportedLanguageTags: ["zh*"],
+            authentication: .bearerAPIKey,
+            transport: .hexEncodedContainer,
+            candidateSetPolicy: numberedComplete)
+        let sfxEndpoint = fixedURL("https://api.senseaudio.cn/v1/sound-effects/generations")
+        let animal = AICueProviderRoute(
+            modality: .animal,
+            endpoint: sfxEndpoint,
+            modelID: "senseaudio-sfx-1.0-260626",
+            voiceID: nil,
+            supportedLanguageTags: ["zh*"],
+            authentication: .bearerAPIKey,
+            transport: .remoteAssets,
+            candidateSetPolicy: numberedPartial)
+        let soundEffect = AICueProviderRoute(
+            modality: .soundEffect,
+            endpoint: sfxEndpoint,
+            modelID: "senseaudio-sfx-1.0-260626",
+            voiceID: nil,
+            supportedLanguageTags: ["zh*"],
+            authentication: .bearerAPIKey,
+            transport: .remoteAssets,
+            candidateSetPolicy: numberedPartial)
+        return AICueProviderProfile(
+            id: .senseAudioChina,
+            providerID: .senseAudio,
+            credentialSlotID: .senseAudioChina,
+            credentialValidationPolicy: .readOnlyProbe,
+            regionID: "china",
+            displayNameKey: .aiCueProviderProfileSenseAudioChina,
+            privacyDisclosureKey: .aiCueCredentialPrivacySenseAudioChina,
+            routes: [.speech: speech, .animal: animal, .soundEffect: soundEffect],
+            constraints: AICueProviderConstraints(maximumDurationMilliseconds: 3_000))
+    }()
 
     private static func fixedURL(_ value: String) -> URL {
         guard let url = URL(string: value) else {

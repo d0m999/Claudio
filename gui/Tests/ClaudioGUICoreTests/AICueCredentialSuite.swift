@@ -180,6 +180,44 @@ func runAICueCredentialSuites() async {
             "Keychain 原子替换失败必须保留旧 active")
     }
 
+    await suite("AI 提示音凭据：gated SenseAudio 只读 probe 使用独立 slot 并保留旧 key") {
+        let registry = senseAudioCredentialFixtureRegistry()
+        let old = try! SensitiveCredentialInput("old-senseaudio-key")
+        let replacement = try! SensitiveCredentialInput("new-senseaudio-key")
+        let vault = CredentialVaultFixture(items: [.senseAudioChina: old])
+        let passingProbe = CredentialValidatorFixture(result: .success(()))
+        let manager = makeCredentialManager(
+            vault: vault,
+            registry: registry,
+            validators: [.senseAudioChina: passingProbe])
+
+        let status = try! await manager.save(replacement, for: .senseAudioChina)
+        expect(await passingProbe.count() == 1, "SenseAudio 保存前必须恰好执行一次只读 voice probe")
+        expect(
+            await vault.item(in: .senseAudioChina) === replacement,
+            "通过 probe 后只能原子替换 senseaudio-cn active slot")
+        expect(
+            status == .stored(verification: .verified, hasPendingReplacement: false),
+            "SenseAudio 成功保存后必须投影 verified 且没有 pending slot")
+
+        let rejected = CredentialValidatorFixture(result: .failure(.rejected))
+        let rejectedManager = makeCredentialManager(
+            vault: vault,
+            registry: registry,
+            validators: [.senseAudioChina: rejected])
+        do {
+            _ = try await rejectedManager.save(
+                try SensitiveCredentialInput("rejected-senseaudio-key"),
+                for: .senseAudioChina)
+        } catch {}
+        expect(
+            await vault.item(in: .senseAudioChina) === replacement,
+            "SenseAudio probe 失败不得覆盖已经验证的 active key")
+        expect(
+            await vault.facts().replacements == [.senseAudioChina],
+            "失败的 SenseAudio probe 不得触发第二次 Keychain 写入")
+    }
+
     await suite("AI 提示音凭据：Qwen 首次保存 deferred 且不调用 probe") {
         let vault = CredentialVaultFixture()
         let accidentalProbe = CredentialValidatorFixture(result: .failure(.rejected))
@@ -381,12 +419,21 @@ func runAICueCredentialSuites() async {
 
 private func makeCredentialManager(
     vault: CredentialVaultFixture,
+    registry: AICueProviderRegistry = AICueProviderRegistry(),
     validators: [AICueProviderProfileID: any AICueCredentialValidating] = [:]
 ) -> AICueCredentialManager {
     AICueCredentialManager(
         vault: vault,
+        registry: registry,
         validators: validators,
         metadata: CredentialMetadataFixture())
+}
+
+private func senseAudioCredentialFixtureRegistry() -> AICueProviderRegistry {
+    let policy = try! AICueAssetPolicy(
+        allowedOrigins: [try! AICueAssetOrigin("https://assets.fixture.invalid")],
+        acceptedMediaTypes: ["audio/mpeg"])
+    return AICueProviderRegistry(evidenceGatedSenseAudioAssetPolicy: policy)
 }
 
 private func throwsCredentialInput(_ body: () throws -> Void) -> Bool {

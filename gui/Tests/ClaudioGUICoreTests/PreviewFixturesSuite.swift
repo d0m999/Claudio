@@ -119,6 +119,8 @@ func runPreviewFixturesSuites() {
             "aiCueGallery.qwen-singapore.deferred",
             "aiCueGallery.qwen-beijing.pending-replacement",
             "aiCueGallery.qwen-beijing.unavailable",
+            "aiCueGallery.senseaudio-cn.missing",
+            "aiCueGallery.senseaudio-cn.voice-unavailable",
             "aiCueGallery.elevenlabs.probing",
             "aiCueGallery.qwen-singapore.saving",
             "aiCueGallery.qwen-beijing.updating-replacement",
@@ -129,6 +131,7 @@ func runPreviewFixturesSuites() {
             "aiCueGallery.composer.editing",
             "aiCueGallery.composer.generating",
             "aiCueGallery.composer.candidates",
+            "aiCueGallery.composer.senseaudio-partial",
             "aiCueGallery.composer.playing",
             "aiCueGallery.composer.adopting",
             "aiCueGallery.composer.applied",
@@ -540,15 +543,18 @@ func runPreviewFixturesSuites() {
             Set(scenarios.map(\.providerProfileID))
                 == [
                     .elevenLabsGlobal, .miniMaxGlobal, .qwenSingapore, .qwenBeijing,
+                    .senseAudioChina,
                 ],
-            "AI Cue gallery 必须覆盖四个 allowlisted profile 与两个独立 Qwen region")
+            "AI Cue gallery 必须区分四个 production profile 与 gated SenseAudio fixture")
         expect(
             Set(scenarios.map(\.rawValue)).isSuperset(
                 of: [
                     "elevenlabs.missing", "elevenlabs.verified", "minimax.rejected",
                     "qwen-singapore.deferred", "qwen-beijing.pending-replacement",
-                    "qwen-beijing.unavailable", "composer.editing", "composer.generating",
+                    "qwen-beijing.unavailable", "senseaudio-cn.missing",
+                    "senseaudio-cn.voice-unavailable", "composer.editing", "composer.generating",
                     "composer.candidates", "composer.playing", "composer.adopting",
+                    "composer.senseaudio-partial",
                     "composer.applied", "composer.unsupported-modality",
                     "composer.unsupported-locale", "composer.provider-failure",
                     "composer.validation-failure", "composer.display-name-failure",
@@ -557,6 +563,20 @@ func runPreviewFixturesSuites() {
                     "composer.adoption-rollback",
                 ]),
             "AI Cue gallery 不得漏掉凭据、播放/采用或失败族")
+        let partial = PreviewFixtures.AICueGalleryScenario.senseAudioPartial.previewState
+        expect(
+            partial.providerProfileID == .senseAudioChina
+                && partial.generation?.profileID == .senseAudioChina
+                && partial.generation?.completion == .partial
+                && partial.generation?.candidates.map(\.identity)
+                    == [1, 3].map {
+                        .numbered(AICueCandidateOrdinal(rawValue: $0)!)
+                    },
+            "SenseAudio preview 必须用真实 1/3 identity 呈现 gated partial")
+        expect(
+            AICueProviderRegistry().profiles().count == 4
+                && PreviewFixtures.aiCueEvidenceRegistry.profiles().count == 5,
+            "DEBUG fixture 不得把 SenseAudio 反向加入 production registry")
         expect(
             PreviewFixtures.AICueGalleryScenario.playing.playingCandidateID != nil
                 && PreviewFixtures.AICueGalleryScenario.candidates.playingCandidateID == nil,

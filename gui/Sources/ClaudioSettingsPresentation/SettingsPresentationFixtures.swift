@@ -211,7 +211,8 @@ package enum SettingsPresentationFixtures {
             injectedAICueViewModel
             ?? AICueGenerationViewModel(
                 previewState: (aiCueScenario ?? PreviewFixtures.AICueGalleryScenario.editing)
-                    .previewState)
+                    .previewState,
+                registry: PreviewFixtures.aiCueEvidenceRegistry)
         let session = SettingsPresentationSession(
             dependencies: SettingsPresentationDependencies(
                 preferences: preferences,
@@ -325,7 +326,8 @@ extension SettingsPresentationDependencies {
                 refreshHandler: IntegrationDestinationRefreshHandler { integrationOutcome },
                 actionHandler: IntegrationDestinationActionHandler { _ in integrationOutcome }),
             aiCueViewModel: AICueGenerationViewModel(
-                previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState))
+                previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState,
+                registry: PreviewFixtures.aiCueEvidenceRegistry))
     }
 }
 

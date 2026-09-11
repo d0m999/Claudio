@@ -1,12 +1,14 @@
 # PLAN — 描述式 AI 提示音（BYOK、多 Provider）执行计划
 
-> 状态：**TTS-MP-0、allowlisted 多 Provider 实现与统一设置迁移的自动合同已落地；真机无障碍、真实 Provider 与发布证据待单独验收**
+> 状态：**既有四个 allowlisted profile 与统一设置自动合同已落地；SenseAudio 双路线与确定性 fixture 已实现，但默认 allowlist 暂不暴露；真实资源 origin、付费 smoke、真机无障碍与发布证据待单独验收**
 >
-> 日期：2026-08-26
+> 日期：2026-09-11
 >
 > 范围：AI 提示音命名、描述生成、隐藏的内部声音方案、allowlisted provider profile、按能力路由的
-> BYOK 凭据管理、3 候选试听与现有 `AudioImport` / manifest bind 闭环。首批 Provider 目标为
-> ElevenLabs、MiniMax 和 Qwen TTS；不支持任意自定义 endpoint、model 或 voice。
+> BYOK 凭据管理、route-owned 候选集合与现有 `AudioImport` / manifest bind 闭环。当前已暴露 Provider
+> 为 ElevenLabs、MiniMax 和 Qwen TTS；新增的固定 `senseaudio-cn` 候选同时实现 TTS 与 native-batch
+> SFX，但在资源 origin 和真实验收门禁完成前不进入默认 allowlist。不支持任意自定义 endpoint、model、
+> voice、region 或资源服务器。
 >
 > 文件名沿用 `TTS` 以保持计划路径稳定；产品能力不再限定为文字转语音，也包括动物叫声、
 > 简短音效和混合声音。
@@ -17,20 +19,22 @@
 > 九个设置目的页、统一窗口、路由与视觉迁移的总规格见
 > `plan/PLAN-SETTINGS-EXPERIENCE.md`；本文件只拥有 AI 提示音子域合同。
 >
-> 当前实现已完成四个 allowlisted profile、provider-neutral registry/request compiler、hardened
+> 当前基线已完成四个 allowlisted profile、provider-neutral registry/request compiler、hardened
 > transports、逐 profile credential policy、ElevenLabs/MiniMax/Qwen adapters 与统一设置投影的
 > deterministic fixture 验证。自动测试只使用假 key/fixture；未输入真实 key、未发真实供应商或
 > 付费请求，也未据此宣称音质、费用或正式发布验收。
 >
-> 兼容性说明：`docs/adr/0006-use-elevenlabs-byok-with-fixed-modality-routing.md` 与 TTS-MP-1 至
-> TTS-MP-5 的 Swift/fixture 合同已经按 allowlisted 多 Provider 目标落地；真实 Provider、原生 UI、
-> 双架构、签名、公证与发布仍保持独立的 `NOT VERIFIED` 证据层。
+> 兼容性说明：`docs/adr/0011-use-route-owned-candidate-sets-for-senseaudio.md` 只取代 ADR 0006 的全局
+> styled / 三候选全有或全无假设；固定 profile、route-derived capability、Keychain-only 与无 fallback
+> 边界继续成立。SenseAudio deterministic fixture 或本地构建不能替代真实 Provider、资源 origin、
+> 原生 UI、双架构、签名、公证与发布的独立 `NOT VERIFIED` 证据层。
 
 ## 0. 目标与完成定义
 
 用户先为一个现有 `Event` 选择一个已注册的 Provider profile，并描述想听到的声音。Claudio 在后台把
-描述规范化为内部声音方案，使用该 Provider 的用户自有 API Key 请求对应能力路线，返回 3 个不超过
-3 秒的临时候选。候选完整展示后，
+描述规范化为内部声音方案，使用该 Provider 的用户自有 API Key 请求对应能力路线，返回不超过
+3 秒、逐项验证的临时候选。通常展示完整的 3 个候选；只有路线政策明确允许时，才可展示 1–2 个
+有效候选并标记 partial。候选集合可展示后，
 系统根据描述提供名称建议；用户试听、确认或修改名称并显式采用一个候选，最终音频才以该名称
 保存到「我的提示音」，再绑定到该事件。
 
@@ -40,35 +44,38 @@
 - 用户可以显式选择已支持的 Provider；每个 Provider/profile 独立显示凭据状态，不把一个 Provider 的
   key 当作另一个 Provider 的 key；
 - 描述阶段不要求命名；候选阶段显示系统建议名称，并允许用户在采用前直接修改；
-- 可见主流程只有“描述 → 3 个候选”，不再强制展示独立的“声音方案”重表单；
+- 可见主流程只有“描述 → 候选”，不再强制展示独立的“声音方案”重表单；完整集合显示 3 个候选，
+  允许 partial 的路线同时明确显示实际数量；
 - 描述可覆盖语音、动物叫声、简短音效或混合声音，`spokenContent` 可以为空；
 - 语音或混合声音必须由用户在描述中明确给出台词，例如 `清晰地说“任务完成”`；本地解释器不得
   猜测、补写或调用隐藏 LLM 生成要说的文字；
 - Provider 不支持当前声音类型时，在本地能力检查阶段阻止请求并保留描述，不把 TTS 模型冒充成纯音效模型；
-- 三个候选是同一待保存提示音的临时变体，不要求逐一命名；
+- 候选是同一待保存提示音的临时结果，不要求逐一命名；styled 身份只用于确实发送了风格控制的路线，
+  numbered 身份只显示“候选 1/2/3”；
 - 候选阶段可只修改最终名称，不重新请求模型；修改声音描述才需要重新生成；
 - 用户显式采用的候选继续经过现有 `AudioImport`、内容嗅探、大小/时长检查和 manifest bind；
-- 任一失败都保留旧声音，不产生假刷新或部分发布。
+- 任一采用失败都保留旧声音，不产生假刷新或 manifest 部分发布；生成阶段的 partial 只表示已完整
+  验证的临时候选数量，不能放宽采用事务。
 
 ### 0.1 已拍板决议
 
 | 议题 | 决议 |
 |---|---|
 | 产品形态 | 单事件 AI 提示音；支持语音、动物叫声、音效和混合声音 |
-| 可见流程 | 描述 → 3 个候选 + 命名 → 显式采用 |
+| 可见流程 | 描述 → 候选 + 命名 → 显式采用；完整集合为 3 个，只有 route policy 允许时显示 1–2 个 partial |
 | 声音方案 | 保留为内部必要模块；默认完全隐藏，不作为强制独立步骤 |
 | 提示音名称 | 不进入生成表单或 provider request；候选阶段建议、确认或修改，采用时保存 |
 | 首发调用路线 | **仅 BYOK**；用户输入自己的 API Key，本机直连 provider |
 | Hosted 路线 | v1 不做账号、额度、支付、Hosted API 或自动 fallback |
-| provider 范围 | 首批 allowlisted profile 包含 ElevenLabs、MiniMax、Qwen TTS；按 provider 能力支持声音类型，不允许自定义 base URL / model / voice |
+| provider 范围 | 默认 allowlist 仍包含 ElevenLabs、MiniMax、Qwen；`senseaudio-cn` 只有 TTS、SFX、真实资源 origin 和人工验收全部完成后才整体加入，不发布 TTS-only；不允许自定义 base URL / model / voice / region / 资源服务器 |
 | provider 选择 | 用户显式选择 Provider/profile；切换会使未采用候选失效，不自动 fallback 或跨供应商重试 |
 | model / voice | 每个 profile 使用应用内固定且可审计的 model/voice；UI 不接受任意 model ID、voice ID |
 | region | 需要区域的 Provider 使用显式 allowlisted region profile；不自动跨区，不把不同区域 key 混用 |
 | 凭据保存 | macOS Keychain only；按 registry-owned credential slot 隔离；配置文件、日志、回执和 manifest 均不保存 key |
-| 凭据状态 | “已保存”只表示 Keychain 可读，不等价于在线验证成功；ElevenLabs/MiniMax 使用只读 probe，Qwen 延迟到用户显式生成时验证 |
+| 凭据状态 | “已保存”只表示 Keychain 可读，不等价于在线验证成功；ElevenLabs/MiniMax/SenseAudio 使用只读 probe，Qwen 延迟到用户显式生成时验证 |
 | 旧 Keychain 兼容 | `elevenlabs-global` 继续映射现有 account `elevenlabs`；不复制、不改名、不双写、不删除旧 item |
-| 候选约束 | 每次恰好 3 个，每个不超过 3 秒、5 MB；不自动播放 |
-| 网络重试 | 三个子请求顺序执行；网络、5xx 和未知计费结果不重试；明确 429 至多重试一次 |
+| 候选约束 | route policy 唯一决定 styled/numbered、请求数和最少可接受数；complete 恰好 3 个，partial 只能是 1–2 个；每项不超过 3 秒、5 MB且不自动播放 |
+| 网络重试 | 既有逐候选 Provider 保留明确 429 至多一次的兼容行为；SenseAudio TTS/SFX POST 零自动 retry；SFX asset GET 仅对限定瞬态失败最多重试一次 |
 | 时间预算 | 单次 generation 从点击开始最多 60 秒；每个子请求和 429 retry 都必须消耗同一剩余预算 |
 | 采用边界 | 明确 `surface + event + packID`；独立用户包内完整 `AudioImport` + manifest bind 成功后才替换旧绑定 |
 
@@ -77,14 +84,16 @@
 首批目标不是让用户输入任意 API 地址，而是由应用维护一个可审计的 Provider/profile allowlist。
 `providerID`、区域、endpoint、model、voice、认证方式、响应解码方式和可用声音类型均属于应用内
 profile。用户只选择 profile 并输入对应的 key；实现前必须重新核对官方文档和当前 API 响应，不能把
-下面的计划快照当成永久 API 保证。以下资料按 2026-08-26 初查：
+下面的计划快照当成永久 API 保证。既有 profile 资料按 2026-08-26 初查，SenseAudio 合同按
+2026-09-11 官方文档核对：
 
 | Provider/profile | 凭据策略与固定请求路线 | 固定 model / voice / 输出处理 | 初始能力 | 状态 |
 |---|---|---|---|---|
 | `elevenlabs-global` | `readOnlyProbe`：`GET https://api.elevenlabs.io/v1/models`；`xi-api-key`；speech/mixed：`POST /v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb`；animal/soundEffect：`POST /v1/sound-generation`；credential slot 固定为旧 account `elevenlabs` | speech/mixed：`eleven_v3` + voice `JBFqnCBsd6RMkjVDRZzb`；animal/soundEffect：`eleven_text_to_sound_v2`；直接 MP3 | `speech`、`mixed`、`animal`、`soundEffect`；`zh` / `zh-Hans` / `en` | 已有基线 adapter；迁入 registry 时保持 route、voice 和旧 key 回归兼容 |
-| `minimax-global` | `readOnlyProbe`：`POST https://api.minimax.io/v1/get_voice`，body 固定为 `{"voice_type":"all"}`；生成使用 Bearer + `POST https://api.minimax.io/v1/t2a_v2` | `speech-2.8-hd` + voice `Chinese (Mandarin)_Reliable_Executive`；`output_format: hex`；32 kHz / 128 kbps / mono MP3；响应 `data.audio` 解 hex | 首批只开放 `speech` 和 `zh` / `zh-Hans`；sound tags / voice effects 不等价于纯音效生成 | 计划新增 unary adapter |
-| `qwen-singapore` | `deferredUntilExplicitGeneration`；Bearer + `POST https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`；credential slot `qwen-singapore`；`X-DashScope-SSE: enable` | `qwen3-tts-instruct-flash` + voice `Cherry`；SSE Base64 PCM，24 kHz / 16-bit / mono / little-endian，封装 WAV | 首批只开放 `speech`；locale 仅映射 `zh* → Chinese`、`en* → English` | 计划新增 SSE adapter；保存 key 时不发可计费请求 |
-| `qwen-beijing` | `deferredUntilExplicitGeneration`；Bearer + `POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`；credential slot `qwen-beijing`；独立 region key | 与 Singapore 相同的 model、voice、SSE 和 PCM 合同 | 与 `qwen-singapore` 相同，必须单独做地区 smoke | 计划新增独立 profile；不得隐式自动切换 |
+| `minimax-global` | `readOnlyProbe`：`POST https://api.minimax.io/v1/get_voice`，body 固定为 `{"voice_type":"all"}`；生成使用 Bearer + `POST https://api.minimax.io/v1/t2a_v2` | `speech-2.8-hd` + voice `Chinese (Mandarin)_Reliable_Executive`；`output_format: hex`；32 kHz / 128 kbps / mono MP3；响应 `data.audio` 解 hex | 首批只开放 `speech` 和 `zh` / `zh-Hans`；sound tags / voice effects 不等价于纯音效生成 | unary adapter 已实现；MiniMax 候选改为真实 numbered 语义 |
+| `qwen-singapore` | `deferredUntilExplicitGeneration`；Bearer + `POST https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`；credential slot `qwen-singapore`；`X-DashScope-SSE: enable` | `qwen3-tts-instruct-flash` + voice `Cherry`；SSE Base64 PCM，24 kHz / 16-bit / mono / little-endian，封装 WAV | 首批只开放 `speech`；locale 仅映射 `zh* → Chinese`、`en* → English` | SSE adapter 已实现；保存 key 时不发可计费请求 |
+| `qwen-beijing` | `deferredUntilExplicitGeneration`；Bearer + `POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`；credential slot `qwen-beijing`；独立 region key | 与 Singapore 相同的 model、voice、SSE 和 PCM 合同 | 与 `qwen-singapore` 相同，必须单独做地区 smoke | 独立 profile 已实现；不得隐式自动切换 |
+| `senseaudio-cn` | `readOnlyProbe`：Bearer + `POST https://api.senseaudio.cn/v1/get_voice`，body 固定为 `{"voice_type":"all"}`；TTS `POST /v1/t2a_v2`；SFX `POST /v1/sound-effects/generations`；credential slot `senseaudio-cn` | speech：`sensenova-tts-2.0` + `female_0033_b`，32 kHz / 128 kbps / mono hex MP3；animal/soundEffect：`senseaudio-sfx-1.0-260626`、一次 native batch 返回资源 URL | `speech` 仅 `zh*`；`animal` / `soundEffect`；`.mixed` 明确不支持 | **预生产候选**；在官方稳定资源 origin/MIME、真实 TTS+SFX smoke 与人工验收全部完成前不进入默认 allowlist |
 
 能力规则：
 
@@ -102,8 +111,15 @@ profile。用户只选择 profile 并输入对应的 key；实现前必须重新
   bytes 与 duration probe；缺少、冲突或漂移的格式参数使 profile fail closed。
 - `routes` 是 modality 的唯一真相：`supportedModalities` 必须从 `Set(routes.keys)` 计算，不能在 profile
   中维护第二份可漂移的 capability set。
-- 每个 generation 仍顺序发出 A/B/C 三个独立子请求；provider 的同步、SSE 或编码差异不能改变统一
-  的候选、60 秒 generation deadline、3 秒、5 MB 和全有或全无发布合同。
+- `candidateSetPolicy` 是候选集合语义的唯一真相：ElevenLabs/Qwen 为 styled、请求 3、最少 3；
+  MiniMax speech 为 numbered、请求 3、最少 3；SenseAudio speech 为 numbered、请求 3、最少 3；
+  SenseAudio animal/SFX 为 numbered、native batch 请求 3、最少 1。不得由 UI 或 engine 维护另一份
+  styled/numbered 或 partial 规则。
+- 既有 Provider 继续通过顺序 compatibility adapter 发出三个子请求；SenseAudio speech 顺序发三次，
+  SenseAudio SFX 只发一次 `variants_count=3` 的 native batch。所有请求与后续资源 GET 共用 60 秒
+  generation deadline，每个有效音频仍受 3 秒和 5 MiB 上限约束。
+- SenseAudio `regionID = "china"` 只标识固定 `.cn` API 路由，不构成数据驻留承诺。`.mixed` 在读取
+  Keychain 前失败；`animal` 与 `soundEffect` 不得自动降级为 speech。
 
 官方契约证据：
 
@@ -120,13 +136,17 @@ profile。用户只选择 profile 并输入对应的 key；实现前必须重新
 - [Qwen-TTS voice list](https://www.alibabacloud.com/help/en/model-studio/qwen-tts-voice-list)
 - [Model Studio regions and access domains](https://www.alibabacloud.com/help/en/model-studio/regions/)
 - [Model Studio API key](https://www.alibabacloud.com/help/en/model-studio/get-api-key)
+- [SenseAudio API 概览](https://docs.senseaudio.cn/api-reference/introduction)
+- [SenseAudio TTS 接口](https://docs.senseaudio.cn/api-reference/endpoint/tts/synthesize)
+- [SenseAudio SFX OpenAPI](https://docs.senseaudio.cn/api-reference/endpoint/sfx/sfx.openapi.json)
 
 每个 Provider 的数据留存、模型改进、计费和地区规则分别披露；Claudio 不把 ElevenLabs 的条款
-推广到 MiniMax/Qwen，也不对任何 Provider 统一承诺 zero retention。真实付费 smoke 仍需要单独授权。
+推广到 MiniMax/Qwen/SenseAudio，也不对任何 Provider 统一承诺 zero retention。披露 key 由 profile
+提供，UI 不按 profile ID 写 switch。真实付费 smoke 仍需要单独授权。
 
 ### 0.2.1 新 Provider 的准入清单
 
-以后增加 OpenAI、Google、Azure、CosyVoice 或其他 TTS API 时，不能只新增一个枚举值。每个 Provider
+以后增加 OpenAI、Google、Azure、CosyVoice、SenseAudio 或其他生成 API 时，不能只新增一个枚举值。每个 Provider
 必须单独提交以下材料并通过同一门禁：
 
 1. 官方认证、endpoint、region、model、voice、输出格式、限额、计费和数据处理链接；
@@ -134,10 +154,12 @@ profile。用户只选择 profile 并输入对应的 key；实现前必须重新
    `supportedModalities`；
 3. provider-neutral request 到实际 API body/header 的编译器，不把 provider 字段泄漏进领域模型；
 4. 成功、空响应、畸形响应、认证/额度/限流/5xx、取消和输出过大 fixture；
-5. 真实 provider smoke 的单独授权、可撤销限额 key、3 候选回执和未完成项记录。
+5. 真实 provider smoke 的单独授权、可撤销限额 key、候选集合回执和未完成项记录；返回资源 URL 的
+   路线还必须有官方确认的精确下载 origin/MIME、无凭据下载合同和 redirect 行为。
 
-Provider 只有在 `speech` 路线通过后才能显示为可用；纯音效、动物叫声、混合声音和声音克隆都是
-独立 capability，不能从“有 TTS API”推导出来。
+Provider 只有其计划暴露的全部路线通过后才能显示为可用；纯音效、动物叫声、混合声音和声音克隆都是
+独立 capability，不能从“有 TTS API”推导出来。尤其 `senseaudio-cn` 是一个不可拆分的固定 profile：
+TTS 通过而 SFX 资源 origin 未确认时，整个 profile 仍不可用，不能发布 TTS-only 半成品。
 
 ### 0.2.2 跨文档 SoT 对齐门禁
 
@@ -155,6 +177,11 @@ Provider 只有在 `speech` 路线通过后才能显示为可用；纯音效、�
 一致；GitHub #92 及 TTS-MP-1...TTS-MP-5 tickets 的 ownership、验收和原生依赖也已在 issue tracker
 中对齐。该结果只解除文档与设计门禁，不代表任一多 Provider adapter、credential policy 或
 production UI 已实现，也不把 issue label、静态原型或本地文档升格为真实 Provider 证据。
+
+2026-09-11 的 SenseAudio 扩展由 ADR 0011 取代 ADR 0006 的全局候选集合假设，并要求本计划、
+`CONTEXT.md` 和 `TODOS.md` 同步记录 candidate-set 术语、生产暴露门禁与 `senseaudio-a1` mixed P3。
+这次文档对齐不等于 `senseaudio-cn` 已进入默认 allowlist；该状态只能由 production registry 与第 11 节
+的外部证据共同证明。
 
 ### 0.3 共享事件边界
 
@@ -194,21 +221,23 @@ AICueGenerationEngine
           │ local interpret + normalize with versioned hidden rules
           ▼
 internal AICueSoundPlan
-          │ capability check + provider-neutral A/B/C request compilation
+          │ capability check + route-owned candidate-set policy
           ▼
 allowlisted AICueProviderRegistry
           ├── ElevenLabs adapter ──► fixed HTTPS endpoints
           ├── MiniMax adapter ─────► fixed HTTPS endpoint
-          └── Qwen adapter/profile ─► fixed region HTTPS/SSE endpoint
+          ├── Qwen adapter/profile ─► fixed region HTTPS/SSE endpoint
+          └── SenseAudio adapter ───► fixed TTS / native-batch SFX endpoint
+                                      └── credential-free exact-origin asset GET
           │
           ▼
-3 private temporary candidates
+1...3 policy-valid private temporary candidates
           │ explicit Use + final display name + captured adoption target
           ▼
 existing AudioImport + manifest bind
 ~~~
 
-架构分为五个独立接缝：
+架构分为六个独立接缝：
 
 1. `CredentialManager` 只管理 provider/profile 凭据状态、验证、替换和删除；UI 只看到状态。
 2. `AICueGenerationEngine` 接收描述，通过确定性的 `AICueSoundPlanner` 在本地生成并保留内部
@@ -216,9 +245,12 @@ existing AudioImport + manifest bind
    “解释请求”，也不把方案投影成强制 UI。
 3. `AICueProviderRegistry` 只返回应用内注册的 profile 和 adapter；它负责 provider/profile、区域、
    capability 与 adapter 的对应关系，不接受用户输入的 URL、model 或 voice。
-4. `ProviderAdapter` 把 provider-neutral request 编译成自己的 HTTP、SSE 或编码格式；播放器和
+4. `CandidateSetProvider` 拥有一次生成的候选集合；旧逐候选 Provider 由顺序 adapter 兼容，native
+   batch Provider 不需要伪装成三次独立调用。
+5. `ProviderAdapter` 把 provider-neutral request 编译成自己的 HTTP、SSE 或编码格式；无凭据 asset
+   fetcher 只按 registry 固定 policy 下载返回资源；播放器和
    `AudioImport` 永远只接触已落入应用私有临时目录且经过初步校验的本地音频资产。
-5. `AICueAdoptionTarget` 把 `surface + event + packID` 从可变 UI 选择中冻结出来；采用前重新验证目标
+6. `AICueAdoptionTarget` 把 `surface + event + packID` 从可变 UI 选择中冻结出来；采用前重新验证目标
    仍隔离、可编辑且有效，再进入既有发布链。
 
 隐藏生成指令是质量机制，不是安全边界。provider 的 models JSON、状态码、MIME 和音频响应体
@@ -235,6 +267,7 @@ struct AICueProviderID: RawRepresentable, Hashable, Codable, Sendable {
     static let elevenLabs = AICueProviderID(rawValue: "elevenlabs")
     static let miniMax = AICueProviderID(rawValue: "minimax")
     static let qwen = AICueProviderID(rawValue: "qwen")
+    static let senseAudio = AICueProviderID(rawValue: "senseaudio")
 }
 
 struct AICueProviderProfileID: RawRepresentable, Hashable, Codable, Sendable {
@@ -245,6 +278,7 @@ struct AICueProviderProfileID: RawRepresentable, Hashable, Codable, Sendable {
     static let miniMaxGlobal = AICueProviderProfileID(rawValue: "minimax-global")
     static let qwenSingapore = AICueProviderProfileID(rawValue: "qwen-singapore")
     static let qwenBeijing = AICueProviderProfileID(rawValue: "qwen-beijing")
+    static let senseAudioChina = AICueProviderProfileID(rawValue: "senseaudio-cn")
 }
 
 struct AICueCredentialSlotID: RawRepresentable, Hashable, Sendable {
@@ -255,6 +289,7 @@ struct AICueCredentialSlotID: RawRepresentable, Hashable, Sendable {
     static let miniMaxGlobal = AICueCredentialSlotID(rawValue: "minimax-global")
     static let qwenSingapore = AICueCredentialSlotID(rawValue: "qwen-singapore")
     static let qwenBeijing = AICueCredentialSlotID(rawValue: "qwen-beijing")
+    static let senseAudioChina = AICueCredentialSlotID(rawValue: "senseaudio-cn")
 }
 
 enum AICueCredentialValidationPolicy: Sendable, Equatable {
@@ -269,8 +304,27 @@ struct AICuePCMFormat: Sendable, Equatable {
     let isLittleEndian: Bool
 }
 
+struct AICueCandidateOrdinal: RawRepresentable, Hashable, Sendable {
+    let rawValue: Int // initializer 只接受 1...3
+}
+
+enum AICueCandidateIdentity: Hashable, Sendable {
+    case styled(AICueVariant)
+    case numbered(AICueCandidateOrdinal)
+}
+
+enum AICueCandidateSetSemantics: Sendable, Equatable {
+    case styled
+    case numbered
+}
+
+struct AICueCandidateSetPolicy: Sendable, Equatable {
+    let semantics: AICueCandidateSetSemantics
+    let requestedCount: Int
+    let minimumAcceptedCount: Int
+}
+
 struct AICueProviderConstraints: Sendable, Equatable {
-    let supportsInstructionControl: Bool
     let maximumDurationMilliseconds: Int
 }
 
@@ -293,6 +347,7 @@ struct AICueProviderRoute: Sendable, Equatable {
     let supportedLanguageTags: Set<String>
     let authentication: AICueProviderAuthentication
     let transport: AICueProviderAudioTransport
+    let candidateSetPolicy: AICueCandidateSetPolicy
 }
 
 struct AICueProviderProfile: Sendable, Equatable {
@@ -302,6 +357,7 @@ struct AICueProviderProfile: Sendable, Equatable {
     let credentialValidationPolicy: AICueCredentialValidationPolicy
     let regionID: String?
     let displayName: String
+    let privacyDisclosureKey: ClaudioL10nKey
     let routes: [AICueModality: AICueProviderRoute]
     let constraints: AICueProviderConstraints
 
@@ -377,11 +433,28 @@ enum AICueVariant: String, CaseIterable, Sendable, Equatable {
 
 struct AICueCandidate: Identifiable, Sendable, Equatable {
     let id: UUID
-    let variant: AICueVariant // A / B / C 的试听身份，不是最终保存名称
+    let identity: AICueCandidateIdentity
     let asset: AICueTemporaryAudioAsset
     let durationMilliseconds: Int
     let mediaType: String
     let provenance: AICueCandidateProvenance
+
+    // 兼容旧调用方；只为真实 styled 候选返回非 nil。
+    var styledVariant: AICueVariant?
+}
+
+enum AICueGenerationCompletion: Sendable, Equatable {
+    case complete
+    case partial
+}
+
+struct AICueGeneration: Identifiable, Sendable, Equatable {
+    let id: UUID
+    let profileID: AICueProviderProfileID
+    let plan: AICueSoundPlan
+    let candidates: [AICueCandidate]
+    let completion: AICueGenerationCompletion
+    let generatedAt: Date
 }
 
 struct AICueAdoptionTarget: Sendable, Equatable {
@@ -424,6 +497,12 @@ profile 并使用对应的 key。`routes` 的 key 集合是生成前的唯一能
 初始化必须验证 route key 与 `route.modality` 相同、每个 modality 恰好一条 route、endpoint origin
 与 authentication policy 匹配，否则整个 profile 不注册。
 
+`AICueCandidateIdentity` 分离创作语义与展示顺序：styled 候选继续携带 `AICueVariant`，numbered 候选
+只携带 1...3 的 ordinal。MiniMax 当前没有把 `request.prompt` 发送给服务，因此改为编号显示而不再
+暗示“清晰/轻快/克制”真的参与了生成。`AICueCandidateSetPolicy` 只存在于 route；engine 依据它验证
+身份种类、唯一 ordinal、请求数和最少发布数。`.complete` 只能表示三个有效候选，`.partial` 只能
+表示一个或两个有效候选，且不能出现在最少发布数为 3 的路线。
+
 ### 2.2 深接口
 
 ~~~swift
@@ -436,8 +515,24 @@ protocol AICueProvider: Sendable {
 
     func generateCandidate(
         request: AICueProviderRequest,
-        credential: SensitiveCredentialInput
+        credential: SensitiveCredentialInput,
+        deadline: AICueGenerationDeadline
     ) async throws -> AICueProviderAudioResponse
+}
+
+struct AICueProviderCandidateResponse: Sendable, Equatable {
+    let identity: AICueCandidateIdentity
+    let audio: AICueProviderAudioResponse
+}
+
+protocol AICueCandidateSetProvider: AICueCredentialValidating {
+    var profile: AICueProviderProfile { get }
+
+    func generateCandidateSet(
+        plan: AICueSoundPlan,
+        credential: SensitiveCredentialInput,
+        deadline: AICueGenerationDeadline
+    ) async throws -> [AICueProviderCandidateResponse]
 }
 
 protocol AICueProviderRegistry: Sendable {
@@ -483,8 +578,11 @@ profile 编译为 provider-neutral 的 A/B/C 请求，adapter 再将其映射到
 `AICueCredentialManager` 必须按 profile 从 registry 解析验证策略和可选 probe，不能继续注入一个
 只会验证 ElevenLabs 的全局 validator：
 
-- ElevenLabs 用 `GET /v1/models`，MiniMax 用 `POST /v1/get_voice` 做不生成音频的
+- ElevenLabs 用 `GET /v1/models`，MiniMax 与 SenseAudio 分别用各自固定 origin 的
+  `POST /v1/get_voice` 做不生成音频的
   `readOnlyProbe`；probe 成功后才把新值原子替换为 active credential。
+- SenseAudio probe 还必须确认 `female_0033_b` 对当前账户可见；voice 缺失是
+  `.requiredModelsUnavailable`，不是 `.invalidCredential`，旧 active key 保持有效。
 - Qwen 没有由 Model Studio API Key 自身完成的安全只读验证合同；保存时只做本地输入检查和 Keychain
   写入，返回 `.deferredUntilExplicitGeneration`，绝不为“验证”偷偷触发可计费生成。
 - “已保存”只证明对应 Keychain slot 可读；UI 不得把 deferred 状态写成“连接已验证”。
@@ -492,7 +590,8 @@ profile 编译为 provider-neutral 的 A/B/C 请求，adapter 再将其映射到
 Keychain service 继续固定为 `com.claudio.ai-cue.byok`；slot 由 registry 明确映射，不能简单由
 profile ID 拼接。`elevenlabs-global` 继续读写现有 account `elevenlabs`，因此不做
 rename/copy/delete/dual-write migration；MiniMax、Qwen Singapore、
-Qwen Beijing 的 active account 分别固定为 `minimax-global`、`qwen-singapore`、`qwen-beijing`。
+Qwen Beijing 与 SenseAudio 的 active account 分别固定为 `minimax-global`、`qwen-singapore`、
+`qwen-beijing`、`senseaudio-cn`。
 Qwen pending replacement 使用 registry 固定的 `<active>.pending` account，后缀不能来自用户输入。
 删除某个 profile 只删除该 profile 的 active/pending item，随后生成进入
 `.credentialRequired`，但已经导入的提示音不受影响。
@@ -507,6 +606,12 @@ pending 与旧 active，允许用户重试或取消替换。没有旧 active 时
 `AICueProvider` 是真实外部接缝；网络、Keychain、时间和 duration probe 只能通过 adapter 注入测试。
 解释器、A/B/C prompt compiler、候选集合与采用目标验证保持 Foundation-only，测试不穿透私有
 HTTP 或 Keychain 实现。
+
+`AICueGenerationEngine` 只依赖 `AICueCandidateSetProvider`。保留 `AICueProvider` 和原有 provider
+initializer 作为兼容入口，由 `SequentialAICueCandidateSetAdapter` 把每个旧 Provider 的三个顺序请求
+包装成 route-owned 集合，并保留既有“整次 generation 最多一次、仅带 1...5 秒 `Retry-After` 的 429”
+重试合同。SenseAudio 直接实现 candidate-set 接缝：TTS 三次 POST 和 SFX native batch POST 均不自动
+重试，避免未知计费结果下重复生成。
 
 ### 2.3 Unary 与 SSE transport seam
 
@@ -561,6 +666,24 @@ Qwen SSE parser 是独立 Foundation-only 值/actor seam。它必须处理任意
 EOF-before-terminal；末包远端 URL 只解析后丢弃。不得把 ElevenLabs/MiniMax/Qwen adapter、registry、
 SSE parser 和 transport 继续堆进同一个 `AICueProvider.swift`。
 
+#### 2.3.1 无凭据 asset fetcher
+
+SenseAudio SFX 返回资源 URL，不能复用强制接收 credential 的 `AICueUnaryTransport.send`。新增
+package-only `AICueAssetFetching`，其任何方法都不接受 `SensitiveCredentialInput`，并遵守以下合同：
+
+- `allowedOrigins` 与可接受 MIME 只来自 registry-owned 固定字面量；只允许 HTTPS、有效端口 443、
+  精确 hostname，拒绝通配域、IP literal、userinfo、fragment 和异常空 path；
+- 允许签名 query，但完整 URL/query 不得进入 `CustomReflectable`、错误、日志、fixture 或 UI；
+- 请求不设置 `Authorization`、Cookie、Referer，使用无 cookie/cache/credential storage 的 ephemeral
+  `URLSession`，拒绝所有 redirect，并要求 final URL 与请求 URL 完全相同；
+- 每项 wire 上限 5 MiB，最多三项顺序下载，共享 generation 的 60 秒 absolute deadline；
+- 普通单项下载失败后继续下一项；cancel、deadline 或本地存储错误立即终止整批；
+- 同一 GET 最多重试一次，且只限明确瞬态网络错误、HTTP 408/5xx，或带 1...5 秒 `Retry-After` 的
+  HTTP 429。SenseAudio TTS/SFX 生成 POST 始终零自动 retry。
+
+SFX adapter 必须在首次 GET 前验证响应中**全部实际出现**的 URL。任一 URL 越过信任边界时整批失败且
+零下载，不能把“这一项稍后丢弃”当作向未知 origin 外发请求的理由。
+
 ### 2.4 确定性语音文本语法
 
 本地 planner 只接受用户明确写出的台词，不使用隐藏 LLM：
@@ -576,6 +699,67 @@ SSE parser 和 transport 继续堆进同一个 `AICueProvider.swift`。
 描述输入旁显示简短帮助：“需要人声时，请用引号写出台词，例如：清晰地说‘任务完成’”。该语法既
 避免模型猜台词，也保留动物叫声和无文字音效的自由描述。
 
+### 2.5 SenseAudio 固定合同
+
+`senseaudio-cn` 只接受以下固定参数，不提供 endpoint、model、voice、region、采样率、streaming 或
+下载域名配置。credential probe 为 Bearer `POST https://api.senseaudio.cn/v1/get_voice`，body 固定为
+`{"voice_type":"all"}`；响应必须是 2xx JSON、`base_resp.status_code == 0`，且 `system_voice`
+包含 `female_0033_b`。只有该 API origin 的 HTTP 401 映射为 `.invalidCredential`；业务错误、voice
+缺失或资源 GET 401 使用各自的脱敏错误，不能废弃旧 active key。
+
+speech 只支持 `zh*`，并在同一 deadline 内顺序调用三次
+`POST https://api.senseaudio.cn/v1/t2a_v2`：
+
+~~~json
+{
+  "model": "sensenova-tts-2.0",
+  "text": "<spokenContent>",
+  "stream": false,
+  "voice_setting": {
+    "voice_id": "female_0033_b",
+    "speed": 1,
+    "vol": 1,
+    "pitch": 0
+  },
+  "audio_setting": {
+    "format": "mp3",
+    "sample_rate": 32000,
+    "bitrate": 128000,
+    "channel": 1
+  }
+}
+~~~
+
+每个响应都要求 `data.status == 2`、`base_resp.status_code == 0`、非空偶数长度 hex，以及彼此一致的
+可选 format/sample-rate/bitrate/channel metadata。bounded hex 解码后仍执行 MP3 magic、5 MiB 和
+3 秒本地验证；任一项失败就清理全部，TTS 不展示 partial。
+
+`.animal` 与 `.soundEffect` 共用一次
+`POST https://api.senseaudio.cn/v1/sound-effects/generations`：
+
+~~~json
+{
+  "text": "<规范化音效 prompt>",
+  "model": "senseaudio-sfx-1.0-260626",
+  "variants_count": 3,
+  "duration_seconds": 3,
+  "smart_duration": false,
+  "output_format": "mp3"
+}
+~~~
+
+`duration_seconds` 是 `ceil(targetDurationMilliseconds / 1000)` 后限制在 1...3 的整数。`variant_index`
+必须唯一且位于 0...2；`completed` batch 必须声明三个 completed item，`partial_success` 必须声明一至
+两个 completed item。未知 batch/item 状态、重复或越界 index、重复 URL 整批失败。completed item
+缺 URL、格式或时长声明可作为单项失败，但任何实际出现却违反 asset policy 的 URL 都在下载前使整批
+失败。完成项按 index 排序为“候选 1/2/3”；远端 `completed` 不能覆盖本地下载、magic、大小或时长
+校验，淘汰单项后可以降为本地 partial。零个有效项返回 `insufficientValidCandidates` 并清理。
+
+官方 SFX schema 只冻结 `audio_url` 字段，示例仍使用 `example.com`，没有给出生产资源 hostname、MIME、
+redirect 或有效期合同。因此实现与 fixture 可以注入非 production asset policy，但 production policy
+必须等待官方确认与真实 smoke；若只能观察到不稳定 host，不得改成任意 HTTPS，整个 `senseaudio-cn`
+继续不进入默认 allowlist。
+
 ## 3. 用户流程与状态
 
 ### 3.1 页面级凭据流程
@@ -586,7 +770,8 @@ SSE parser 和 transport 继续堆进同一个 `AICueProvider.swift`。
 3. 默认选择 `elevenlabs-global` 以保持现有行为；用户可以显式切换到已注册的 MiniMax 或 Qwen
    profile。选择结果是非敏感偏好，不能包含 key、Authorization 或原始请求内容。
 4. 未配置当前 profile 时显示该 Provider 的 key 表单；Qwen profile 还显示明确的 region 说明，
-   但不接受自由 endpoint。ElevenLabs/MiniMax 的主按钮为“验证并保存”，只调用各自 read-only probe；
+   但不接受自由 endpoint。ElevenLabs/MiniMax/SenseAudio 的主按钮为“验证并保存”，只调用各自
+   read-only probe；
    Qwen 的主按钮为“保存 API Key”，辅助文案明确“将在你下一次点击生成时验证，保存不会产生模型
    调用或费用”。
 5. 删除前二次确认，并明确“不能继续使用该 profile 生成，但已采用提示音不受影响”。删除一个
@@ -612,9 +797,10 @@ SSE parser 和 transport 继续堆进同一个 `AICueProvider.swift`。
    的 route、语言和 spoken-content invariant，再读取对应 credential；不显示独立确认表单。
 5. 如果 modality 不在 `routes.keys`、locale 不在 route allowlist，或 speech/mixed 缺少明确引号台词，
    直接显示可修正的本地错误，不读 key、不发网络；保留描述并允许修改或切换 profile。
-6. 以点击时冻结的 `generationID + profileID + 60 秒 absolute deadline` 请求选定 provider，完整取得并
-   校验 3 个候选后一次性展示；不自动播放，同一时刻最多播放一个。Qwen deferred key 只在这一步
-   被真实验证，且绝不自动 fallback 到旧 key、其他 region 或其他 Provider。
+6. 以点击时冻结的 `generationID + profileID + 60 秒 absolute deadline` 请求选定 provider，并按 route
+   policy 一次性发布候选集合；`.complete` 必须恰好 3 个，`.partial` 只能有 1–2 个并显示“仅生成
+   N/3 个可用候选”。不自动播放，同一时刻最多播放一个。Qwen deferred key 只在这一步被真实验证，
+   且绝不自动 fallback 到旧 key、其他 region 或其他 Provider。
 7. 候选页用 `AICueSoundPlan.suggestedDisplayName` 预填“提示音名称”；名称是必填的最终保存元数据，
    但不属于任一候选的生成参数。
 8. 用户可在试听期间直接修改名称；改名不重新生成，“修改描述”或切换 profile 才返回输入态并使旧
@@ -639,6 +825,10 @@ editing → generating → candidatesReady → adopting → applied
    └── 修改描述 / 切换 profile / 重新生成会使旧候选失效；迟到结果按 generation identity 丢弃
 ~~~
 
+`candidatesReady` 同时携带 `complete | partial`，但采用状态机不区分两者：每个可见候选都已逐项通过
+完整校验，采用仍是单候选的全事务。cancel、deadline、本地存储错误和低于 route minimum 的结果不会
+进入 `candidatesReady`。
+
 关闭窗口、修改描述或重新生成时清理未采用的临时候选；仅重命名不能清理或重新请求候选。已导入
 声音由现有包目录和 manifest 接管，不能被临时清理删除。
 
@@ -651,6 +841,8 @@ editing → generating → candidatesReady → adopting → applied
 - API endpoint 和 redirect host 必须按 profile allowlist 校验；不接受用户输入 base URL、model ID、
   voice ID 或远端下载 URL。Qwen 的计划路线使用 SSE 音频数据，避免把临时结果 URL 变成任意下载入口，
   防止 SSRF、凭据外送和任意网络访问。
+- SenseAudio SFX 是唯一允许消费远端资源 URL 的路线；URL 必须先通过 registry-owned exact-origin
+  policy，并由不接收 credential 的 asset fetcher 下载。签名 query 不得进入 UI、错误、日志或 fixture。
 - key 只存 macOS Keychain，且按 registry-owned credential slot 隔离；不得进入 `UserDefaults`、
   `config.json`、CLI 参数、环境变量、日志、analytics、receipt、crash metadata、生成请求值类型、
   音频 metadata 或 manifest。
@@ -670,14 +862,15 @@ editing → generating → candidatesReady → adopting → applied
 
 provider 输出不得绕过现有 `AudioImport`：
 
-- 网络层设置连接/请求 inactivity timeout、60 秒 generation absolute deadline、有限重试、exact-origin
-  redirect rejection 和流式大小上限；取消与 429 retry 不能重置 generation deadline；
+- 网络层设置连接/请求 inactivity timeout、60 秒 generation absolute deadline、按操作类型限制的重试、
+  exact-origin redirect rejection 和流式大小上限；取消与任何允许的 retry 不能重置 generation deadline；
 - 只接收现有 allowlist：WAV、MP3、AIFF、M4A；最大 5 MB、最大 3 秒；
 - provider 状态码、MIME、响应体和声明格式均不可信，必须检查状态码、流式字节上限、magic bytes、
   sniffed format 和 duration probe；
-- ElevenLabs adapter 继续只接收固定 endpoint 的直接音频响应；MiniMax adapter 只接受成功 JSON 中
-  的 hex 音频并在内存中解码；Qwen adapter 只接受 allowlisted SSE 事件中的 Base64 PCM，并在本地
-  生成带正确格式参数的 WAV。任何 provider 返回的 URL 默认拒绝，不得绕过下载 allowlist；
+- ElevenLabs adapter 继续只接收固定 endpoint 的直接音频响应；MiniMax 与 SenseAudio TTS adapter
+  只接受成功 JSON 中的 hex 音频并在内存中解码；Qwen adapter 只接受 allowlisted SSE 事件中的
+  Base64 PCM，并在本地生成带正确格式参数的 WAV。除 SenseAudio SFX 的 credential-free asset
+  fetcher 外，任何 provider 返回的 URL 默认拒绝；
 - 编码解码前后都执行独立上限，防止 hex/Base64 膨胀绕过限制：ElevenLabs 直接音频 wire/decoded
   均不超过 5 MiB；MiniMax JSON wire 不超过 10 MiB hex + 512 KiB envelope，decoded MP3 不超过
   5 MiB；Qwen SSE wire 不超过 256 KiB，累计 decoded PCM 不超过 144,000 bytes（24 kHz × 16-bit ×
@@ -685,7 +878,8 @@ provider 输出不得绕过现有 `AudioImport`：
 - Qwen PCM 的容器封装失败、格式冲突、Base64 非法、事件顺序异常或 EOF-before-terminal 时，整个
   候选失败；不能把原始 PCM 仅改名为 `.wav`；
 - 响应先写入应用私有临时目录，使用唯一临时文件和安全权限，不跟随 symlink；
-- 三个候选必须属于同一 generation 且完整通过校验后才进入 `candidatesReady`；不展示部分结果；
+- 候选必须属于同一 generation、身份与数量满足 route policy，且每项完整通过校验后才进入
+  `candidatesReady`；只有 minimum 为 1 的 SenseAudio SFX route 可展示部分结果；
 - 采用时继续复用 source acquisition、regular-file 检查、唯一文件名、包锁、安全 publication、
   manifest bind 和刷新语义；
 - 内置包仍只读，用户必须先复制为自有包再保存生成结果；
@@ -705,6 +899,11 @@ provider 输出不得绕过现有 `AudioImport`：
 | TTS-MP-3 | ElevenLabs adapter 接入 registry 并实现统一 response/provenance 合同 | TTS-MP-1T | 已完成（#107） | 固定 endpoint/model/voice、read-only probe、四类 route 和 3 候选回归通过；旧 account 兼容由 MP-2 覆盖 |
 | TTS-MP-4 | MiniMax `speech-2.8-hd` unary T2A adapter | TTS-MP-1T | 已完成（#108） | Bearer、`get_voice` probe、固定 voice、JSON/hex、MP3、语言门禁、错误与 3 候选 fixture 全覆盖；只开放 `speech` |
 | TTS-MP-5 | Qwen `qwen3-tts-instruct-flash` SSE adapter 与 region profiles | TTS-MP-1T | 已完成（#109） | 固定 host/path/header/model/voice、SSE/Base64 PCM、合法 WAV、取消/大小/终态校验；只开放 `speech`，地区 smoke 分开 |
+| TTS-SA-0 | ADR 0011、candidate-set policy/identity/completion 与 legacy sequential adapter | TTS-MP-1 | 本轮实现；以最终 harness 为准 | 旧 Provider 行为不变；MiniMax 显示 numbered；complete/partial 与 cleanup 合同有确定性覆盖 |
+| TTS-SA-1 | `senseaudio-cn` read-only voice probe 与三次顺序 TTS | TTS-SA-0、TTS-MP-1T | 本轮实现；真实调用 `NOT VERIFIED` | 固定 endpoint/model/voice/body；仅 zh；无 POST retry；三候选全有或全无 |
+| TTS-SA-2 | SenseAudio native-batch SFX 与 credential-free asset fetcher | TTS-SA-0、TTS-MP-1T | 本轮实现 fixture policy；production origin 阻塞 | exact batch parser、URL 全量 preflight、无 credential GET、1–3 候选与 partial |
+| TTS-SA-3 | registry/dispatcher/composition、披露、numbered/partial UI 与 deterministic suites | TTS-SA-1–TTS-SA-2 | 本轮实现；默认 allowlist 继续关闭 | 非 production policy 覆盖全部分支；默认仍 ElevenLabs；无 origin 证据时用户不可见 |
+| TTS-SA-4 | 官方资源 origin、真实 TTS/SFX、听感、键盘与 VoiceOver 验收 | TTS-SA-3、单独付费授权 | `NOT VERIFIED` / 外部门禁 | 全部通过后才将完整 `senseaudio-cn` 加入默认 allowlist；不得发布 TTS-only |
 | TTS-3 | 事件页 Provider/profile 选择、逐 profile 配置/管理 key、能力不支持提示、候选试听/采用 | TTS-MP-2–TTS-MP-5 | 多 Provider production UI 与自动 fixture 已完成；真机 AX `NOT VERIFIED` | 默认 ElevenLabs；切换不自动生成；不支持 modality 在网络前阻止；改名不重新生成；键盘/VoiceOver 可用 |
 | TTS-4 | 临时候选 acquisition、`AudioImport`、manifest bind、名称投影和清理 | TTS-1–TTS-MP-1 | 已完成 fixture 验证 | 所有 adapter 输出走同一安全导入链；坏音频 fail closed；失败保留旧绑定；仅采用一个 |
 | TTS-5 | 文档、按 Provider 的隐私/费用披露、自动/手工/真实 provider 分层验收 | TTS-MP-0–TTS-4 | 多 Provider 文档与自动交接已完成；原生/真实 Provider/发布层 `NOT VERIFIED` | 不含 key/内容；每个 profile 的能力/地区/费用证据清楚；所有对应门禁通过 |
@@ -719,12 +918,16 @@ TTS-0 → TTS-MP-0 → TTS-MP-1 ─┬─→ TTS-MP-2 ────────�
 TTS-MP-1 ──────────────────────────────────────────────────────┴─→ TTS-4 ─┤
 TTS-1 ───────────────────────────────────────────────────────────────────┘
 TTS-5 等待 TTS-MP-0...TTS-4
+
+TTS-MP-1/1T → TTS-SA-0 → TTS-SA-1 ─┐
+                         └→ TTS-SA-2 ─┴→ TTS-SA-3 → TTS-SA-4（外部门禁）
 ~~~
 
-先冻结三家 Provider 的真实请求/响应和能力边界，再抽象公共接口，避免把某一家 API 的字段泄漏进
-领域模型。Registry 稳定后，credential policy 与 unary/SSE transport 可并行；三个 adapter fixture
+既有三家 Provider 先冻结真实请求/响应和能力边界，再抽象公共接口，避免把某一家 API 的字段泄漏进
+领域模型。Registry 稳定后，credential policy 与 unary/SSE transport 可并行；既有三个 adapter fixture
 只依赖公共 contracts + transport，不依赖生产 Keychain，避免凭据工作阻塞 adapter 测试。UI 等待
-credential 与三个 adapter 全部完成；统一候选导入链保持最后的 provider-independent 汇合点。TTS 与
+credential 与 adapter 全部完成；统一候选导入链保持最后的 provider-independent 汇合点。SenseAudio
+先落 candidate-set seam，再并行 TTS 与 SFX/asset，最后统一 composition、UI 与 suite 注册。TTS 与
 非 TTS 宿主工作互不依赖；若同时触及
 GUI tests、localization 或 `SoundPacksWindowModel`，共享文件必须顺序处理。真实 key、付费请求、
 commit、push、release 或部署仍需分别授权。
@@ -735,18 +938,20 @@ commit、push、release 或部署仍需分别授权。
 |---|---|
 | `gui/Sources/ClaudioGUICore/AICueDomain.swift` | 保留声音方案、候选与采用领域类型；加入明确台词 invariant 和 generation identity，不放 provider HTTP 字段 |
 | `gui/Sources/ClaudioGUICore/AICueProviderContracts.swift`（新） | provider/profile/route、credential slot/policy、provider-neutral request/response 和 route-derived capability |
-| `gui/Sources/ClaudioGUICore/AICueProviderRegistry.swift`（新） | 冻结四个 profile，校验 route/origin/auth/language/slot invariants；不接受用户 URL/model/voice |
+| `gui/Sources/ClaudioGUICore/AICueProviderRegistry.swift`（新） | 保留四个默认 profile，并准备受证据门禁的 `senseaudio-cn`；校验 route/origin/auth/language/slot/candidate-set invariants；不接受用户 URL/model/voice/resource host |
 | `gui/Sources/ClaudioGUICore/AICueHTTPTransport.swift`（新） | hardened unary URLSession、exact-origin 校验、认证注入、redirect rejection、wire ceiling 与取消 |
 | `gui/Sources/ClaudioGUICore/AICueSSETransport.swift`（新） | 增量 SSE framing/parser、CRLF/LF、terminal/cancel、Base64/wire ceiling；不缓冲完整 stream |
 | `gui/Sources/ClaudioGUICore/ElevenLabsAICueProvider.swift`（新） | 从现有 `AICueProvider.swift` 提取 ElevenLabs adapter；保持固定 model/voice/routes 与 fixture 回归 |
 | `gui/Sources/ClaudioGUICore/MiniMaxAICueProvider.swift`（新） | `get_voice` probe、固定 T2A request、JSON/status/hex MP3 解码和脱敏错误 |
 | `gui/Sources/ClaudioGUICore/QwenAICueProvider.swift`（新） | 两个 region profile 的固定 request、SSE/Base64 PCM 收集、WAV 封装和末包 URL 丢弃 |
+| `gui/Sources/ClaudioGUICore/SenseAudioAICueProvider.swift`（新） | fixed voice probe、三次 TTS、native SFX batch、状态/index/URL 结构校验和零 POST retry |
+| `gui/Sources/ClaudioGUICore/AICueAssetFetch.swift`（新） | 无 credential 的 exact-origin asset GET、redirect/header/query/size/MIME/deadline/retry 边界 |
 | `gui/Sources/ClaudioGUICore/AICueProvider.swift` | 迁移期间只保留共享 compatibility typealias/错误；完成后删除重复 transport/adapter，不继续扩成总文件 |
 | `gui/Sources/ClaudioGUICore/AICueCredentials.swift` | vault/manager 改为 registry-owned slot；复用旧 `elevenlabs` account；实现 read-only/deferred policy 和 pending replacement |
-| `gui/Sources/ClaudioGUICore/AICueGenerationEngine.swift` | 冻结 profile/generation/deadline、route/language/台词门禁、调用 registry adapter；迟到结果 fail closed |
+| `gui/Sources/ClaudioGUICore/AICueGenerationEngine.swift` | 冻结 profile/generation/deadline、route/language/台词门禁、调用 candidate-set provider；校验 complete/partial、minimum 与 identity，迟到结果 fail closed |
 | `gui/Sources/ClaudioGUICore/AICueGenerationViewModel.swift` | 管理 profile、逐 profile stored/verification/pending 状态、切换取消和 provider-specific 脱敏错误 |
 | `gui/Sources/ClaudioGUI/EventSettingsAICueView.swift` | 增加 Provider/profile 选择、差异化保存文案、region/能力/台词帮助；保持 `SecureField` 和显式 Generate |
-| `gui/Sources/ClaudioGUI/MenuBarController.swift` | composition root 注入 registry、credential manager、unary/SSE transport 和三个 adapter；UI 无 provider 分支 |
+| `gui/Sources/ClaudioGUI/MenuBarController.swift` | composition root 注入 registry、credential manager、unary/SSE/asset transport 和 adapters；UI 无 provider switch，默认 allowlist 受外部证据门禁 |
 | `gui/Tests/ClaudioGUICoreTests/AICueDomainSuite.swift` | profile-neutral domain、明确台词语法、unsupported modality/language 和 generation identity |
 | `gui/Tests/ClaudioGUICoreTests/AICueCredentialSuite.swift` | slot mapping、无迁移 legacy account、read-only/deferred、pending promotion/cancel 和 region 隔离 |
 | `gui/Tests/ClaudioGUICoreTests/AICueHTTPTransportSuite.swift`（新） | auth header 隔离、exact origin、redirect、unary wire ceiling、deadline 与取消 |
@@ -754,6 +959,9 @@ commit、push、release 或部署仍需分别授权。
 | `gui/Tests/ClaudioGUICoreTests/ElevenLabsAICueProviderSuite.swift`（新） | 迁移现有 ElevenLabs provider fixtures，不改变 route/model/voice |
 | `gui/Tests/ClaudioGUICoreTests/MiniMaxAICueProviderSuite.swift`（新） | probe、request、status/JSON/hex、语言和错误 fixtures |
 | `gui/Tests/ClaudioGUICoreTests/QwenAICueProviderSuite.swift`（新） | region/header/request、SSE/PCM/WAV、末包 URL、取消和格式错误 fixtures |
+| `gui/Tests/ClaudioGUICoreTests/AICueCandidateSetSuite.swift`（新） | route policy、legacy adapter、styled/numbered、complete/partial、cleanup 和 retry 回归 |
+| `gui/Tests/ClaudioGUICoreTests/SenseAudioAICueProviderSuite.swift`（新） | probe、TTS、SFX exact request/response/error matrix |
+| `gui/Tests/ClaudioGUICoreTests/AICueAssetFetchSuite.swift`（新） | URL/header/redirect/query redaction/deadline/size/MIME/cancel 和限定 GET retry |
 | `gui/Tests/ClaudioGUICoreTests/AICueGenerationEngineSuite.swift` | registry 路由、3 候选、60 秒 deadline、profile switch late-result race 和统一导入限制 |
 | `gui/Tests/ClaudioGUICoreTests/AICueGenerationViewModelSuite.swift` | profile 选择、差异化 key 流程、pending replacement、候选失效与保存后不自动生成 |
 | `gui/Tests/ClaudioGUICoreTests/ViewWiringSuite.swift` | composition root、SecureField、provider selector、状态文案和禁止自定义 endpoint/model/voice |
@@ -775,13 +983,15 @@ commit、push、release 或部署仍需分别授权。
 | TTS-MP-3 | 0.5–1 天 | ElevenLabs adapter 重接与全量回归 |
 | TTS-MP-4 | 1–1.5 天 | MiniMax HTTP、JSON/hex 解码、错误映射和 fixture |
 | TTS-MP-5 | 2–3 天 | Qwen SSE、PCM→WAV、region profile、取消和输出校验 |
+| TTS-SA-0–TTS-SA-3 | 3–5 天 | candidate-set seam、SenseAudio probe/TTS/SFX、asset fetch、UI 与 deterministic fixtures |
+| TTS-SA-4 | 另计 | 官方资源 origin 确认、付费 smoke、听感、键盘与 VoiceOver；需要独立授权 |
 | TTS-3、TTS-5 | 2–3 天 | 多 Provider UI、文案、AX、手工矩阵和证据整理；真实 smoke 时间另计 |
 
 估时不包含真实 key 申请、供应商审批、付费等待、签名、公证或发布排队。回滚时从 registry 移除或
-禁用 MiniMax/Qwen profile，恢复 `elevenlabs-global` 默认即可；不得删除已采用的音频、manifest 绑定
+禁用 MiniMax/Qwen/SenseAudio profile，恢复 `elevenlabs-global` 默认即可；不得删除已采用的音频、manifest 绑定
 或用户的其他 profile key。`elevenlabs-global` 从始至终使用旧 account `elevenlabs`，没有迁移回滚步骤；
 新 profile 的 active/pending key 即使在回滚后保留，也只能作为未使用的隔离 item，不能被旧代码误读
-或自动 fallback。
+或自动 fallback；回滚不得自动删除 `senseaudio-cn` Keychain item。
 
 ## 7. 自动测试与回归命令
 
@@ -790,17 +1000,20 @@ commit、push、release 或部署仍需分别授权。
 - 空/过长描述；名称 trim、1...40 字符、控制字符和同名后缀；名称不得决定文件路径。
 - speech / animal / soundEffect / mixed 四类 fixture；非语音时 `spokenContent == nil`，speech/mixed 时
   台词必须从完整引号中逐字提取。`说任务完成`、缺失右引号、空引号均本地失败且网络计数为 0。
-- Provider/profile registry 只返回四个首批 profile：`elevenlabs-global`、`minimax-global`、
-  `qwen-singapore`、`qwen-beijing`；未知 profile、未知 region 或自由 endpoint/model/voice 均拒绝。
+- production `allowlistedProfiles` 在外部门禁完成前只返回四个既有 profile：`elevenlabs-global`、
+  `minimax-global`、`qwen-singapore`、`qwen-beijing`；deterministic suite 可通过显式非 production policy
+  构造固定 `senseaudio-cn`。未知 profile/region 或自由 endpoint/model/voice/resource host 均拒绝。
 - `supportedModalities == Set(routes.keys)`；route key/modality、origin/auth、credential slot、locale allowlist
   任一冲突时 registry 初始化失败，不存在第二份 capability 真相。
 - 每个 profile 的 route matrix 都有显式正例和负例：MiniMax/Qwen 的 TTS 不能生成
-  `animal` / `soundEffect`；不支持的 modality 在读取 key 或发网络前直接失败。
+  `animal` / `soundEffect`；SenseAudio 的 `.mixed` 与非 zh speech 在读取 key 前失败；不支持的
+  modality/locale 在读取 key 或发网络前直接失败。
 - 候选页获得稳定名称建议；手工名称覆盖建议；名称不进入 generation request，修改名称不增加请求计数。
 - hidden instruction version 被记录为非敏感 token；内部计划不出现在强制 UI 状态。
 - 缺少所选 profile credential 不发网络；保存 key 后不自动生成；删除某 profile key 后已采用声音仍可播放。
-- credential save/replace/delete 使用 mock Keychain；ElevenLabs/MiniMax read-only probe 失败或写入失败
-  时旧 key 保持有效；Qwen 保存计费请求数为 0，pending success、明确 401、403/权限、额度/429/5xx/
+- credential save/replace/delete 使用 mock Keychain；ElevenLabs/MiniMax/SenseAudio read-only probe
+  失败或写入失败时旧 key 保持有效；SenseAudio voice 缺失不映射 invalidCredential；Qwen 保存计费
+  请求数为 0，pending success、明确 401、403/权限、额度/429/5xx/
   network、cancel 分别覆盖；只有 401 丢弃 pending，不同 profile/region 的 key 永不交叉读取。
 - `elevenlabs-global` 精确映射旧 account `elevenlabs`；测试禁止创建 `elevenlabs-global` account、复制、
   删除或双写旧 item。新安装与已有旧 item 都直接通过同一 slot。
@@ -810,19 +1023,27 @@ commit、push、release 或部署仍需分别授权。
 - ElevenLabs 请求验证 `xi-api-key`、固定 model/voice/endpoint；MiniMax 请求验证 Bearer header、固定
   `speech-2.8-hd` / Mandarin voice、`get_voice` probe、`data.audio` hex 解码和
   `base_resp.status_code`；Qwen 请求验证 Bearer、exact region host/path、`X-DashScope-SSE: enable`、
-  model `qwen3-tts-instruct-flash`、voice `Cherry`、Base64 PCM 和 WAV 封装。
+  model `qwen3-tts-instruct-flash`、voice `Cherry`、Base64 PCM 和 WAV 封装；SenseAudio 验证固定
+  `get_voice`/TTS/SFX body、required voice、三次 numbered TTS、native batch 和无 POST retry。
 - 每个 adapter 都覆盖认证失败、权限/额度、限流、5xx、畸形 JSON、空音频、编码错误和响应过大；错误
   对外只返回统一脱敏分类，日志不含 prompt 或响应正文。
-- 恰好返回 3 个稳定候选；partial result、late result、取消、限流和有限重试符合状态机。切换 profile
-  后旧 generation 的成功/失败迟到结果均不能改变新状态或留下临时文件。
-- 60 秒 generation deadline 覆盖三个顺序子请求和唯一 429 retry；子请求结束、retry 或网络 callback
-  都不能重置预算，deadline 后任务取消且不发布 partial candidates。
+- candidate-set suite 覆盖 styled/numbered identity、每条 route 的 requested/minimum、恰好三个的
+  complete、只含一至两个的 allowed partial、低于 minimum 清理，以及旧 Provider 一次 429 retry 回归。
+  切换 profile 后旧 generation 的成功/失败迟到结果均不能改变新状态或留下临时文件。
+- 60 秒 generation deadline 覆盖顺序子请求、native batch、asset GET 与允许的 retry；任一步结束、
+  retry 或网络 callback 都不能重置预算。deadline/cancel 不发布 partial candidates。
 - 候选替换、symlink、格式伪装、超时长、超大小和下载中断时采用 fail closed。
 - Qwen SSE 覆盖 byte-by-byte 分片、JSON/Base64 跨 callback、LF/CRLF、空行、重复/缺失 terminal、
   terminal 后数据、EOF 和取消；任何异常不得发布候选。PCM 不是 24 kHz/16-bit/mono/little-endian、
   decoded 超过 144,000 bytes 或 WAV 超过 144,044 bytes 时拒绝。
 - MiniMax 奇数长度/非法字符 hex、wire 超过 10 MiB + 512 KiB、decoded 超过 5 MiB、JSON 声明 MP3
   但 magic bytes 不匹配均拒绝；ElevenLabs direct container wire/decoded 超过 5 MiB 拒绝。
+- SenseAudio TTS 覆盖业务状态、`data.status`、奇偶 hex、可选 metadata 一致性与三项 all-or-nothing；
+  SFX 覆盖 completed/partial_success、item 状态、index 唯一/范围/排序、重复 URL、缺字段、零有效项，
+  以及远端 complete 经本地校验降为 partial。
+- Asset fetch 覆盖 HTTPS/443/exact hostname、IP/userinfo/fragment/redirect/final URL 拒绝、全 URL
+  预检早于 GET、零 Authorization/Cookie/Referer、query 脱敏、MIME、5 MiB、取消/deadline 和同 URL
+  最多一次限定瞬态 GET retry。
 - 同时试听第二个候选时第一个停止；无 autoplay。
 - 导入/bind/refresh 部分失败显示真实状态，旧绑定保持不变。
 
@@ -846,6 +1067,8 @@ git diff --check
 | ElevenLabs | `GET /v1/models` probe；固定 TTS/Sound Generation route、model、voice、`xi-api-key` | 直接 MP3；记录 opaque request ID | 非 allowlist origin、缺模型、JSON/空音频、错误 MIME、redirect、>5 MiB |
 | MiniMax | `POST /v1/get_voice` probe；`POST /v1/t2a_v2`、Bearer、固定 model/voice、`output_format: hex` | `base_resp.status_code == 0`、合法 hex MP3、`trace_id` | 非 0 状态、空/非法 hex、非 zh locale、wire/decoded 超限、magic bytes 不匹配 |
 | Qwen Singapore / Beijing | exact region host/path、Bearer、SSE header、固定 model/voice；保存 key fixture 的网络计数为 0 | 分片 Base64 PCM → 24 kHz/16-bit/mono WAV；记录 region/profile | 跨区 key、畸形 SSE、缺/重复 terminal、远端 URL 跟随、格式/encoded/decoded/时长超限 |
+| SenseAudio TTS | `POST /v1/get_voice` probe；`POST /v1/t2a_v2` × 3、Bearer、固定 model/voice/mono MP3；POST attempt 恒为 1 | required voice；`data.status == 2`、业务成功、合法 hex MP3、一致 metadata | 401 与 voice 缺失混淆、非 zh/mixed 越过本地门禁、任何 POST retry、状态/hex/metadata/magic/size/duration 错误 |
+| SenseAudio SFX | `POST /v1/sound-effects/generations` 一次、固定 model、`variants_count=3`、duration 1...3、`smart_duration=false` | completed 3 项或 partial_success 1–2 项；index 排序；asset GET 后 complete/partial | 状态/index/重复 URL 冲突、任意 URL 未预检即下载、资源请求携带凭据、redirect/MIME/host/大小错误、零有效项 |
 
 fixture 必须只包含假 key、假 prompt 和脱敏音频字节；真实 provider smoke 不得替代 deterministic
 fixture，也不得把真实 key、完整 prompt、响应正文或音频写入仓库。
@@ -857,9 +1080,13 @@ fixture，也不得把真实 key、完整 prompt、响应正文或音频写入�
 - 未配置状态：只输入描述并点击生成，配置窗打开且描述不丢失；关闭后不发生请求。
 - 配置状态：SecureField、Provider/profile 选择、焦点、取消、替换失败保留旧 key、删除二次确认和
   删除后生成门禁；切换 profile 不显示或复制其他 profile 的 key。ElevenLabs/MiniMax 显示“已验证并
-  保存”，Qwen 显示“已保存，待首次生成验证”，且保存 Qwen key 时无模型请求/费用。
+  保存”，SenseAudio 还区分“凭据无效”与“所需音色不可用”；Qwen 显示“已保存，待首次生成验证”，
+  且保存 Qwen key 时无模型请求/费用。
 - ElevenLabs 默认完成四类描述各一次 3 候选流程；MiniMax/Qwen 完成 `speech` 3 候选流程，尝试
   `animal` / `soundEffect` 时在网络前明确阻止并保留描述。
+- SenseAudio 只有在 profile 生产门禁解除后才出现在选择器：完成中文 `speech` 三个 numbered 候选，
+  `animal` / `soundEffect` 各完成一次 native batch，并实际走查 1/3、2/3 partial banner；`.mixed` 和
+  非中文 speech 在读取 key 前阻止。不得用只完成 TTS 的构建做此项验收。
 - Qwen Singapore 与 Beijing 若均启用，分别验证 region profile、对应 key 和 endpoint；切换地区不
   自动发请求，也不复用另一地区 credential。
 - speech/mixed 描述使用引号时准确朗读引号内文字；缺引号时在本地给出示例并保留描述。动物叫声和
@@ -876,20 +1103,23 @@ fixture，也不得把真实 key、完整 prompt、响应正文或音频写入�
 自动测试使用 fake adapter 和测试 Keychain namespace，不需要真实 key。每个真实 provider/profile 的
 smoke 必须另行授权，并使用用户主动提供、可撤销、限额的测试 key；不得把 key、Authorization、完整
 prompt、响应正文或音频内容写进命令历史、文档、Git、issue、截图或日志。不同 provider 的成功不能
-相互代替：ElevenLabs 的回执不能证明 MiniMax/Qwen 已可用，Singapore 的回执也不能证明 Beijing 已可用。
+相互代替：ElevenLabs 的回执不能证明 MiniMax/Qwen/SenseAudio 已可用，Singapore 的回执也不能证明
+Beijing 已可用；SenseAudio TTS 成功不能证明 SFX asset 合同成立。
 
 验收报告分开记录：
 
 - 自动测试与 build；
 - 本地 GUI / VoiceOver / 音频导入；
-- 每个 provider/profile 的认证、请求、3 候选与错误回执；
+- 每个 provider/profile 的认证、请求、候选集合与错误回执；
 - 未完成的地区、模型、纯音效能力、付费、双架构、签名 RC 或正式发布证据。
 
 每个获得单独授权的真实 profile smoke 还必须执行音质 rubric，而不是只看 HTTP 200：
 
-- 3 个候选都可播放、无截断、爆音、明显静音或错误背景声，且 duration/size 合同通过；
+- complete 的 3 个候选或明确 partial 的每个可见候选都可播放、无截断、爆音、明显静音或错误背景声，
+  且 duration/size 合同通过；
 - speech 候选逐字包含用户给出的台词，语言、发音和固定 voice 可辨识，不能朗读 style 描述；
-- 三个 variant 至少在速度、力度或克制程度上存在可听差异，同时都符合原始意图；
+- styled 的三个 variant 至少在速度、力度或克制程度上存在可听差异；numbered 候选按可辨差异与原始
+  意图分别记录，不为服务未接收的 style 建立虚假验收项；
 - 由人试听记录 `pass/fail + 非敏感原因`，不保存 prompt、真实音频或 provider 响应正文。
 
 fixture 只能证明协议与防线，不能证明音质。没有真实 provider 回执和人工试听时，只能声明
@@ -899,23 +1129,30 @@ adapter/fixture 已验证，不能升级为真实生成或用户可接受音质�
 
 | 路径 | 失败 | 防线 | 用户可见结果 |
 |---|---|---|---|
-| 命名 | 三候选被当成三个永久名字 | final display name 与 variant label 分离 | 只保存采用项和一个名称 |
+| 命名 | 候选被当成多个永久名字 | final display name 与 candidate identity 分离 | 只保存采用项和一个名称 |
 | 自动命名 | 名称被直接用作路径 | `AICueDisplayName` 与唯一文件分配器分离 | 显示名称可编辑，路径安全生成 |
 | BYOK key | key 进入状态、日志或配置 | Keychain-only slot + 非日志化输入 + 静态扫描 | UI 只显示 stored/verification 状态 |
 | 验证语义 | Qwen 保存被伪装成“已在线验证”或偷偷计费 | per-profile read-only/deferred policy | 明确“已保存，待首次生成验证” |
 | key 替换 | deferred 新 key 无效导致旧 key 丢失 | read-only 原子替换；Qwen pending promotion/cancel | 失败保留旧 active，不自动 fallback |
+| SenseAudio probe | 401、业务错误或所需 voice 缺失被混为一类 | 只有 API origin 401 是 invalidCredential；业务/voice 错误独立分类 | 新 key 不落盘，旧 active 保留；明确提示所需音色不可用 |
 | legacy Keychain | 新 profile ID 导致既有 ElevenLabs key 消失 | registry 固定 `elevenlabs-global → elevenlabs` | 无迁移、无重复输入、旧版本兼容 |
 | profile / region | Qwen 区域 key 或 endpoint 混用 | slot-scoped Keychain + 固定 region allowlist | 当前 profile 明确不可用，不跨区重试 |
 | endpoint | 自定义 URL 外送 key / SSRF | provider/profile registry + endpoint/redirect allowlist | 拒绝非内置地址 |
 | transport auth | 所有 Provider 被错误注入 `xi-api-key` | exact-origin 后按 auth enum 集中注入 | 请求在本地拒绝，不外送 key |
+| asset URL | SFX 返回错 host、HTTP、IP、userinfo 或 redirect | 全 URL 下载前预检 + credential-free exact-origin fetcher | 零凭据外送；显示脱敏下载失败 |
 | provider 能力 | TTS 模型被宣传为可生音效 | 官方能力矩阵 + capability tests | 不支持类型在网络前明确阻止 |
 | 语音台词 | 模型猜台词或把 style 整段朗读 | 明确引号语法 + speech invariant | 本地提示示例，保留用户描述 |
-| provider 编码 | MiniMax hex 或 Qwen Base64 PCM 被当作普通音频 | adapter 专属解码、容器封装与 magic bytes 校验 | 候选拒绝，旧声音不变 |
+| provider 编码 | MiniMax/SenseAudio hex 或 Qwen Base64 PCM 被当作普通音频 | adapter 专属解码、容器封装与 magic bytes 校验 | 候选拒绝，旧声音不变 |
+| SenseAudio TTS | 429/5xx/超时/畸形 JSON 或单项坏音频 | 生成 POST 零 retry + 三候选全有或全无 + 全部临时文件清理 | 显示可重试的脱敏错误，不展示 TTS partial |
+| SenseAudio SFX | batch 状态、index、URL 结构冲突 | 首次 GET 前整批结构验证 | 服务响应无效，零资源下载 |
+| SFX 单项资源 | 下载、MIME、magic 或 duration 淘汰一至两项 | 继续其他项；route minimum 为 1 | 显示“仅生成 N/3 个可用候选” |
+| SFX 全部资源 | 零个本地有效候选 | `insufficientValidCandidates` + 整批清理 | 明确无可用候选 |
 | provider fallback | 一个 provider 失败后暗中改用另一 provider | provider selection 固定到 generation；无自动 fallback | 显示当前 provider 错误，由用户重新选择 |
 | provider 输出 | MIME/响应体/声明格式伪装 | 私有 temp acquisition + sniff + AudioImport | 候选拒绝，旧声音不变 |
-| 自动计费 | 保存 key 后自动生成/无限重试 | 二次显式 Generate + 有限重试 | 用户掌握每次请求时机 |
+| 自动计费 | 保存 key 后自动生成或 POST 自动重试 | 二次显式 Generate + SenseAudio POST 零 retry | 用户掌握每次可能计费请求的时机 |
 | 迟到结果 | 切换 profile 后旧请求覆盖新状态 | generationID/profileID snapshot + cancel/discard | 新选择和候选不被污染 |
-| 总耗时 | 三个 45 秒子请求让用户等待超过 2 分钟 | 60 秒 generation absolute deadline | 超时统一失败，不展示 partial |
+| 总耗时 | 子请求与资源下载各自重置时间预算 | 共享 60 秒 generation absolute deadline | 超时统一失败，不展示 partial |
+| candidate set | UI/engine 自行接受不够数或身份错误的候选 | route-owned policy + unique identity + minimum 校验 | complete 恰好 3；只在允许时显示 1–2 个 partial |
 | partial publish | 导入或 bind 只完成一半 | 事务、回滚和真实磁盘状态投影 | 旧绑定保持，显示实际阶段 |
 
 ## 10. 明确不做
@@ -923,9 +1160,13 @@ adapter/fixture 已验证，不能升级为真实生成或用户可接受音质�
 - 不新增或改名现有五个 `Event`，不修改 WorkBuddy 或其他宿主配置。
 - v1 不做 claudi0 Hosted server、账号、额度、支付、订阅或 Hosted/BYOK 自动 fallback。
 - 多 Provider 仅限应用内 allowlisted profile；不做自定义 API base URL、自定义模型 ID、任意 voice
-  ID 或区域自动切换。
-- 本计划首批只实现 MiniMax/Qwen 的 `speech` 路线；不因 TTS 支持而承诺 `animal`、`soundEffect` 或
-  任意 `mixed` 语义。没有独立官方能力证据和输出验收时，保持 modality 不可用。
+  ID、区域自动切换、任意 HTTPS、通配下载域名或用户自定义资源服务器。
+- MiniMax/Qwen 仍只支持 `speech`；SenseAudio 支持 `speech`、`animal` 与 `soundEffect`，明确不支持
+  `.mixed`。`senseaudio-a1` mixed 作为 `TODOS.md` 的 P3 独立工作，不塞入本次三秒 v1 合同。
+- 不发布 SenseAudio TTS-only 半成品；只有 TTS、native-batch SFX、官方稳定资源 origin/MIME 和人工
+  验收全部通过后，才把完整 `senseaudio-cn` 加入默认 allowlist。
+- 不做自定义 SenseAudio voice、音色克隆、流式 TTS、可调采样率、可调模型或可调 region。
+- 不对可能计费的 SenseAudio TTS/SFX POST 自动 retry；GET 的有限幂等 retry 不能推广到生成请求。
 - 不做本地 Qwen/MiniMax 权重下载、Core ML/MLX 推理、离线模型管理或云 Provider 的自动选择器；
   这些是独立的本地推理计划。
 - 不显示或恢复已保存 key 明文，不把 key 放进 CLI/env/config/日志/回执。
@@ -933,13 +1174,15 @@ adapter/fixture 已验证，不能升级为真实生成或用户可接受音质�
   用户的 Model Studio API Key。
 - 不恢复可见的“声音方案”强制步骤；内部 `AICueSoundPlan` 仍保留。
 - 不做声音克隆、用户本人音色训练、音频编辑器、裁剪时间线或归一化工作台。
+- 不新增资源代理、后端、长期生成缓存或外部分析埋点。
 - 不一次生成整个声音包，不生成超过 3 秒或 5 MB 的候选。
 - 不改变当前 macOS 12 最低版本，不为新 UI 强行采用更高系统专属 API。
 - 不把原型、fixture、静态契约或本地 hash 升格为真实 provider、正式发布或商业验收。
 
 ## 11. 绿灯
 
-只有以下条件同时成立，多 Provider 扩展计划才算完成：
+既有四 profile 的完成状态不因新增候选而倒退；但只有以下条件同时成立，`senseaudio-cn` 才可进入默认
+allowlist 并被表述为真实集成完成：
 
 - ADR 0006、`PLAN-SETTINGS-EXPERIENCE.md`、交互原型和 #92/子 tickets 已通过 TTS-MP-0 对齐；
   ElevenLabs-only 原型不能单独作为多 Provider 验收依据。
@@ -951,15 +1194,23 @@ adapter/fixture 已验证，不能升级为真实生成或用户可接受音质�
 - MiniMax adapter 已通过 read-only probe、Bearer、固定 voice、hex→MP3、状态码、wire/decoded 上限和
   3 候选测试；Qwen adapter 已通过 exact region route、deferred validation、SSE fragmentation、
   Base64 PCM→WAV、terminal/取消、wire/decoded 上限和 3 候选测试。
+- ADR 0011、candidate-set policy/identity/completion、legacy sequential adapter 与 MiniMax numbered
+  标签已通过回归；styled/numbered 和 complete/partial 不由 UI 重复判断。
+- SenseAudio probe、三次顺序 TTS、native-batch SFX 与 credential-free asset fetcher 的 deterministic
+  matrix 全绿，且 `.mixed`、非 zh speech、错误 URL 在读取 key/下载前 fail closed。
 - 可见 UI 只有“描述 → 候选与命名”，第一步没有名称字段，内部 `AICueSoundPlan` 不成为强制重表单。
 - speech/mixed 只朗读用户引号内的明确台词；缺台词或不支持 locale 时不读 key、不发网络，动物叫声
   和无文字音效仍可自由描述。
 - 候选阶段自动建议并可无成本改名；空名称不能采用，最终名称随采用项进入用户声音包和事件绑定。
 - 每个 profile 的 API Key 可配置、替换和删除，Keychain-only，明文不越过凭据管理边界；
   read-only/deferred 状态诚实，Qwen pending replacement 可取消，保存 key 后不自动生成。
-- 真实 adapter 返回并校验完整 3 候选；无自动播放；每次生成由用户显式触发；不支持 modality 不会
-  发送请求或自动 fallback；全部子请求共享 60 秒 generation deadline，profile switch 的迟到结果
-  不能污染新状态。
+- adapter 按 route policy 返回候选集合：complete 恰好 3 个，只有 SenseAudio SFX 可返回 1–2 个
+  partial；无自动播放；每次生成由用户显式触发；不支持 modality 不会发送请求或自动 fallback；全部
+  子请求与资源 GET 共享 60 秒 generation deadline，profile switch 的迟到结果不能污染新状态。
+- SenseAudio 官方确认稳定的精确资源 origin 与 MIME；经单独授权的真实 TTS/SFX smoke 证明
+  `female_0033_b` 可用、SFX GET 无 Bearer/redirect 且音频合同成立；人工听感、键盘和 VoiceOver 通过。
+- 上一项完成前，production `allowlistedProfiles` 仍只有既有四项，默认 Provider 仍为
+  `elevenlabs-global`；不得以 fixture 或 TTS 单路线证据暴露 SenseAudio。
 - 选中候选完整走现有 `AudioImport` 和 manifest bind，任何失败保留旧声音。
 - helper/GUI test harness、显式 GUI debug build、xcstrings 校验和 `git diff --check` 全绿。
 - 自动、GUI/VoiceOver/音频、真实 provider + 人工音质 rubric 和未完成发布证据分别报告。
@@ -972,7 +1223,9 @@ adapter/fixture 已验证，不能升级为真实生成或用户可接受音质�
 `mockups/ai-app-manager-native-macos.html?page=events&app=workbuddy&prototype=tts&profile=elevenlabs-global&stage=applied&credential=verified`
 
 原型状态在内存中；`profile` 和 `credential=missing|verified|deferred|rejected|pending|unavailable` 只
-用于演示四个 allowlisted profile、read-only/deferred 验证差异和状态，不代表真实 Keychain。用
+用于演示四个当前 production allowlisted profile、read-only/deferred 验证差异和状态，不代表真实
+Keychain。`senseaudio-cn` 只作为 `productionEnabled: false` 的确定性 fixture 显示 numbered/partial
+状态；它可以在原型中选择，但不代表已经进入 production allowlist。用
 MiniMax/Qwen profile 输入非 speech 描述可演示 unsupported modality，MiniMax 的 English 台词可演示
 unsupported locale；也可用 `scenario=unsupported-modality|unsupported-locale` 直接固定对应状态。
 旧 `credential=ready` 只在缺省、显式或未知 `profile` 最终解析为 `elevenlabs-global` 时兼容为
@@ -994,10 +1247,13 @@ unsupported locale；也可用 `scenario=unsupported-modality|unsupported-locale
 
 本计划新增/修订 `AICueDisplayName`、隐藏 `AICueSoundPlan`、`AICueProviderProfile`、route-derived
 capability registry、provider-neutral request、registry-owned credential slots/policies、unary/SSE
-transport、ElevenLabs/MiniMax/Qwen BYOK adapters 和对应 UI 接缝；不得在 UI 或 adapter 中复制
+transport、ElevenLabs/MiniMax/Qwen BYOK adapters，以及 candidate-set seam、SenseAudio adapter、
+credential-free asset fetcher 和对应 UI 接缝；不得在 UI 或 adapter 中复制
 `AudioImport`、包锁和 manifest 发布逻辑。
 
 文档类型：AI 提示音子域工程执行计划，兼具内部接口 reference 与架构 explanation。AI 子域的
 provider-neutral registry、transports、逐 profile credential policy、ElevenLabs/MiniMax/Qwen adapters、
-统一设置 production UI、窗口迁移与 deterministic fixtures 已落地。原生 UI/VoiceOver、真实 Provider、
-双架构、签名、公证、push、release 和部署不由本地自动证据证明，均需要后续单独授权或验收。
+统一设置 production UI、窗口迁移与既有 deterministic fixtures 已落地。SenseAudio 的代码与 fixture
+实施状态以本轮实际 gate 为准；在官方资源 origin、真实 Provider 与人工验收完成前始终是未暴露候选。
+原生 UI/VoiceOver、真实 Provider、双架构、签名、公证、push、release 和部署不由本地自动证据证明，
+均需要后续单独授权或验收。

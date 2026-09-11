@@ -493,7 +493,8 @@ func runAICueElevenLabsProviderSuites() async {
             let sent = await transport.requests()
             expect(sent.count == 3, "ElevenLabs 一次 generation 必须恰好三个顺序请求")
             expect(
-                generation.candidates.map(\.variant) == [.clear, .brisk, .restrained],
+                generation.candidates.map(\.styledVariant)
+                    == AICueVariant.allCases.map(Optional.some),
                 "候选身份必须稳定为 A/B/C")
             expect(
                 generation.candidates.allSatisfy {

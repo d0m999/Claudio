@@ -118,4 +118,34 @@ func runAICueGenerationDispatcherSuites() async {
             expect(false, "profile 身份漂移返回了错误的语义错误")
         }
     }
+
+    await suite("AI 提示音 dispatcher：gated registry 必须精确接入 SenseAudio 且不 fallback") {
+        let policy = try! AICueAssetPolicy(
+            allowedOrigins: [try! AICueAssetOrigin("https://assets.fixture.invalid")],
+            acceptedMediaTypes: ["audio/mpeg"])
+        let registry = AICueProviderRegistry(evidenceGatedSenseAudioAssetPolicy: policy)
+        let senseAudio = DispatcherGeneratorFixture(returnedProfileID: .senseAudioChina)
+        let elevenLabs = DispatcherGeneratorFixture(returnedProfileID: .elevenLabsGlobal)
+        let dispatcher = try! AICueGenerationDispatcher(
+            generators: [
+                .elevenLabsGlobal: elevenLabs,
+                .miniMaxGlobal: DispatcherGeneratorFixture(returnedProfileID: .miniMaxGlobal),
+                .qwenSingapore: DispatcherGeneratorFixture(returnedProfileID: .qwenSingapore),
+                .qwenBeijing: DispatcherGeneratorFixture(returnedProfileID: .qwenBeijing),
+                .senseAudioChina: senseAudio,
+            ],
+            registry: registry)
+
+        _ = try! await dispatcher.generate(
+            description: "两声短促木鱼声",
+            locale: "zh-Hans",
+            providerProfileID: .senseAudioChina,
+            deadline: .startingNow())
+        expect(
+            await senseAudio.facts().requests == [.senseAudioChina],
+            "fixture gate 开启时必须只路由到 SenseAudio engine")
+        expect(
+            await elevenLabs.facts().requests.isEmpty,
+            "SenseAudio 请求不得跨 Provider fallback 到默认 ElevenLabs")
+    }
 }

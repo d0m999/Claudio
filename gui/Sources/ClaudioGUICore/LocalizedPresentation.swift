@@ -509,6 +509,20 @@ public func localizedSetupNoticeMessage(
 }
 
 public func localizedAICueCandidateTitle(
+    _ identity: AICueCandidateIdentity,
+    language: ClaudioAppLanguage
+) -> String {
+    switch identity {
+    case .styled(let variant):
+        localizedAICueCandidateTitle(variant, language: language)
+    case .numbered(let ordinal):
+        ClaudioL10n(language: language).format(
+            .aiCueCandidateNumbered,
+            Int64(ordinal.rawValue))
+    }
+}
+
+public func localizedAICueCandidateTitle(
     _ variant: AICueVariant,
     language: ClaudioAppLanguage
 ) -> String {
@@ -520,14 +534,48 @@ public func localizedAICueCandidateTitle(
     }
 }
 
+public func aiCueCandidateAccessibilityIdentifierComponent(
+    _ identity: AICueCandidateIdentity
+) -> String {
+    switch identity {
+    case .styled(let variant): return variant.rawValue
+    case .numbered(let ordinal): return "numbered-\(ordinal.rawValue)"
+    }
+}
+
+public func localizedAICueCandidateActionName(
+    _ identity: AICueCandidateIdentity,
+    language: ClaudioAppLanguage
+) -> String {
+    switch identity {
+    case .styled:
+        localizedAICueCandidateTitle(identity, language: language)
+    case .numbered(let ordinal):
+        String(ordinal.rawValue)
+    }
+}
+
+public func localizedAICueCandidatePreviewAccessibilityLabel(
+    identity: AICueCandidateIdentity,
+    duration: String,
+    isPlaying: Bool,
+    language: ClaudioAppLanguage
+) -> String {
+    let l10n = ClaudioL10n(language: language)
+    let title = localizedAICueCandidateActionName(identity, language: language)
+    let action = isPlaying ? ClaudioL10nKey.aiCueCandidateStopAction : .aiCueCandidatePlayAction
+    return l10n.format(action, title) + " · " + duration
+}
+
 public func localizedAICueCandidatePreviewAccessibilityLabel(
     variant: AICueVariant,
     duration: String,
     isPlaying: Bool,
     language: ClaudioAppLanguage
 ) -> String {
-    let l10n = ClaudioL10n(language: language)
-    let title = localizedAICueCandidateTitle(variant, language: language)
-    let action = isPlaying ? ClaudioL10nKey.aiCueCandidateStopAction : .aiCueCandidatePlayAction
-    return l10n.format(action, title) + " · " + duration
+    localizedAICueCandidatePreviewAccessibilityLabel(
+        identity: .styled(variant),
+        duration: duration,
+        isPlaying: isPlaying,
+        language: language)
 }

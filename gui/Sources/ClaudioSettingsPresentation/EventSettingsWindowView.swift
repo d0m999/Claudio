@@ -940,8 +940,8 @@ struct EventSettingsWindowView: View {
             return
         }
         selection.beginCandidatePreview(id: candidate.id)
-        let title = localizedAICueCandidateTitle(
-            candidate.variant,
+        let title = localizedAICueCandidateActionName(
+            candidate.identity,
             language: languageStore.language)
         onAnnouncement(
             l10n.format(
@@ -976,8 +976,8 @@ struct EventSettingsWindowView: View {
         let stoppedCandidateTitle = selection.presentationState.playingCandidateID.flatMap {
             candidateID in
             aiCueViewModel.generation?.candidates.first(where: { $0.id == candidateID }).map {
-                localizedAICueCandidateTitle(
-                    $0.variant,
+                localizedAICueCandidateActionName(
+                    $0.identity,
                     language: languageStore.language)
             }
         }

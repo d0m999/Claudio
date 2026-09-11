@@ -1108,6 +1108,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Qwen · 北京" } }
       }
     },
+    "ai-cue.provider-profile.senseaudio-cn" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "SenseAudio · China API" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "SenseAudio · 中国 API" } }
+      }
+    },
     "ai-cue.service.title" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "AI sound generation" } },
@@ -1252,6 +1258,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音描述、台词和生成元数据会由本机直接发送给北京地区的 DashScope，并适用该地区的数据处理、留存及模型改进条款。保存不发模型请求且不消耗生成配额；下一次显式生成可能消耗配额，并验证此地区的独立 Key。" } }
       }
     },
+    "ai-cue.credential.privacy.senseaudio-cn" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your sound description, speech, and generation metadata are sent directly to SenseAudio through its fixed .cn API route; this route is not a data-residency promise. Generation may consume quota, and processing, retention, and model-improvement use follow SenseAudio's terms. Saving runs only a read-only voice-list probe and does not generate audio." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音描述、台词和生成元数据会由本机通过固定 .cn API 路由直接发送给 SenseAudio；该路由不构成数据驻留承诺。生成可能消耗配额，数据处理、留存及是否用于模型改进以 SenseAudio 条款为准。保存前只执行不生成音频的音色列表只读检查。" } }
+      }
+    },
     "ai-cue.credential.keychain" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The key is stored only in this Mac's Keychain. Claudio cannot display or copy a saved key." } },
@@ -1356,8 +1368,8 @@
     },
     "ai-cue.stage.candidates" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "2  3 candidates" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "2  3 个候选" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "2  Candidates & name" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "2  候选与命名" } }
       }
     },
     "ai-cue.description.label" : {
@@ -1430,6 +1442,18 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "C · Restrained" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "C · 克制" } }
+      }
+    },
+    "ai-cue.candidate.numbered" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Candidate %lld" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "候选 %lld" } }
+      }
+    },
+    "ai-cue.candidate.partial" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Only %lld of 3 candidates are usable. You can preview and apply one, or generate again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "仅生成 %lld/3 个可用候选；你可以试听并采用一个，或重新生成。" } }
       }
     },
     "ai-cue.candidate.duration" : {
@@ -1546,6 +1570,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法在钥匙串中读取或保存 API Key；请解锁这台 Mac 后重试。" } }
       }
     },
+    "ai-cue.error.required-voice-unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The required voice is not available to this account. The existing saved key was not changed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前账户无法使用所需音色；已有的已保存 Key 未被更改。" } }
+      }
+    },
     "ai-cue.error.credits" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected Provider reports insufficient quota for this generation." } },
@@ -1568,6 +1598,12 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The 3 candidates could not be completed. Nothing was saved; generate again when ready." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未能完整生成 3 个候选；没有保存任何内容，请准备好后再手动生成。" } }
+      }
+    },
+    "ai-cue.error.no-valid-candidates" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No usable candidate was returned. Nothing was saved; generate again when ready." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有返回可用候选；没有保存任何内容，请准备好后再手动生成。" } }
       }
     },
     "ai-cue.error.name-required" : {

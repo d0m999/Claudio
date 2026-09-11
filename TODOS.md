@@ -7,6 +7,27 @@
 > - 「源码 / harness 已通过」不等于 native SwiftUI、VoiceOver、真实 release 下载路径或正式验收；人工验收项继续保留。
 > - 本文件仅保留待执行项；人工和外部发布验收仍是独立状态。
 
+## AI 提示音
+
+### SenseAudio `senseaudio-a1` mixed 生成路线留待独立设计与验收
+
+**What:** 当前 `senseaudio-cn` 只计划用 `sensenova-tts-2.0` 处理 `speech`，并用
+`senseaudio-sfx-1.0-260626` 处理 `animal` / `soundEffect`；`.mixed` 在读取 Keychain 或发网络前明确
+fail closed。不要把一段同时含台词和背景声的描述拆成两次请求后本地拼接，也不要把 TTS 或 SFX
+单路线伪装成 mixed。
+
+**Why:** `senseaudio-a1` 可能提供更自然的混合音频路线，但它不属于当前三秒提示音合同，尚无固定
+endpoint/model/输出格式、费用、留存、候选集合语义和真实听感证据。提前加入现有 profile 会扩大
+数据与计费边界，并让无法由 fixture 证明的音频语义看起来已经受支持。
+
+**修复方式:** 作为独立里程碑核对官方合同，固定不可由用户编辑的 route，补齐请求/响应/错误 fixture、
+三秒和 5 MiB 本地校验、凭据与 retry 语义，并在单独授权的付费 smoke 和人工听感验收通过后再决定
+是否加入 `senseaudio-cn`。不得用该路线绕过 SenseAudio SFX 资源 origin 门禁，也不得自动 fallback。
+
+**Effort:** L
+**Priority:** P3
+**Depends on:** `senseaudio-cn` TTS + SFX 完整合同、官方资源 origin 与真实 Provider 验收
+
 ## Ship / CI
 
 ### `loadPanelConfig` 每次调用把 config.json 独立读三遍 —— 文档写的「一次读 + 一次目录 stat」和实现对不上

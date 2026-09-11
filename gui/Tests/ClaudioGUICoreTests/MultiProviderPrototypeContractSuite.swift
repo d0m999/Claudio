@@ -38,7 +38,7 @@ private func multiProviderPrototypeCollapsed(_ source: String) -> String {
 
 @MainActor
 func runMultiProviderPrototypeContractSuites() {
-    suite("multi-provider prototype pins the four-profile allowlist and unknown fallback") {
+    suite("multi-provider prototype pins production profiles plus gated SenseAudio fixture") {
         guard
             let html = multiProviderPrototypeSource(
                 "mockups/ai-app-manager-native-macos.html"),
@@ -57,15 +57,22 @@ func runMultiProviderPrototypeContractSuites() {
 
         let expectedProfileIDs = [
             "elevenlabs-global", "minimax-global", "qwen-singapore", "qwen-beijing",
+            "senseaudio-cn",
         ]
         expect(
-            multiProviderPrototypeOccurrences(of: "id: '", in: profiles) == 4,
-            "原型 registry 必须且只能声明四个 profile fixture")
+            multiProviderPrototypeOccurrences(of: "id: '", in: profiles) == 5,
+            "原型 registry 必须声明四个 production profile 与一个 gated SenseAudio fixture")
         for profileID in expectedProfileIDs {
             expect(
                 multiProviderPrototypeOccurrences(of: "id: '\(profileID)'", in: profiles) == 1,
                 "原型 registry 必须恰好声明一次 \(profileID)")
         }
+        expect(
+            profiles.contains("id: 'senseaudio-cn'")
+                && profiles.contains("productionEnabled: false")
+                && profiles.contains("candidateSemantics: 'numbered'")
+                && profiles.contains("minimumAcceptedCount: 1"),
+            "SenseAudio 原型必须显式冻结 numbered/partial 合同并保持生产门禁关闭")
 
         let collapsedResolution = multiProviderPrototypeCollapsed(profileResolution)
         expect(
@@ -97,6 +104,7 @@ func runMultiProviderPrototypeContractSuites() {
             "'minimax-global': 'missing'",
             "'qwen-singapore': 'deferred'",
             "'qwen-beijing': 'unavailable'",
+            "'senseaudio-cn': 'missing'",
         ] {
             expect(
                 credentialFixtures.contains(fixture),

@@ -417,6 +417,9 @@ struct EventSettingsAICueComposerView: View {
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
 
             if let generation = viewModel.generation {
+                if generation.completion == .partial {
+                    partialCandidateNotice(count: generation.candidates.count)
+                }
                 VStack(spacing: 8) {
                     ForEach(generation.candidates) { candidate in
                         candidateRow(candidate)
@@ -454,12 +457,13 @@ struct EventSettingsAICueComposerView: View {
             .buttonStyle(ClaudioIconButtonStyle())
             .accessibilityLabel(candidatePreviewLabel(candidate))
             .accessibilityIdentifier(
-                "event-settings.ai-cue.candidate.\(candidate.variant.rawValue).preview")
+                "event-settings.ai-cue.candidate.\(candidateIdentifierComponent(candidate)).preview"
+            )
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(
                     localizedAICueCandidateTitle(
-                        candidate.variant,
+                        candidate.identity,
                         language: languageStore.language)
                 )
                 .font(ClaudioTheme.font(.body).weight(.semibold))
@@ -486,7 +490,7 @@ struct EventSettingsAICueComposerView: View {
                 adoptionEnabled ? l10n.text(.aiCueUseForEvent) : adoptionUnavailableHint
             )
             .accessibilityIdentifier(
-                "event-settings.ai-cue.candidate.\(candidate.variant.rawValue).use")
+                "event-settings.ai-cue.candidate.\(candidateIdentifierComponent(candidate)).use")
         }
         .padding(10)
         .background(ClaudioTheme.surface(colorScheme))
@@ -497,7 +501,7 @@ struct EventSettingsAICueComposerView: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(
-            "event-settings.ai-cue.candidate.\(candidate.variant.rawValue).row")
+            "event-settings.ai-cue.candidate.\(candidateIdentifierComponent(candidate)).row")
     }
 
     private var appliedStep: some View {
@@ -546,6 +550,27 @@ struct EventSettingsAICueComposerView: View {
         .accessibilityIdentifier("event-settings.ai-cue.error")
     }
 
+    private func partialCandidateNotice(count: Int) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(ClaudioTheme.warning(colorScheme))
+                .accessibilityHidden(true)
+            Text(l10n.format(.aiCueCandidatePartial, Int64(count)))
+                .font(ClaudioTheme.font(.caption))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ClaudioTheme.surface(colorScheme))
+        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row))
+        .overlay(
+            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
+                .stroke(ClaudioTheme.hairline(colorScheme), lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("event-settings.ai-cue.partial")
+    }
+
     private func candidateDuration(_ candidate: AICueCandidate) -> String {
         let seconds = Double(candidate.durationMilliseconds) / 1_000
         let value = String(format: "%.1f", seconds)
@@ -554,10 +579,14 @@ struct EventSettingsAICueComposerView: View {
 
     private func candidatePreviewLabel(_ candidate: AICueCandidate) -> String {
         localizedAICueCandidatePreviewAccessibilityLabel(
-            variant: candidate.variant,
+            identity: candidate.identity,
             duration: candidateDuration(candidate),
             isPlaying: playingCandidateID == candidate.id,
             language: languageStore.language)
+    }
+
+    private func candidateIdentifierComponent(_ candidate: AICueCandidate) -> String {
+        aiCueCandidateAccessibilityIdentifierComponent(candidate.identity)
     }
 }
 
@@ -588,7 +617,7 @@ struct EventSettingsAICueCredentialSheet: View {
                 .font(ClaudioTheme.font(.sectionTitle).weight(.bold))
                 .foregroundColor(ClaudioTheme.text(colorScheme))
 
-            Text(l10n.text(privacyDisclosureKey))
+            Text(l10n.text(viewModel.providerProfile.privacyDisclosureKey))
                 .font(ClaudioTheme.font(.body))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
@@ -692,16 +721,6 @@ struct EventSettingsAICueCredentialSheet: View {
             l10n.text(viewModel.providerProfile.displayNameKey))
     }
 
-    private var privacyDisclosureKey: ClaudioL10nKey {
-        switch viewModel.providerProfile.id {
-        case .elevenLabsGlobal: return .aiCueCredentialPrivacy
-        case .miniMaxGlobal: return .aiCueCredentialPrivacyMiniMax
-        case .qwenSingapore: return .aiCueCredentialPrivacyQwenSingapore
-        case .qwenBeijing: return .aiCueCredentialPrivacyQwenBeijing
-        default: preconditionFailure("Provider profile was not resolved through the registry")
-        }
-    }
-
     private var saveButtonTitle: String {
         switch viewModel.providerProfile.credentialValidationPolicy {
         case .readOnlyProbe: return l10n.text(.aiCueCredentialValidateSave)
@@ -782,9 +801,10 @@ private func aiCueCredentialFailureText(
     l10n: ClaudioL10n
 ) -> String {
     switch failure {
-    case .provider(.invalidCredential), .provider(.forbidden),
-        .provider(.requiredModelsUnavailable):
+    case .provider(.invalidCredential), .provider(.forbidden):
         return l10n.text(.aiCueErrorCredentialInvalid)
+    case .provider(.requiredModelsUnavailable):
+        return l10n.text(.aiCueErrorRequiredVoiceUnavailable)
     case .provider(.insufficientCredits):
         return l10n.text(.aiCueErrorCredits)
     case .provider(.rateLimited):
@@ -817,9 +837,10 @@ private func aiCueFailureText(
     case .generation(.credentialUnavailable):
         return l10n.text(.aiCueErrorCredentialUnavailable)
     case .generation(.provider(.invalidCredential)),
-        .generation(.provider(.forbidden)),
-        .generation(.provider(.requiredModelsUnavailable)):
+        .generation(.provider(.forbidden)):
         return l10n.text(.aiCueErrorCredentialInvalid)
+    case .generation(.provider(.requiredModelsUnavailable)):
+        return l10n.text(.aiCueErrorRequiredVoiceUnavailable)
     case .generation(.provider(.insufficientCredits)):
         return l10n.text(.aiCueErrorCredits)
     case .generation(.provider(.rateLimited)):
@@ -827,6 +848,8 @@ private func aiCueFailureText(
     case .generation(.audioTooLarge), .generation(.unsupportedAudio),
         .generation(.audioDurationUnavailable), .generation(.audioTooLong):
         return l10n.text(.aiCueErrorAudioInvalid)
+    case .generation(.insufficientValidCandidates):
+        return l10n.text(.aiCueErrorNoValidCandidates)
     case .generation:
         return l10n.text(.aiCueErrorGeneration)
     case .displayName(.emptyDisplayName):

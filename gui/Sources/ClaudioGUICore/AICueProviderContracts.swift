@@ -11,6 +11,7 @@ public struct AICueProviderID: RawRepresentable, Hashable, Codable, Sendable {
     public static let elevenLabs = AICueProviderID(rawValue: "elevenlabs")
     public static let miniMax = AICueProviderID(rawValue: "minimax")
     public static let qwen = AICueProviderID(rawValue: "qwen")
+    public static let senseAudio = AICueProviderID(rawValue: "senseaudio")
 }
 
 public struct AICueProviderProfileID: RawRepresentable, Hashable, Codable, Sendable {
@@ -24,6 +25,7 @@ public struct AICueProviderProfileID: RawRepresentable, Hashable, Codable, Senda
     public static let miniMaxGlobal = AICueProviderProfileID(rawValue: "minimax-global")
     public static let qwenSingapore = AICueProviderProfileID(rawValue: "qwen-singapore")
     public static let qwenBeijing = AICueProviderProfileID(rawValue: "qwen-beijing")
+    public static let senseAudioChina = AICueProviderProfileID(rawValue: "senseaudio-cn")
 }
 
 public struct AICueCredentialSlotID: RawRepresentable, Hashable, Codable, Sendable {
@@ -37,6 +39,7 @@ public struct AICueCredentialSlotID: RawRepresentable, Hashable, Codable, Sendab
     public static let miniMaxGlobal = AICueCredentialSlotID(rawValue: "minimax-global")
     public static let qwenSingapore = AICueCredentialSlotID(rawValue: "qwen-singapore")
     public static let qwenBeijing = AICueCredentialSlotID(rawValue: "qwen-beijing")
+    public static let senseAudioChina = AICueCredentialSlotID(rawValue: "senseaudio-cn")
     package static let qwenSingaporePending =
         AICueCredentialSlotID(rawValue: "qwen-singapore.pending")
     package static let qwenBeijingPending =
@@ -46,6 +49,65 @@ public struct AICueCredentialSlotID: RawRepresentable, Hashable, Codable, Sendab
 public enum AICueCredentialValidationPolicy: Sendable, Equatable {
     case readOnlyProbe
     case deferredUntilExplicitGeneration
+}
+
+public struct AICueCandidateOrdinal: RawRepresentable, Hashable, Sendable {
+    public let rawValue: Int
+
+    public init?(rawValue: Int) {
+        guard (1...AICueGenerationRequest.candidateCount).contains(rawValue) else { return nil }
+        self.rawValue = rawValue
+    }
+}
+
+public enum AICueCandidateIdentity: Hashable, Sendable {
+    case styled(AICueVariant)
+    case numbered(AICueCandidateOrdinal)
+
+    public var ordinal: Int {
+        switch self {
+        case .styled(let variant): variant.ordinal
+        case .numbered(let ordinal): ordinal.rawValue
+        }
+    }
+
+    public var styledVariant: AICueVariant? {
+        guard case .styled(let variant) = self else { return nil }
+        return variant
+    }
+}
+
+public enum AICueCandidateSetSemantics: Sendable, Equatable {
+    case styled
+    case numbered
+}
+
+public struct AICueCandidateSetPolicy: Sendable, Equatable {
+    public let semantics: AICueCandidateSetSemantics
+    public let requestedCount: Int
+    public let minimumAcceptedCount: Int
+
+    public init(
+        semantics: AICueCandidateSetSemantics,
+        requestedCount: Int,
+        minimumAcceptedCount: Int
+    ) {
+        self.semantics = semantics
+        self.requestedCount = requestedCount
+        self.minimumAcceptedCount = minimumAcceptedCount
+    }
+
+    package var isValid: Bool {
+        requestedCount == AICueGenerationRequest.candidateCount
+            && (1...requestedCount).contains(minimumAcceptedCount)
+    }
+
+    package func accepts(_ identity: AICueCandidateIdentity) -> Bool {
+        switch (semantics, identity) {
+        case (.styled, .styled), (.numbered, .numbered): true
+        default: false
+        }
+    }
 }
 
 public struct AICuePCMFormat: Sendable, Equatable {
@@ -68,11 +130,9 @@ public struct AICuePCMFormat: Sendable, Equatable {
 }
 
 public struct AICueProviderConstraints: Sendable, Equatable {
-    public let supportsInstructionControl: Bool
     public let maximumDurationMilliseconds: Int
 
-    public init(supportsInstructionControl: Bool, maximumDurationMilliseconds: Int) {
-        self.supportsInstructionControl = supportsInstructionControl
+    public init(maximumDurationMilliseconds: Int) {
         self.maximumDurationMilliseconds = maximumDurationMilliseconds
     }
 }
@@ -81,6 +141,7 @@ public enum AICueProviderAudioTransport: Sendable, Equatable {
     case directContainer
     case hexEncodedContainer
     case ssePCM(AICuePCMFormat)
+    case remoteAssets
 }
 
 public enum AICueProviderAuthentication: String, Sendable, Equatable {
@@ -96,6 +157,7 @@ public struct AICueProviderRoute: Sendable, Equatable {
     public let supportedLanguageTags: Set<String>
     public let authentication: AICueProviderAuthentication
     public let transport: AICueProviderAudioTransport
+    public let candidateSetPolicy: AICueCandidateSetPolicy
 
     public init(
         modality: AICueModality,
@@ -104,7 +166,8 @@ public struct AICueProviderRoute: Sendable, Equatable {
         voiceID: String?,
         supportedLanguageTags: Set<String>,
         authentication: AICueProviderAuthentication,
-        transport: AICueProviderAudioTransport
+        transport: AICueProviderAudioTransport,
+        candidateSetPolicy: AICueCandidateSetPolicy
     ) {
         self.modality = modality
         self.endpoint = endpoint
@@ -113,6 +176,7 @@ public struct AICueProviderRoute: Sendable, Equatable {
         self.supportedLanguageTags = supportedLanguageTags
         self.authentication = authentication
         self.transport = transport
+        self.candidateSetPolicy = candidateSetPolicy
     }
 }
 
@@ -124,6 +188,7 @@ public struct AICueProviderProfile: Sendable, Equatable {
     public let credentialValidationPolicy: AICueCredentialValidationPolicy
     public let regionID: String?
     public let displayNameKey: ClaudioL10nKey
+    public let privacyDisclosureKey: ClaudioL10nKey
     public let routes: [AICueModality: AICueProviderRoute]
     public let constraints: AICueProviderConstraints
 
@@ -135,6 +200,7 @@ public struct AICueProviderProfile: Sendable, Equatable {
         credentialValidationPolicy: AICueCredentialValidationPolicy,
         regionID: String?,
         displayNameKey: ClaudioL10nKey,
+        privacyDisclosureKey: ClaudioL10nKey,
         routes: [AICueModality: AICueProviderRoute],
         constraints: AICueProviderConstraints
     ) {
@@ -145,6 +211,7 @@ public struct AICueProviderProfile: Sendable, Equatable {
         self.credentialValidationPolicy = credentialValidationPolicy
         self.regionID = regionID
         self.displayNameKey = displayNameKey
+        self.privacyDisclosureKey = privacyDisclosureKey
         self.routes = routes
         self.constraints = constraints
     }

@@ -11,8 +11,12 @@ func runLocalizationSuites() {
         expect(
             ClaudioAppLanguage.defaultValue == .zhHans,
             "catalog fallback must remain the Simplified Chinese source language")
-        expect(ClaudioAppLanguage.zhHans.selfName == "中文", "Chinese segment must use its self-name")
-        expect(ClaudioAppLanguage.english.selfName == "English", "English segment must use its self-name")
+        expect(
+            ClaudioAppLanguage.zhHans.selfName == "中文",
+            "Chinese segment must use its self-name")
+        expect(
+            ClaudioAppLanguage.english.selfName == "English",
+            "English segment must use its self-name")
 
         let chinese = ClaudioL10n(language: .zhHans)
         let english = ClaudioL10n(language: .english)
@@ -107,8 +111,12 @@ func runLocalizationSuites() {
                 && chinese.text(.aiCueCredentialPrivacyQwenSingapore).contains("新加坡")
                 && english.text(.aiCueCredentialPrivacyQwenSingapore).contains("Singapore")
                 && chinese.text(.aiCueCredentialPrivacyQwenBeijing).contains("北京")
-                && english.text(.aiCueCredentialPrivacyQwenBeijing).contains("Beijing"),
-            "MiniMax/Qwen 必须逐 profile 披露供应商与 region，不能推广 ElevenLabs 条款")
+                && english.text(.aiCueCredentialPrivacyQwenBeijing).contains("Beijing")
+                && chinese.text(.aiCueCredentialPrivacySenseAudioChina).contains(
+                    "不构成数据驻留承诺")
+                && english.text(.aiCueCredentialPrivacySenseAudioChina).contains(
+                    "not a data-residency promise"),
+            "MiniMax/Qwen/SenseAudio 必须逐 profile 披露供应商与 route 边界")
         expect(
             chinese.format(
                 .aiCueProviderCapabilities,
@@ -136,6 +144,18 @@ func runLocalizationSuites() {
             chinese.format(.aiCueCandidateDuration, "1.2") == "1.2 秒"
                 && english.format(.aiCueCandidateDuration, "1.2") == "1.2 s",
             "候选时长单位必须由 localization catalog 按当前语言呈现")
+        expect(
+            chinese.format(.aiCueCandidateNumbered, Int64(3)) == "候选 3"
+                && english.format(.aiCueCandidateNumbered, Int64(3)) == "Candidate 3"
+                && chinese.format(.aiCueCandidatePartial, Int64(2)).contains("2/3")
+                && english.format(.aiCueCandidatePartial, Int64(2)).contains("2 of 3"),
+            "numbered identity 与 partial 数量必须有同构双语 placeholder")
+        expect(
+            chinese.text(.aiCueErrorRequiredVoiceUnavailable).contains("所需音色")
+                && english.text(.aiCueErrorRequiredVoiceUnavailable).contains("required voice")
+                && chinese.text(.aiCueErrorNoValidCandidates).contains("没有返回可用候选")
+                && english.text(.aiCueErrorNoValidCandidates).contains("No usable candidate"),
+            "voice capability 与零有效候选不得退化为 credential 或通用错误")
 
         let values = ClaudioL10n.catalogValues()
         let pluralValues = ClaudioL10n.catalogPluralValues()
@@ -151,8 +171,10 @@ func runLocalizationSuites() {
             let source = values[key.rawValue] ?? [:]
             let englishValues = values[key.rawValue]?[ClaudioAppLanguage.english.rawValue] ?? ""
             let chineseValues = source[ClaudioAppLanguage.zhHans.rawValue] ?? ""
-            let sourcePlural = pluralValues[key.rawValue]?[ClaudioAppLanguage.zhHans.rawValue] ?? [:]
-            let englishPlural = pluralValues[key.rawValue]?[ClaudioAppLanguage.english.rawValue] ?? [:]
+            let sourcePlural =
+                pluralValues[key.rawValue]?[ClaudioAppLanguage.zhHans.rawValue] ?? [:]
+            let englishPlural =
+                pluralValues[key.rawValue]?[ClaudioAppLanguage.english.rawValue] ?? [:]
             expect(
                 (!chineseValues.isEmpty || !sourcePlural.isEmpty)
                     && (!englishValues.isEmpty || !englishPlural.isEmpty),
@@ -165,7 +187,8 @@ func runLocalizationSuites() {
                     + englishPlural.values.flatMap { placeholders(in: $0) })
             expect(
                 chinesePlaceholders == englishPlaceholders,
-                "placeholder signature must match for \(key.rawValue): \(chinesePlaceholders) vs \(englishPlaceholders)")
+                "placeholder signature must match for \(key.rawValue):"
+                    + " \(chinesePlaceholders) vs \(englishPlaceholders)")
         }
     }
 }

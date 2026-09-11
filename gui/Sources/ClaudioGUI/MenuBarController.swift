@@ -194,40 +194,75 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             profileID: .qwenSingapore)
         let aiCueQwenBeijingProvider = try! QwenAICueProvider(
             profileID: .qwenBeijing)
+        let aiCueRegistry: AICueProviderRegistry
+        let aiCueSenseAudioProvider: SenseAudioAICueProvider?
+        if let assetPolicy = AICueProviderRegistry.productionSenseAudioAssetPolicy {
+            let evidenceRegistry = AICueProviderRegistry(
+                evidenceGatedSenseAudioAssetPolicy: assetPolicy)
+            aiCueRegistry = evidenceRegistry
+            aiCueSenseAudioProvider = try! SenseAudioAICueProvider(registry: evidenceRegistry)
+        } else {
+            // SenseAudio remains absent from production selection until the official asset origin,
+            // credential-free GET contract and real TTS/SFX smoke have separate evidence.
+            aiCueRegistry = AICueProviderRegistry()
+            aiCueSenseAudioProvider = nil
+        }
+        var aiCueValidators: [AICueProviderProfileID: any AICueCredentialValidating] = [
+            .elevenLabsGlobal: aiCueElevenLabsProvider,
+            .miniMaxGlobal: aiCueMiniMaxProvider,
+        ]
+        if let aiCueSenseAudioProvider {
+            aiCueValidators[.senseAudioChina] = aiCueSenseAudioProvider
+        }
         let aiCueCredentialManager = AICueCredentialManager(
             vault: aiCueVault,
-            validators: [
-                .elevenLabsGlobal: aiCueElevenLabsProvider,
-                .miniMaxGlobal: aiCueMiniMaxProvider,
-            ])
+            registry: aiCueRegistry,
+            validators: aiCueValidators)
         let aiCueTemporaryRoot = ClaudioPaths.root.appendingPathComponent(
             "ai-cue-temporary",
             isDirectory: true)
-        let aiCueGenerator = try! AICueGenerationDispatcher(generators: [
+        var aiCueGenerators: [AICueProviderProfileID: any AICueGenerating] = [
             .elevenLabsGlobal: AICueGenerationEngine(
                 credentialManager: aiCueCredentialManager,
                 provider: aiCueElevenLabsProvider,
                 temporaryRoot: aiCueTemporaryRoot,
-                durationProbe: audioEnvironment.durationProbe),
+                durationProbe: audioEnvironment.durationProbe,
+                registry: aiCueRegistry),
             .miniMaxGlobal: AICueGenerationEngine(
                 credentialManager: aiCueCredentialManager,
                 provider: aiCueMiniMaxProvider,
                 temporaryRoot: aiCueTemporaryRoot,
-                durationProbe: audioEnvironment.durationProbe),
+                durationProbe: audioEnvironment.durationProbe,
+                registry: aiCueRegistry),
             .qwenSingapore: AICueGenerationEngine(
                 credentialManager: aiCueCredentialManager,
                 provider: aiCueQwenSingaporeProvider,
                 temporaryRoot: aiCueTemporaryRoot,
-                durationProbe: audioEnvironment.durationProbe),
+                durationProbe: audioEnvironment.durationProbe,
+                registry: aiCueRegistry),
             .qwenBeijing: AICueGenerationEngine(
                 credentialManager: aiCueCredentialManager,
                 provider: aiCueQwenBeijingProvider,
                 temporaryRoot: aiCueTemporaryRoot,
-                durationProbe: audioEnvironment.durationProbe),
-        ])
+                durationProbe: audioEnvironment.durationProbe,
+                registry: aiCueRegistry),
+        ]
+        if let aiCueSenseAudioProvider {
+            aiCueGenerators[.senseAudioChina] = AICueGenerationEngine(
+                credentialManager: aiCueCredentialManager,
+                candidateSetProvider: aiCueSenseAudioProvider,
+                temporaryRoot: aiCueTemporaryRoot,
+                durationProbe: audioEnvironment.durationProbe,
+                registry: aiCueRegistry)
+        }
+        let aiCueGenerator = try! AICueGenerationDispatcher(
+            generators: aiCueGenerators,
+            registry: aiCueRegistry)
         let aiCueViewModel = AICueGenerationViewModel(
             credentialManager: aiCueCredentialManager,
-            generator: aiCueGenerator)
+            generator: aiCueGenerator,
+            registry: aiCueRegistry,
+            providerPreferences: AICueProviderPreferences(registry: aiCueRegistry))
         let dynamicQuietObserver = DynamicQuietSystemObserver()
         let activityDiagnostics = makeActivityDiagnosticsModel()
         let soundPacksEditorNativeEffects = SoundPacksEditorNativeEffectsDispatcher(

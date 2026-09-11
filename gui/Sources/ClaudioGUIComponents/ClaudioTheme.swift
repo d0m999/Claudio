@@ -144,6 +144,12 @@ public enum ClaudioTheme {
             : Color(claudioHex: ClaudioColorHex.successLight)
     }
 
+    public static func warning(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(claudioHex: ClaudioColorHex.warningDark)
+            : Color(claudioHex: ClaudioColorHex.warningLight)
+    }
+
     public static func error(_ scheme: ColorScheme) -> Color {
         scheme == .dark
             ? Color(claudioHex: ClaudioColorHex.errorDark)

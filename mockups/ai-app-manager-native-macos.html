@@ -889,6 +889,24 @@
           speech: { path: '/api/v1/services/aigc/multimodal-generation/generation', model: 'qwen3-tts-instruct-flash', voice: 'Cherry', locales: ['zh*', 'en*'], header: 'X-DashScope-SSE: enable' }
         },
         disclosure: '本机直连北京 DashScope；不复用 Singapore key。保存不发模型请求，下一次显式生成才验证并可能计费。'
+      },
+      {
+        id: 'senseaudio-cn',
+        name: 'SenseAudio',
+        region: 'China',
+        origin: 'https://api.senseaudio.cn',
+        probe: 'POST /v1/get_voice',
+        authentication: 'Bearer',
+        credentialSlot: 'senseaudio-cn',
+        validationPolicy: 'readOnlyProbe',
+        productionEnabled: false,
+        output: 'TTS JSON hex / SFX credential-free remote MP3 assets',
+        routes: {
+          speech: { path: '/v1/t2a_v2', model: 'sensenova-tts-2.0', voice: 'female_0033_b', locales: ['zh*'], candidateSemantics: 'numbered', minimumAcceptedCount: 3 },
+          animal: { path: '/v1/sound-effects/generations', model: 'senseaudio-sfx-1.0-260626', voice: null, locales: ['zh*'], candidateSemantics: 'numbered', minimumAcceptedCount: 1 },
+          soundEffect: { path: '/v1/sound-effects/generations', model: 'senseaudio-sfx-1.0-260626', voice: null, locales: ['zh*'], candidateSemantics: 'numbered', minimumAcceptedCount: 1 }
+        },
+        disclosure: '仅用于确定性原型验收；.cn 是固定 API 路由，不代表数据驻留承诺。真实资源 origin、MIME、无鉴权 GET 与无重定向合同完成独立确认和付费 smoke 前，生产 allowlist 不暴露此 profile。'
       }
     ];
     const initialTTSStageKey = initialQuery.get('stage') || 'prompt';
@@ -901,7 +919,8 @@
       'elevenlabs-global': 'verified',
       'minimax-global': 'missing',
       'qwen-singapore': 'deferred',
-      'qwen-beijing': 'unavailable'
+      'qwen-beijing': 'unavailable',
+      'senseaudio-cn': 'missing'
     };
     const ttsPendingReplacementPreviousStates = {};
     const initialTTSCredentialValue = initialQuery.get('credential');
@@ -1313,7 +1332,8 @@
       const credential = ttsCredentialPresentation(currentTTSCredentialState());
       const profileOptions = ttsProviderProfiles.map(item => {
         const state = ttsCredentialPresentation(ttsCredentialStates[item.id]);
-        return `<button class="tts-profile-option ${item.id === profile.id ? 'active' : ''}" type="button" data-tts-action="select-profile" data-tts-profile="${item.id}" aria-pressed="${item.id === profile.id ? 'true' : 'false'}"><span class="tts-profile-name">${item.name} · ${item.region}</span><span class="tts-profile-detail">${ttsRouteLabels(item)}</span><span class="tts-profile-state">${state.label}</span></button>`;
+        const gate = item.productionEnabled === false ? ' · 生产门禁关闭' : '';
+        return `<button class="tts-profile-option ${item.id === profile.id ? 'active' : ''}" type="button" data-tts-action="select-profile" data-tts-profile="${item.id}" aria-pressed="${item.id === profile.id ? 'true' : 'false'}"><span class="tts-profile-name">${item.name} · ${item.region}${gate}</span><span class="tts-profile-detail">${ttsRouteLabels(item)}</span><span class="tts-profile-state">${state.label}</span></button>`;
       }).join('');
       return `<section class="tts-service-card" aria-label="AI 声音生成服务">
         <span class="tts-service-icon" aria-hidden="true">⌁</span>
@@ -1378,13 +1398,23 @@
     }
 
     function renderTTSCandidates() {
-      const rows = ttsCandidates.map(candidate => `<div class="tts-candidate-row">
+      const senseAudioPartial = currentTTSProfile().id === 'senseaudio-cn';
+      const visibleCandidates = senseAudioPartial
+        ? [
+            { id: '1', name: '候选 1', duration: '1.2 秒' },
+            { id: '3', name: '候选 3', duration: '1.6 秒' }
+          ]
+        : ttsCandidates;
+      const rows = visibleCandidates.map(candidate => `<div class="tts-candidate-row">
         ${renderTTSPlayButton(candidate)}
         <span><span class="tts-candidate-name">${candidate.id} · ${candidate.name}</span><span class="tts-candidate-meta"><span class="tts-sim-badge">${currentTTSProfile().name} ${currentTTSProfile().region} · 原型候选</span> · ${candidate.duration}</span></span>
         ${ttsWave()}
         <button class="tts-small-button" type="button" data-tts-action="adopt" data-tts-candidate="${candidate.id}">采用并保存</button>
       </div>`).join('');
-      return `${renderTTSRequestSummary()}<div class="tts-candidate-list">${rows}</div>
+      const partialNotice = senseAudioPartial
+        ? '<div class="tts-capability-callout">仅生成 2/3 个可用候选；可试听并采用，或重新生成。</div>'
+        : '';
+      return `${renderTTSRequestSummary()}${partialNotice}<div class="tts-candidate-list">${rows}</div>
         <div class="tts-action-row"><span class="tts-helper">不自动播放 · 同时最多试听一个 · 采用前先停止试听</span><span style="display:flex;align-items:center;gap:6px"><button class="tts-link-button" type="button" data-tts-action="simulate-failure">预览失败态</button><button class="tts-secondary-button" type="button" data-tts-action="regenerate">重新生成</button></span></div>`;
     }
 

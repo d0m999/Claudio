@@ -353,9 +353,11 @@ func runAICueGenerationEngineSuites() async {
                 providerProfileID: .elevenLabsGlobal,
                 deadline: .startingNow())
             expect(
-                generation.candidates.map(\.variant) == [.clear, .brisk, .restrained],
+                generation.candidates.map(\.styledVariant)
+                    == AICueVariant.allCases.map(Optional.some),
                 "候选必须稳定按 A/B/C 返回")
             expect(generation.candidates.count == 3, "不能展示少于或多于三个候选")
+            expect(generation.completion == .complete, "legacy 三候选成功必须保持 complete")
             expect(generation.profileID == .elevenLabsGlobal, "generation 必须冻结 profile identity")
             expect(
                 generation.candidates.allSatisfy {

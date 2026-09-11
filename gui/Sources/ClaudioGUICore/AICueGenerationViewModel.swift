@@ -101,13 +101,19 @@ public final class AICueGenerationViewModel: ObservableObject {
     /// Deterministic, side-effect-free state injection for the repository visual/AX gallery.
     /// Production continues to reach these states only through the credential, generation and
     /// adoption operations above; this initializer supplies no alternate production transition.
-    public convenience init(previewState: AICueGenerationPreviewState) {
+    public convenience init(
+        previewState: AICueGenerationPreviewState,
+        registry: AICueProviderRegistry = AICueProviderRegistry()
+    ) {
         self.init(
             credentialManager: AICuePreviewCredentialManager(
                 status: previewState.credentialStatus ?? .missing),
             generator: AICuePreviewGenerator(),
             providerProfileID: previewState.providerProfileID,
-            providerPreferences: AICueProviderPreferences(defaults: UserDefaults()))
+            registry: registry,
+            providerPreferences: AICueProviderPreferences(
+                defaults: UserDefaults(),
+                registry: registry))
         credentialStatus = previewState.credentialStatus
         credentialActivity = previewState.credentialActivity
         credentialFailure = previewState.credentialFailure

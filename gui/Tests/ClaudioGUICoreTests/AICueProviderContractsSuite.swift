@@ -1,4 +1,5 @@
 import ClaudioGUICore
+import ClaudioLocalization
 import Foundation
 
 @MainActor
@@ -16,6 +17,11 @@ func runAICueProviderContractsSuites() {
             profiles.allSatisfy { $0.supportedModalities == Set($0.routes.keys) },
             "supportedModalities 必须只从 routes.keys 派生")
         expect(
+            profiles.allSatisfy { profile in
+                profile.routes.values.allSatisfy(\.candidateSetPolicy.isValid)
+            },
+            "每条 allowlisted route 都必须拥有有效的 candidate-set policy")
+        expect(
             profiles.map(\.displayNameKey) == [
                 .aiCueProviderProfileElevenLabsGlobal,
                 .aiCueProviderProfileMiniMaxGlobal,
@@ -23,6 +29,18 @@ func runAICueProviderContractsSuites() {
                 .aiCueProviderProfileQwenBeijing,
             ],
             "profile 的可见名称必须只引用双语 catalog key")
+        expect(
+            profiles.map(\.privacyDisclosureKey) == [
+                .aiCueCredentialPrivacy,
+                .aiCueCredentialPrivacyMiniMax,
+                .aiCueCredentialPrivacyQwenSingapore,
+                .aiCueCredentialPrivacyQwenBeijing,
+            ],
+            "逐 profile 隐私披露必须由 registry profile 提供")
+        expect(
+            (try? registry.profile(for: .senseAudioChina)) == nil
+                && AICueProviderRegistry.productionSenseAudioAssetPolicy == nil,
+            "真实资源 origin 与付费 smoke 前 production registry 不得暴露 SenseAudio")
         expect(
             try! registry.profile(for: .elevenLabsGlobal).supportedModalities
                 == Set(AICueModality.allCases),
@@ -75,7 +93,17 @@ func runAICueProviderContractsSuites() {
                 in: elevenLabs,
                 key: .speech,
                 with: copying(speechRoute, authentication: .bearerAPIKey)),
+            replacingRoute(
+                in: elevenLabs,
+                key: .speech,
+                with: copying(
+                    speechRoute,
+                    candidateSetPolicy: AICueCandidateSetPolicy(
+                        semantics: .numbered,
+                        requestedCount: 3,
+                        minimumAcceptedCount: 3))),
             copying(elevenLabs, credentialSlotID: .qwenSingapore),
+            copying(elevenLabs, privacyDisclosureKey: .aiCueCredentialPrivacyMiniMax),
             copying(qwen, regionID: "user-region"),
         ]
         for invalidProfile in invalidProfiles {
@@ -90,6 +118,57 @@ func runAICueProviderContractsSuites() {
         }
     }
 
+    suite("AI 提示音 Provider registry：fixture 可完整验证 gated SenseAudio 固定合同") {
+        let policy = try! AICueAssetPolicy(
+            allowedOrigins: [try! AICueAssetOrigin("https://assets.fixture.invalid")],
+            acceptedMediaTypes: ["audio/mpeg"])
+        let registry = AICueProviderRegistry(evidenceGatedSenseAudioAssetPolicy: policy)
+        let profile = try! registry.profile(for: .senseAudioChina)
+        expect(
+            registry.profiles().count == 5, "evidence fixture registry 必须包含唯一 SenseAudio profile")
+        expect(
+            profile.providerID == .senseAudio
+                && profile.credentialSlotID == .senseAudioChina
+                && profile.credentialValidationPolicy == .readOnlyProbe
+                && profile.regionID == "china",
+            "SenseAudio profile 身份、slot、probe policy 与固定 .cn 路由标记必须冻结")
+        expect(
+            profile.supportedModalities == [.speech, .animal, .soundEffect]
+                && profile.routes[.mixed] == nil,
+            "SenseAudio 只允许 speech/animal/soundEffect，mixed 必须失败关闭")
+        expect(
+            profile.routes[.speech]?.endpoint.absoluteString
+                == "https://api.senseaudio.cn/v1/t2a_v2"
+                && profile.routes[.speech]?.modelID == "sensenova-tts-2.0"
+                && profile.routes[.speech]?.voiceID == "female_0033_b"
+                && profile.routes[.speech]?.candidateSetPolicy
+                    == AICueCandidateSetPolicy(
+                        semantics: .numbered,
+                        requestedCount: 3,
+                        minimumAcceptedCount: 3),
+            "SenseAudio TTS 必须固定 route/model/voice 与三候选全成功")
+        expect(
+            profile.routes[.soundEffect]?.endpoint.absoluteString
+                == "https://api.senseaudio.cn/v1/sound-effects/generations"
+                && profile.routes[.soundEffect]?.modelID == "senseaudio-sfx-1.0-260626"
+                && profile.routes[.animal]
+                    == profile.routes[.soundEffect].map {
+                        AICueProviderRoute(
+                            modality: .animal,
+                            endpoint: $0.endpoint,
+                            modelID: $0.modelID,
+                            voiceID: $0.voiceID,
+                            supportedLanguageTags: $0.supportedLanguageTags,
+                            authentication: $0.authentication,
+                            transport: $0.transport,
+                            candidateSetPolicy: $0.candidateSetPolicy)
+                    }
+                && profile.routes[.soundEffect]?.candidateSetPolicy.minimumAcceptedCount == 1,
+            "animal/soundEffect 必须共享 fixed native-batch SFX route 并允许 1 个本地有效候选")
+        expect(
+            registry.assetPolicy(for: .senseAudioChina) == policy, "asset policy 必须由 registry 拥有")
+    }
+
     suite("AI 提示音 Provider registry：四个 profile 的 route、slot 与 policy 精确冻结") {
         let registry = AICueProviderRegistry()
         let elevenLabs = try! registry.profile(for: .elevenLabsGlobal)
@@ -101,6 +180,15 @@ func runAICueProviderContractsSuites() {
             elevenLabs.credentialSlotID == .legacyElevenLabs
                 && elevenLabs.credentialValidationPolicy == .readOnlyProbe,
             "ElevenLabs profile 必须继续映射旧 account 并使用只读 probe")
+        expect(
+            elevenLabs.routes.values.allSatisfy {
+                $0.candidateSetPolicy
+                    == AICueCandidateSetPolicy(
+                        semantics: .styled,
+                        requestedCount: 3,
+                        minimumAcceptedCount: 3)
+            },
+            "ElevenLabs 全部 route 必须保持 styled 三候选全成功")
         expect(
             elevenLabs.routes[.speech]?.endpoint.absoluteString
                 == "https://api.elevenlabs.io/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb"
@@ -118,7 +206,12 @@ func runAICueProviderContractsSuites() {
                 && miniMax.routes[.speech]?.modelID == "speech-2.8-hd"
                 && miniMax.routes[.speech]?.voiceID
                     == "Chinese (Mandarin)_Reliable_Executive"
-                && miniMax.routes[.speech]?.transport == .hexEncodedContainer,
+                && miniMax.routes[.speech]?.transport == .hexEncodedContainer
+                && miniMax.routes[.speech]?.candidateSetPolicy
+                    == AICueCandidateSetPolicy(
+                        semantics: .numbered,
+                        requestedCount: 3,
+                        minimumAcceptedCount: 3),
             "MiniMax profile 必须冻结 global slot、T2A route、voice 与 hex transport")
         expect(
             qwenSingapore.credentialSlotID == .qwenSingapore
@@ -147,6 +240,11 @@ func runAICueProviderContractsSuites() {
                                 bitsPerSample: 16,
                                 channels: 1,
                                 isLittleEndian: true))
+                    && $0.routes[.speech]?.candidateSetPolicy
+                        == AICueCandidateSetPolicy(
+                            semantics: .styled,
+                            requestedCount: 3,
+                            minimumAcceptedCount: 3)
             },
             "两个 Qwen region 必须共享固定 model/voice/auth/PCM，不共享 endpoint 或 slot")
     }
@@ -284,6 +382,7 @@ private func copying(
     _ profile: AICueProviderProfile,
     credentialSlotID: AICueCredentialSlotID? = nil,
     regionID: String? = nil,
+    privacyDisclosureKey: ClaudioL10nKey? = nil,
     routes: [AICueModality: AICueProviderRoute]? = nil
 ) -> AICueProviderProfile {
     AICueProviderProfile(
@@ -293,6 +392,7 @@ private func copying(
         credentialValidationPolicy: profile.credentialValidationPolicy,
         regionID: regionID ?? profile.regionID,
         displayNameKey: profile.displayNameKey,
+        privacyDisclosureKey: privacyDisclosureKey ?? profile.privacyDisclosureKey,
         routes: routes ?? profile.routes,
         constraints: profile.constraints)
 }
@@ -304,7 +404,8 @@ private func copying(
     modelID: String? = nil,
     voiceID: String? = nil,
     supportedLanguageTags: Set<String>? = nil,
-    authentication: AICueProviderAuthentication? = nil
+    authentication: AICueProviderAuthentication? = nil,
+    candidateSetPolicy: AICueCandidateSetPolicy? = nil
 ) -> AICueProviderRoute {
     AICueProviderRoute(
         modality: modality ?? route.modality,
@@ -313,7 +414,8 @@ private func copying(
         voiceID: voiceID ?? route.voiceID,
         supportedLanguageTags: supportedLanguageTags ?? route.supportedLanguageTags,
         authentication: authentication ?? route.authentication,
-        transport: route.transport)
+        transport: route.transport,
+        candidateSetPolicy: candidateSetPolicy ?? route.candidateSetPolicy)
 }
 
 private func throwsCompilationError(

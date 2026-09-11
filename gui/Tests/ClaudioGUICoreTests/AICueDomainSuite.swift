@@ -177,6 +177,26 @@ func runAICueDomainSuites() {
                 isPlaying: true,
                 language: .zhHans) == "停止候选 B · 轻快 · 1.7 秒",
             "正在播放候选必须公告停止动作、候选身份与时长")
+
+        let second = AICueCandidateOrdinal(rawValue: 2)!
+        expect(
+            localizedAICueCandidateTitle(
+                .numbered(second),
+                language: .english) == "Candidate 2",
+            "numbered 候选必须显示真实序号而不是伪造风格")
+        expect(
+            localizedAICueCandidatePreviewAccessibilityLabel(
+                identity: .numbered(second),
+                duration: "1.8 秒",
+                isPlaying: true,
+                language: .zhHans) == "停止候选 2 · 1.8 秒",
+            "numbered 候选的 VoiceOver 标签必须共享本地化序号")
+        expect(
+            aiCueCandidateAccessibilityIdentifierComponent(.styled(.clear)) == "clear",
+            "styled 候选必须保持现有 AX identifier component")
+        expect(
+            aiCueCandidateAccessibilityIdentifierComponent(.numbered(second)) == "numbered-2",
+            "numbered 候选必须使用不依赖数组位置的 AX identifier component")
     }
 }
 
