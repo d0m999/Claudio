@@ -2,6 +2,25 @@ import Foundation
 
 public typealias HostEventNoticeSender = @Sendable (HostEventNotice) -> EventNoticeSendOutcome
 
+/// The three values that only make sense together: raw bounded stdin payload, the GUI
+/// receiver's current epoch, and the best-effort sender. Bundling them keeps every call site
+/// from re-deriving the "is there a live notice channel?" predicate field by field.
+public struct HostEventNoticeChannel: Sendable {
+    public let sourcePayload: Data?
+    public let receiverEpoch: UUID
+    public let sender: HostEventNoticeSender
+
+    public init(
+        sourcePayload: Data?,
+        receiverEpoch: UUID,
+        sender: @escaping HostEventNoticeSender
+    ) {
+        self.sourcePayload = sourcePayload
+        self.receiverEpoch = receiverEpoch
+        self.sender = sender
+    }
+}
+
 /// 新版 `claudio hook` 一次调用的注入式环境。`playEnvironment` 必须使用该宿主自己的
 /// lock/state；构造器显式携带 host，以免测试或未来调用方误把两宿主又接回 legacy 全局去抖。
 public struct HostHookEnvironment: Sendable {
@@ -12,9 +31,7 @@ public struct HostHookEnvironment: Sendable {
     public let receiptStore: HostHookReceiptStore
     public let activityStore: LocalActivitySummaryStore?
     public let now: @Sendable () -> Date
-    public let sourcePayload: Data?
-    public let receiverEpoch: UUID?
-    public let eventNoticeSender: HostEventNoticeSender?
+    public let eventNoticeChannel: HostEventNoticeChannel?
 
     public init(
         host: HostID,
@@ -23,9 +40,7 @@ public struct HostHookEnvironment: Sendable {
         taskStartDebounceInterval: TimeInterval = 0.25,
         receiptStore: HostHookReceiptStore,
         activityStore: LocalActivitySummaryStore? = nil,
-        sourcePayload: Data? = nil,
-        receiverEpoch: UUID? = nil,
-        eventNoticeSender: HostEventNoticeSender? = nil,
+        eventNoticeChannel: HostEventNoticeChannel? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.host = host
@@ -37,9 +52,7 @@ public struct HostHookEnvironment: Sendable {
         self.taskStartDebounceInterval = taskStartDebounceInterval
         self.receiptStore = receiptStore
         self.activityStore = activityStore
-        self.sourcePayload = sourcePayload
-        self.receiverEpoch = receiverEpoch
-        self.eventNoticeSender = eventNoticeSender
+        self.eventNoticeChannel = eventNoticeChannel
         self.now = now
     }
 }
@@ -47,9 +60,7 @@ public struct HostHookEnvironment: Sendable {
 /// 生产 CLI 的单一环境工厂。宿主级锁/状态路径留在 Core 的路径事实源内，CLI 不自行拼装。
 public func systemHostHookEnvironment(
     for host: HostID,
-    sourcePayload: Data? = nil,
-    receiverEpoch: UUID? = nil,
-    eventNoticeSender: HostEventNoticeSender? = nil
+    eventNoticeChannel: HostEventNoticeChannel? = nil
 ) -> HostHookEnvironment {
     HostHookEnvironment(
         host: host,
@@ -64,9 +75,7 @@ public func systemHostHookEnvironment(
             installationsRoot: ClaudioPaths.activeInstallationsDirectory,
             installationLocksRoot: ClaudioPaths.activeInstallationLocksDirectory),
         activityStore: .production,
-        sourcePayload: sourcePayload,
-        receiverEpoch: receiverEpoch,
-        eventNoticeSender: eventNoticeSender)
+        eventNoticeChannel: eventNoticeChannel)
 }
 
 public struct HostHookHandlingOutcome: Sendable, Equatable {
@@ -173,15 +182,14 @@ public func handleHostHook(
             to: base.logFile,
             lockFile: base.logLockFile)
     }
-    if let receiverEpoch = environment.receiverEpoch,
-        let eventNoticeSender = environment.eventNoticeSender,
+    if let channel = environment.eventNoticeChannel,
         activeInstallationID == installationID,
         let binding = HostCapabilityCatalog.binding(host: host, nativeEvent: nativeEvent)
     {
-        let source = HostEventSourceParser.parse(host: host, data: environment.sourcePayload).source
+        let source = HostEventSourceParser.parse(host: host, data: channel.sourcePayload).source
         let notice = HostEventNotice(
             id: eventID,
-            receiverEpoch: receiverEpoch,
+            receiverEpoch: channel.receiverEpoch,
             surface: host.surfaceID,
             bindingID: binding.id,
             installationID: installationID,
@@ -189,7 +197,16 @@ public func handleHostHook(
             event: event,
             occurredAt: occurredAt,
             source: source)
-        _ = eventNoticeSender(notice)
+        // The send is best effort, but a known failure still earns one fixed redacted
+        // diagnostic code on the existing log path; the payload never leaves this process.
+        if case .dropped(let failure) = channel.sender(notice) {
+            appendLogLine(
+                event: event.cliName,
+                reason: "事件提示发送失败（\(failure.rawValue)）",
+                timestamp: occurredAt,
+                to: base.logFile,
+                lockFile: base.logLockFile)
+        }
     }
     return HostHookHandlingOutcome(
         host: host,

@@ -14,7 +14,9 @@ func runHostEventSourceSuites() {
         }
         expect(source.projectLabel == "同名项目", "项目展示名必须取 cwd 的末级安全标签")
         expect(source.sessionID == "12345678-abcdef", "session_id 必须保留有效会话身份")
-        expect(source.sessionLabel == "session · 12345678", "短会话标签必须显示真实前缀")
+        expect(
+            source.sessionLabel == nil,
+            "默认短会话标签由 GUI 侧本地化投影，helper 不得随 IPC 发送硬编码语言")
         expect(source.isParentSession, "子任务 payload 必须标注父会话，不得改用 agent_id 导航")
         expect(source.completeness == .complete, "项目与会话都存在时完整度必须为 complete")
     }

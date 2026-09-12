@@ -264,13 +264,14 @@ func runHostHookRunnerSuites() {
                 taskStartDebounceInterval: base.taskStartDebounceInterval,
                 receiptStore: base.receiptStore,
                 activityStore: base.activityStore,
-                sourcePayload: Data(
-                    #"{"cwd":"/tmp/same-name","session_id":"12345678-secret"}"#.utf8),
-                receiverEpoch: epoch,
-                eventNoticeSender: { notice in
-                    collector.append(notice)
-                    return .sent
-                },
+                eventNoticeChannel: HostEventNoticeChannel(
+                    sourcePayload: Data(
+                        #"{"cwd":"/tmp/same-name","session_id":"12345678-secret"}"#.utf8),
+                    receiverEpoch: epoch,
+                    sender: { notice in
+                        collector.append(notice)
+                        return .sent
+                    }),
                 now: base.now)
             let outcome = handleHostHook(
                 host: .codex,
@@ -312,9 +313,10 @@ func runHostHookRunnerSuites() {
                     logFile: base.playEnvironment.logFile,
                     logLockFile: base.playEnvironment.logLockFile),
                 receiptStore: base.receiptStore,
-                sourcePayload: Data(#"{"cwd":"/tmp/same-name"}"#.utf8),
-                receiverEpoch: epoch,
-                eventNoticeSender: { _ in .dropped(.endpointClosed) },
+                eventNoticeChannel: HostEventNoticeChannel(
+                    sourcePayload: Data(#"{"cwd":"/tmp/same-name"}"#.utf8),
+                    receiverEpoch: epoch,
+                    sender: { _ in .dropped(.endpointClosed) }),
                 now: base.now)
             let dropped = handleHostHook(
                 host: .codex,
@@ -324,6 +326,13 @@ func runHostHookRunnerSuites() {
             expect(
                 dropped?.playbackResult == .played && dropped?.receiptWritten == true,
                 "发送失败不得改变既有 hook 成功退出所依赖的播放与回执语义")
+            let logAfterDrop = (try? String(contentsOf: base.playEnvironment.logFile)) ?? ""
+            expect(
+                logAfterDrop.contains("endpoint_closed"),
+                "已知发送失败必须在日志留下固定脱敏诊断码")
+            expect(
+                !logAfterDrop.contains("same-name"),
+                "诊断码不得夹带来源 payload 内容")
         }
     }
 

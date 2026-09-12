@@ -13,6 +13,7 @@ package struct SettingsRootView: View {
     @ObservedObject var dynamicQuietPolicy: DynamicQuietPolicyController
     @ObservedObject var settingsPresentationSession: SettingsPresentationSession
     @ObservedObject var activityDiagnostics: ActivityDiagnosticsModel
+    @ObservedObject var eventNoticeHealth: EventNoticeHealthStore
     @ObservedObject var globalShortcutSettings: GlobalShortcutSettingsModel
     @ObservedObject var aboutSettings: AboutSettingsModel
     let soundPacksEditorOwner: SoundPacksEditorOwner
@@ -41,6 +42,7 @@ package struct SettingsRootView: View {
         _dynamicQuietPolicy = ObservedObject(wrappedValue: dependencies.dynamicQuietPolicy)
         _settingsPresentationSession = ObservedObject(wrappedValue: session)
         _activityDiagnostics = ObservedObject(wrappedValue: dependencies.activityDiagnostics)
+        _eventNoticeHealth = ObservedObject(wrappedValue: dependencies.eventNoticeHealth)
         _globalShortcutSettings = ObservedObject(
             wrappedValue: dependencies.globalShortcutSettings)
         _aboutSettings = ObservedObject(wrappedValue: dependencies.aboutSettings)
@@ -489,6 +491,21 @@ package struct SettingsRootView: View {
                         )
                     )
                     .accessibilityIdentifier("settings.notifications.event-source-prompts")
+
+                    if eventNoticeHealth.status == .unavailable,
+                        let failureCode = eventNoticeHealth.failureCode
+                    {
+                        Text(
+                            l10n.format(
+                                .settingsNotificationsEventSourceReceiverUnavailable,
+                                failureCode)
+                        )
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier(
+                            "settings.notifications.event-source-receiver-unavailable")
+                    }
 
                     Divider()
 

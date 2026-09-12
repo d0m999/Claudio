@@ -78,11 +78,11 @@ public enum EventNoticeTransport {
             return .dropped(.messageTooLarge)
         }
 
-        let descriptorFD = socket(AF_UNIX, SOCK_DGRAM, 0)
-        guard descriptorFD >= 0 else { return .dropped(.socketFailed) }
-        defer { _ = Darwin.close(descriptorFD) }
-        let flags = fcntl(descriptorFD, F_GETFL)
-        guard flags >= 0, fcntl(descriptorFD, F_SETFL, flags | O_NONBLOCK) == 0 else {
+        let socketFD = socket(AF_UNIX, SOCK_DGRAM, 0)
+        guard socketFD >= 0 else { return .dropped(.socketFailed) }
+        defer { _ = Darwin.close(socketFD) }
+        let flags = fcntl(socketFD, F_GETFL)
+        guard flags >= 0, fcntl(socketFD, F_SETFL, flags | O_NONBLOCK) == 0 else {
             return .dropped(.socketFailed)
         }
 
@@ -96,7 +96,7 @@ public enum EventNoticeTransport {
             return withUnsafePointer(to: &address) { pointer in
                 pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
                     Darwin.sendto(
-                        descriptorFD,
+                        socketFD,
                         baseAddress,
                         rawBuffer.count,
                         MSG_DONTWAIT,
@@ -443,6 +443,19 @@ public enum EventNoticeReceiverError: Error, Sendable, Equatable, CustomStringCo
         case .descriptorTooLarge: "event notice descriptor is too large"
         case .descriptorWriteFailed(let errno):
             "event notice descriptor write failed (errno \(errno))"
+        }
+    }
+
+    /// Fixed redacted code for health surfaces; never carries errno, paths, or payload.
+    public var diagnosticCode: String {
+        switch self {
+        case .ownerBusy: "owner_busy"
+        case .ownerLockFailed: "owner_lock_failed"
+        case .directoryFailed: "directory_failed"
+        case .socketFailed: "socket_failed"
+        case .socketPathTooLong: "socket_path_too_long"
+        case .descriptorTooLarge: "descriptor_too_large"
+        case .descriptorWriteFailed: "descriptor_write_failed"
         }
     }
 }

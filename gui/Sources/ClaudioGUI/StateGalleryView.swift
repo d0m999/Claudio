@@ -418,14 +418,29 @@ private struct EventNoticeGalleryFrame: View {
     let language: ClaudioAppLanguage
     let scenario: EventNoticeGalleryScenario
 
+    /// Shared mutable flag so the DEBUG "Route OK / Route Fail" buttons decide what the next
+    /// simulated navigation returns. Simulation never leaves this gallery (SPEC S8).
+    private final class RouteSimulationBox {
+        var succeeds = true
+    }
+
     @StateObject private var model: EventNoticeModel
     @StateObject private var languageStore: ClaudioPreferences
+    @StateObject private var navigationCoordinator: SessionNavigationCoordinator
+    private let routeSimulation: RouteSimulationBox
 
     init(language: ClaudioAppLanguage, scenario: EventNoticeGalleryScenario) {
         self.language = language
         self.scenario = scenario
+        let routeSimulation = RouteSimulationBox()
+        self.routeSimulation = routeSimulation
         _model = StateObject(wrappedValue: EventNoticeModel(receiverEpoch: UUID()))
         _languageStore = StateObject(wrappedValue: ClaudioPreferences(previewLanguage: language))
+        _navigationCoordinator = StateObject(
+            wrappedValue: SessionNavigationCoordinator { _ in
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                return routeSimulation.succeeds ? .succeeded : .failed
+            })
     }
 
     var body: some View {
@@ -434,7 +449,10 @@ private struct EventNoticeGalleryFrame: View {
                 model: model,
                 languageStore: languageStore,
                 onViewSource: { _ in model.openRecent() },
-                onCopySessionID: { _ in false },
+                onCopySessionID: { _ in
+                    navigationCoordinator.markCopied()
+                    return true
+                },
                 onClose: { model.dismiss() })
 
             HStack(spacing: 6) {
@@ -446,12 +464,42 @@ private struct EventNoticeGalleryFrame: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
 
-            Text("Model-driven DEBUG controls · no host route or disk history")
+            HStack(spacing: 6) {
+                Button("Route OK") { simulateRoute(succeeds: true) }
+                Button("Route Fail") { simulateRoute(succeeds: false) }
+                Text("Route: \(String(describing: navigationCoordinator.result))")
+                    .font(.system(size: 9, design: .rounded))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Text("Model-driven DEBUG controls · simulated route only, no host navigation")
                 .font(.system(size: 9, design: .rounded))
                 .foregroundColor(.secondary)
         }
         .padding(8)
         .onAppear(perform: seed)
+    }
+
+    /// S8 route simulation: builds a verified target from the current notice's own safe source
+    /// fields, so success/failure is exercised without promising any real host navigation.
+    private func simulateRoute(succeeds: Bool) {
+        routeSimulation.succeeds = succeeds
+        guard
+            let notice = model.snapshot.current?.notice,
+            let source = notice.source,
+            let sessionID = source.sessionID
+        else {
+            navigationCoordinator.reset()
+            return
+        }
+        let target = SessionNavigationTarget(
+            surface: notice.surface,
+            projectKey: source.projectKey,
+            sessionID: sessionID)
+        navigationCoordinator.openSession(
+            sessionNavigationCapability(for: notice, verifiedTarget: target))
     }
 
     private func seed() {
@@ -505,8 +553,7 @@ private func makeEventNoticeGalleryNotice(
             : HostEventSource(
                 projectLabel: language == .english ? "Orbit Signals" : "Orbit 示例项目",
                 projectKey: "debug-gallery-project",
-                sessionID: "12345678-debug-gallery",
-                sessionLabel: "session · 12345678"))
+                sessionID: "12345678-debug-gallery"))
 }
 
 @MainActor

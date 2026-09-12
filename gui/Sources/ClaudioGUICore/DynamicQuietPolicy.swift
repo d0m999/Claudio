@@ -223,6 +223,17 @@ public struct DynamicQuietPresentation: Sendable, Equatable {
         self.hasObserverFailure = hasObserverFailure
         self.snapshotHealth = snapshotHealth
     }
+
+    /// Whether an active system quiet fact should suppress automatic UI presentation
+    /// (event notices, etc.). Audio semantics keep their own existing mapping.
+    public var suppressesAutomaticPresentations: Bool {
+        switch currentReason {
+        case .focusActive, .calendarBusy, .focusAndCalendarBusy:
+            return true
+        case .policiesDisabled, .permissionRequired, .noDynamicQuiet, .observerFailure:
+            return false
+        }
+    }
 }
 
 /// App-lifetime Dynamic Quiet State owner. The system adapter supplies two independent minimized

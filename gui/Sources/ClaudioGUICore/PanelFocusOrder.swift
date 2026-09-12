@@ -86,7 +86,9 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         let hasResetSurface,
         let hasConfigFailureNotice,
         let bootstrapReportActions):
-        var order: [PanelFocusTarget] = [.soundScope, .recentNotices]
+        // 近期入口在 header（Settings 旁、Sound Scope 之上），焦点序与视觉序一致：
+        // 排在 Settings 与 Sound Scope 之间。
+        var order: [PanelFocusTarget] = [.recentNotices, .soundScope]
         order.append(contentsOf: bootstrapReportActions)
         if hasConfigFailureNotice { order.append(.configReveal) }
         for event in events {
@@ -121,12 +123,18 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
 }
 
 /// 面板打开时落在当前真实可操作顺序的第一项。operational 永远至少有声音作用域与退出。
+/// 例外：近期提示入口按 spec 在 Tab 序中排在 Sound Scope 之前，但打开焦点必须继续落在
+/// 声音作用域——面板的主任务是对声音作用域的直接操作，提示入口只做阅读。
 public func panelFirstFocusTarget(
     _ scope: PanelFocusScope,
     nonOperableActionEvents _: Set<Event> = [],
     ctaOperable: Bool = true
 ) -> PanelFocusTarget? {
-    panelFocusOrder(scope).first { target in
+    let order = panelFocusOrder(scope)
+    if case .operational = scope, order.contains(.soundScope) {
+        return .soundScope
+    }
+    return order.first { target in
         switch target {
         case .onboardingPrimaryAction, .onboardingSecondaryAction, .disconnect, .revealDetail:
             return ctaOperable

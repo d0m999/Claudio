@@ -94,7 +94,9 @@ public struct HostEventSource: Codable, Sendable, Equatable, Hashable {
         case completeness
     }
 
-    private static func containsUnsafeScalar(_ value: String) -> Bool {
+    /// Single owner of the unsafe-scalar rule. The parser and cross-process validation both
+    /// reuse it so an untrusted datagram can never meet a looser second copy.
+    static func containsUnsafeScalar(_ value: String) -> Bool {
         value.unicodeScalars.contains { scalar in
             let number = scalar.value
             return number <= 0x1F || number == 0x7F || (0x80...0x9F).contains(number)
@@ -103,6 +105,24 @@ public struct HostEventSource: Codable, Sendable, Equatable, Hashable {
                     0x2066, 0x2067, 0x2068, 0x2069,
                 ].contains(Int(number))
         }
+    }
+
+    /// Single owner of the bounded display-size rule shared by the parser and notice validation.
+    static func displayBytes(of source: HostEventSource) -> Int {
+        [source.projectLabel, source.sessionLabel, source.sessionID]
+            .compactMap { $0 }
+            .reduce(0) { $0 + $1.utf8.count }
+    }
+
+    /// Shared sanitize preamble: fold line/tab breaks into spaces, reject unsafe scalars,
+    /// collapse whitespace runs. Returns nil when nothing safe remains.
+    static func normalizeWhitespace(_ value: String) -> String? {
+        let folded = value.replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+        guard !containsUnsafeScalar(folded) else { return nil }
+        let normalized = folded.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        return normalized.isEmpty ? nil : normalized
     }
 }
 
@@ -203,7 +223,6 @@ public enum HostEventSourceParser {
             projectLabel: projectInfo?.label,
             projectKey: projectInfo?.key,
             sessionID: safeSession,
-            sessionLabel: safeSession.map(shortSessionLabel),
             isParentSession: parentResult.value,
             completeness: .forFields(
                 hasProject: projectInfo != nil,
@@ -211,7 +230,7 @@ public enum HostEventSourceParser {
         guard source.completeness != .unknown else {
             return .unavailable(reason: .empty, partial: nil)
         }
-        guard sourceDisplayBytes(source) <= maximumDisplayBytes else {
+        guard HostEventSource.displayBytes(of: source) <= maximumDisplayBytes else {
             return .unavailable(reason: .oversized, partial: nil)
         }
         return .available(source)
@@ -241,11 +260,12 @@ public enum HostEventSourceParser {
             sanitizeIdentifier($0, maximumBytes: maximumSessionIDBytes)
         }
         guard projectLabel != nil || safeSession != nil else { return nil }
+        // The default short session label is projected and localized GUI-side; the transport
+        // field stays nil until an adapter earns an explicit trusted title (SPEC 来源合同).
         return HostEventSource(
             projectLabel: projectLabel,
             projectKey: projectKey,
             sessionID: safeSession,
-            sessionLabel: safeSession.map(shortSessionLabel),
             isParentSession: isParentSession)
     }
 
@@ -260,11 +280,6 @@ public enum HostEventSourceParser {
         let digest = SHA256.hash(data: Data(cwd.utf8))
         let key = digest.map { String(format: "%02x", $0) }.joined()
         return (label, key)
-    }
-
-    private static func shortSessionLabel(_ sessionID: String) -> String {
-        let prefix = String(sessionID.prefix(8))
-        return "session · \(prefix)"
     }
 
     private enum StringFieldResult: Equatable {
@@ -304,22 +319,12 @@ public enum HostEventSourceParser {
     }
 
     private static func sanitizeIdentifier(_ value: String, maximumBytes: Int) -> String? {
-        let folded = value.replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-            .replacingOccurrences(of: "\t", with: " ")
-        guard !containsUnsafeScalar(folded) else { return nil }
-        let normalized = folded.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-        guard !normalized.isEmpty else { return nil }
+        guard let normalized = HostEventSource.normalizeWhitespace(value) else { return nil }
         return prefixByUTF8Bytes(normalized, maximumBytes: maximumBytes)
     }
 
     private static func sanitizeLabel(_ value: String, maximumScalars: Int) -> String? {
-        let folded = value.replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-            .replacingOccurrences(of: "\t", with: " ")
-        guard !containsUnsafeScalar(folded) else { return nil }
-        let normalized = folded.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-        guard !normalized.isEmpty else { return nil }
+        guard let normalized = HostEventSource.normalizeWhitespace(value) else { return nil }
         var scalarCount = 0
         var result = ""
         for character in normalized {
@@ -341,23 +346,6 @@ public enum HostEventSourceParser {
             count += bytes
         }
         return result.isEmpty ? nil : result
-    }
-
-    private static func sourceDisplayBytes(_ source: HostEventSource) -> Int {
-        [source.projectLabel, source.sessionLabel, source.sessionID]
-            .compactMap { $0 }
-            .reduce(0) { $0 + $1.utf8.count }
-    }
-
-    private static func containsUnsafeScalar(_ value: String) -> Bool {
-        value.unicodeScalars.contains(where: { scalar in
-            let value = scalar.value
-            return value <= 0x1F || value == 0x7F || (0x80...0x9F).contains(value)
-                || [
-                    0x202A, 0x202B, 0x202C, 0x202D, 0x202E,
-                    0x2066, 0x2067, 0x2068, 0x2069,
-                ].contains(Int(value))
-        })
     }
 
     /// `JSONSerialization` collapses duplicate keys. Scan only the top-level object so the
@@ -529,7 +517,7 @@ public struct HostEventNotice: Codable, Sendable, Equatable, Hashable, Identifia
         guard sourceCompleteness == expectedCompleteness else { return false }
         return source.map {
             $0.isSemanticallyValid
-                && sourceDisplayBytes($0) <= HostEventSourceParser.maximumDisplayBytes
+                && HostEventSource.displayBytes(of: $0) <= HostEventSourceParser.maximumDisplayBytes
         } ?? true
     }
 
@@ -545,11 +533,5 @@ public struct HostEventNotice: Codable, Sendable, Equatable, Hashable, Identifia
         case occurredAt = "occurred_at"
         case source
         case sourceCompleteness = "source_completeness"
-    }
-
-    private func sourceDisplayBytes(_ source: HostEventSource) -> Int {
-        [source.projectLabel, source.sessionLabel, source.sessionID]
-            .compactMap { $0 }
-            .reduce(0) { $0 + $1.utf8.count }
     }
 }

@@ -16,6 +16,9 @@ package struct SettingsPresentationDependencies {
     package let hostIntegrations: HostIntegrationPresentationStore
     package let integrationsModel: IntegrationDestinationModel
     package let aiCueViewModel: AICueGenerationViewModel
+    /// Receiver health for the event-source prompts toggle row. Defaults to a detached store
+    /// so fixtures and harness targets stay unchanged; production injects the runtime's store.
+    package let eventNoticeHealth: EventNoticeHealthStore
 
     package init(
         preferences: ClaudioPreferences,
@@ -29,7 +32,8 @@ package struct SettingsPresentationDependencies {
         eventSettingsModel: PanelConfigController,
         hostIntegrations: HostIntegrationPresentationStore,
         integrationsModel: IntegrationDestinationModel,
-        aiCueViewModel: AICueGenerationViewModel
+        aiCueViewModel: AICueGenerationViewModel,
+        eventNoticeHealth: EventNoticeHealthStore? = nil
     ) {
         self.preferences = preferences
         self.loginItemSettings = loginItemSettings
@@ -43,5 +47,6 @@ package struct SettingsPresentationDependencies {
         self.hostIntegrations = hostIntegrations
         self.integrationsModel = integrationsModel
         self.aiCueViewModel = aiCueViewModel
+        self.eventNoticeHealth = eventNoticeHealth ?? EventNoticeHealthStore()
     }
 }

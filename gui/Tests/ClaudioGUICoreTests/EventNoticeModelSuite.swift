@@ -68,8 +68,7 @@ private func makeEventNotice(
     source: HostEventSource? = HostEventSource(
         projectLabel: "same-name",
         projectKey: "project-key",
-        sessionID: "12345678-abcdef",
-        sessionLabel: "session · 12345678")
+        sessionID: "12345678-abcdef")
 ) -> HostEventNotice {
     let binding = HostCapabilityCatalog.binding(host: .codex, nativeEvent: "Stop")!
     return HostEventNotice(
@@ -323,5 +322,25 @@ func runEventNoticeModelSuites() {
             event: binding.event,
             occurredAt: Date())
         expect(model.accept(invalid) == .invalid, "不匹配 binding 的 notice 必须拒绝")
+    }
+
+    suite("EventNoticeModel：相同到达时间的记录按接收次序确定排序") {
+        let epoch = UUID()
+        let clock = EventNoticeClock()
+        let scheduler = ManualEventNoticeScheduler()
+        let model = EventNoticeModel(
+            receiverEpoch: epoch,
+            now: { clock.value },
+            scheduler: scheduler.scheduler())
+        // 固定时钟让三条记录拿到完全相同的 expiresAt；次序只能来自到达序，不得依赖排序稳定性。
+        let first = makeEventNotice(epoch: epoch)
+        let second = makeEventNotice(epoch: epoch)
+        let third = makeEventNotice(epoch: epoch)
+        _ = model.accept(first)
+        _ = model.accept(second)
+        _ = model.accept(third)
+        expect(
+            model.snapshot.recent.map(\.id) == [third.id, second.id, first.id],
+            "相同 expiresAt 的记录必须按到达先后确定排序（最新在前），不得依赖 sorted 稳定性")
     }
 }

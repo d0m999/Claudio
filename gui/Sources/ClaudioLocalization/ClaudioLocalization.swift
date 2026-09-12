@@ -267,6 +267,13 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let eventNoticeCopied: Self = "event-notice.copied"
     public static let eventNoticeNavigationUnavailable: Self =
         "event-notice.navigation-unavailable"
+    public static let eventNoticeNewNotices: Self = "event-notice.new-notices"
+    public static let eventNoticeOccurredAt: Self = "event-notice.occurred-at"
+    public static let eventNoticeRecentDisclaimer: Self = "event-notice.recent-disclaimer"
+    public static let eventNoticeRecentOverflow: Self = "event-notice.recent-overflow"
+    public static let eventNoticeSessionShort: Self = "event-notice.session-short"
+    public static let settingsNotificationsEventSourceReceiverUnavailable: Self =
+        "settings.notifications.event-source-receiver-unavailable"
     public static let cellAudible: Self = "cell.audible"
     public static let cellMuted: Self = "cell.muted"
     public static let cellMasterVolumeZero: Self = "cell.master-volume-zero"
@@ -1421,6 +1428,9 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .eventNoticeExpandHint,
         .eventNoticeCollapseHint, .eventNoticeViewSource, .eventNoticeCopySession,
         .eventNoticeCopied, .eventNoticeNavigationUnavailable,
+        .eventNoticeNewNotices, .eventNoticeOccurredAt, .eventNoticeRecentDisclaimer,
+        .eventNoticeRecentOverflow, .eventNoticeSessionShort,
+        .settingsNotificationsEventSourceReceiverUnavailable,
         .cellAudible, .cellMuted, .cellMasterVolumeZero, .cellMissingSound, .cellNotConnected,
         .cellAwaitingActivation, .cellLegacy, .cellUnsupported, .cellDegraded,
         .hostPlaybackPlayed, .hostPlaybackMuted, .hostPlaybackDebounced, .hostPlaybackNotReady,

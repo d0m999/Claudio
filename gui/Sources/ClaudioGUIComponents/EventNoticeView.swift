@@ -57,7 +57,9 @@ public struct EventNoticeView: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(accessibilitySummary(snapshot.current))
+        .accessibilityLabel(
+            EventNoticeProjection.accessibilitySummary(
+                for: snapshot.current, language: languageStore.language))
         .accessibilityIdentifier("event-notice.capsule")
     }
 
@@ -132,22 +134,48 @@ public struct EventNoticeView: View {
     }
 
     private func recentList(_ records: [EventNoticeRecord]) -> some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 2) {
-                ForEach(Array(records.prefix(50))) { record in
-                    Button {
-                        model.selectRecent(id: record.id)
-                    } label: {
-                        recentRow(record)
+        let snapshot = model.snapshot
+        return VStack(alignment: .leading, spacing: 4) {
+            // Frozen while reading: new arrivals only move the badge until the user explicitly
+            // asks for them, so focus never drifts across a changing list (SPEC S5/D6).
+            if snapshot.pendingCount > 0 {
+                Button {
+                    model.refreshRecent()
+                } label: {
+                    Text(l10n.format(.eventNoticeNewNotices, Int64(snapshot.pendingCount)))
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .frame(minHeight: 28)
+                .accessibilityIdentifier("event-notice.refresh-recent")
+            }
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(records.prefix(50))) { record in
+                        Button {
+                            model.selectRecent(id: record.id)
+                        } label: {
+                            recentRow(record)
+                        }
+                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
+                        .accessibilityIdentifier("event-notice.recent.\(record.id.uuidString)")
                     }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
-                    .accessibilityIdentifier("event-notice.recent.\(record.id.uuidString)")
                 }
             }
+            .frame(maxHeight: 180)
+            .accessibilityIdentifier("event-notice.recent-list")
+            Text(l10n.text(.eventNoticeRecentDisclaimer))
+                .font(.system(size: 9, design: .rounded))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+            if snapshot.droppedCount > 0 {
+                Text(l10n.text(.eventNoticeRecentOverflow))
+                    .font(.system(size: 9, design: .rounded))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                    .accessibilityIdentifier("event-notice.recent-overflow")
+            }
         }
-        .frame(maxHeight: 180)
-        .accessibilityIdentifier("event-notice.recent-list")
     }
 
     private func recentRow(_ record: EventNoticeRecord) -> some View {
@@ -189,15 +217,27 @@ public struct EventNoticeView: View {
         includeFullSessionID: Bool
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            if includeFullSessionID, let sessionID = record.source?.sessionID {
-                Text(l10n.text(.eventNoticeSessionID))
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                Text(sessionID)
-                    .font(.system(size: 10, design: .monospaced))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("event-notice.session-id")
+            if includeFullSessionID {
+                if let occurredAtText = EventNoticeProjection.occurredAtText(
+                    for: record, language: languageStore.language)
+                {
+                    Text(l10n.text(.eventNoticeOccurredAt))
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                    Text(occurredAtText)
+                        .font(.system(size: 10, design: .rounded))
+                        .accessibilityIdentifier("event-notice.occurred-at")
+                }
+                if let sessionID = record.source?.sessionID {
+                    Text(l10n.text(.eventNoticeSessionID))
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                    Text(sessionID)
+                        .font(.system(size: 10, design: .monospaced))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("event-notice.session-id")
+                }
             }
 
             HStack(spacing: 7) {
@@ -240,32 +280,11 @@ public struct EventNoticeView: View {
     }
 
     private func primaryLine(_ record: EventNoticeRecord) -> String {
-        let host = record.notice?.host?.displayName ?? l10n.text(.eventNoticeUnknownSource)
-        let event = localizedEventName(record.event, language: languageStore.language)
-        return "\(host) · \(event)"
+        EventNoticeProjection.primaryLine(for: record, language: languageStore.language)
     }
 
     private func secondaryLine(_ record: EventNoticeRecord) -> String {
-        guard let source = record.source else {
-            return l10n.text(.eventNoticeUnknownSource)
-        }
-        let project = source.projectLabel ?? l10n.text(.eventNoticeUnknownProject)
-        let session: String
-        if let sessionLabel = source.sessionLabel {
-            session =
-                source.isParentSession
-                ? "\(sessionLabel) · \(l10n.text(.eventNoticeParentSession))"
-                : sessionLabel
-        } else {
-            session = l10n.text(.eventNoticeUnknownSession)
-        }
-        return "\(project) · \(session)"
-    }
-
-    private func accessibilitySummary(_ record: EventNoticeRecord?) -> String {
-        guard let record else { return l10n.text(.eventNoticeUnknownSource) }
-        return [primaryLine(record), secondaryLine(record)]
-            .joined(separator: languageStore.language == .english ? ", " : "，")
+        EventNoticeProjection.secondaryLine(for: record, language: languageStore.language)
     }
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }

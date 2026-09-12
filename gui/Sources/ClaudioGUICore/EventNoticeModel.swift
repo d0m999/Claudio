@@ -183,6 +183,9 @@ public final class EventNoticeModel: ObservableObject {
         let event: Event
         let occurredAt: Date?
         let expiresAt: TimeInterval
+        /// Monotonic per-model arrival counter. Ordering is a total (expiresAt, arrivalOrdinal)
+        /// key comparison, so same-tick arrivals never depend on sort stability.
+        let arrivalOrdinal: UInt64
         var notice: HostEventNotice?
         var status: EventNoticeRecordStatus
         var isExpired: Bool
@@ -207,6 +210,7 @@ public final class EventNoticeModel: ObservableObject {
     private var expiryRevision: UInt64 = 0
     private var badgeRevision: UInt64 = 0
     private var droppedCount = 0
+    private var nextArrivalOrdinal: UInt64 = 0
 
     public init(
         receiverEpoch: UUID,
@@ -266,9 +270,11 @@ public final class EventNoticeModel: ObservableObject {
             event: notice.event,
             occurredAt: notice.occurredAt,
             expiresAt: now() + Self.retentionDuration,
+            arrivalOrdinal: nextArrivalOrdinal,
             notice: notice,
             status: .queued,
             isExpired: false)
+        nextArrivalOrdinal &+= 1
         entries.append(entry)
 
         let currentIsExpired =
@@ -289,10 +295,6 @@ public final class EventNoticeModel: ObservableObject {
     public func accept<S: Sequence>(contentsOf notices: S) -> [EventNoticeAcceptance]
     where S.Element == HostEventNotice {
         notices.map(accept)
-    }
-
-    public func receive(_ notice: HostEventNotice) -> EventNoticeAcceptance {
-        accept(notice)
     }
 
     public func setHovering(_ isHovering: Bool) {
@@ -670,7 +672,9 @@ public final class EventNoticeModel: ObservableObject {
         } else {
             filtered = entries
         }
-        return filtered.sorted { $0.expiresAt > $1.expiresAt }
+        return filtered.sorted {
+            ($0.expiresAt, $0.arrivalOrdinal) > ($1.expiresAt, $1.arrivalOrdinal)
+        }
     }
 
     private func record(_ entry: Entry) -> EventNoticeRecord {

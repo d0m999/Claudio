@@ -54,7 +54,7 @@ func runPanelFocusOrderSuites() {
             [PanelFocusTarget.eventPreview($0), .eventMute($0)]
         }
         expect(
-            order == [.soundScope, .recentNotices] + eventTargets
+            order == [.recentNotices, .soundScope] + eventTargets
                 + [.masterVolume, .openSoundSettings, .quitApplication],
             "Global 正常焦点顺序错误：\(order)")
         expect(
@@ -135,7 +135,7 @@ func runPanelFocusOrderSuites() {
                 hasConfigFailureNotice: true,
                 bootstrapReportActions: actions))
         expect(
-            order == [.soundScope, .recentNotices] + actions + [.configReveal, .quitApplication],
+            order == [.recentNotices, .soundScope] + actions + [.configReveal, .quitApplication],
             "恢复动作视觉/焦点顺序错误：\(order)")
     }
 
@@ -147,7 +147,7 @@ func runPanelFocusOrderSuites() {
                 hasOpenSoundSettings: true,
                 hasResetSurface: false))
         expect(
-            order == [.soundScope, .recentNotices, .openSoundSettings, .quitApplication],
+            order == [.recentNotices, .soundScope, .openSoundSettings, .quitApplication],
             "needsPack 焦点顺序错误：\(order)")
     }
 }

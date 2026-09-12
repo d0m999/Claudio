@@ -84,6 +84,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         scheduleSettingsPresentationAnnouncementDelivery()
     }
 
+    /// Mutual exclusion with the top event-notice list (SPEC: 设置打开和顶部列表互斥显示).
+    /// Closing here must not run the stored focus restoration — the notice surface is about to
+    /// take the key status, and a popover reopen would steal it right back.
+    func closeForMutualExclusion() {
+        guard let window, window.isVisible else { return }
+        focusRestoration = nil
+        window.close()
+    }
+
     func windowDidBecomeKey(_ notification: Notification) {
         guard
             let keyWindow = notification.object as? NSWindow,
