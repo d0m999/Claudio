@@ -51,7 +51,7 @@ func attentionNotice(
     source: HostEventSource? = HostEventSource(
         projectLabel: "project", projectKey: "project-key", sessionID: "session-id",
         mainSessionIsKnown: true),
-    reason: HostEventNoticeReason? = nil, observed: TimeInterval? = nil
+    reason: HostEventNoticeReason? = .permission, observed: TimeInterval? = nil
 ) -> HostEventNotice {
     let binding = HostCapabilityCatalog.bindings(for: host).first { $0.nativeEvent == native }!
     return HostEventNotice(
@@ -95,6 +95,38 @@ func runEventNoticeModelSuites() {
             model.snapshot.isExpanded && model.snapshot.current == nil
                 && model.snapshot.recent.isEmpty, "零项仍可打开")
         model.dismiss(animated: false)
+    }
+
+    suite("Attention：淡入中的新事件不替换、不延长或自动排队") {
+        let clock = ManualEventNoticeScheduler()
+        let model = makeModel(clock)
+        let first = attentionNotice(epoch: model.receiverEpoch, native: "Stop")
+        expect(model.accept(first) == .accepted, "首个瞬时事件有效")
+        expect(
+            model.snapshot.phase == .entering && model.snapshot.current?.id == first.id,
+            "首个事件开始淡入")
+
+        let transient = attentionNotice(epoch: model.receiverEpoch, native: "SubagentStop")
+        expect(model.accept(transient) == .accepted, "淡入中的瞬时事件仍被协议接受")
+        clock.advance(0.09)
+        let attention = attentionNotice(epoch: model.receiverEpoch)
+        expect(model.accept(attention) == .accepted, "淡入中的待接手事件仍被保留")
+        expect(
+            model.snapshot.phase == .entering && model.snapshot.current?.id == first.id
+                && model.resourceUsage.transientVersions == 1
+                && model.snapshot.totalCount == 1,
+            "淡入中保持当前瞬时版本，只把待接手事件保留到列表")
+
+        clock.advance(0.09)
+        expect(
+            model.snapshot.phase == .visible && model.snapshot.current?.id == first.id
+                && model.snapshot.remainingTime.map { abs($0 - 4) < 0.001 } == true,
+            "后续事件不得延长淡入或替换当前四秒阅读期")
+        clock.advance(4.18)
+        expect(
+            model.snapshot.phase == .hidden && model.snapshot.current == nil
+                && model.snapshot.totalCount == 1,
+            "当前收起后不得自动播放淡入期间到达的事件")
     }
 
     suite("Attention：淡出中新瞬时与待接手事件抢占旧展示") {
@@ -437,20 +469,23 @@ func runEventNoticeModelSuites() {
     suite("Attention：Notification 原因与未实现 binding 的诚实分类") {
         let clock = ManualEventNoticeScheduler()
         let model = makeModel(clock)
-        let cases: [(HostEventNoticeReason?, EventNoticeKind, Int)] = [
-            (.permission, .permission, 1),
-            (.needsInput, .needsInput, 1), (.informational, .transient, 0), (.review, .review, 1),
-            (nil, .review, 1),
+        let cases: [(HostID, String, HostEventNoticeReason?, EventNoticeKind, Int)] = [
+            (.codex, "PermissionRequest", .permission, .permission, 1),
+            (.codex, "PermissionRequest", nil, .review, 1),
+            (.claudeCode, "Notification", .permission, .permission, 1),
+            (.claudeCode, "Notification", .needsInput, .needsInput, 1),
+            (.claudeCode, "Notification", .informational, .transient, 0),
+            (.claudeCode, "Notification", .review, .review, 1),
+            (.claudeCode, "Notification", nil, .review, 1),
         ]
-        for (reason, kind, count) in cases {
+        for (host, native, reason, kind, count) in cases {
             model.clearForPrivacy()
             _ = model.accept(
                 attentionNotice(
-                    epoch: model.receiverEpoch, native: "Notification", host: .claudeCode,
-                    reason: reason))
+                    epoch: model.receiverEpoch, native: native, host: host, reason: reason))
             expect(
                 model.snapshot.current?.kind == kind && model.snapshot.totalCount == count,
-                "原因分类 \(String(describing: reason))")
+                "只按公共原因分类 \(host.rawValue)/\(String(describing: reason))")
         }
         expect(
             model.accept(

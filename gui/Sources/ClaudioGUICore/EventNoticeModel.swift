@@ -225,9 +225,6 @@ public enum EventNoticeKind: Sendable, Equatable {
         case .taskStart, .stop, .subagentStop: return .transient
         case .stopFailure: return .interrupted
         case .notification:
-            if notice.host == .codex && notice.nativeEvent == "PermissionRequest" {
-                return .permission
-            }
             switch notice.reason {
             case .permission: return .permission
             case .needsInput: return .needsInput
@@ -926,16 +923,16 @@ public final class EventNoticeModel: ObservableObject {
         owesImmediateBadge = owesImmediateBadge || immediateBadge
         guard !isReducingBatch else { return }
         scheduleExpiry()
-        var changes = 0
+        var pendingRefreshCount = 0
         if isExpanded {
             for entry in entries where !frozen.contains(where: { $0.action == entry.action }) {
-                changes += 1
+                pendingRefreshCount += 1
             }
         }
         let updated = EventNoticeModelSnapshot(
             phase: phase, current: currentEntry.map(record),
             recent: (isExpanded ? frozen : Array(entries.reversed())).map(record),
-            pendingCount: changes, pauseReasons: pauseReasons,
+            pendingCount: pendingRefreshCount, pauseReasons: pauseReasons,
             remainingTime: currentDeadline.map { max(0, $0 - now()) } ?? pausedRemaining,
             isExpanded: isExpanded, droppedCount: droppedCount, receiverEpoch: receiverEpoch,
             isDetail: isDetail, totalCount: entries.count)
