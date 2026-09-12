@@ -14,8 +14,8 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
     let model: EventNoticeModel
 
     private let languageStore: ClaudioPreferences
-    private let onWillBecomeInteractive: @MainActor () -> Void
-    private let handbackFocusOnClose: @MainActor () -> Void
+    private let onWillBecomeInteractive: @MainActor () -> (@MainActor () -> Void)?
+    private var focusRestoration: (@MainActor () -> Void)?
     private let window: NSPanel
     private var snapshotCancellable: AnyCancellable?
     private var screenCancellable: AnyCancellable?
@@ -26,13 +26,11 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
     init(
         model: EventNoticeModel,
         languageStore: ClaudioPreferences,
-        onWillBecomeInteractive: @escaping @MainActor () -> Void = {},
-        handbackFocusOnClose: @escaping @MainActor () -> Void = {}
+        onWillBecomeInteractive: @escaping @MainActor () -> (@MainActor () -> Void)? = { nil }
     ) {
         self.model = model
         self.languageStore = languageStore
         self.onWillBecomeInteractive = onWillBecomeInteractive
-        self.handbackFocusOnClose = handbackFocusOnClose
         window = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 440, height: 92),
             styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
@@ -59,6 +57,9 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
                 onViewSource: { [weak self] notice in
                     self?.viewSource(notice)
                 },
+                onOpenRecent: { [weak self] in
+                    self?.openInteractive()
+                },
                 onCopySessionID: { [weak self] sessionID in
                     self?.copySessionID(sessionID) ?? false
                 },
@@ -79,9 +80,11 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
     func openInteractive() {
         // Mutual exclusion with the retained Settings window happens before this surface takes
         // the key status (SPEC: 设置打开和顶部列表互斥显示).
-        onWillBecomeInteractive()
         model.openRecent()
         guard model.snapshot.current != nil else { return }
+        if !isInteractive {
+            focusRestoration = onWillBecomeInteractive()
+        }
         isInteractive = true
         positionWindow()
         window.alphaValue = 1
@@ -118,13 +121,16 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
         // Focus handback is only owed while this window still owns the key status; if the user
         // already moved focus elsewhere, giving anything back would override their choice.
         let owesHandback = isInteractive && window.isKeyWindow && NSApp.isActive
+        let restoration = focusRestoration
+        focusRestoration = nil
         isInteractive = false
         model.setKeyboardFocused(false)
         model.dismiss()
-        if owesHandback { handbackFocusOnClose() }
+        if owesHandback { restoration?() }
     }
 
     func clearForPrivacy() {
+        focusRestoration = nil
         isInteractive = false
         presentationScreen = nil
         window.orderOut(nil)
@@ -142,6 +148,10 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
 
     private func render(_ snapshot: EventNoticeModelSnapshot) {
         guard snapshot.current != nil, snapshot.phase != .hidden else {
+            // Privacy clears arrive through the runtime's shared model as well as this adapter.
+            // End the old interaction here so its return target cannot survive into a new epoch.
+            focusRestoration = nil
+            isInteractive = false
             if snapshot.phase == .hidden { presentationScreen = nil }
             if window.isVisible { window.orderOut(nil) }
             return

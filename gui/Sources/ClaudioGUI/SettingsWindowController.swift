@@ -85,12 +85,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     /// Mutual exclusion with the top event-notice list (SPEC: 设置打开和顶部列表互斥显示).
-    /// Closing here must not run the stored focus restoration — the notice surface is about to
-    /// take the key status, and a popover reopen would steal it right back.
-    func closeForMutualExclusion() {
-        guard let window, window.isVisible else { return }
-        focusRestoration = nil
+    /// Transfer the complete restoration before close consumes it. The notice surface will run
+    /// it only when its own interaction ends, preserving both the host and panel destination.
+    func closeForMutualExclusion() -> (@MainActor () -> Void)? {
+        guard let window, window.isVisible else { return nil }
+        let restoration = takeFocusRestoration()
         window.close()
+        return restoration
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
@@ -117,14 +118,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         else { return }
 
         _ = settingsPresentationSession.send(.windowWillClose)
-        let handback = handbackTracker.consumeOnClose()
-        let restoration = focusRestoration
-        focusRestoration = nil
+        let restoration = takeFocusRestoration()
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
-                restoration?(handback)
+                restoration?()
             }
         }
+    }
+
+    private func takeFocusRestoration() -> (@MainActor () -> Void)? {
+        guard let restoration = focusRestoration else { return nil }
+        focusRestoration = nil
+        return handbackTracker.consumeOnClose(restoringWith: restoration)
     }
 
     private func makeWindow() -> NSWindow {

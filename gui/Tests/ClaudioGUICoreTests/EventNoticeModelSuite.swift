@@ -268,6 +268,7 @@ func runEventNoticeModelSuites() {
         expect(
             model.snapshot.current?.isExpired == true
                 && model.snapshot.current?.notice == nil
+                && model.snapshot.current?.occurredAt == nil
                 && model.snapshot.current?.source == nil,
             "TTL 到期必须擦除来源与导航目标，但保留当前安全焦点占位")
         model.setHovering(false)
@@ -296,6 +297,33 @@ func runEventNoticeModelSuites() {
         expect(
             model.snapshot.recent.isEmpty && model.snapshot.receiverEpoch == nextEpoch,
             "receiver 代次更换必须清空旧展示事实")
+    }
+
+    suite("EventNoticeModel：冻结列表中选中条目的 TTL 同时擦除当前与近期发生时间") {
+        let epoch = UUID()
+        let clock = EventNoticeClock()
+        let scheduler = ManualEventNoticeScheduler()
+        let model = EventNoticeModel(
+            receiverEpoch: epoch, now: { clock.value }, scheduler: scheduler.scheduler())
+        let first = makeEventNotice(epoch: epoch)
+        let selected = makeEventNotice(epoch: epoch)
+        _ = model.accept(first)
+        _ = model.accept(selected)
+        model.openRecent()
+        model.selectRecent(id: selected.id)
+        expect(model.snapshot.current?.occurredAt == selected.occurredAt, "有效详情保留发生时间")
+        clock.value += EventNoticeModel.retentionDuration
+        model.expireNow()
+        expect(
+            model.snapshot.current?.id == selected.id && model.snapshot.current?.isExpired == true,
+            "到期后仍保留当前选中身份，不自动跳到另一条")
+        expect(model.snapshot.current?.occurredAt == nil, "选中详情到期后立即擦除发生时间")
+        expect(
+            model.snapshot.recent.count == 1
+                && model.snapshot.recent.allSatisfy {
+                    $0.isExpired && $0.notice == nil && $0.source == nil && $0.occurredAt == nil
+                },
+            "冻结列表只能保留无来源、无发生时间的选中占位")
     }
 
     suite("EventNoticeModel：重复 UUID、陈旧代次和非法 notice 都 fail closed") {

@@ -11,6 +11,7 @@ public struct EventNoticeView: View {
     @ObservedObject private var languageStore: ClaudioPreferences
 
     private let onViewSource: @MainActor (HostEventNotice) -> Void
+    private let onOpenRecent: (@MainActor () -> Void)?
     private let onCopySessionID: @MainActor (String) -> Bool
     private let onClose: @MainActor () -> Void
 
@@ -21,12 +22,14 @@ public struct EventNoticeView: View {
         model: EventNoticeModel,
         languageStore: ClaudioPreferences,
         onViewSource: @escaping @MainActor (HostEventNotice) -> Void = { _ in },
+        onOpenRecent: (@MainActor () -> Void)? = nil,
         onCopySessionID: @escaping @MainActor (String) -> Bool = { _ in false },
         onClose: @escaping @MainActor () -> Void = {}
     ) {
         _model = ObservedObject(wrappedValue: model)
         _languageStore = ObservedObject(wrappedValue: languageStore)
         self.onViewSource = onViewSource
+        self.onOpenRecent = onOpenRecent
         self.onCopySessionID = onCopySessionID
         self.onClose = onClose
     }
@@ -40,6 +43,7 @@ public struct EventNoticeView: View {
         }
         .frame(width: 440, alignment: .topLeading)
         .padding(12)
+        .frame(maxHeight: 180, alignment: .topLeading)
         .background(ClaudioTheme.panelGradient(colorScheme))
         .overlay(
             RoundedRectangle(cornerRadius: ClaudioTheme.Radius.panel)
@@ -59,7 +63,8 @@ public struct EventNoticeView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
             EventNoticeProjection.accessibilitySummary(
-                for: snapshot.current, language: languageStore.language))
+                for: snapshot.current, language: languageStore.language)
+        )
         .accessibilityIdentifier("event-notice.capsule")
     }
 
@@ -88,6 +93,8 @@ public struct EventNoticeView: View {
                 Button {
                     if snapshot.isExpanded {
                         model.closeRecent()
+                    } else if let onOpenRecent {
+                        onOpenRecent()
                     } else {
                         model.openRecent()
                     }
@@ -126,8 +133,14 @@ public struct EventNoticeView: View {
 
         if snapshot.isExpanded {
             Divider().overlay(ClaudioTheme.hairline(colorScheme))
-            recentList(snapshot.recent)
-            detailActions(for: record, includeFullSessionID: true)
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 8) {
+                    recentList(snapshot.recent)
+                    detailActions(for: record, includeFullSessionID: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .accessibilityIdentifier("event-notice.recent-list")
         } else {
             detailActions(for: record, includeFullSessionID: false)
         }
@@ -150,22 +163,18 @@ public struct EventNoticeView: View {
                 .frame(minHeight: 28)
                 .accessibilityIdentifier("event-notice.refresh-recent")
             }
-            ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(records.prefix(50))) { record in
-                        Button {
-                            model.selectRecent(id: record.id)
-                        } label: {
-                            recentRow(record)
-                        }
-                        .buttonStyle(.plain)
-                        .contentShape(Rectangle())
-                        .accessibilityIdentifier("event-notice.recent.\(record.id.uuidString)")
+            LazyVStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(records.prefix(50))) { record in
+                    Button {
+                        model.selectRecent(id: record.id)
+                    } label: {
+                        recentRow(record)
                     }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .accessibilityIdentifier("event-notice.recent.\(record.id.uuidString)")
                 }
             }
-            .frame(maxHeight: 180)
-            .accessibilityIdentifier("event-notice.recent-list")
             Text(l10n.text(.eventNoticeRecentDisclaimer))
                 .font(.system(size: 9, design: .rounded))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))

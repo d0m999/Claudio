@@ -54,7 +54,7 @@ public enum EventNoticeProjection {
         for record: EventNoticeRecord,
         language: ClaudioAppLanguage
     ) -> String? {
-        guard let occurredAt = record.occurredAt else { return nil }
+        guard !record.isExpired, let occurredAt = record.occurredAt else { return nil }
         let locale = Locale(identifier: language.rawValue)
         return occurredAt.formatted(
             Date.FormatStyle(date: .omitted, time: .shortened).locale(locale))
@@ -66,7 +66,10 @@ public enum EventNoticeProjection {
     ) -> String {
         let l10n = ClaudioL10n(language: language)
         guard let record else { return l10n.text(.eventNoticeUnknownSource) }
-        return [primaryLine(for: record, language: language), secondaryLine(for: record, language: language)]
-            .joined(separator: language == .english ? ", " : "，")
+        return [
+            primaryLine(for: record, language: language),
+            secondaryLine(for: record, language: language),
+        ]
+        .joined(separator: language == .english ? ", " : "，")
     }
 }

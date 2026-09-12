@@ -3,7 +3,7 @@
 日期：2026-09-12（Asia/Singapore）。审查基线：`main@d113ff335b7d5b35409b12adc78172d586c7566b`。
 状态：工程计划已完成；生产实现、原生验收尚未开始。
 授权：用户选择 C 顶部提示条，授权本次 `plan-eng-review` auto-select，要求完整 spec 与健壮实现。下列决策由该授权自动选择，不代表用户逐项回答过问题。
-输入：本会话《Claudio 事件来源提示：三种交互原型》及已制作的 C 原型；原型位于本机 `.gstack/projects/Claudio/designs/event-source-prompts-20260912/index.html`。A/B 只保留为比较材料。
+输入：本会话《Claudio 事件来源提示：三种交互原型》及已制作的 C 原型；原型未纳入仓库，选定的 C 合同见[目标与 spec 对照](#1-目标与-spec-对照)和[落地架构与合同](#4-落地架构与合同)。A/B 只保留为历史比较材料。
 
 ## 1. 目标与 spec 对照
 
@@ -380,7 +380,7 @@ Outside voice：按已读取 skill section 的 `CODEX_MODE=under_codex` 分支�
 
 Suppressed findings：关于 WorkBuddy 精确 title/URL、inactive NSPanel 的实际 VoiceOver、所有系统版本 full-screen 行为，仅有待验证假设；不以高置信度“已支持/不可能”列为缺陷。验证任务保留。
 
-机器可读交付：[七项实施任务](/Users/d0m999/.gstack/projects/Claudio/tasks-eng-review-20260911-183046.jsonl)；QA 入口：[测试清单](/Users/d0m999/.gstack/projects/Claudio/d0m999-main-eng-review-test-plan-20260911-183046.md)。本轮只校验计划映射、文件路径、JSONL schema 和 whitespace；未运行生产构建/harness，未改生产实现。
+仓库内交付：[七项实施任务](#10-implementation-tasks)；QA 入口：[测试覆盖与断言](#6-test-review8-个覆盖缺口组)及[验证与证据门槛](#12-验证实施顺序与证据门槛)。工程计划轮仅校验计划材料与 whitespace；未运行生产构建/harness，未改生产实现。
 
 Completion summary：Step 0 完整范围保留、移动部件收敛；Architecture 4 项；Code Quality 3 项；Test 8 缺口组和 ASCII 图；Performance 2 项；What already exists / NOT in scope 已写；TODO 1 项已按 auto-select 决定不新增；未分配处理/测试的 critical gap=0；Outside voice skipped；2 条可并行 lane + 集成顺序段；Lake Score 17/17 完整建议进入计划，均尚待实现。无未决产品选择，仍有明确实施证据门禁。
 

@@ -34,4 +34,14 @@ public struct RetainedWindowHandbackTracker<Application> {
         latestExternalApplication = nil
         return application
     }
+
+    /// Transfers the current debt together with its destination action. Capturing the consumed
+    /// value now lets another retained surface restore it later without consulting a new session.
+    @MainActor
+    public mutating func consumeOnClose(
+        restoringWith restoration: @escaping @MainActor (Application?) -> Void
+    ) -> @MainActor () -> Void {
+        let application = consumeOnClose()
+        return { restoration(application) }
+    }
 }

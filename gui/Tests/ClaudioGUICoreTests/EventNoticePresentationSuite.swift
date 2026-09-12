@@ -1,8 +1,10 @@
+import AppKit
 import ClaudioCore
-import ClaudioGUICore
 import ClaudioGUIComponents
+import ClaudioGUICore
 import ClaudioLocalization
 import Foundation
+import SwiftUI
 
 @MainActor
 private func makePresentationRecord(
@@ -31,6 +33,111 @@ private func makePresentationRecord(
 
 @MainActor
 func runEventNoticePresentationSuites() {
+    suite("EventNoticeView：180pt 展开态的完整详情与动作可滚动到达") {
+        _ = NSApplication.shared
+        let epoch = UUID()
+        var scheduled: [(TimeInterval, @MainActor () -> Void)] = []
+        let model = EventNoticeModel(
+            receiverEpoch: epoch, now: { 100 },
+            scheduler: EventNoticeScheduler { delay, callback in
+                scheduled.append((delay, callback))
+                return EventNoticeCancellation {}
+            })
+        let binding = HostCapabilityCatalog.binding(host: .codex, nativeEvent: "Stop")!
+        let sessionID = String(repeating: "session-", count: 32)
+        @MainActor func receive() {
+            _ = model.accept(
+                HostEventNotice(
+                    receiverEpoch: epoch, surface: .codex, bindingID: binding.id,
+                    installationID: UUID(), nativeEvent: binding.nativeEvent!, event: binding.event,
+                    occurredAt: Date(timeIntervalSince1970: 1_700_000_000),
+                    source: HostEventSource(projectLabel: "project", sessionID: sessionID)))
+        }
+        for _ in 0..<51 { receive() }
+        model.openRecent()
+        receive()
+        let preferences = ClaudioPreferences(previewLanguage: .zhHans)
+        var viewedSource: UUID?
+        var openRecentRequests = 0
+        let hosting = NSHostingView(
+            rootView: EventNoticeView(
+                model: model, languageStore: preferences,
+                onViewSource: { viewedSource = $0.id },
+                onOpenRecent: {
+                    openRecentRequests += 1
+                    model.openRecent()
+                }))
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 180),
+            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        panel.contentView = hosting
+        panel.setFrame(NSRect(x: 0, y: 0, width: 440, height: 180), display: true)
+        panel.orderFront(nil)
+        defer { panel.orderOut(nil); panel.close() }
+        hosting.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
+        @MainActor func descendants(_ view: NSView) -> [NSView] {
+            [view] + view.subviews.flatMap { descendants($0) }
+        }
+        let views = descendants(hosting)
+        let scrollViews = views.compactMap { $0 as? NSScrollView }
+        expect(
+            hosting.frame.height <= 180, "完整详情不能强迫 180pt panel 的 root 超高，实得 \(hosting.frame.height)"
+        )
+        expect(scrollViews.count == 1, "展开详情只应有一个滚动区域")
+        guard let scroll = scrollViews.first, let document = scroll.documentView,
+            let session = views.compactMap({ $0 as? NSTextField }).first(where: {
+                $0.stringValue == sessionID
+            })
+        else {
+            expect(false, "实际视图必须包含滚动区域和完整的可选中 session ID")
+            return
+        }
+        expect(scroll.contentView.bounds.height >= 28, "滚动区域不能被固定详情挤到零高度")
+        expect(session.isDescendant(of: document), "完整 session ID 必须属于可滚动文档，不能留在其外被裁切")
+        guard session.isDescendant(of: document), scroll.contentView.bounds.height >= 28 else {
+            return
+        }
+        let sessionFrame = session.convert(session.bounds, to: document)
+        document.scrollToVisible(sessionFrame)
+        hosting.layoutSubtreeIfNeeded()
+        expect(
+            scroll.contentView.bounds.intersects(sessionFrame),
+            "滚动到 session ID 后必须进入可见视口")
+        // The action row is the last 28pt row. Scroll to the end and exercise the actual source
+        // button through AppKit; a button laid out outside the scroll region cannot pass this.
+        let bottom = NSPoint(
+            x: 0, y: max(0, document.bounds.height - scroll.contentView.bounds.height))
+        scroll.contentView.scroll(to: bottom)
+        scroll.reflectScrolledClipView(scroll.contentView)
+        hosting.layoutSubtreeIfNeeded()
+        let actionPoint = document.convert(NSPoint(x: 32, y: document.bounds.maxY - 14), to: nil)
+        @MainActor func click(_ point: NSPoint) {
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                guard
+                    let event = NSEvent.mouseEvent(
+                        with: type, location: point, modifierFlags: [], timestamp: 0,
+                        windowNumber: panel.windowNumber, context: nil, eventNumber: 1,
+                        clickCount: 1,
+                        pressure: 1)
+                else { expect(false, "必须能生成原生动作点击"); return }
+                panel.sendEvent(event)
+            }
+        }
+        click(actionPoint)
+        expect(viewedSource == model.snapshot.current?.id, "滚动到底后的来源按钮必须可点击且指向当前条目")
+        model.closeRecent()
+        // Deliver the specified 100ms badge coalescing callbacks without waiting on wall time.
+        for (_, callback) in scheduled.filter({ $0.0 <= 0.1 }) { callback() }
+        hosting.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
+        click(NSPoint(x: hosting.frame.width - 90, y: hosting.frame.height - 28))
+        expect(
+            openRecentRequests == 1 && model.snapshot.isExpanded,
+            "紧凑胶囊的数量入口必须经 native controller 回调展开，才能接入 Settings 焦点移交")
+    }
+
     suite("EventNoticePlacement：刘海与菜单栏共同决定顶部安全位置") {
         let frame = CGRect(x: 0, y: 0, width: 1512, height: 982)
         // 刘海屏且菜单栏常驻：visibleFrame 已让出菜单栏（24pt），刘海 32pt 中 8pt 侵入可见区。
@@ -83,11 +190,13 @@ func runEventNoticePresentationSuites() {
         expect(
             EventNoticeProjection.secondaryLine(for: record, language: .english)
                 == "same-name · Session · 12345678",
-            "英文投影必须生成本地化短会话标签，实得 \(EventNoticeProjection.secondaryLine(for: record, language: .english))")
+            "英文投影必须生成本地化短会话标签，实得 \(EventNoticeProjection.secondaryLine(for: record, language: .english))"
+        )
         expect(
             EventNoticeProjection.secondaryLine(for: record, language: .zhHans)
                 == "same-name · 会话 · 12345678",
-            "中文投影必须生成中文短会话标签，实得 \(EventNoticeProjection.secondaryLine(for: record, language: .zhHans))")
+            "中文投影必须生成中文短会话标签，实得 \(EventNoticeProjection.secondaryLine(for: record, language: .zhHans))"
+        )
 
         let titled = makePresentationRecord(
             source: HostEventSource(
@@ -137,5 +246,13 @@ func runEventNoticePresentationSuites() {
         expect(
             EventNoticeProjection.occurredAtText(for: noTime, language: .english) == nil,
             "来源过期后不得伪造发生时间")
+        let expired = EventNoticeRecord(
+            id: record.id, event: record.event, occurredAt: record.occurredAt, notice: nil,
+            status: .displayed, isExpired: true)
+        for language in [ClaudioAppLanguage.english, .zhHans] {
+            expect(
+                EventNoticeProjection.occurredAtText(for: expired, language: language) == nil,
+                "过期占位即使携带旧时间也不得继续生成可见时间文本")
+        }
     }
 }

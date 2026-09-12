@@ -68,7 +68,12 @@ func runSessionNavigationSuites() async {
         }
         coordinator.openSession(.viewSession(target))
         expect(coordinator.result == .started, "有效导航动作启动时必须先发布 started")
-        try? await Task.sleep(nanoseconds: 1_000_000)
+        // Native SwiftUI event delivery can resume this test before the navigator's yield
+        // completes. Observe completion with a bounded deadline rather than assuming 1ms wins.
+        let deadline = ProcessInfo.processInfo.systemUptime + 1
+        while coordinator.result == .started, ProcessInfo.processInfo.systemUptime < deadline {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
         expect(
             coordinator.result == .succeeded && navigatedTarget == target,
             "完成的导航结果必须与原 target 对应")

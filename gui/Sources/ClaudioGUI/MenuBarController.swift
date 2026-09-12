@@ -49,14 +49,8 @@ private final class MenuBarActionRouter {
     }
 
     /// Settings and the top notice list are mutually exclusive (SPEC: 设置打开和顶部列表互斥显示).
-    func closeSettingsForEventNoticeInteraction() {
+    func closeSettingsForEventNoticeInteraction() -> (@MainActor () -> Void)? {
         owner?.dismissSettingsForEventNoticeInteraction()
-    }
-
-    /// The notice window only calls this while it still owns the key status, so returning focus
-    /// cannot override a user who already moved on.
-    func handbackEventNoticeFocus() {
-        owner?.handbackEventNoticeFocus()
     }
 }
 
@@ -122,9 +116,6 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// Set by the retained settings window's close callback and consumed by the next
     /// `popoverDidShow`, so focus restoration is one-shot rather than sticky across later opens.
     private var pendingRestoredPanelFocusTarget: PanelFocusTarget?
-    /// Frontmost app captured when the notice surface became interactive outside the panel;
-    /// consumed by `handbackEventNoticeFocus()` so closing the notice returns the foreground.
-    private var eventNoticeHandbackApplication: NSRunningApplication?
 
     /// 面板 shell 只接收 manager 已组合的宿主事实。内置 helper 的定位与
     /// shared bootstrap 已上移到 AppDelegate 的 composition root，不再经过面板。
@@ -286,9 +277,6 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             languageStore: languageStore,
             onWillBecomeInteractive: { [weak actionRouter] in
                 actionRouter?.closeSettingsForEventNoticeInteraction()
-            },
-            handbackFocusOnClose: { [weak actionRouter] in
-                actionRouter?.handbackEventNoticeFocus()
             })
         let activityDiagnostics = makeActivityDiagnosticsModel()
         let soundPacksEditorNativeEffects = SoundPacksEditorNativeEffectsDispatcher(
@@ -771,29 +759,26 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// through the action router before it takes the key status. When the notice was not opened
     /// from the panel, the current frontmost app is captured here so the close path can return
     /// the foreground to it (SPEC: 关闭归还原宿主).
-    fileprivate func dismissSettingsForEventNoticeInteraction() {
-        settingsWindowController.closeForMutualExclusion()
-        if popover.isShown {
-            eventNoticeHandbackApplication = nil
-        } else {
-            let frontmost = NSWorkspace.shared.frontmostApplication
-            eventNoticeHandbackApplication =
-                frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier
-                ? nil : frontmost
+    fileprivate func dismissSettingsForEventNoticeInteraction() -> (@MainActor () -> Void)? {
+        if let restoration = settingsWindowController.closeForMutualExclusion() {
+            return restoration
         }
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        let handback =
+            frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+            ? nil : frontmost
+        return { [weak self] in self?.handbackEventNoticeFocus(to: handback) }
     }
 
     /// The notice window requests this only while it still owns the key status. If it was
     /// opened from the panel, focus returns to the panel's recent-notices entry; otherwise the
     /// foreground goes back to the app captured when the notice became interactive.
-    fileprivate func handbackEventNoticeFocus() {
+    private func handbackEventNoticeFocus(to application: NSRunningApplication?) {
         if popover.isShown {
             popover.contentViewController?.view.window?.makeKey()
             focusCoordinator.requestFocus(target: .recentNotices)
         } else {
-            let handback = eventNoticeHandbackApplication
-            eventNoticeHandbackApplication = nil
-            activateHandbackApplication(handback)
+            activateHandbackApplication(application)
         }
     }
 

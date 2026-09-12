@@ -346,6 +346,57 @@ private func guiCoreSources() -> [ScannedSource] {
 
 @MainActor
 func runViewWiringSuites() {
+    suite("Event Notice：executable 跨窗口接线转交 Settings restoration，重复交互不重捕获") {
+        guard
+            let settings = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
+            let router = codeWithoutStrings("gui/Sources/ClaudioGUI/MenuBarController.swift"),
+            let notice = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/EventNoticeWindowController.swift"),
+            let transfer = closureBody(after: "func closeForMutualExclusion()", in: settings),
+            let route = closureBody(
+                after: "func dismissSettingsForEventNoticeInteraction()", in: router),
+            let entry = closureBody(after: "func openInteractive()", in: notice),
+            let firstEntry = closureBody(after: "if !isInteractive", in: entry),
+            let close = closureBody(after: "func close()", in: notice),
+            let privacy = closureBody(after: "func clearForPrivacy()", in: notice),
+            let takeRange = transfer.range(of: "takeFocusRestoration()"),
+            let closeRange = transfer.range(of: "window.close()")
+        else {
+            expect(false, "必须能解析 Settings → router → Event Notice 的 executable 接线")
+            return
+        }
+        expect(
+            transfer.contains("let restoration = takeFocusRestoration()")
+                && transfer.contains("return restoration")
+                && takeRange.lowerBound < closeRange.lowerBound,
+            "Settings 必须在 close 前取出完整 restoration 并返回给调用者")
+        expect(
+            route.contains(
+                "if let restoration = settingsWindowController.closeForMutualExclusion()")
+                && route.contains("return restoration"),
+            "router 必须优先转交 Settings restoration，不得被 frontmost Claudio 覆盖")
+        expect(
+            firstEntry.contains("focusRestoration = onWillBecomeInteractive()"),
+            "转交回调只能绑定首次进入 interactive 的分支")
+        expect(
+            close.contains("let restoration = focusRestoration")
+                && close.contains("focusRestoration = nil")
+                && close.contains("isInteractive && window.isKeyWindow && NSApp.isActive")
+                && close.contains("if owesHandback { restoration?() }"),
+            "notice close 必须消费一次转交动作，并由当前焦点所有权守卫")
+        expect(privacy.contains("focusRestoration = nil"), "隐私清空必须释放延迟归还动作")
+        expect(
+            closureBody(after: "onOpenRecent:", in: notice)?.contains("self?.openInteractive()")
+                == true,
+            "数量入口必须接到同一个原生 interactive 焦点移交路径")
+        let render = closureBody(after: "private func render(", in: notice) ?? ""
+        expect(
+            closureBody(after: "guard snapshot.current != nil", in: render)?
+                .contains("focusRestoration = nil") == true,
+            "runtime 经共享模型清空隐私时，也必须丢弃旧的焦点归还动作")
+    }
+
     suite("Orbit Zero 字标是所有 UI 品牌入口的单一实现") {
         guard
             let branding = codeOnly(

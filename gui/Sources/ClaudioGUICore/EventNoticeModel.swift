@@ -181,7 +181,6 @@ public final class EventNoticeModel: ObservableObject {
     private struct Entry {
         let id: UUID
         let event: Event
-        let occurredAt: Date?
         let expiresAt: TimeInterval
         /// Monotonic per-model arrival counter. Ordering is a total (expiresAt, arrivalOrdinal)
         /// key comparison, so same-tick arrivals never depend on sort stability.
@@ -268,7 +267,6 @@ public final class EventNoticeModel: ObservableObject {
         let entry = Entry(
             id: notice.id,
             event: notice.event,
-            occurredAt: notice.occurredAt,
             expiresAt: now() + Self.retentionDuration,
             arrivalOrdinal: nextArrivalOrdinal,
             notice: notice,
@@ -681,7 +679,7 @@ public final class EventNoticeModel: ObservableObject {
         EventNoticeRecord(
             id: entry.id,
             event: entry.event,
-            occurredAt: entry.occurredAt,
+            occurredAt: entry.notice?.occurredAt,
             notice: entry.notice,
             status: entry.status,
             isExpired: entry.isExpired)
