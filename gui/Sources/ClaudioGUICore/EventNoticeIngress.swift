@@ -4,19 +4,26 @@ import Foundation
 /// Bounded cross-queue handoff from the receiver's serial I/O queue to MainActor. It keeps at
 /// most 128 notices and schedules one drain at a time; a dropped packet never becomes a fake
 /// count or a persisted history record.
-final class EventNoticeIngress: @unchecked Sendable {
-    private static let maximumMailboxCount = 128
+public final class EventNoticeIngress: @unchecked Sendable {
+    public static let maximumMailboxCount = 128
 
     private let lock = NSLock()
-    private let deliver: @MainActor ([HostEventNotice]) -> Void
+    private let deliver: @MainActor ([HostEventNotice]) -> Int
     private var mailbox: [HostEventNotice] = []
     private var drainScheduled = false
+    private var generation: UInt64 = 0
 
-    init(deliver: @escaping @MainActor ([HostEventNotice]) -> Void) {
+    public var pendingCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return mailbox.count
+    }
+
+    public init(deliver: @escaping @MainActor ([HostEventNotice]) -> Int) {
         self.deliver = deliver
     }
 
-    func enqueue(_ notice: HostEventNotice) {
+    public func enqueue(_ notice: HostEventNotice) {
         lock.lock()
         guard mailbox.count < Self.maximumMailboxCount else {
             lock.unlock()
@@ -32,8 +39,9 @@ final class EventNoticeIngress: @unchecked Sendable {
         }
     }
 
-    func clear() {
+    public func clear() {
         lock.lock()
+        generation &+= 1
         mailbox.removeAll(keepingCapacity: false)
         lock.unlock()
     }
@@ -42,12 +50,18 @@ final class EventNoticeIngress: @unchecked Sendable {
     private func drain() {
         lock.lock()
         let batch = Array(mailbox.prefix(32))
-        mailbox.removeFirst(min(32, mailbox.count))
+        let capturedGeneration = generation
+        lock.unlock()
+
+        let consumed = batch.isEmpty ? 0 : deliver(batch)
+        lock.lock()
+        if capturedGeneration == generation {
+            mailbox.removeFirst(min(max(0, consumed), min(batch.count, mailbox.count)))
+        }
         let hasMore = !mailbox.isEmpty
         if !hasMore { drainScheduled = false }
         lock.unlock()
 
-        if !batch.isEmpty { deliver(batch) }
         guard hasMore else { return }
         Task { @MainActor [weak self] in
             self?.drain()

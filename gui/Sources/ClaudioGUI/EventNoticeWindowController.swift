@@ -16,12 +16,14 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
     private let languageStore: ClaudioPreferences
     private let onWillBecomeInteractive: @MainActor () -> (@MainActor () -> Void)?
     private var focusRestoration: (@MainActor () -> Void)?
+    private let navigation: SessionNavigationCoordinator
     private let window: NSPanel
     private var snapshotCancellable: AnyCancellable?
     private var screenCancellable: AnyCancellable?
     private var animationRevision: UInt64 = 0
     private var presentationScreen: NSScreen?
     private var isInteractive = false
+    private var renderedPhase: EventNoticePresentationPhase = .hidden
 
     init(
         model: EventNoticeModel,
@@ -29,6 +31,7 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
         onWillBecomeInteractive: @escaping @MainActor () -> (@MainActor () -> Void)? = { nil }
     ) {
         self.model = model
+        navigation = SessionNavigationCoordinator(model: model)
         self.languageStore = languageStore
         self.onWillBecomeInteractive = onWillBecomeInteractive
         window = NSPanel(
@@ -50,7 +53,7 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
         window.ignoresMouseEvents = false
         window.delegate = self
         window.title = "claudi0 event notice"
-        window.contentView = NSHostingView(
+        window.contentView = EventNoticeHostingView(
             rootView: EventNoticeView(
                 model: model,
                 languageStore: languageStore,
@@ -78,13 +81,13 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
     }
 
     func openInteractive() {
-        // Mutual exclusion with the retained Settings window happens before this surface takes
-        // the key status (SPEC: 设置打开和顶部列表互斥显示).
         model.openRecent()
-        guard model.snapshot.current != nil else { return }
-        if !isInteractive {
-            focusRestoration = onWillBecomeInteractive()
-        }
+        guard model.snapshot.isExpanded else { return }
+        becomeInteractive()
+    }
+
+    private func becomeInteractive() {
+        if !isInteractive { focusRestoration = onWillBecomeInteractive() }
         isInteractive = true
         positionWindow()
         window.alphaValue = 1
@@ -92,29 +95,17 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
         model.setKeyboardFocused(true)
     }
 
-    func viewSource(_ notice: HostEventNotice) {
-        // Production has no verified host route yet. This action enters the retained detail/list
-        // surface; it does not claim that an application or exact session was opened.
-        guard notice.isSemanticallyValid, notice.receiverEpoch == model.receiverEpoch else {
-            return
-        }
-        model.selectRecent(id: notice.id)
-        guard model.snapshot.current?.id == notice.id else { return }
-        openInteractive()
+    func viewSource(_ action: EventNoticeAction) {
+        guard model.viewSource(action) == .applied else { return }
+        becomeInteractive()
     }
 
     @discardableResult
-    func copySessionID(_ sessionID: String) -> Bool {
-        guard
-            !sessionID.isEmpty,
-            model.snapshot.current?.source?.sessionID == sessionID
-        else { return false }
-        guard
-            NSPasteboard.general.clearContents() != 0,
-            NSPasteboard.general.setString(sessionID, forType: .string)
-        else { return false }
-        openInteractive()
-        return true
+    func copySessionID(_ action: EventNoticeAction) -> Bool {
+        navigation.copy(action) { sessionID in
+            NSPasteboard.general.clearContents()
+            return NSPasteboard.general.setString(sessionID, forType: .string)
+        }
     }
 
     func close() {
@@ -124,6 +115,7 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
         let restoration = focusRestoration
         focusRestoration = nil
         isInteractive = false
+        navigation.reset()
         model.setKeyboardFocused(false)
         model.dismiss()
         if owesHandback { restoration?() }
@@ -134,6 +126,7 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
         isInteractive = false
         presentationScreen = nil
         window.orderOut(nil)
+        navigation.reset()
         model.clearForPrivacy()
     }
 
@@ -147,7 +140,9 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
     }
 
     private func render(_ snapshot: EventNoticeModelSnapshot) {
-        guard snapshot.current != nil, snapshot.phase != .hidden else {
+        let phaseChanged = renderedPhase != snapshot.phase
+        renderedPhase = snapshot.phase
+        guard (snapshot.current != nil || snapshot.isExpanded), snapshot.phase != .hidden else {
             // Privacy clears arrive through the runtime's shared model as well as this adapter.
             // End the old interaction here so its return target cannot survive into a new epoch.
             focusRestoration = nil
@@ -156,7 +151,7 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
             if window.isVisible { window.orderOut(nil) }
             return
         }
-        positionWindow()
+        positionWindow(snapshot: snapshot)
         animationRevision &+= 1
         let revision = animationRevision
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -167,7 +162,7 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
             }
             if reduceMotion {
                 window.alphaValue = 1
-            } else {
+            } else if phaseChanged {
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = EventNoticeModel.fadeDuration
                     window.animator().alphaValue = 1
@@ -197,7 +192,7 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
         positionWindow()
     }
 
-    private func positionWindow() {
+    private func positionWindow(snapshot: EventNoticeModelSnapshot? = nil) {
         if let presentationScreen,
             !NSScreen.screens.contains(where: { $0 === presentationScreen })
         {
@@ -208,14 +203,19 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
         if presentationScreen == nil { presentationScreen = screen }
         let visible = screen.visibleFrame
         let width = EventNoticePlacement.clampedWidth(visibleFrame: visible)
-        let height = max(88, min(180, window.contentView?.fittingSize.height ?? 92))
+        let preferredHeight = EventNoticeView.preferredHeight(for: snapshot ?? model.snapshot)
+        let availableHeight = EventNoticePlacement.availableHeight(
+            screenFrame: screen.frame, visibleFrame: visible, safeAreaTop: screen.safeAreaInsets.top
+        )
+        let height = min(preferredHeight, availableHeight)
         let x = EventNoticePlacement.clampedX(visibleFrame: visible, width: width)
         let y = EventNoticePlacement.topAnchorY(
             screenFrame: screen.frame,
             visibleFrame: visible,
             safeAreaTop: screen.safeAreaInsets.top,
             height: height)
-        window.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
+        let frame = NSRect(x: x, y: y, width: width, height: height)
+        if window.frame != frame { window.setFrame(frame, display: true) }
     }
 
     /// The first notice of a burst pins to the display under the pointer (SPEC 原生呈现:

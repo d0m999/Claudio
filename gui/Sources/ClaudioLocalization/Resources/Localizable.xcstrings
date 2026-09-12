@@ -1350,13 +1350,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Recent notices"
+            "value": "Needs You"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "近期提示"
+            "value": "需要你"
           }
         }
       }
@@ -1366,13 +1366,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld other notices"
+            "value": "%lld"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "另 %lld 条提示"
+            "value": "%lld"
           }
         }
       }
@@ -1446,13 +1446,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Source information expired"
+            "value": "This reminder is no longer retained. Its source has been cleared."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "来源信息已过期"
+            "value": "此提醒已不再保留，来源已清除。"
           }
         }
       }
@@ -1478,13 +1478,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show recent event notices"
+            "value": "Open retained reminders, including an empty list."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "查看近期事件提示"
+            "value": "打开保留的待接手提醒，零项时也可查看。"
           }
         }
       }
@@ -1494,13 +1494,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Hide recent event notices"
+            "value": "Collapse without removing reminders."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "收起近期事件提示"
+            "value": "收起，不移除待接手提醒。"
           }
         }
       }
@@ -12776,13 +12776,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld new"
+            "value": "Show %lld new or updated reminders"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "有 %lld 条新提示"
+            "value": "查看 %lld 项新增或更新"
           }
         }
       }
@@ -12808,13 +12808,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Notices received during this run"
+            "value": "Only observed reminders are retained, for up to 30 minutes. This is not a task completion list."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "本次运行收到的近期提示"
+            "value": "仅保留已观察到的提醒，最长 30 分钟。此列表不表示任务完成。"
           }
         }
       }
@@ -12824,13 +12824,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Only the most recent 50 are kept"
+            "value": "Some reminders were not retained because the 50-item limit was reached."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "仅保留最近 50 条"
+            "value": "已达到 50 项上限，部分提醒未保留。"
           }
         }
       }
@@ -12863,6 +12863,198 @@
           "stringUnit": {
             "state": "translated",
             "value": "实时来源提示暂不可用（%@）"
+          }
+        }
+      }
+    },
+    "event-notice.empty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No attention reminders are currently retained."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前没有保留的待接手提醒"
+          }
+        }
+      }
+    },
+    "event-notice.permission": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for permission"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待授权"
+          }
+        }
+      }
+    },
+    "event-notice.needs-input": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs input"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要输入"
+          }
+        }
+      }
+    },
+    "event-notice.review": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs review"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待查看"
+          }
+        }
+      }
+    },
+    "event-notice.remove": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove reminder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除提醒"
+          }
+        }
+      }
+    },
+    "event-notice.back": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back to Needs You"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "返回需要你"
+          }
+        }
+      }
+    },
+    "event-notice.copy-failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not copy. Try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制失败，请重试。"
+          }
+        }
+      }
+    },
+    "event-notice.stale": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This reminder has changed. Refresh the list to act on the new version."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此提醒已有更新，请刷新列表后操作新版本。"
+          }
+        }
+      }
+    },
+    "event-notice.missing-source": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only available source details are shown. Missing project or session information was not provided safely by the host."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅显示已知来源。宿主未提供可安全使用的项目或会话信息。"
+          }
+        }
+      }
+    },
+    "event-notice.unknown-reason": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The host did not provide a recognized notification reason."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "宿主未提供可识别的通知原因。"
+          }
+        }
+      }
+    },
+    "event-notice.informational": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Information"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "信息通知"
+          }
+        }
+      }
+    },
+    "event-notice.refresh": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh list"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新列表"
           }
         }
       }

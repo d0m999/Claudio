@@ -64,6 +64,15 @@ func suite(_ name: String, _ body: @MainActor () async -> Void) async {
     await body()
 }
 
+if CommandLine.arguments.contains("--event-attention") {
+    runEventNoticeModelSuites()
+    runEventNoticePresentationSuites()
+    await runSessionNavigationSuites()
+    await runEventAttentionStressSuites()
+    print("Event attention: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
 runOnboardingStateSuites()
 runLocalizationSuites()
 runAboutInformationSuites()
@@ -132,6 +141,7 @@ runPanelFocusOrderSuites()
 runEventNoticeModelSuites()
 runEventNoticePresentationSuites()
 await runSessionNavigationSuites()
+await runEventAttentionStressSuites()
 runPanelSoundScopeInteractionSuites()
 await runPanelPresentationSuites()
 runEventSettingsWindowSelectionSuites()

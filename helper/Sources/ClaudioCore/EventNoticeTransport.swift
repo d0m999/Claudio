@@ -172,7 +172,7 @@ public enum EventNoticeTransport {
 }
 
 /// GUI-owned receiver. The I/O queue only validates and decodes; the callback decides how to
-/// re-enter MainActor. At most one datagram is handed to a callback at a time per queue turn.
+/// re-enter MainActor. Each I/O turn drains at most 32 datagrams so stop cannot starve.
 public final class EventNoticeReceiver: @unchecked Sendable {
     public let descriptor: EventNoticeEndpointDescriptor
 
@@ -345,7 +345,11 @@ public final class EventNoticeReceiver: @unchecked Sendable {
         let fd = socketFD
         lock.unlock()
         var buffer = [UInt8](repeating: 0, count: EventNoticeTransport.maximumMessageBytes + 1)
-        while true {
+        for _ in 0..<32 {
+            lock.lock()
+            let shouldStop = stopped
+            lock.unlock()
+            guard !shouldStop else { return }
             let count = buffer.withUnsafeMutableBytes { rawBuffer -> Int in
                 guard let baseAddress = rawBuffer.baseAddress else { return -1 }
                 return recv(fd, baseAddress, rawBuffer.count, MSG_DONTWAIT)
