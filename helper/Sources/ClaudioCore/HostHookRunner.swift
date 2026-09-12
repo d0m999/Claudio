@@ -8,15 +8,18 @@ public typealias HostEventNoticeSender = @Sendable (HostEventNotice) -> EventNot
 public struct HostEventNoticeChannel: Sendable {
     public let sourcePayload: Data?
     public let receiverEpoch: UUID
+    public let observedUptime: TimeInterval?
     public let sender: HostEventNoticeSender
 
     public init(
         sourcePayload: Data?,
         receiverEpoch: UUID,
+        observedUptime: TimeInterval? = nil,
         sender: @escaping HostEventNoticeSender
     ) {
         self.sourcePayload = sourcePayload
         self.receiverEpoch = receiverEpoch
+        self.observedUptime = observedUptime
         self.sender = sender
     }
 }
@@ -31,6 +34,7 @@ public struct HostHookEnvironment: Sendable {
     public let receiptStore: HostHookReceiptStore
     public let activityStore: LocalActivitySummaryStore?
     public let now: @Sendable () -> Date
+    public let uptime: @Sendable () -> TimeInterval
     public let eventNoticeChannel: HostEventNoticeChannel?
 
     public init(
@@ -41,7 +45,8 @@ public struct HostHookEnvironment: Sendable {
         receiptStore: HostHookReceiptStore,
         activityStore: LocalActivitySummaryStore? = nil,
         eventNoticeChannel: HostEventNoticeChannel? = nil,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        uptime: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     ) {
         self.host = host
         self.playEnvironment = playEnvironment
@@ -54,6 +59,7 @@ public struct HostHookEnvironment: Sendable {
         self.activityStore = activityStore
         self.eventNoticeChannel = eventNoticeChannel
         self.now = now
+        self.uptime = uptime
     }
 }
 
@@ -120,6 +126,7 @@ public func handleHostHook(
     // diagnostic line.  The marker is read at the acceptance boundary; stale callbacks may
     // still be played according to the existing hook contract, but they never count as activity.
     let occurredAt = environment.now()
+    let observedUptime = environment.eventNoticeChannel?.observedUptime ?? environment.uptime()
     let activeInstallationID = environment.receiptStore.currentInstallationID(host: host)
     let activityRecordOutcome: LocalActivityRecordOutcome
     if let activityStore = environment.activityStore {
@@ -186,7 +193,8 @@ public func handleHostHook(
         activeInstallationID == installationID,
         let binding = HostCapabilityCatalog.binding(host: host, nativeEvent: nativeEvent)
     {
-        let source = HostEventSourceParser.parse(host: host, data: channel.sourcePayload).source
+        let input = HostEventSourceParser.parseInput(
+            host: host, nativeEvent: nativeEvent, data: channel.sourcePayload)
         let notice = HostEventNotice(
             id: eventID,
             receiverEpoch: channel.receiverEpoch,
@@ -196,7 +204,9 @@ public func handleHostHook(
             nativeEvent: nativeEvent,
             event: event,
             occurredAt: occurredAt,
-            source: source)
+            source: input.source.source,
+            reason: input.reason,
+            observedUptime: observedUptime)
         // The send is best effort, but a known failure still earns one fixed redacted
         // diagnostic code on the existing log path; the payload never leaves this process.
         if case .dropped(let failure) = channel.sender(notice) {

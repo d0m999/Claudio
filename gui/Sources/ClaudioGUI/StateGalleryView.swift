@@ -434,12 +434,14 @@ private struct EventNoticeGalleryFrame: View {
         self.scenario = scenario
         let routeSimulation = RouteSimulationBox()
         self.routeSimulation = routeSimulation
-        _model = StateObject(wrappedValue: EventNoticeModel(receiverEpoch: UUID()))
+        let model = EventNoticeModel(receiverEpoch: UUID())
+        _model = StateObject(wrappedValue: model)
         _languageStore = StateObject(wrappedValue: ClaudioPreferences(previewLanguage: language))
         _navigationCoordinator = StateObject(
-            wrappedValue: SessionNavigationCoordinator { _ in
-                try? await Task.sleep(nanoseconds: 150_000_000)
-                return routeSimulation.succeeds ? .succeeded : .failed
+            wrappedValue: SessionNavigationCoordinator(model: model) { _, complete in
+                EventNoticeScheduler.live.schedule(after: 0.15) {
+                    complete(routeSimulation.succeeds ? .exactReturnConfirmed : .failed)
+                }
             })
     }
 
@@ -448,12 +450,11 @@ private struct EventNoticeGalleryFrame: View {
             EventNoticeView(
                 model: model,
                 languageStore: languageStore,
-                onViewSource: { _ in model.openRecent() },
-                onCopySessionID: { _ in
-                    navigationCoordinator.markCopied()
-                    return true
-                },
-                onClose: { model.dismiss() })
+                onViewSource: { _ = model.viewSource($0) },
+                onCopySessionID: { navigationCoordinator.copy($0) { _ in true } },
+                onClose: { model.dismiss() }
+            )
+            .frame(width: 440, height: EventNoticeView.preferredHeight(for: model.snapshot))
 
             HStack(spacing: 6) {
                 Button("One") { emit(count: 1) }
@@ -474,7 +475,7 @@ private struct EventNoticeGalleryFrame: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
 
-            Text("Model-driven DEBUG controls · simulated route only, no host navigation")
+            Text("Synthetic · model-driven DEBUG controls · no real host navigation")
                 .font(.system(size: 9, design: .rounded))
                 .foregroundColor(.secondary)
         }
@@ -487,7 +488,8 @@ private struct EventNoticeGalleryFrame: View {
     private func simulateRoute(succeeds: Bool) {
         routeSimulation.succeeds = succeeds
         guard
-            let notice = model.snapshot.current?.notice,
+            let record = model.snapshot.current, let action = record.action,
+            let notice = record.notice,
             let source = notice.source,
             let sessionID = source.sessionID
         else {
@@ -499,7 +501,8 @@ private struct EventNoticeGalleryFrame: View {
             projectKey: source.projectKey,
             sessionID: sessionID)
         navigationCoordinator.openSession(
-            sessionNavigationCapability(for: notice, verifiedTarget: target))
+            sessionNavigationCapability(for: notice, verifiedTarget: target),
+            action: action, generation: navigationCoordinator.capabilityGeneration)
     }
 
     private func seed() {
@@ -553,7 +556,7 @@ private func makeEventNoticeGalleryNotice(
             : HostEventSource(
                 projectLabel: language == .english ? "Orbit Signals" : "Orbit 示例项目",
                 projectKey: "debug-gallery-project",
-                sessionID: "12345678-debug-gallery"))
+                sessionID: "12345678-debug-gallery", mainSessionIsKnown: true))
 }
 
 @MainActor

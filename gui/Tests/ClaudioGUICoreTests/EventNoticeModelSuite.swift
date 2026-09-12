@@ -1,374 +1,423 @@
 import ClaudioCore
 import ClaudioGUICore
+import Combine
 import Foundation
 
-private final class ManualEventNoticeScheduler: @unchecked Sendable {
+/// Deadline-driven manual scheduler shared with the action suites. Cancellation is thread safe.
+final class ManualEventNoticeScheduler: @unchecked Sendable {
     private struct Item {
-        let id: Int
-        let delay: TimeInterval
+        let id: UUID
+        let deadline: TimeInterval
         let callback: @MainActor () -> Void
     }
-
     private let lock = NSLock()
-    private var nextID = 0
     private var items: [Item] = []
-
-    func scheduler() -> EventNoticeScheduler {
+    @MainActor var time: TimeInterval = 100
+    @MainActor func scheduler() -> EventNoticeScheduler {
         EventNoticeScheduler { [weak self] delay, callback in
             guard let self else { return EventNoticeCancellation {} }
-            let id = self.add(delay: delay, callback: callback)
-            return EventNoticeCancellation { [weak self] in
-                self?.remove(id: id)
-            }
+            let id = UUID()
+            self.add(Item(id: id, deadline: self.time + delay, callback: callback))
+            return EventNoticeCancellation { [weak self] in self?.remove(id) }
         }
     }
-
-    @discardableResult
-    @MainActor
-    func runNext(maxDelay: TimeInterval = .greatestFiniteMagnitude) -> Bool {
-        let item: Item?
-        lock.lock()
-        if let index = items.firstIndex(where: { $0.delay <= maxDelay }) {
-            item = items.remove(at: index)
-        } else {
-            item = nil
+    @MainActor func advance(_ duration: TimeInterval) {
+        let target = time + duration
+        while let item = take(until: target) {
+            time = item.deadline
+            item.callback()
         }
-        lock.unlock()
-        item?.callback()
-        return item != nil
+        time = target
     }
-
-    private func add(
-        delay: TimeInterval,
-        callback: @escaping @MainActor () -> Void
-    ) -> Int {
+    private func add(_ item: Item) { lock.lock(); items.append(item); lock.unlock() }
+    private func remove(_ id: UUID) { lock.lock(); items.removeAll { $0.id == id }; lock.unlock() }
+    private func take(until deadline: TimeInterval) -> Item? {
         lock.lock()
         defer { lock.unlock() }
-        nextID += 1
-        items.append(Item(id: nextID, delay: delay, callback: callback))
-        return nextID
-    }
-
-    private func remove(id: Int) {
-        lock.lock()
-        items.removeAll { $0.id == id }
-        lock.unlock()
+        guard
+            let item = items.filter({ $0.deadline <= deadline }).min(by: {
+                $0.deadline < $1.deadline
+            })
+        else { return nil }
+        items.removeAll { $0.id == item.id }
+        return item
     }
 }
 
 @MainActor
-private final class EventNoticeClock {
-    var value: TimeInterval = 100
-}
-
-@MainActor
-private func makeEventNotice(
-    epoch: UUID,
-    id: UUID = UUID(),
+func attentionNotice(
+    epoch: UUID, id: UUID = UUID(), installation: UUID = UUID(),
+    native: String = "PermissionRequest", host: HostID = .codex,
     source: HostEventSource? = HostEventSource(
-        projectLabel: "same-name",
-        projectKey: "project-key",
-        sessionID: "12345678-abcdef")
+        projectLabel: "project", projectKey: "project-key", sessionID: "session-id",
+        mainSessionIsKnown: true),
+    reason: HostEventNoticeReason? = nil, observed: TimeInterval? = nil
 ) -> HostEventNotice {
-    let binding = HostCapabilityCatalog.binding(host: .codex, nativeEvent: "Stop")!
+    let binding = HostCapabilityCatalog.bindings(for: host).first { $0.nativeEvent == native }!
     return HostEventNotice(
-        id: id,
-        receiverEpoch: epoch,
-        surface: .codex,
-        bindingID: binding.id,
-        installationID: UUID(),
-        nativeEvent: binding.nativeEvent!,
-        event: binding.event,
-        occurredAt: Date(timeIntervalSince1970: 1_700_000_000),
-        source: source)
+        id: id, receiverEpoch: epoch, surface: host.surfaceID,
+        bindingID: binding.id, installationID: installation, nativeEvent: native,
+        event: binding.event, occurredAt: Date(timeIntervalSince1970: 1_700_000_000),
+        source: source,
+        reason: reason, observedUptime: observed)
 }
 
 @MainActor
 func runEventNoticeModelSuites() {
-    suite("EventNoticeModel：单条提示完成淡入、四秒阅读后淡出并保留近期记录") {
-        let epoch = UUID()
-        let clock = EventNoticeClock()
-        let scheduler = ManualEventNoticeScheduler()
-        let model = EventNoticeModel(
-            receiverEpoch: epoch,
-            now: { clock.value },
-            scheduler: scheduler.scheduler())
-        let notice = makeEventNotice(epoch: epoch)
-
-        expect(model.accept(notice) == .accepted, "合法事件必须进入提示模型")
-        expect(
-            model.snapshot.phase == .entering && model.snapshot.current?.id == notice.id,
-            "首条事件必须成为当前提示并先进入淡入态")
-        expect(scheduler.runNext(maxDelay: EventNoticeModel.fadeDuration), "淡入回调必须可执行")
-        expect(
-            model.snapshot.phase == .visible
-                && model.snapshot.remainingTime == EventNoticeModel.displayDuration,
-            "淡入完成后必须从完整四秒开始阅读计时")
-        expect(
-            scheduler.runNext(maxDelay: EventNoticeModel.displayDuration),
-            "四秒阅读计时器必须可执行")
-        expect(model.snapshot.phase == .exiting, "阅读时间到后必须进入淡出态")
-        expect(scheduler.runNext(maxDelay: EventNoticeModel.fadeDuration), "淡出回调必须可执行")
-        expect(
-            model.snapshot.phase == .hidden
-                && model.snapshot.current == nil
-                && model.snapshot.recent.count == 1
-                && model.snapshot.recent[0].status == .collapsed,
-            "淡出后应隐藏当前面板但保留近期记录，不把收起冒充为已处理")
-        model.openRecent()
-        expect(
-            model.snapshot.isExpanded && model.snapshot.current?.id == notice.id,
-            "当前提示收起后仍必须能从近期入口重新打开，而不是丢失记录")
+    func makeModel(_ scheduler: ManualEventNoticeScheduler, verified: Set<HostSurfaceID> = [])
+        -> EventNoticeModel
+    {
+        EventNoticeModel(
+            receiverEpoch: UUID(), now: { scheduler.time }, scheduler: scheduler.scheduler(),
+            verifiedSubmissionSurfaces: verified)
     }
 
-    suite("EventNoticeModel：hover 与键盘聚焦共同暂停，全部解除后只恢复剩余时间") {
-        let epoch = UUID()
-        let clock = EventNoticeClock()
-        let scheduler = ManualEventNoticeScheduler()
-        let model = EventNoticeModel(
-            receiverEpoch: epoch,
-            now: { clock.value },
-            scheduler: scheduler.scheduler())
-        _ = model.accept(makeEventNotice(epoch: epoch))
-        _ = scheduler.runNext(maxDelay: EventNoticeModel.fadeDuration)
+    suite("Attention：普通事件仅四秒展示，无排队、历史或收起后来源") {
+        let clock = ManualEventNoticeScheduler()
+        let model = makeModel(clock)
+        let first = attentionNotice(epoch: model.receiverEpoch, native: "Stop")
+        expect(model.accept(first) == .accepted, "普通事件有效")
+        clock.advance(0.18)
+        expect(
+            model.snapshot.current?.id == first.id && model.snapshot.remainingTime == 4, "淡入后完整四秒")
+        clock.advance(2)
+        _ = model.accept(attentionNotice(epoch: model.receiverEpoch, native: "Stop"))
+        expect(
+            model.snapshot.current?.id == first.id && model.snapshot.remainingTime == 2, "新事件不替换或延长"
+        )
+        expect(model.snapshot.recent.isEmpty && model.snapshot.totalCount == 0, "普通事件不成为历史")
+        clock.advance(2.18)
+        expect(
+            model.snapshot.phase == .hidden && model.resourceUsage.transientVersions == 0,
+            "展示完即释放来源")
+        model.openRecent()
+        expect(
+            model.snapshot.isExpanded && model.snapshot.current == nil
+                && model.snapshot.recent.isEmpty, "零项仍可打开")
+        model.dismiss(animated: false)
+    }
 
-        clock.value += 2
+    suite("Attention：暂停交叠只恢复剩余时间，展开不会重置横幅倒计时") {
+        let clock = ManualEventNoticeScheduler()
+        let model = makeModel(clock)
+        _ = model.accept(attentionNotice(epoch: model.receiverEpoch))
+        clock.advance(2.18)
         model.setHovering(true)
-        expect(
-            model.snapshot.pauseReasons == .hover
-                && model.snapshot.remainingTime == 2,
-            "悬停必须冻结当前剩余两秒")
         model.setKeyboardFocused(true)
+        clock.advance(20)
         model.setHovering(false)
-        expect(
-            model.snapshot.pauseReasons == .keyboardFocus
-                && model.snapshot.remainingTime == 2,
-            "多个暂停原因解除一个后仍必须保持暂停")
+        expect(model.snapshot.remainingTime == 2, "仍聚焦时保持暂停")
         model.setKeyboardFocused(false)
-        expect(
-            model.snapshot.pauseReasons.isEmpty && model.snapshot.remainingTime == 2,
-            "全部暂停原因解除后必须恢复原剩余时间，而不是重新给四秒")
-        expect(scheduler.runNext(maxDelay: 2), "剩余计时器必须按两秒恢复")
-        expect(model.snapshot.phase == .exiting, "恢复的计时器到期必须触发淡出")
+        clock.advance(1)
+        expect(model.snapshot.phase == .visible, "剩余时间尚未结束")
+        clock.advance(1.18)
+        expect(model.snapshot.phase == .hidden && model.snapshot.totalCount == 1, "收起保留待接手项")
     }
 
-    suite("EventNoticeModel：展开冻结列表，新事件只增数量，显式刷新后才进入列表") {
-        let epoch = UUID()
-        let clock = EventNoticeClock()
-        let scheduler = ManualEventNoticeScheduler()
-        let model = EventNoticeModel(
-            receiverEpoch: epoch,
-            now: { clock.value },
-            scheduler: scheduler.scheduler())
-        let first = makeEventNotice(epoch: epoch)
-        let second = makeEventNotice(epoch: epoch)
-        let third = makeEventNotice(epoch: epoch)
+    suite("Attention：完整身份归并、版本冻结与陈旧动作拒绝") {
+        let clock = ManualEventNoticeScheduler()
+        let model = makeModel(clock)
+        let installation = UUID()
+        let first = attentionNotice(epoch: model.receiverEpoch, installation: installation)
         _ = model.accept(first)
-        _ = scheduler.runNext(maxDelay: EventNoticeModel.fadeDuration)
-        _ = model.accept(second)
-
+        clock.advance(0.18)
+        let banner = model.snapshot.current!
         model.openRecent()
+        let frozen = model.snapshot.recent
+        let action = frozen[0].action!
+        _ = model.accept(
+            attentionNotice(
+                epoch: model.receiverEpoch, installation: installation,
+                source: HostEventSource(
+                    projectLabel: "updated label", projectKey: "project-key",
+                    sessionID: "session-id", mainSessionIsKnown: true)))
+        expect(model.snapshot.totalCount == 1 && model.snapshot.pendingCount == 1, "同完整会话更新一行")
         expect(
-            model.snapshot.isExpanded
-                && model.snapshot.pauseReasons.contains(.expanded)
-                && model.snapshot.recent.count == 2
-                && model.snapshot.remainingTime == EventNoticeModel.displayDuration,
-            "显式展开必须冻结现有列表并暂停且重置四秒阅读区间")
-        _ = model.accept(third)
-        expect(
-            model.snapshot.recent.count == 2 && model.snapshot.pendingCount == 1,
-            "展开期间的新事件不得替换当前内容或偷偷改变冻结列表")
+            model.snapshot.recent[0].notice == frozen[0].notice
+                && model.snapshot.recent[0].version == 1, "完整内容与版本冻结")
+        expect(!model.snapshot.recent[0].isActionable && model.remove(action) == .stale, "陈旧移除拒绝")
+        expect(model.viewSource(action) == .stale && model.snapshot.totalCount == 1, "陈旧来源动作不绑定最新")
         model.refreshRecent()
+        let latest = model.snapshot.recent[0]
         expect(
-            model.snapshot.recent.count == 3 && model.snapshot.pendingCount == 0,
-            "显式刷新后新事件才进入近期列表")
-        model.selectRecent(id: second.id)
+            latest.id == banner.id && latest.version == 2
+                && latest.source?.projectLabel == "updated label", "刷新后同稳定 ID 新版本")
+        expect(model.viewSource(latest.action!) == .applied, "当前版本详情可打开")
+        expect(model.snapshot.isDetail && model.snapshot.totalCount == 1, "查看不移除")
+        expect(model.copySessionID(latest.action!) { $0 == "session-id" }, "复制真实写入结果")
+        expect(model.snapshot.totalCount == 1, "复制不移除")
+        expect(model.remove(latest.action!) == .applied && model.badgeCount == 0, "手动移除立即发布真实零数")
         expect(
-            model.snapshot.current?.id == second.id
-                && model.snapshot.recent.first(where: { $0.id == first.id })?.status == .collapsed,
-            "选择动作必须按 UUID 切换到原事件，不依赖数组位置")
-        model.closeRecent()
-        expect(
-            !model.snapshot.isExpanded && model.snapshot.pauseReasons.isEmpty,
-            "关闭列表必须解除 expanded 暂停原因")
+            model.snapshot.current?.notice == nil && model.snapshot.current?.occurredAt == nil,
+            "详情移除后无来源安全占位")
     }
 
-    suite("EventNoticeModel：事件身份即时保留，近期数量按一百毫秒合并") {
-        let epoch = UUID()
-        let clock = EventNoticeClock()
-        let scheduler = ManualEventNoticeScheduler()
-        let model = EventNoticeModel(
-            receiverEpoch: epoch,
-            now: { clock.value },
-            scheduler: scheduler.scheduler())
-        _ = model.accept(makeEventNotice(epoch: epoch))
-        _ = scheduler.runNext(maxDelay: EventNoticeModel.fadeDuration)
-        _ = model.accept(makeEventNotice(epoch: epoch))
-        _ = model.accept(makeEventNotice(epoch: epoch))
-        expect(
-            model.snapshot.recent.count == 3 && model.snapshot.pendingCount == 2
-                && model.badgeCount == 0,
-            "事件快照必须即时保留三条，但数量徽标不能逐条重绘")
-        expect(!scheduler.runNext(maxDelay: 0.099), "一百毫秒 debounce 不得提前发布徽标")
-        expect(scheduler.runNext(maxDelay: 0.1), "一百毫秒后必须发布合并后的数量")
-        expect(model.badgeCount == 2, "徽标必须只发布最终真实数量，不合并事件身份")
+    suite("Attention：不完整/parent/未知主会话与不同项目安装独立保留") {
+        let clock = ManualEventNoticeScheduler()
+        let model = makeModel(clock)
+        let installation = UUID()
+        let sources: [HostEventSource?] = [
+            nil,
+            HostEventSource(projectLabel: "project", sessionID: "session-id"),
+            HostEventSource(
+                projectLabel: "project", projectKey: "key", sessionID: "session-id",
+                isParentSession: true),
+            HostEventSource(projectLabel: "project", projectKey: "key", sessionID: "session-id"),
+        ]
+        for source in sources {
+            for _ in 0..<2 {
+                _ = model.accept(
+                    attentionNotice(
+                        epoch: model.receiverEpoch, installation: installation, source: source))
+            }
+        }
+        expect(model.snapshot.totalCount == 8, "身份不足不能猜测归并")
+        for key in ["a", "b"] {
+            _ = model.accept(
+                attentionNotice(
+                    epoch: model.receiverEpoch, installation: installation,
+                    source: HostEventSource(
+                        projectLabel: "same", projectKey: key, sessionID: "session-id",
+                        mainSessionIsKnown: true)))
+        }
+        _ = model.accept(attentionNotice(epoch: model.receiverEpoch))
+        expect(model.snapshot.totalCount == 11, "项目键与安装代次参与身份")
     }
 
-    suite("EventNoticeModel：容量保护当前项、丢弃计数有界且不按项目名称合并") {
-        let epoch = UUID()
-        let clock = EventNoticeClock()
-        let scheduler = ManualEventNoticeScheduler()
-        let model = EventNoticeModel(
-            receiverEpoch: epoch,
-            now: { clock.value },
-            scheduler: scheduler.scheduler())
-        let first = makeEventNotice(epoch: epoch)
+    suite("Attention：重复 UUID 不续期，旧观察不替换，冻结版本各自 TTL") {
+        let clock = ManualEventNoticeScheduler()
+        let model = makeModel(clock)
+        let installation = UUID()
+        let first = attentionNotice(
+            epoch: model.receiverEpoch, installation: installation, observed: clock.time)
         _ = model.accept(first)
-        _ = scheduler.runNext(maxDelay: EventNoticeModel.fadeDuration)
-        for _ in 1..<EventNoticeModel.maximumRecentCount {
-            _ = model.accept(makeEventNotice(epoch: epoch))
+        model.openRecent()
+        let original = model.snapshot.recent[0]
+        _ = model.viewSource(original.action!)
+        clock.advance(100)
+        expect(model.accept(first) == .duplicate, "重复 UUID 不增加版本或延长期限")
+        _ = model.accept(
+            attentionNotice(
+                epoch: model.receiverEpoch, installation: installation, observed: clock.time))
+        let old = attentionNotice(
+            epoch: model.receiverEpoch, installation: installation, observed: 150)
+        expect(model.accept(old) == .staleObservation, "倒序观察不能覆盖新提醒")
+        clock.advance(1700)
+        expect(model.snapshot.totalCount == 1, "新版本自身尚未过期")
+        expect(
+            model.snapshot.current?.notice == nil && model.snapshot.current?.occurredAt == nil,
+            "冻结旧版本到期擦除来源与时间")
+        model.refreshRecent()
+        expect(model.snapshot.recent[0].version == 2, "新版只经刷新展示")
+        clock.advance(100)
+        expect(
+            model.snapshot.totalCount == 0 && model.snapshot.recent.allSatisfy { $0.notice == nil },
+            "新版本独立过期")
+    }
+
+    suite("Attention：Stop 不清，生产后续提交关闭，可信主会话严格后序才移除") {
+        for verified in [false, true] {
+            let clock = ManualEventNoticeScheduler()
+            let model = makeModel(clock, verified: verified ? [.codex] : [])
+            let installation = UUID()
+            _ = model.accept(
+                attentionNotice(
+                    epoch: model.receiverEpoch, installation: installation, observed: 100))
+            clock.advance(1)
+            _ = model.accept(
+                attentionNotice(
+                    epoch: model.receiverEpoch, installation: installation, native: "Stop",
+                    observed: 101))
+            expect(model.snapshot.totalCount == 1, "Stop 从不移除")
+            for time in [nil, 100, 99, 10000, -1] as [TimeInterval?] {
+                _ = model.accept(
+                    attentionNotice(
+                        epoch: model.receiverEpoch, installation: installation,
+                        native: "UserPromptSubmit", observed: time))
+                expect(model.snapshot.totalCount == 1, "缺失/相等/旧/未来/异常时间不移除")
+            }
+            let parent = HostEventSource(
+                projectLabel: "project", projectKey: "project-key", sessionID: "session-id",
+                isParentSession: true)
+            _ = model.accept(
+                attentionNotice(
+                    epoch: model.receiverEpoch, installation: installation,
+                    native: "UserPromptSubmit", source: parent, observed: 101))
+            expect(model.snapshot.totalCount == 1, "parent 不移除主会话")
+            _ = model.accept(
+                attentionNotice(
+                    epoch: model.receiverEpoch, installation: installation,
+                    native: "UserPromptSubmit", observed: 101))
+            expect(model.snapshot.totalCount == (verified ? 0 : 1), "仅明确验证 adapter 的主会话后序提交清除")
+            if verified {
+                expect(model.lastRemovalReason == .subsequentSubmission, "区分移除原因")
+                expect(
+                    model.accept(
+                        attentionNotice(
+                            epoch: model.receiverEpoch, installation: installation, observed: 100.5)
+                    ) == .staleObservation, "移除后迟到提醒不能回填")
+            }
+        }
+    }
+
+    suite("Attention：0/1/5/6/50/51 容量，冻结详情保护与安全占位") {
+        let clock = ManualEventNoticeScheduler()
+        let model = makeModel(clock)
+        for count in 1...51 {
+            _ = model.accept(attentionNotice(epoch: model.receiverEpoch))
+            if [1, 5, 6, 50, 51].contains(count) {
+                expect(model.snapshot.totalCount == min(50, count), "容量与首屏数无关：\(count)")
+            }
+            if count == 1 {
+                model.openRecent()
+                _ = model.viewSource(model.snapshot.recent[0].action!)
+            }
         }
         expect(
-            model.snapshot.recent.count == EventNoticeModel.maximumRecentCount,
-            "近期记录上限必须是五十条")
-        _ = model.accept(makeEventNotice(epoch: epoch))
-        expect(
-            model.snapshot.recent.count == EventNoticeModel.maximumRecentCount
-                && model.snapshot.current?.id == first.id
-                && model.snapshot.droppedCount == 1,
-            "第五十一条不得淘汰当前阅读项，且只能增加真实丢弃计数")
+            model.snapshot.current?.notice != nil && model.snapshot.totalCount == 50, "当前详情免于容量淘汰")
+        expect(model.snapshot.droppedCount == 1 && model.lastRemovalReason == .capacity, "如实记录容量淘汰")
+        model.refreshRecent()
+        expect(model.snapshot.recent.count == 50, "全部五十项可达")
     }
 
-    suite("EventNoticeModel：静默不补播，TTL 清除来源，关闭与代次隔离旧消息") {
-        let epoch = UUID()
-        let nextEpoch = UUID()
-        let clock = EventNoticeClock()
-        let scheduler = ManualEventNoticeScheduler()
-        let model = EventNoticeModel(
-            receiverEpoch: epoch,
-            now: { clock.value },
-            scheduler: scheduler.scheduler())
-        let quietNotice = makeEventNotice(epoch: epoch)
-        model.setAutomaticallySuppressed(true)
-        expect(model.accept(quietNotice) == .accepted, "静默期间仍应保留允许的近期信息")
-        expect(
-            model.snapshot.phase == .hidden && model.snapshot.current == nil,
-            "静默期间不得自动展示提示")
-        model.setAutomaticallySuppressed(false)
-        expect(
-            model.snapshot.phase == .hidden && model.snapshot.current == nil,
-            "解除静默不得集中补播静默期间事件")
-
-        let visible = makeEventNotice(epoch: epoch)
-        _ = model.accept(visible)
-        _ = scheduler.runNext(maxDelay: EventNoticeModel.fadeDuration)
+    suite("Attention：容量压力也不能擦除正在阅读的横幅") {
+        let clock = ManualEventNoticeScheduler()
+        let model = makeModel(clock)
+        let first = attentionNotice(epoch: model.receiverEpoch)
+        _ = model.accept(first)
+        clock.advance(0.18)
         model.setHovering(true)
-        clock.value += EventNoticeModel.retentionDuration
-        model.expireNow()
+        for _ in 0..<100 { _ = model.accept(attentionNotice(epoch: model.receiverEpoch)) }
         expect(
-            model.snapshot.current?.isExpired == true
-                && model.snapshot.current?.notice == nil
-                && model.snapshot.current?.occurredAt == nil
-                && model.snapshot.current?.source == nil,
-            "TTL 到期必须擦除来源与导航目标，但保留当前安全焦点占位")
-        model.setHovering(false)
-        expect(
-            model.snapshot.phase == .visible && model.snapshot.remainingTime == nil,
-            "TTL 优先于暂停，来源过期后解除悬停不得重新启动阅读倒计时")
-
-        let afterExpiry = makeEventNotice(epoch: epoch)
-        expect(
-            model.accept(afterExpiry) == .accepted
-                && model.snapshot.current?.id == afterExpiry.id,
-            "当前占位已过期后到达的新事件必须重新成为当前提示")
-
-        model.setEnabled(false)
-        expect(
-            model.snapshot.recent.isEmpty && model.snapshot.phase == .hidden,
-            "关闭提示偏好必须立即清空来源和展示")
-        expect(model.accept(visible) == .ignoredDisabled, "关闭后旧消息不得进入模型")
-        model.setEnabled(true)
-        expect(model.accept(visible) == .staleEpoch, "重新开启后旧代次消息仍必须失效")
-        let currentEpoch = model.receiverEpoch
-        expect(
-            model.accept(makeEventNotice(epoch: currentEpoch)) == .accepted,
-            "重新开启后的新代次消息必须可以进入模型")
-        model.replaceReceiverEpoch(nextEpoch)
-        expect(
-            model.snapshot.recent.isEmpty && model.snapshot.receiverEpoch == nextEpoch,
-            "receiver 代次更换必须清空旧展示事实")
+            model.snapshot.current?.notice == first && model.snapshot.current?.version == 1,
+            "容量淘汰必须保留当前横幅的完整阅读内容")
     }
 
-    suite("EventNoticeModel：冻结列表中选中条目的 TTL 同时擦除当前与近期发生时间") {
-        let epoch = UUID()
-        let clock = EventNoticeClock()
-        let scheduler = ManualEventNoticeScheduler()
-        let model = EventNoticeModel(
-            receiverEpoch: epoch, now: { clock.value }, scheduler: scheduler.scheduler())
-        let first = makeEventNotice(epoch: epoch)
-        let selected = makeEventNotice(epoch: epoch)
-        _ = model.accept(first)
-        _ = model.accept(selected)
+    suite("Attention：静默不补播，锁屏与睡眠交叠，禁用和 epoch 隔离") {
+        let clock = ManualEventNoticeScheduler()
+        let model = makeModel(clock)
+        model.setAutomaticallySuppressed(true)
+        _ = model.accept(attentionNotice(epoch: model.receiverEpoch, native: "Stop"))
+        _ = model.accept(attentionNotice(epoch: model.receiverEpoch))
+        expect(
+            model.snapshot.totalCount == 1 && model.resourceUsage.transientVersions == 0, "静默只保留关注项"
+        )
+        model.setAutomaticallySuppressed(false)
+        expect(model.snapshot.phase == .hidden, "解除不补播")
         model.openRecent()
-        model.selectRecent(id: selected.id)
-        expect(model.snapshot.current?.occurredAt == selected.occurredAt, "有效详情保留发生时间")
-        clock.value += EventNoticeModel.retentionDuration
-        model.expireNow()
+        model.setAutomaticallySuppressed(true)
+        expect(model.snapshot.isExpanded, "动态静默不打断用户主动阅读列表")
+        let previous = attentionNotice(epoch: model.receiverEpoch)
+        model.setSystemPrivacy(.screenLocked, active: true)
+        model.setSystemPrivacy(.sleeping, active: true)
+        model.setSystemPrivacy(.screenLocked, active: false)
+        expect(!model.canReceive && model.snapshot.totalCount == 0, "只解锁不能越过睡眠边界")
         expect(
-            model.snapshot.current?.id == selected.id && model.snapshot.current?.isExpired == true,
-            "到期后仍保留当前选中身份，不自动跳到另一条")
-        expect(model.snapshot.current?.occurredAt == nil, "选中详情到期后立即擦除发生时间")
+            model.accept(attentionNotice(epoch: model.receiverEpoch)) == .ignoredDisabled, "挂起期间拒收")
+        model.setEnabled(false)
+        model.setEnabled(true)
+        expect(!model.canReceive, "重开偏好也不能越过睡眠")
+        model.setSystemPrivacy(.sleeping, active: false)
+        expect(model.canReceive && model.accept(previous) == .staleEpoch, "全部恢复仍拒绝旧 ingress")
+        _ = model.accept(attentionNotice(epoch: model.receiverEpoch))
+        model.clearForPrivacy()
         expect(
-            model.snapshot.recent.count == 1
-                && model.snapshot.recent.allSatisfy {
-                    $0.isExpired && $0.notice == nil && $0.source == nil && $0.occurredAt == nil
-                },
-            "冻结列表只能保留无来源、无发生时间的选中占位")
+            model.resourceUsage.latestVersions == 0 && model.resourceUsage.readingVersions == 0
+                && model.resourceUsage.deduplicationEntries == 0
+                && model.resourceUsage.observationEntries == 0
+                && model.resourceUsage.timers == 0, "隐私清空所有来源、元数据及计时器")
     }
 
-    suite("EventNoticeModel：重复 UUID、陈旧代次和非法 notice 都 fail closed") {
-        let epoch = UUID()
-        let clock = EventNoticeClock()
-        let scheduler = ManualEventNoticeScheduler()
-        let model = EventNoticeModel(
-            receiverEpoch: epoch,
-            now: { clock.value },
-            scheduler: scheduler.scheduler())
-        let notice = makeEventNotice(epoch: epoch)
-        expect(model.accept(notice) == .accepted, "首条合法 notice 必须接受")
-        expect(model.accept(notice) == .duplicate, "重复 UUID 必须丢弃")
-        expect(
-            model.accept(makeEventNotice(epoch: UUID())) == .staleEpoch,
-            "陈旧 receiver epoch 必须丢弃")
-        let binding = HostCapabilityCatalog.binding(host: .codex, nativeEvent: "Stop")!
-        let invalid = HostEventNotice(
-            receiverEpoch: epoch,
-            surface: .codex,
-            bindingID: binding.id,
-            installationID: UUID(),
-            nativeEvent: "not-a-real-event",
-            event: binding.event,
-            occurredAt: Date())
-        expect(model.accept(invalid) == .invalid, "不匹配 binding 的 notice 必须拒绝")
-    }
-
-    suite("EventNoticeModel：相同到达时间的记录按接收次序确定排序") {
-        let epoch = UUID()
-        let clock = EventNoticeClock()
-        let scheduler = ManualEventNoticeScheduler()
-        let model = EventNoticeModel(
-            receiverEpoch: epoch,
-            now: { clock.value },
-            scheduler: scheduler.scheduler())
-        // 固定时钟让三条记录拿到完全相同的 expiresAt；次序只能来自到达序，不得依赖排序稳定性。
-        let first = makeEventNotice(epoch: epoch)
-        let second = makeEventNotice(epoch: epoch)
-        let third = makeEventNotice(epoch: epoch)
+    suite("Attention：不透明 ID 按字节区分，元数据淘汰不破坏仍保留的版本") {
+        let clock = ManualEventNoticeScheduler()
+        let model = makeModel(clock)
+        let installation = UUID()
+        for session in ["caf\u{e9}", "cafe\u{301}"] {
+            _ = model.accept(
+                attentionNotice(
+                    epoch: model.receiverEpoch, installation: installation,
+                    source: HostEventSource(
+                        projectLabel: "project", projectKey: "project-key",
+                        sessionID: session, mainSessionIsKnown: true)))
+        }
+        expect(model.snapshot.totalCount == 2, "Unicode 规范等价不能合并两个不透明 ID")
+        model.clearForPrivacy()
+        clock.advance(1)
+        let first = attentionNotice(
+            epoch: model.receiverEpoch, installation: installation, observed: clock.time)
         _ = model.accept(first)
-        _ = model.accept(second)
-        _ = model.accept(third)
+        model.openRecent()
+        _ = model.viewSource(model.snapshot.recent[0].action!)
+        clock.advance(1)
+        for _ in 0..<300 {
+            _ = model.accept(attentionNotice(epoch: model.receiverEpoch, observed: clock.time))
+        }
+        expect(model.accept(first) == .duplicate, "当前保留 UUID 即使退出去重元数据仍不续期")
         expect(
-            model.snapshot.recent.map(\.id) == [third.id, second.id, first.id],
-            "相同 expiresAt 的记录必须按到达先后确定排序（最新在前），不得依赖 sorted 稳定性")
+            model.accept(
+                attentionNotice(
+                    epoch: model.receiverEpoch, installation: installation, observed: 100.5))
+                == .staleObservation,
+            "保留版本自身的观察顺序不依赖可淘汰元数据")
+        expect(model.snapshot.current?.version == 1, "冻结详情不被旧事件延长")
+    }
+
+    suite("Attention：Notification 原因与未实现 binding 的诚实分类") {
+        let clock = ManualEventNoticeScheduler()
+        let model = makeModel(clock)
+        let cases: [(HostEventNoticeReason?, EventNoticeKind, Int)] = [
+            (.permission, .permission, 1),
+            (.needsInput, .needsInput, 1), (.informational, .transient, 0), (.review, .review, 1),
+            (nil, .review, 1),
+        ]
+        for (reason, kind, count) in cases {
+            model.clearForPrivacy()
+            _ = model.accept(
+                attentionNotice(
+                    epoch: model.receiverEpoch, native: "Notification", host: .claudeCode,
+                    reason: reason))
+            expect(
+                model.snapshot.current?.kind == kind && model.snapshot.totalCount == count,
+                "原因分类 \(String(describing: reason))")
+        }
+        expect(
+            model.accept(
+                attentionNotice(
+                    epoch: model.receiverEpoch, native: "Notification", host: .workBuddy))
+                == .invalid, "WorkBuddy 未实现能力不升级")
+    }
+
+    suite("Attention：批量一次发布、持续到达徽标不饥饿、元数据有界且到期释放") {
+        let clock = ManualEventNoticeScheduler()
+        let model = makeModel(clock)
+        var publishes = 0
+        let sink = model.$snapshot.sink { _ in publishes += 1 }
+        let batch = (0..<32).map { _ in
+            attentionNotice(epoch: model.receiverEpoch, observed: clock.time)
+        }
+        let reduced = model.acceptBatch(batch)
+        expect(publishes == 2 && !reduced.isEmpty && reduced.count <= 32, "初始快照加一次有界批次发布")
+        _ = model.accept(contentsOf: batch.dropFirst(reduced.count))
+        clock.advance(0.05)
+        for _ in 0..<32 {
+            _ = model.accept(attentionNotice(epoch: model.receiverEpoch, observed: clock.time))
+        }
+        clock.advance(0.05)
+        expect(model.badgeCount == 50, "最早变化一百毫秒内发布最新数")
+        for _ in 0..<1000 {
+            _ = model.accept(attentionNotice(epoch: model.receiverEpoch, observed: clock.time))
+        }
+        let usage = model.resourceUsage
+        expect(
+            usage.latestVersions <= 50 && usage.readingVersions <= 50
+                && usage.transientVersions <= 1
+                && usage.deduplicationEntries == 256 && usage.observationEntries == 256
+                && usage.timers <= 3, "全部常驻集合有界")
+        clock.advance(1801)
+        expect(
+            model.snapshot.totalCount == 0 && model.resourceUsage.deduplicationEntries == 0
+                && model.resourceUsage.observationEntries == 0 && model.resourceUsage.timers == 0,
+            "截止计时器清理，空闲无轮询")
+        withExtendedLifetime(sink) {}
     }
 }

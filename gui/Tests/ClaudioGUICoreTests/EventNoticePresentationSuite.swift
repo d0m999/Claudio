@@ -33,109 +33,166 @@ private func makePresentationRecord(
 
 @MainActor
 func runEventNoticePresentationSuites() {
-    suite("EventNoticeView：180pt 展开态的完整详情与动作可滚动到达") {
+    suite("EventNoticeView：五行列表及小屏长详情实际挂载可滚动到达") {
         _ = NSApplication.shared
-        let epoch = UUID()
-        var scheduled: [(TimeInterval, @MainActor () -> Void)] = []
-        let model = EventNoticeModel(
-            receiverEpoch: epoch, now: { 100 },
-            scheduler: EventNoticeScheduler { delay, callback in
-                scheduled.append((delay, callback))
-                return EventNoticeCancellation {}
-            })
-        let binding = HostCapabilityCatalog.binding(host: .codex, nativeEvent: "Stop")!
-        let sessionID = String(repeating: "session-", count: 32)
-        @MainActor func receive() {
-            _ = model.accept(
-                HostEventNotice(
-                    receiverEpoch: epoch, surface: .codex, bindingID: binding.id,
-                    installationID: UUID(), nativeEvent: binding.nativeEvent!, event: binding.event,
-                    occurredAt: Date(timeIntervalSince1970: 1_700_000_000),
-                    source: HostEventSource(projectLabel: "project", sessionID: sessionID)))
-        }
-        for _ in 0..<51 { receive() }
-        model.openRecent()
-        receive()
-        let preferences = ClaudioPreferences(previewLanguage: .zhHans)
-        var viewedSource: UUID?
-        var openRecentRequests = 0
-        let hosting = NSHostingView(
-            rootView: EventNoticeView(
-                model: model, languageStore: preferences,
-                onViewSource: { viewedSource = $0.id },
-                onOpenRecent: {
-                    openRecentRequests += 1
-                    model.openRecent()
-                }))
-        let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 180),
-            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.isReleasedWhenClosed = false
-        panel.contentView = hosting
-        panel.setFrame(NSRect(x: 0, y: 0, width: 440, height: 180), display: true)
-        panel.orderFront(nil)
-        defer { panel.orderOut(nil); panel.close() }
-        hosting.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
         @MainActor func descendants(_ view: NSView) -> [NSView] {
             [view] + view.subviews.flatMap { descendants($0) }
         }
-        let views = descendants(hosting)
-        let scrollViews = views.compactMap { $0 as? NSScrollView }
-        expect(
-            hosting.frame.height <= 180, "完整详情不能强迫 180pt panel 的 root 超高，实得 \(hosting.frame.height)"
-        )
-        expect(scrollViews.count == 1, "展开详情只应有一个滚动区域")
-        guard let scroll = scrollViews.first, let document = scroll.documentView,
-            let session = views.compactMap({ $0 as? NSTextField }).first(where: {
-                $0.stringValue == sessionID
-            })
-        else {
-            expect(false, "实际视图必须包含滚动区域和完整的可选中 session ID")
-            return
-        }
-        expect(scroll.contentView.bounds.height >= 28, "滚动区域不能被固定详情挤到零高度")
-        expect(session.isDescendant(of: document), "完整 session ID 必须属于可滚动文档，不能留在其外被裁切")
-        guard session.isDescendant(of: document), scroll.contentView.bounds.height >= 28 else {
-            return
-        }
-        let sessionFrame = session.convert(session.bounds, to: document)
-        document.scrollToVisible(sessionFrame)
-        hosting.layoutSubtreeIfNeeded()
-        expect(
-            scroll.contentView.bounds.intersects(sessionFrame),
-            "滚动到 session ID 后必须进入可见视口")
-        // The action row is the last 28pt row. Scroll to the end and exercise the actual source
-        // button through AppKit; a button laid out outside the scroll region cannot pass this.
-        let bottom = NSPoint(
-            x: 0, y: max(0, document.bounds.height - scroll.contentView.bounds.height))
-        scroll.contentView.scroll(to: bottom)
-        scroll.reflectScrolledClipView(scroll.contentView)
-        hosting.layoutSubtreeIfNeeded()
-        let actionPoint = document.convert(NSPoint(x: 32, y: document.bounds.maxY - 14), to: nil)
-        @MainActor func click(_ point: NSPoint) {
-            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                guard
-                    let event = NSEvent.mouseEvent(
-                        with: type, location: point, modifierFlags: [], timestamp: 0,
-                        windowNumber: panel.windowNumber, context: nil, eventNumber: 1,
-                        clickCount: 1,
-                        pressure: 1)
-                else { expect(false, "必须能生成原生动作点击"); return }
-                panel.sendEvent(event)
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            for language in [ClaudioAppLanguage.english, .zhHans] {
+                for count in [0, 1, 5, 7, 50] {
+                    let clock = ManualEventNoticeScheduler()
+                    let model = EventNoticeModel(
+                        receiverEpoch: UUID(), now: { clock.time }, scheduler: clock.scheduler())
+                    let sessionID = String(repeating: "S", count: 256)
+                    for _ in 0..<count {
+                        _ = model.accept(
+                            attentionNotice(
+                                epoch: model.receiverEpoch,
+                                source: HostEventSource(
+                                    projectLabel: "project", sessionID: sessionID)))
+                    }
+                    model.openRecent()
+                    let preferences = ClaudioPreferences(previewLanguage: language)
+                    var copyCalls = 0
+                    let hosting = EventNoticeHostingView(
+                        rootView: EventNoticeView(
+                            model: model, languageStore: preferences,
+                            onViewSource: { _ = model.viewSource($0) },
+                            onCopySessionID: { action in
+                                copyCalls += 1
+                                return model.copySessionID(action) { _ in false }
+                            }, onClose: { model.dismiss(animated: false) }))
+                    let height = EventNoticeView.preferredHeight(for: model.snapshot)
+                    let panel = NSPanel(
+                        contentRect: NSRect(x: 0, y: 0, width: 440, height: height),
+                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered,
+                        defer: false)
+                    panel.isReleasedWhenClosed = false
+                    panel.appearance = NSAppearance(named: appearance)
+                    panel.contentView = hosting
+                    panel.setFrame(NSRect(x: 0, y: 0, width: 440, height: height), display: true)
+                    panel.orderFront(nil)
+                    defer { panel.orderOut(nil); panel.close() }
+                    hosting.layoutSubtreeIfNeeded()
+                    RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+                    expect(
+                        abs(hosting.frame.height - height) <= 1,
+                        "窗口遵循模型布局高度：count=\(count) actual=\(hosting.frame.height) expected=\(height)"
+                    )
+                    let scrolls = descendants(hosting).compactMap { $0 as? NSScrollView }
+                    expect(scrolls.count == 1, "列表单个滚动区域：\(count)")
+                    if count >= 5, let scroll = scrolls.first {
+                        expect(
+                            scroll.contentView.bounds.height >= 270,
+                            "标准五行视口至少270pt：\(scroll.contentView.bounds.height)")
+                        if count > 5, let document = scroll.documentView {
+                            expect(
+                                document.bounds.height > scroll.contentView.bounds.height,
+                                "第六行起存在可滚动内容，count=\(count) document=\(document.bounds.height) viewport=\(scroll.contentView.bounds.height)"
+                            )
+                            document.scrollToVisible(
+                                NSRect(x: 0, y: document.bounds.maxY - 30, width: 100, height: 28))
+                            expect(
+                                scroll.contentView.bounds.maxY >= document.bounds.maxY - 32,
+                                "末行可滚动到达")
+                        }
+                    }
+                    if let directory = ProcessInfo.processInfo.environment[
+                        "CLAUDIO_ATTENTION_SCREENSHOT_DIR"], count == 0 || count == 7
+                    {
+                        let output = URL(fileURLWithPath: directory, isDirectory: true)
+                        try? FileManager.default.createDirectory(
+                            at: output, withIntermediateDirectories: true)
+                        if let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)
+                        {
+                            hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+                            try? bitmap.representation(using: .png, properties: [:])?.write(
+                                to: output.appendingPathComponent(
+                                    "list-\(appearance.rawValue)-\(language.rawValue)-\(count).png")
+                            )
+                        }
+                    }
+                    guard count > 0, let action = model.snapshot.recent.first?.action else {
+                        continue
+                    }
+                    _ = model.viewSource(action)
+                    panel.setFrame(NSRect(x: 0, y: 0, width: 300, height: 180), display: true)
+                    hosting.layoutSubtreeIfNeeded()
+                    RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+                    let views = descendants(hosting)
+                    guard let scroll = views.compactMap({ $0 as? NSScrollView }).first,
+                        let document = scroll.documentView,
+                        let session = views.compactMap({ $0 as? NSTextField }).first(where: {
+                            $0.stringValue == sessionID
+                        })
+                    else { expect(false, "详情必须实际挂载完整 session ID 与滚动文档"); continue }
+                    expect(session.isDescendant(of: document), "完整 ID 在可滚动区域内")
+                    let frame = session.convert(session.bounds, to: document)
+                    document.scrollToVisible(frame)
+                    expect(scroll.contentView.bounds.intersects(frame), "小屏完整 ID 可滚动到达")
+                    expect(
+                        hosting.frame.height <= 180 && scroll.contentView.bounds.height >= 28,
+                        "小屏不溢出且动作区域可达")
+                    // The last row is remove (28pt); the preceding row is copy (28pt), with
+                    // a 10pt gap. Exercise native mouse delivery, as in the pre-existing detail test.
+                    let originalDetailHeight = document.bounds.height
+                    let copyRect = NSRect(
+                        x: 0, y: document.bounds.maxY - 66, width: 110, height: 28)
+                    document.scrollToVisible(copyRect)
+                    hosting.layoutSubtreeIfNeeded()
+                    let point = document.convert(NSPoint(x: 45, y: copyRect.midY), to: nil)
+                    for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                        if let event = NSEvent.mouseEvent(
+                            with: type, location: point,
+                            modifierFlags: [], timestamp: 0, windowNumber: panel.windowNumber,
+                            context: nil, eventNumber: 1, clickCount: 1, pressure: 1)
+                        {
+                            panel.sendEvent(event)
+                        }
+                    }
+                    expect(copyCalls == 1, "滚动后的真实复制按钮回送捕获版本")
+                    RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+                    hosting.layoutSubtreeIfNeeded()
+                    expect(
+                        document.bounds.height > originalDetailHeight,
+                        "复制失败反馈增加实际滚动内容：\(language.rawValue) \(appearance.rawValue)")
+                    document.scrollToVisible(
+                        NSRect(x: 0, y: document.bounds.maxY - 28, width: 110, height: 28))
+                    expect(
+                        scroll.contentView.bounds.maxY >= document.bounds.maxY - 1,
+                        "错误反馈出现后末尾动作仍可滚动到达")
+                    if count == 1,
+                        let directory = ProcessInfo.processInfo.environment[
+                            "CLAUDIO_ATTENTION_SCREENSHOT_DIR"],
+                        let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)
+                    {
+                        hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+                        try? bitmap.representation(using: .png, properties: [:])?.write(
+                            to: URL(fileURLWithPath: directory, isDirectory: true)
+                                .appendingPathComponent(
+                                    "copy-failed-\(appearance.rawValue)-\(language.rawValue).png"))
+                    }
+                }
             }
         }
-        click(actionPoint)
-        expect(viewedSource == model.snapshot.current?.id, "滚动到底后的来源按钮必须可点击且指向当前条目")
-        model.closeRecent()
-        // Deliver the specified 100ms badge coalescing callbacks without waiting on wall time.
-        for (_, callback) in scheduled.filter({ $0.0 <= 0.1 }) { callback() }
-        hosting.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
-        click(NSPoint(x: hosting.frame.width - 90, y: hosting.frame.height - 28))
+    }
+
+    suite("EventNoticeProjection：信息性通知不显示等待介入") {
+        let clock = ManualEventNoticeScheduler()
+        let model = EventNoticeModel(
+            receiverEpoch: UUID(), now: { clock.time }, scheduler: clock.scheduler())
+        _ = model.accept(
+            attentionNotice(
+                epoch: model.receiverEpoch, native: "Notification", host: .claudeCode,
+                reason: .informational))
+        guard let record = model.snapshot.current else { expect(false, "信息通知应有瞬时投影"); return }
         expect(
-            openRecentRequests == 1 && model.snapshot.isExpanded,
-            "紧凑胶囊的数量入口必须经 native controller 回调展开，才能接入 Settings 焦点移交")
+            EventNoticeProjection.primaryLine(for: record, language: .zhHans)
+                == "Claude Code · 信息通知", "中文信息性通知不猜测等待介入")
+        expect(
+            EventNoticeProjection.primaryLine(for: record, language: .english)
+                == "Claude Code · Information", "英文与中文含义一致")
     }
 
     suite("EventNoticePlacement：刘海与菜单栏共同决定顶部安全位置") {
@@ -168,8 +225,8 @@ func runEventNoticePresentationSuites() {
         let narrowVisible = CGRect(x: 0, y: 0, width: 300, height: 800)
         let narrowWidth = EventNoticePlacement.clampedWidth(visibleFrame: narrowVisible)
         expect(
-            narrowWidth == EventNoticePlacement.minimumWidth,
-            "窄屏宽度必须夹到 280pt 下限，实得 \(narrowWidth)")
+            narrowWidth == 268,
+            "窄屏必须优先保留双侧 16pt 边距，实得 \(narrowWidth)")
         let narrowX = EventNoticePlacement.clampedX(
             visibleFrame: narrowVisible, width: narrowWidth)
         expect(

@@ -356,7 +356,7 @@ func runViewWiringSuites() {
             let transfer = closureBody(after: "func closeForMutualExclusion()", in: settings),
             let route = closureBody(
                 after: "func dismissSettingsForEventNoticeInteraction()", in: router),
-            let entry = closureBody(after: "func openInteractive()", in: notice),
+            let entry = closureBody(after: "private func becomeInteractive()", in: notice),
             let firstEntry = closureBody(after: "if !isInteractive", in: entry),
             let close = closureBody(after: "func close()", in: notice),
             let privacy = closureBody(after: "func clearForPrivacy()", in: notice),
@@ -392,7 +392,8 @@ func runViewWiringSuites() {
             "数量入口必须接到同一个原生 interactive 焦点移交路径")
         let render = closureBody(after: "private func render(", in: notice) ?? ""
         expect(
-            closureBody(after: "guard snapshot.current != nil", in: render)?
+            closureBody(
+                after: "guard (snapshot.current != nil || snapshot.isExpanded)", in: render)?
                 .contains("focusRestoration = nil") == true,
             "runtime 经共享模型清空隐私时，也必须丢弃旧的焦点归还动作")
     }

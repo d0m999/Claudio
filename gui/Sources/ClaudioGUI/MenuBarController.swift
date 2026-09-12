@@ -404,7 +404,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             .sink { [weak globalShortcutSettings, weak eventNoticeRuntime] _ in
                 MainActor.assumeIsolated {
                     globalShortcutSettings?.suspend()
-                    eventNoticeRuntime?.suspendForSystemPrivacy()
+                    eventNoticeRuntime?.suspendForSystemPrivacy(.sleeping)
                 }
             }
             .store(in: &systemPowerCancellables)
@@ -412,21 +412,39 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             .sink { [weak globalShortcutSettings, weak eventNoticeRuntime] _ in
                 MainActor.assumeIsolated {
                     globalShortcutSettings?.resume()
-                    eventNoticeRuntime?.resumeAfterSystemPrivacy()
+                    eventNoticeRuntime?.resumeAfterSystemPrivacy(.sleeping)
+                }
+            }
+            .store(in: &systemPowerCancellables)
+        // Workspace session notifications describe fast-user switching. loginwindow emits
+        // separate distributed screen-lock signals; keep those reasons independent so a
+        // session-active callback cannot resume while the screen is still locked.
+        let screenNotifications = DistributedNotificationCenter.default()
+        screenNotifications.publisher(for: Notification.Name("com.apple.screenIsLocked"))
+            .sink { [weak eventNoticeRuntime] _ in
+                MainActor.assumeIsolated {
+                    eventNoticeRuntime?.suspendForSystemPrivacy(.screenLocked)
+                }
+            }
+            .store(in: &systemPowerCancellables)
+        screenNotifications.publisher(for: Notification.Name("com.apple.screenIsUnlocked"))
+            .sink { [weak eventNoticeRuntime] _ in
+                MainActor.assumeIsolated {
+                    eventNoticeRuntime?.resumeAfterSystemPrivacy(.screenLocked)
                 }
             }
             .store(in: &systemPowerCancellables)
         workspaceNotifications.publisher(for: NSWorkspace.sessionDidResignActiveNotification)
             .sink { [weak eventNoticeRuntime] _ in
                 MainActor.assumeIsolated {
-                    eventNoticeRuntime?.suspendForSystemPrivacy()
+                    eventNoticeRuntime?.suspendForSystemPrivacy(.inactiveSession)
                 }
             }
             .store(in: &systemPowerCancellables)
         workspaceNotifications.publisher(for: NSWorkspace.sessionDidBecomeActiveNotification)
             .sink { [weak eventNoticeRuntime] _ in
                 MainActor.assumeIsolated {
-                    eventNoticeRuntime?.resumeAfterSystemPrivacy()
+                    eventNoticeRuntime?.resumeAfterSystemPrivacy(.inactiveSession)
                 }
             }
             .store(in: &systemPowerCancellables)

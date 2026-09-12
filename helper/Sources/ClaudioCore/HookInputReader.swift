@@ -54,6 +54,7 @@ public enum HookInputReader {
             + UInt64(max(0, budget) * 1_000_000_000)
         var bytes = Data()
         var buffer = [UInt8](repeating: 0, count: 4096)
+        var frame = HookInputFrame()
 
         while true {
             let count = buffer.withUnsafeMutableBytes { rawBuffer -> Int in
@@ -67,11 +68,9 @@ public enum HookInputReader {
                         status: .tooLarge,
                         bytesRead: bytes.count)
                 }
-                // A complete JSON document does not need an EOF from a host that keeps stdin open.
-                if (try? JSONSerialization.jsonObject(
-                    with: bytes,
-                    options: [.fragmentsAllowed])) != nil
-                {
+                // Framing only: the adapter performs the sole JSON decode after this bounded read.
+                // A completed object need not wait for EOF from a host that keeps stdin open.
+                if frame.consume(buffer.prefix(count)) {
                     return HookInputReadResult(status: .data, data: bytes, bytesRead: bytes.count)
                 }
                 continue
@@ -117,5 +116,43 @@ public enum HookInputReader {
                     bytesRead: bytes.count)
             }
         }
+    }
+}
+
+private struct HookInputFrame {
+    private var depth = 0
+    private var started = false
+    private var inString = false
+    private var escaped = false
+
+    mutating func consume(_ bytes: ArraySlice<UInt8>) -> Bool {
+        for byte in bytes {
+            if !started {
+                if [9, 10, 13, 32].contains(byte) { continue }
+                started = true
+                guard byte == 123 || byte == 91 else { return true }
+                depth = 1
+                continue
+            }
+            if inString {
+                if escaped {
+                    escaped = false
+                } else if byte == 92 {
+                    escaped = true
+                } else if byte == 34 {
+                    inString = false
+                }
+                continue
+            }
+            switch byte {
+            case 34: inString = true
+            case 123, 91: depth += 1
+            case 125, 93:
+                depth -= 1
+                if depth <= 0 { return true }
+            default: break
+            }
+        }
+        return false
     }
 }

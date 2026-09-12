@@ -1,3 +1,4 @@
+import CoreFoundation
 import CryptoKit
 import Foundation
 
@@ -28,6 +29,8 @@ public struct HostEventSource: Codable, Sendable, Equatable, Hashable {
     public let sessionID: String?
     public let sessionLabel: String?
     public let isParentSession: Bool
+    /// nil for legacy/incomplete input; false is not evidence of a main-session identity.
+    public let mainSessionIsKnown: Bool?
     public let completeness: HostEventSourceCompleteness
 
     public init(
@@ -36,13 +39,15 @@ public struct HostEventSource: Codable, Sendable, Equatable, Hashable {
         sessionID: String?,
         sessionLabel: String? = nil,
         isParentSession: Bool = false,
-        completeness: HostEventSourceCompleteness? = nil
+        completeness: HostEventSourceCompleteness? = nil,
+        mainSessionIsKnown: Bool? = nil
     ) {
         self.projectLabel = projectLabel
         self.projectKey = projectKey
         self.sessionID = sessionID
         self.sessionLabel = sessionLabel
         self.isParentSession = isParentSession
+        self.mainSessionIsKnown = mainSessionIsKnown
         self.completeness =
             completeness
             ?? HostEventSourceCompleteness.forFields(
@@ -71,6 +76,7 @@ public struct HostEventSource: Codable, Sendable, Equatable, Hashable {
                 !value.isEmpty
                     && value.utf8.count <= HostEventSourceParser.maximumSessionIDBytes
                     && !Self.containsUnsafeScalar(value)
+                    && !value.contains(where: { $0.isWhitespace })
             } ?? true
         let labelIsValid =
             sessionLabel.map { value in
@@ -83,6 +89,7 @@ public struct HostEventSource: Codable, Sendable, Equatable, Hashable {
             hasSession: sessionID != nil)
         return projectIsValid && keyIsValid && sessionIsValid && labelIsValid
             && completeness == expectedCompleteness
+            && !(isParentSession && mainSessionIsKnown == true)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -91,7 +98,19 @@ public struct HostEventSource: Codable, Sendable, Equatable, Hashable {
         case sessionID = "session_id"
         case sessionLabel = "session_label"
         case isParentSession = "is_parent_session"
+        case mainSessionIsKnown = "main_session_is_known"
         case completeness
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        projectLabel = try values.decodeIfPresent(String.self, forKey: .projectLabel)
+        projectKey = try values.decodeIfPresent(String.self, forKey: .projectKey)
+        sessionID = try values.decodeIfPresent(String.self, forKey: .sessionID)
+        sessionLabel = try values.decodeIfPresent(String.self, forKey: .sessionLabel)
+        isParentSession = try values.decode(Bool.self, forKey: .isParentSession)
+        completeness = try values.decode(HostEventSourceCompleteness.self, forKey: .completeness)
+        mainSessionIsKnown = try? values.decode(Bool.self, forKey: .mainSessionIsKnown)
     }
 
     /// Single owner of the unsafe-scalar rule. The parser and cross-process validation both
@@ -152,6 +171,11 @@ public enum HostEventSourceParseOutcome: Sendable, Equatable {
     }
 }
 
+public struct HostEventInput: Sendable, Equatable {
+    public let source: HostEventSourceParseOutcome
+    public let reason: HostEventNoticeReason?
+}
+
 /// 宿主来源解析器只认识各 adapter 明确列入合同的字段。
 public enum HostEventSourceParser {
     public static let maximumProjectLabelScalars = 128
@@ -159,114 +183,106 @@ public enum HostEventSourceParser {
     public static let maximumDisplayBytes = 1 << 10
 
     public static func parse(host: HostID, data: Data?) -> HostEventSourceParseOutcome {
-        guard let data, !data.isEmpty else {
-            return .unavailable(reason: .empty, partial: nil)
-        }
-        guard data.count <= 64 * 1024 else {
-            return .unavailable(reason: .oversized, partial: nil)
-        }
-        guard host == .claudeCode || host == .codex else {
-            // WorkBuddy 的来源字段没有本次已核实的版本合同，宁可未知，不兼容猜测。
-            return .unavailable(reason: .unsupportedHost, partial: nil)
-        }
-        guard !hasDuplicateTopLevelKeys(data) else {
-            return .unavailable(reason: .duplicateField, partial: nil)
-        }
-        guard
-            let object = try? JSONSerialization.jsonObject(
-                with: data, options: [.fragmentsAllowed]),
-            let dictionary = object as? [String: Any]
-        else {
-            return .unavailable(reason: .invalidJSON, partial: nil)
-        }
+        parseInput(host: host, nativeEvent: nil, data: data).source
+    }
 
+    /// Decode the bounded object once, then independently project source and notification reason.
+    /// Neither projection reads message, title, prompt, response, or transcript contents.
+    public static func parseInput(
+        host: HostID, nativeEvent: String?, data: Data?
+    ) -> HostEventInput {
+        let fallback = normalizedReason(host: host, nativeEvent: nativeEvent, dictionary: nil)
+        func unavailable(_ reason: HostEventSourceUnavailableReason) -> HostEventInput {
+            HostEventInput(source: .unavailable(reason: reason, partial: nil), reason: fallback)
+        }
+        guard let data, !data.isEmpty else { return unavailable(.empty) }
+        guard data.count <= HookInputReader.defaultMaximumBytes else {
+            return unavailable(.oversized)
+        }
+        guard host == .claudeCode || host == .codex else { return unavailable(.unsupportedHost) }
+        guard
+            let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        else { return unavailable(.invalidJSON) }
+        guard let dictionary = object as? [String: Any] else { return unavailable(.notObject) }
+        let duplicateKeys = duplicateTopLevelKeys(data)
+        let reason = normalizedReason(
+            host: host, nativeEvent: nativeEvent,
+            dictionary: duplicateKeys.contains("notification_type")
+                || duplicateKeys.contains("hook_event_name") ? nil : dictionary)
+        let sourceKeys: Set<String> = [
+            "cwd", "session_id", "agent_id", "is_subagent", "subagent", "hook_event_name",
+        ]
+        guard duplicateKeys.isDisjoint(with: sourceKeys) else {
+            return HostEventInput(
+                source: .unavailable(reason: .duplicateField, partial: nil), reason: reason)
+        }
+        return HostEventInput(
+            source: parseSource(host: host, nativeEvent: nativeEvent, dictionary: dictionary),
+            reason: reason)
+    }
+
+    private static func normalizedReason(
+        host: HostID, nativeEvent: String?, dictionary: [String: Any]?
+    ) -> HostEventNoticeReason? {
+        guard let nativeEvent,
+            let binding = HostCapabilityCatalog.binding(host: host, nativeEvent: nativeEvent),
+            binding.event == .notification
+        else { return nil }
+        if host == .codex, nativeEvent == "PermissionRequest" { return .permission }
+        guard host == .claudeCode, nativeEvent == "Notification" else { return .review }
+        if let payloadEvent = dictionary?["hook_event_name"],
+            (payloadEvent as? String) != nativeEvent
+        {
+            return .review
+        }
+        // Official Notification matcher contract, checked 2026-09-12:
+        // https://code.claude.com/docs/en/hooks#notification
+        switch dictionary?["notification_type"] as? String {
+        case "permission_prompt": return .permission
+        case "elicitation_dialog", "elicitation_url_dialog", "agent_needs_input": return .needsInput
+        case "idle_prompt", "auth_success", "elicitation_complete", "elicitation_response",
+            "agent_completed", "quota_auto_resume_fired":
+            return .informational
+        default: return .review
+        }
+    }
+
+    private static func parseSource(
+        host: HostID, nativeEvent: String?, dictionary: [String: Any]
+    ) -> HostEventSourceParseOutcome {
         let cwdResult = stringField(named: "cwd", in: dictionary)
         let sessionResult = stringField(named: "session_id", in: dictionary)
-        let parentResult = parentSessionField(in: dictionary)
-
-        if cwdResult == .invalid || sessionResult == .invalid || parentResult.invalid {
-            let partial = makeSource(
-                cwd: cwdResult.value,
-                sessionID: sessionResult.value,
-                isParentSession: parentResult.value)
-            return .unavailable(reason: .invalidFieldType, partial: partial)
-        }
-
-        let projectInfo: (label: String, key: String)?
-        if let cwd = cwdResult.value {
-            guard let result = Self.project(from: cwd) else {
-                let partial = makeSource(
-                    cwd: nil, sessionID: sessionResult.value, isParentSession: parentResult.value)
-                return .unavailable(reason: .unsafeField, partial: partial)
+        let parent = parentSessionField(host: host, nativeEvent: nativeEvent, in: dictionary)
+        let projectInfo = cwdResult.value.flatMap { Self.project(from: $0) }
+        // A malformed parent marker must not turn its parent session ID into a main target.
+        let safeSession =
+            parent.invalid
+            ? nil
+            : sessionResult.value.flatMap {
+                sanitizeIdentifier($0, maximumBytes: maximumSessionIDBytes)
             }
-            projectInfo = result
-        } else {
-            projectInfo = nil
+        let source: HostEventSource? =
+            projectInfo != nil || safeSession != nil
+            ? HostEventSource(
+                projectLabel: projectInfo?.label,
+                projectKey: projectInfo?.key,
+                sessionID: safeSession,
+                isParentSession: parent.value,
+                mainSessionIsKnown: parent.mainKnown ? true : nil)
+            : nil
+        if cwdResult == .invalid || sessionResult == .invalid || parent.invalid {
+            return .unavailable(reason: .invalidFieldType, partial: source)
         }
-
-        let safeSession: String?
-        if let sessionID = sessionResult.value {
-            guard let sanitized = sanitizeIdentifier(sessionID, maximumBytes: maximumSessionIDBytes)
-            else {
-                let partial = makeSource(
-                    project: projectInfo,
-                    sessionID: nil,
-                    isParentSession: parentResult.value)
-                return .unavailable(reason: .unsafeField, partial: partial)
-            }
-            safeSession = sanitized
-        } else {
-            safeSession = nil
+        if (cwdResult.value != nil && projectInfo == nil)
+            || (sessionResult.value != nil && safeSession == nil)
+        {
+            return .unavailable(reason: .unsafeField, partial: source)
         }
-
-        let source = HostEventSource(
-            projectLabel: projectInfo?.label,
-            projectKey: projectInfo?.key,
-            sessionID: safeSession,
-            isParentSession: parentResult.value,
-            completeness: .forFields(
-                hasProject: projectInfo != nil,
-                hasSession: safeSession != nil))
-        guard source.completeness != .unknown else {
-            return .unavailable(reason: .empty, partial: nil)
-        }
+        guard let source else { return .unavailable(reason: .empty, partial: nil) }
         guard HostEventSource.displayBytes(of: source) <= maximumDisplayBytes else {
             return .unavailable(reason: .oversized, partial: nil)
         }
         return .available(source)
-    }
-
-    private static func makeSource(
-        cwd: String?,
-        sessionID: String?,
-        isParentSession: Bool,
-        projectKey: String? = nil
-    ) -> HostEventSource? {
-        let projectInfo = cwd.flatMap { Self.project(from: $0) }
-        return makeSource(
-            project: projectInfo.map { (label: $0.label, key: projectKey ?? $0.key) },
-            sessionID: sessionID,
-            isParentSession: isParentSession)
-    }
-
-    private static func makeSource(
-        project: (label: String, key: String)?,
-        sessionID: String?,
-        isParentSession: Bool
-    ) -> HostEventSource? {
-        let projectLabel = project?.label
-        let projectKey = project?.key
-        let safeSession = sessionID.flatMap {
-            sanitizeIdentifier($0, maximumBytes: maximumSessionIDBytes)
-        }
-        guard projectLabel != nil || safeSession != nil else { return nil }
-        // The default short session label is projected and localized GUI-side; the transport
-        // field stays nil until an adapter earns an explicit trusted title (SPEC 来源合同).
-        return HostEventSource(
-            projectLabel: projectLabel,
-            projectKey: projectKey,
-            sessionID: safeSession,
-            isParentSession: isParentSession)
     }
 
     private static func project(from cwd: String) -> (label: String, key: String)? {
@@ -301,26 +317,44 @@ public enum HostEventSourceParser {
         return .valid(string)
     }
 
-    private static func parentSessionField(in object: [String: Any]) -> (value: Bool, invalid: Bool)
-    {
-        // `agent_id` identifies a child invocation in the Codex hook payload. It is deliberately
-        // never used as the session ID or as a route target.
+    private static func parentSessionField(
+        host: HostID, nativeEvent: String?, in object: [String: Any]
+    ) -> (value: Bool, mainKnown: Bool, invalid: Bool) {
+        var child = nativeEvent == "SubagentStop"
         if let value = object["agent_id"] {
-            guard value is String else { return (false, true) }
-            return (true, false)
+            guard let identifier = value as? String,
+                sanitizeIdentifier(identifier, maximumBytes: maximumSessionIDBytes) != nil
+            else { return (child, false, true) }
+            child = true
         }
+        // Retain conservative handling of legacy markers, but they alone never prove main scope.
         for key in ["is_subagent", "subagent"] {
             if let value = object[key] {
-                guard let bool = value as? Bool else { return (false, true) }
-                return (bool, false)
+                guard let number = value as? NSNumber,
+                    CFGetTypeID(number) == CFBooleanGetTypeID()
+                else { return (child, false, true) }
+                if number.boolValue { child = true }
             }
         }
-        return (false, false)
+        let payloadEvent = stringField(named: "hook_event_name", in: object)
+        if payloadEvent == .invalid { return (child, false, true) }
+        if let nativeEvent, let payloadName = payloadEvent.value, payloadName != nativeEvent {
+            return (child, false, true)
+        }
+        let matched =
+            nativeEvent != nil && nativeEvent == payloadEvent.value
+            && HostCapabilityCatalog.binding(host: host, nativeEvent: nativeEvent ?? "") != nil
+        return (child, matched && !child, false)
     }
 
     private static func sanitizeIdentifier(_ value: String, maximumBytes: Int) -> String? {
-        guard let normalized = HostEventSource.normalizeWhitespace(value) else { return nil }
-        return prefixByUTF8Bytes(normalized, maximumBytes: maximumBytes)
+        // An identity is never shortened or whitespace-normalized: doing so aliases distinct
+        // sessions and would export a different ID when the user copies it.
+        guard !value.isEmpty, value.utf8.count <= maximumBytes,
+            !HostEventSource.containsUnsafeScalar(value),
+            !value.contains(where: { $0.isWhitespace })
+        else { return nil }
+        return value
     }
 
     private static func sanitizeLabel(_ value: String, maximumScalars: Int) -> String? {
@@ -336,45 +370,34 @@ public enum HostEventSourceParser {
         return result.isEmpty ? nil : result
     }
 
-    private static func prefixByUTF8Bytes(_ value: String, maximumBytes: Int) -> String? {
-        var result = ""
-        var count = 0
-        for character in value {
-            let bytes = character.utf8.count
-            guard count + bytes <= maximumBytes else { break }
-            result.append(character)
-            count += bytes
-        }
-        return result.isEmpty ? nil : result
-    }
-
     /// `JSONSerialization` collapses duplicate keys. Scan only the top-level object so the
     /// allowlisted source fields cannot be given two competing values by an untrusted hook.
-    private static func hasDuplicateTopLevelKeys(_ data: Data) -> Bool {
+    private static func duplicateTopLevelKeys(_ data: Data) -> Set<String> {
         let bytes = Array(data)
+        var duplicates = Set<String>()
         var index = 0
         skipWhitespace(bytes, &index)
-        guard index < bytes.count, bytes[index] == 123 else { return false }
+        guard index < bytes.count, bytes[index] == 123 else { return duplicates }
         index += 1
         var keys = Set<String>()
         while index < bytes.count {
             skipWhitespace(bytes, &index)
-            if index < bytes.count, bytes[index] == 125 { return false }
+            if index < bytes.count, bytes[index] == 125 { return duplicates }
             guard index < bytes.count, bytes[index] == 34,
                 let key = parseJSONString(bytes, &index)
-            else { return false }
-            if !keys.insert(key).inserted { return true }
+            else { return duplicates }
+            if !keys.insert(key).inserted { duplicates.insert(key) }
             skipWhitespace(bytes, &index)
-            guard index < bytes.count, bytes[index] == 58 else { return false }
+            guard index < bytes.count, bytes[index] == 58 else { return duplicates }
             index += 1
-            guard skipJSONValue(bytes, &index) else { return false }
+            guard skipJSONValue(bytes, &index) else { return duplicates }
             skipWhitespace(bytes, &index)
-            guard index < bytes.count else { return false }
-            if bytes[index] == 125 { return false }
-            guard bytes[index] == 44 else { return false }
+            guard index < bytes.count else { return duplicates }
+            if bytes[index] == 125 { return duplicates }
+            guard bytes[index] == 44 else { return duplicates }
             index += 1
         }
-        return false
+        return duplicates
     }
 
     private static func skipWhitespace(_ bytes: [UInt8], _ index: inout Int) {
@@ -459,6 +482,13 @@ public enum HostEventSourceParser {
 
 /// Immutable event notice. This is intentionally not a receipt and is never written to the
 /// receipt store or activity summary.
+public enum HostEventNoticeReason: String, Codable, Sendable, Hashable {
+    case permission
+    case needsInput = "needs_input"
+    case informational
+    case review
+}
+
 public struct HostEventNotice: Codable, Sendable, Equatable, Hashable, Identifiable {
     public static let currentSchema = 1
 
@@ -473,6 +503,9 @@ public struct HostEventNotice: Codable, Sendable, Equatable, Hashable, Identifia
     public let occurredAt: Date
     public let source: HostEventSource?
     public let sourceCompleteness: HostEventSourceCompleteness
+    public let reason: HostEventNoticeReason?
+    /// Hook-local monotonic observation, never a host transaction timestamp.
+    public let observedUptime: TimeInterval?
 
     public init(
         schema: Int = HostEventNotice.currentSchema,
@@ -485,7 +518,9 @@ public struct HostEventNotice: Codable, Sendable, Equatable, Hashable, Identifia
         event: Event,
         occurredAt: Date,
         source: HostEventSource? = nil,
-        sourceCompleteness: HostEventSourceCompleteness? = nil
+        sourceCompleteness: HostEventSourceCompleteness? = nil,
+        reason: HostEventNoticeReason? = nil,
+        observedUptime: TimeInterval? = nil
     ) {
         self.schema = schema
         self.id = id
@@ -498,6 +533,28 @@ public struct HostEventNotice: Codable, Sendable, Equatable, Hashable, Identifia
         self.occurredAt = occurredAt
         self.source = source
         self.sourceCompleteness = sourceCompleteness ?? source?.completeness ?? .unknown
+        self.reason = reason
+        self.observedUptime = observedUptime.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schema = try values.decode(Int.self, forKey: .schema)
+        id = try values.decode(UUID.self, forKey: .id)
+        receiverEpoch = try values.decode(UUID.self, forKey: .receiverEpoch)
+        surface = try values.decode(HostSurfaceID.self, forKey: .surface)
+        bindingID = try values.decode(HostEventBindingID.self, forKey: .bindingID)
+        installationID = try values.decode(UUID.self, forKey: .installationID)
+        nativeEvent = try values.decode(String.self, forKey: .nativeEvent)
+        event = try values.decode(Event.self, forKey: .event)
+        occurredAt = try values.decode(Date.self, forKey: .occurredAt)
+        source = try values.decodeIfPresent(HostEventSource.self, forKey: .source)
+        sourceCompleteness = try values.decode(
+            HostEventSourceCompleteness.self, forKey: .sourceCompleteness)
+        reason = (try? values.decode(String.self, forKey: .reason)).flatMap(
+            HostEventNoticeReason.init(rawValue:))
+        let observation = try? values.decode(TimeInterval.self, forKey: .observedUptime)
+        observedUptime = observation.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
     }
 
     public var host: HostID? { HostID(rawValue: surface.rawValue) }
@@ -533,5 +590,7 @@ public struct HostEventNotice: Codable, Sendable, Equatable, Hashable, Identifia
         case occurredAt = "occurred_at"
         case source
         case sourceCompleteness = "source_completeness"
+        case reason
+        case observedUptime = "observed_uptime"
     }
 }
