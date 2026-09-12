@@ -60,7 +60,7 @@ public final class FileLock {
             // `EINTR` never escapes as a lock failure while `descriptor` is still -1.
             func openLockFile() -> Int32 {
                 while true {
-                    let opened = open(path, O_CREAT | O_RDWR, 0o600)
+                    let opened = open(path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
                     if opened != -1 || errno != EINTR { return opened }
                 }
             }

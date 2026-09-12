@@ -500,6 +500,10 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     // —— helper ——
     // `config.json` 的唯一写者。一次原子写。
     "helper/Sources/ClaudioCore/ConfigMutation.swift": [".write("],
+    // 事件提示 descriptor 只保存 epoch/path/inode；Data.atomic 写入后再收紧到 0600，
+    // 只清理经过 inode/owner 校验的自有 endpoint，不承载来源内容，也不改变既有
+    // config/receipt 写路径。
+    "helper/Sources/ClaudioCore/EventNoticeTransport.swift": [".write(", "unlink("],
     // 锁文件。`flock(2)` 要一个 fd，而拿到 fd 的唯一办法就是 `open(2)`。它不写内容。
     "helper/Sources/ClaudioCore/FileLock.swift": ["open("],
     // 日志。轮转是两次原子写（截断 / 重写保留的尾部）；追加是 `O_APPEND` 上的单次 `write(2)` ——
@@ -604,6 +608,7 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
 /// 「检测器整个瞎掉」；一处写盘单独从检测器眼皮底下消失、而别处新增一处，它照样绿）。
 private let contentReplacingWriteSites: [String: Int] = [
     "helper/Sources/ClaudioCore/ConfigMutation.swift": 1,
+    "helper/Sources/ClaudioCore/EventNoticeTransport.swift": 1,
     "helper/Sources/ClaudioCore/Log.swift": 2,
     "helper/Sources/ClaudioCore/Play.swift": 1,
     "helper/Sources/ClaudioCore/ConcreteHostIntegrationAdapters.swift": 1,

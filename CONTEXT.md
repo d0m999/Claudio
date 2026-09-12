@@ -68,6 +68,23 @@ _Avoid_: 设置项目、独立管理窗口、把侧栏条目当成数据模型
 由用户明确授权的系统状态临时派生出的自动提示音抑制，例如专注模式或日历忙碌。它不改写事件开关、声音作用域、声音包或主音量；过期或无法确认的状态不能继续制造静默。
 _Avoid_: 全局静音配置、把主音量写成零、批量关闭事件
 
+**事件来源提示（Event Source Notice）**:
+由当前运行 GUI 临时接收并展示的不可变宿主事件投影，包含已验证的事件来源、绑定身份、
+发生时间以及可选的安全项目/会话标签。它只在本次 GUI 生命周期的内存中存在，不属于回执、
+本地活动摘要或宿主配置；自动展示不激活 Claudio，也不代表事件已经处理。
+_Avoid_: 把来源写入 receipt、用提示历史冒充完整活动历史、从项目名称推断会话
+
+**提示来源接收器（Event Notice Receiver）**:
+由 GUI app-lifetime owner 持有的私有 Unix datagram 接收器。它只接受当前 epoch、当前
+安装代次和已知 Surface/Binding 的有界消息；发送失败是 best-effort，不改变既有 hook
+播放、回执、活动或 CLI 退出语义。
+_Avoid_: 常驻 helper daemon、磁盘内容队列、ACK 重试总线
+
+**会话导航能力（Session Navigation Capability）**:
+由宿主 adapter 证据决定的来源动作能力。未知或未经验证的精确 route 不能显示伪造的
+“查看会话”成功；默认提供安全来源详情和复制有效会话 ID。
+_Avoid_: 猜 URL、执行任意命令、把打开宿主 app 当作已进入会话
+
 **本地活动摘要（Local Activity Summary）**:
 由 `LocalActivitySummaryStore` 唯一持有的本地七日事实：只记录已确认 installation 的、能够映射到
 公共 `Event` 的宿主回调，按发生时的本地 Gregorian 日期入桶，并以 `HostID × Event` 饱和计数保存。

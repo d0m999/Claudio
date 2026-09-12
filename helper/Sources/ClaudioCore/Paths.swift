@@ -154,6 +154,20 @@ public enum ClaudioPaths {
         root.appendingPathComponent("integrations", isDirectory: true)
     }
 
+    /// 短生命周期的事件来源提示元数据。descriptor 只保存 schema、epoch、socket inode/path，
+    /// 不保存项目、会话或其它来源内容；socket 本体位于系统用户临时目录的私有短目录。
+    public static var eventNoticeDirectory: URL {
+        integrationsDirectory.appendingPathComponent("event-notices", isDirectory: true)
+    }
+
+    public static var eventNoticeDescriptorFile: URL {
+        eventNoticeDirectory.appendingPathComponent("descriptor.json")
+    }
+
+    public static var eventNoticeOwnerLockFile: URL {
+        eventNoticeDirectory.appendingPathComponent("owner.lock")
+    }
+
     /// `~/.claudio/integrations/activity/` — the private local activity summary namespace.
     /// Summary, lock, and pending deltas stay separate from receipts so clearing activity
     /// cannot mutate activation or receipt history facts.

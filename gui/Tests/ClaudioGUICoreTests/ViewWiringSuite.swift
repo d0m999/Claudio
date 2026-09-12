@@ -2088,7 +2088,7 @@ func runViewWiringSuites() {
             "当前 Panel 不得重新承载 Events/Sounds 的窗口级编辑或 Surface reset 写路径")
         expect(
             focusCollapsed.contains(
-                "var order: [PanelFocusTarget] = [.headerSettings, .soundScope]")
+                "var order: [PanelFocusTarget] = [.headerSettings, .recentNotices, .soundScope]")
                 && focusCollapsed.contains("if hasActivityOverview")
                 && focusCollapsed.contains("order.append(.activityRange)")
                 && focusCollapsed.contains("order.append(.quitApplication)"),

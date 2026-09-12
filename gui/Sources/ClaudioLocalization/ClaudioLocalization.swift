@@ -252,6 +252,21 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let eventPreviewUnmapped: Self = "event.preview.unmapped"
     public static let eventPreviewMissing: Self = "event.preview.missing"
     public static let eventPreviewUnsafe: Self = "event.preview.unsafe"
+    public static let eventNoticeRecent: Self = "event-notice.recent"
+    public static let eventNoticeOtherCount: Self = "event-notice.other-count"
+    public static let eventNoticeUnknownSource: Self = "event-notice.unknown-source"
+    public static let eventNoticeUnknownProject: Self = "event-notice.unknown-project"
+    public static let eventNoticeUnknownSession: Self = "event-notice.unknown-session"
+    public static let eventNoticeSessionID: Self = "event-notice.session-id"
+    public static let eventNoticeExpired: Self = "event-notice.expired"
+    public static let eventNoticeParentSession: Self = "event-notice.parent-session"
+    public static let eventNoticeExpandHint: Self = "event-notice.expand.hint"
+    public static let eventNoticeCollapseHint: Self = "event-notice.collapse.hint"
+    public static let eventNoticeViewSource: Self = "event-notice.view-source"
+    public static let eventNoticeCopySession: Self = "event-notice.copy-session"
+    public static let eventNoticeCopied: Self = "event-notice.copied"
+    public static let eventNoticeNavigationUnavailable: Self =
+        "event-notice.navigation-unavailable"
     public static let cellAudible: Self = "cell.audible"
     public static let cellMuted: Self = "cell.muted"
     public static let cellMasterVolumeZero: Self = "cell.master-volume-zero"
@@ -569,6 +584,14 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "settings.notifications.open-events"
     public static let settingsNotificationsAnnouncementSummary: Self =
         "settings.notifications.announcement.summary"
+    public static let settingsNotificationsEventSourcePromptsTitle: Self =
+        "settings.notifications.event-source-prompts.title"
+    public static let settingsNotificationsEventSourcePromptsDescription: Self =
+        "settings.notifications.event-source-prompts.description"
+    public static let settingsNotificationsEventSourcePromptsEnabled: Self =
+        "settings.notifications.event-source-prompts.enabled"
+    public static let settingsNotificationsEventSourcePromptsDisabled: Self =
+        "settings.notifications.event-source-prompts.disabled"
     public static let settingsUsageDescription: Self = "settings.usage.description"
     public static let settingsUsageScopeNotice: Self = "settings.usage.scope-notice"
     public static let settingsUsageRefresh: Self = "settings.usage.refresh"
@@ -1252,6 +1275,10 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .settingsNotificationsPublicationFailed,
         .settingsNotificationsOpenCalendarPrivacy, .settingsNotificationsOpenEvents,
         .settingsNotificationsAnnouncementSummary,
+        .settingsNotificationsEventSourcePromptsTitle,
+        .settingsNotificationsEventSourcePromptsDescription,
+        .settingsNotificationsEventSourcePromptsEnabled,
+        .settingsNotificationsEventSourcePromptsDisabled,
         .settingsShortcutsDescription, .settingsShortcutsRequirement,
         .settingsShortcutsActionTogglePanel, .settingsShortcutsActionTogglePanelDescription,
         .settingsShortcutsActionOpenSettings, .settingsShortcutsActionOpenSettingsDescription,
@@ -1388,7 +1415,12 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .eventPreviewAvailableEnabled, .eventPreviewAvailableMuted, .eventPreviewUnavailable,
         .eventMuteHint, .eventMute, .eventUnmute, .eventEnabled, .eventMuted, .eventPreviewHint,
         .eventPreviewMasterVolumeZero, .eventPreviewUnmapped, .eventPreviewMissing,
-        .eventPreviewUnsafe,
+        .eventPreviewUnsafe, .eventNoticeRecent, .eventNoticeOtherCount,
+        .eventNoticeUnknownSource, .eventNoticeUnknownProject, .eventNoticeUnknownSession,
+        .eventNoticeSessionID, .eventNoticeExpired, .eventNoticeParentSession,
+        .eventNoticeExpandHint,
+        .eventNoticeCollapseHint, .eventNoticeViewSource, .eventNoticeCopySession,
+        .eventNoticeCopied, .eventNoticeNavigationUnavailable,
         .cellAudible, .cellMuted, .cellMasterVolumeZero, .cellMissingSound, .cellNotConnected,
         .cellAwaitingActivation, .cellLegacy, .cellUnsupported, .cellDegraded,
         .hostPlaybackPlayed, .hostPlaybackMuted, .hostPlaybackDebounced, .hostPlaybackNotReady,

@@ -10,7 +10,7 @@
 | Variable | Required | Format / default | Purpose |
 |---|---:|---|---|
 | `CLAUDIO_VERSION` | Release: yes; local: no | `0.0.0-dev` or unprefixed `MAJOR.MINOR.PATCH` | 注入 CLI/app/release bundle version |
-| `CLAUDIO_GUI_BYTES_PER_ARCH` | No | integer; default `5500000` | GUI Mach-O per-architecture size budget |
+| `CLAUDIO_GUI_BYTES_PER_ARCH` | No | integer; default `5600000` | GUI Mach-O per-architecture size budget |
 | `CLAUDIO_HELPER_BYTES_PER_ARCH` | No | integer; default `3250000` | helper Mach-O per-architecture size budget |
 | `CLAUDIO_LOGIN_ITEM_BYTES_PER_ARCH` | No | integer; default `500000` | embedded macOS 12 LoginItem Mach-O per-architecture size budget |
 | `CLAUDIO_NON_EXECUTABLE_BUNDLE_BYTES` | No | integer; default `1500000` | non-executable bundle size budget |

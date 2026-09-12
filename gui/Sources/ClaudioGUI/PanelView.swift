@@ -28,6 +28,7 @@ func makeEventSettingsConfigController(
 
 /// 菜单栏 Agent 集成面板。生产树只呈现一个当前作用域的五行事件与两行播放设置；
 /// 连接/诊断、事件设置和完整声音编辑继续由 retained window 负责。
+@MainActor
 public struct PanelView: View {
     @StateObject private var announcer: PanelAnnouncer
     @StateObject private var panelModel: PanelConfigController
@@ -41,6 +42,7 @@ public struct PanelView: View {
     @ObservedObject private var hostIntegrations: HostIntegrationPresentationStore
     @ObservedObject private var languageStore: ClaudioPreferences
     @ObservedObject private var activityDiagnostics: ActivityDiagnosticsModel
+    @ObservedObject private var eventNoticeModel: EventNoticeModel
 
     @Environment(\.colorScheme) private var colorScheme
     /// `unselected` 只表示从未选择；用户显式选过 Global 后持久化为 `global`。
@@ -53,6 +55,7 @@ public struct PanelView: View {
     private let refreshesActivityOnLifecycle: Bool
     private let onAudibilityInputsChanged: @MainActor () -> Void
     private let onOpenSettings: @MainActor () -> Void
+    private let onOpenRecentNotices: @MainActor () -> Void
     private let onOpenIntegration: @MainActor (HostID) -> Void
     private let onQuit: @MainActor () -> Void
 
@@ -66,8 +69,10 @@ public struct PanelView: View {
         activityDiagnostics: ActivityDiagnosticsModel,
         soundPackLibrary: SoundPackLibrary,
         soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator,
+        eventNoticeModel: EventNoticeModel,
         onAudibilityInputsChanged: @escaping @MainActor () -> Void,
         onOpenSettings: @escaping @MainActor () -> Void,
+        onOpenRecentNotices: @escaping @MainActor () -> Void,
         onOpenIntegration: @escaping @MainActor (HostID) -> Void,
         onQuit: @escaping @MainActor () -> Void,
     ) {
@@ -77,8 +82,10 @@ public struct PanelView: View {
         self.hostIntegrations = hostIntegrations
         self.languageStore = languageStore
         self.activityDiagnostics = activityDiagnostics
+        self.eventNoticeModel = eventNoticeModel
         self.onAudibilityInputsChanged = onAudibilityInputsChanged
         self.onOpenSettings = onOpenSettings
+        self.onOpenRecentNotices = onOpenRecentNotices
         self.onOpenIntegration = onOpenIntegration
         self.onQuit = onQuit
         previewPlayer = NSSoundAudioPreviewPlayer()
@@ -109,7 +116,8 @@ public struct PanelView: View {
         audioEnvironment: AudioImportEnvironment,
         focusCoordinator: PanelFocusCoordinator,
         hostIntegrations: HostIntegrationPresentationStore,
-        languageStore: ClaudioPreferences
+        languageStore: ClaudioPreferences,
+        eventNoticeModel: EventNoticeModel = EventNoticeModel(receiverEpoch: UUID())
     ) {
         let previewKey = UUID().uuidString
         let defaults = UserDefaults(suiteName: "com.orbitzero.claudio.state-gallery")!
@@ -126,12 +134,14 @@ public struct PanelView: View {
         self.focusCoordinator = focusCoordinator
         self.hostIntegrations = hostIntegrations
         self.languageStore = languageStore
+        self.eventNoticeModel = eventNoticeModel
         self.activityDiagnostics = ActivityDiagnosticsModel(
             previewPresentation: previewActivityPresentation)
         self.previewPlayer = NSSoundAudioPreviewPlayer()
         self.refreshesActivityOnLifecycle = false
         self.onAudibilityInputsChanged = {}
         self.onOpenSettings = {}
+        self.onOpenRecentNotices = {}
         self.onOpenIntegration = { _ in }
         self.onQuit = {}
     }
@@ -237,6 +247,29 @@ public struct PanelView: View {
             .focused($focusedTarget, equals: .headerSettings)
             .accessibilityLabel(l10n.text(.panelOpenSettings))
             .accessibilityIdentifier("panel.settings")
+            Button(action: onOpenRecentNotices) {
+                HStack(spacing: 3) {
+                    Image(systemName: "bell.badge")
+                    if eventNoticeModel.badgeCount > 0 {
+                        Text(String(eventNoticeModel.badgeCount))
+                            .monospacedDigit()
+                    }
+                }
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 7)
+                .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
+                .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+            }
+            .buttonStyle(ClaudioIconButtonStyle())
+            .focused($focusedTarget, equals: .recentNotices)
+            .accessibilityLabel(l10n.text(.eventNoticeRecent))
+            .accessibilityValue(
+                eventNoticeModel.badgeCount > 0
+                    ? String(eventNoticeModel.badgeCount)
+                    : "0"
+            )
+            .accessibilityHint(l10n.text(.eventNoticeExpandHint))
+            .accessibilityIdentifier("panel.recent-notices")
         }
         .accessibilityLabel(headerAccessibilityLabel)
     }
@@ -245,6 +278,8 @@ public struct PanelView: View {
         l10n.text(.panelTitle)
             + (languageStore.language == .english ? ", " : "，")
             + l10n.text(.panelOpenSettings)
+            + (languageStore.language == .english ? ", " : "，")
+            + l10n.text(.eventNoticeRecent)
     }
 
     private func announcePanelSummary() {

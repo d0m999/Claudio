@@ -1,5 +1,7 @@
 import Foundation
 
+public typealias HostEventNoticeSender = @Sendable (HostEventNotice) -> EventNoticeSendOutcome
+
 /// 新版 `claudio hook` 一次调用的注入式环境。`playEnvironment` 必须使用该宿主自己的
 /// lock/state；构造器显式携带 host，以免测试或未来调用方误把两宿主又接回 legacy 全局去抖。
 public struct HostHookEnvironment: Sendable {
@@ -10,6 +12,9 @@ public struct HostHookEnvironment: Sendable {
     public let receiptStore: HostHookReceiptStore
     public let activityStore: LocalActivitySummaryStore?
     public let now: @Sendable () -> Date
+    public let sourcePayload: Data?
+    public let receiverEpoch: UUID?
+    public let eventNoticeSender: HostEventNoticeSender?
 
     public init(
         host: HostID,
@@ -18,6 +23,9 @@ public struct HostHookEnvironment: Sendable {
         taskStartDebounceInterval: TimeInterval = 0.25,
         receiptStore: HostHookReceiptStore,
         activityStore: LocalActivitySummaryStore? = nil,
+        sourcePayload: Data? = nil,
+        receiverEpoch: UUID? = nil,
+        eventNoticeSender: HostEventNoticeSender? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.host = host
@@ -29,12 +37,20 @@ public struct HostHookEnvironment: Sendable {
         self.taskStartDebounceInterval = taskStartDebounceInterval
         self.receiptStore = receiptStore
         self.activityStore = activityStore
+        self.sourcePayload = sourcePayload
+        self.receiverEpoch = receiverEpoch
+        self.eventNoticeSender = eventNoticeSender
         self.now = now
     }
 }
 
 /// 生产 CLI 的单一环境工厂。宿主级锁/状态路径留在 Core 的路径事实源内，CLI 不自行拼装。
-public func systemHostHookEnvironment(for host: HostID) -> HostHookEnvironment {
+public func systemHostHookEnvironment(
+    for host: HostID,
+    sourcePayload: Data? = nil,
+    receiverEpoch: UUID? = nil,
+    eventNoticeSender: HostEventNoticeSender? = nil
+) -> HostHookEnvironment {
     HostHookEnvironment(
         host: host,
         playEnvironment: PlayEnvironment(
@@ -47,7 +63,10 @@ public func systemHostHookEnvironment(for host: HostID) -> HostHookEnvironment {
             locksRoot: ClaudioPaths.receiptLocksDirectory,
             installationsRoot: ClaudioPaths.activeInstallationsDirectory,
             installationLocksRoot: ClaudioPaths.activeInstallationLocksDirectory),
-        activityStore: .production)
+        activityStore: .production,
+        sourcePayload: sourcePayload,
+        receiverEpoch: receiverEpoch,
+        eventNoticeSender: eventNoticeSender)
 }
 
 public struct HostHookHandlingOutcome: Sendable, Equatable {
@@ -81,7 +100,8 @@ public func handleHostHook(
     host: HostID,
     nativeEvent: String,
     installationID: UUID,
-    environment: HostHookEnvironment
+    environment: HostHookEnvironment,
+    eventID: UUID = UUID()
 ) -> HostHookHandlingOutcome? {
     guard environment.host == host,
         let event = HostCapabilityCatalog.semanticEvent(host: host, nativeEvent: nativeEvent)
@@ -152,6 +172,24 @@ public func handleHostHook(
             timestamp: occurredAt,
             to: base.logFile,
             lockFile: base.logLockFile)
+    }
+    if let receiverEpoch = environment.receiverEpoch,
+        let eventNoticeSender = environment.eventNoticeSender,
+        activeInstallationID == installationID,
+        let binding = HostCapabilityCatalog.binding(host: host, nativeEvent: nativeEvent)
+    {
+        let source = HostEventSourceParser.parse(host: host, data: environment.sourcePayload).source
+        let notice = HostEventNotice(
+            id: eventID,
+            receiverEpoch: receiverEpoch,
+            surface: host.surfaceID,
+            bindingID: binding.id,
+            installationID: installationID,
+            nativeEvent: nativeEvent,
+            event: event,
+            occurredAt: occurredAt,
+            source: source)
+        _ = eventNoticeSender(notice)
     }
     return HostHookHandlingOutcome(
         host: host,

@@ -505,6 +505,90 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法安全试听：%@" } }
       }
     },
+    "event-notice.recent" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Recent notices" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "近期提示" } }
+      }
+    },
+    "event-notice.other-count" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld other notices" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "另 %lld 条提示" } }
+      }
+    },
+    "event-notice.unknown-source" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unknown source" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未知来源" } }
+      }
+    },
+    "event-notice.unknown-project" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unknown project" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未知项目" } }
+      }
+    },
+    "event-notice.unknown-session" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Session unavailable" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "会话未知" } }
+      }
+    },
+    "event-notice.session-id" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Session ID" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "会话 ID" } }
+      }
+    },
+    "event-notice.expired" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Source information expired" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "来源信息已过期" } }
+      }
+    },
+    "event-notice.parent-session" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Parent session" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "父会话" } }
+      }
+    },
+    "event-notice.expand.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show recent event notices" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看近期事件提示" } }
+      }
+    },
+    "event-notice.collapse.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hide recent event notices" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "收起近期事件提示" } }
+      }
+    },
+    "event-notice.view-source" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "View source" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看来源" } }
+      }
+    },
+    "event-notice.copy-session" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy session ID" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制会话 ID" } }
+      }
+    },
+    "event-notice.copied" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Session ID copied" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "会话 ID 已复制" } }
+      }
+    },
+    "event-notice.navigation-unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Precise session navigation is unavailable" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前没有可验证的精确会话跳转" } }
+      }
+    },
     "event.mute.hint" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Only affects real host events; manual preview is unchanged" } },
@@ -3866,6 +3950,30 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Focus permission: %@. Calendar permission: %@. Current reason: %@. Snapshot status: %@." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "专注模式权限：%@。日历权限：%@。当前原因：%@。快照状态：%@。" } }
+      }
+    },
+    "settings.notifications.event-source-prompts.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show event source prompts" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示事件来源提示" } }
+      }
+    },
+    "settings.notifications.event-source-prompts.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show a short-lived top prompt with the host, project, session identity, and event meaning. Source details stay in memory only; Focus or meeting quiet hides automatic prompts without replaying them later." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在屏幕顶部显示短暂的来源提示，包含宿主、项目、会话标识和事件语义。来源详情只保留在内存中；专注或会议静默会收起自动提示，恢复后不会集中补播。" } }
+      }
+    },
+    "settings.notifications.event-source-prompts.enabled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Event source prompts enabled" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "事件来源提示已开启" } }
+      }
+    },
+    "settings.notifications.event-source-prompts.disabled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Event source prompts disabled" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "事件来源提示已关闭" } }
       }
     },
     "settings.display.status-dot.description" : {

@@ -55,6 +55,15 @@ private struct PendingSettingsPresentation {
     let handbackApplication: NSRunningApplication?
 }
 
+private func dynamicQuietIsActive(_ presentation: DynamicQuietPresentation) -> Bool {
+    switch presentation.currentReason {
+    case .focusActive, .calendarBusy, .focusAndCalendarBusy:
+        return true
+    case .policiesDisabled, .permissionRequired, .noDynamicQuiet, .observerFailure:
+        return false
+    }
+}
+
 /// The real menu-bar shell (ENGINEERING.md T15 D2): an `NSStatusItem` + `NSPopover` hosting
 /// ``PanelView`` via `NSHostingController` — replaces T7's temporary `WindowGroup`
 /// scaffolding (its own doc comment already said so: "expected to be replaced wholesale
@@ -86,6 +95,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let hostIntegrationMatrixProvider: HostIntegrationMatrixProvider
     private let bootstrapReports: BootstrapReportPresentationStore
     private let dynamicQuietObserver: DynamicQuietSystemObserver
+    private let eventNoticeRuntime: EventNoticeRuntime
+    private let eventNoticeWindowController: EventNoticeWindowController
     private var hostIntegrationRefreshTask: Task<Void, Never>?
     private var appActivationCancellable: AnyCancellable?
     private var menuBarIconCancellable: AnyCancellable?
@@ -264,6 +275,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             registry: aiCueRegistry,
             providerPreferences: AICueProviderPreferences(registry: aiCueRegistry))
         let dynamicQuietObserver = DynamicQuietSystemObserver()
+        let eventNoticeRuntime = EventNoticeRuntime()
+        let eventNoticeWindowController = EventNoticeWindowController(
+            model: eventNoticeRuntime.model,
+            languageStore: languageStore)
         let activityDiagnostics = makeActivityDiagnosticsModel()
         let soundPacksEditorNativeEffects = SoundPacksEditorNativeEffectsDispatcher(
             adapter: SystemSoundPacksEditorNativeEffectsAdapter())
@@ -307,11 +322,15 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             activityDiagnostics: activityDiagnostics,
             soundPackLibrary: soundPackLibrary,
             soundPacksRefreshCoordinator: soundPacksRefreshCoordinator,
+            eventNoticeModel: eventNoticeRuntime.model,
             onAudibilityInputsChanged: { [weak actionRouter] in
                 actionRouter?.audibilityInputsChanged()
             },
             onOpenSettings: { [weak actionRouter] in
                 actionRouter?.owner?.requestSettingsWindowPresentation()
+            },
+            onOpenRecentNotices: { [weak eventNoticeWindowController] in
+                eventNoticeWindowController?.openInteractive()
             },
             onOpenIntegration: { [weak actionRouter] host in
                 actionRouter?.requestIntegrationsSettings(
@@ -337,6 +356,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         self.hostIntegrationMatrixProvider = integrationMatrixProvider
         self.bootstrapReports = bootstrapReports
         self.dynamicQuietObserver = dynamicQuietObserver
+        self.eventNoticeRuntime = eventNoticeRuntime
+        self.eventNoticeWindowController = eventNoticeWindowController
         // `.transient`: AppKit closes the popover on a click outside it, on an app switch,
         // and — ONLY once the popover's window is key — on Esc. That last clause is the whole
         // catch: `.transient` alone does NOT buy "Esc 关闭", because a status-item popover in
@@ -367,28 +388,54 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         statusItem.button?.action = #selector(togglePopover)
 
         menuBarIconCancellable = languageStore.$snapshot
-            .sink { [weak statusItem] snapshot in
+            .sink { [weak statusItem, eventNoticeRuntime] snapshot in
                 MainActor.assumeIsolated {
                     guard let statusItem else { return }
                     Self.applyMenuBarIcon(
                         showsStatusDot: snapshot.showsMenuBarStatusDot,
                         language: snapshot.language,
                         to: statusItem)
+                    eventNoticeRuntime.setEnabled(snapshot.showsEventSourcePrompts)
                 }
             }
 
         let workspaceNotifications = NSWorkspace.shared.notificationCenter
         workspaceNotifications.publisher(for: NSWorkspace.willSleepNotification)
-            .sink { [weak globalShortcutSettings] _ in
+            .sink { [weak globalShortcutSettings, weak eventNoticeRuntime] _ in
                 MainActor.assumeIsolated {
                     globalShortcutSettings?.suspend()
+                    eventNoticeRuntime?.suspendForPower()
                 }
             }
             .store(in: &systemPowerCancellables)
         workspaceNotifications.publisher(for: NSWorkspace.didWakeNotification)
-            .sink { [weak globalShortcutSettings] _ in
+            .sink { [weak globalShortcutSettings, weak eventNoticeRuntime] _ in
                 MainActor.assumeIsolated {
                     globalShortcutSettings?.resume()
+                    eventNoticeRuntime?.resumeAfterPower()
+                }
+            }
+            .store(in: &systemPowerCancellables)
+        workspaceNotifications.publisher(for: NSWorkspace.sessionDidResignActiveNotification)
+            .sink { [weak eventNoticeRuntime] _ in
+                MainActor.assumeIsolated {
+                    eventNoticeRuntime?.suspendForPower()
+                }
+            }
+            .store(in: &systemPowerCancellables)
+        workspaceNotifications.publisher(for: NSWorkspace.sessionDidBecomeActiveNotification)
+            .sink { [weak eventNoticeRuntime] _ in
+                MainActor.assumeIsolated {
+                    eventNoticeRuntime?.resumeAfterPower()
+                }
+            }
+            .store(in: &systemPowerCancellables)
+
+        dynamicQuietObserver.policy.$presentation
+            .sink { [weak eventNoticeRuntime] presentation in
+                MainActor.assumeIsolated {
+                    eventNoticeRuntime?.model.setAutomaticallySuppressed(
+                        dynamicQuietIsActive(presentation))
                 }
             }
             .store(in: &systemPowerCancellables)
@@ -407,6 +454,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             }
 
         // GUI 首启只运行共享 bootstrap + 双侧 inspect。宿主连接必须始终来自详情窗里的显式动作。
+        eventNoticeRuntime.setEnabled(languageStore.showsEventSourcePrompts)
+        eventNoticeRuntime.model.setAutomaticallySuppressed(
+            dynamicQuietIsActive(dynamicQuietObserver.policy.presentation))
         requestHostIntegrationRefresh(bootstrapSharedRuntime: true)
     }
 
@@ -430,6 +480,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     func applicationWillTerminate() {
         globalShortcutSettings.suspend()
         globalShortcutRegistrar.invalidate()
+        eventNoticeWindowController.close()
+        eventNoticeRuntime.stopForTermination()
     }
 
     /// 声音包、manifest 或静音配置变化后重算同一份可听矩阵。代次保护避免较慢的旧 refresh

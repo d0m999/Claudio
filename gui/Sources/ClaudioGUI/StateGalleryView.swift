@@ -37,6 +37,7 @@ struct StateGalleryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 ProductionPanelGalleryView()
+                EventNoticeGalleryView()
                 SettingsWindowRouteGalleryView()
                 SettingsExperienceGalleryView()
                 EventSettingsLayoutGalleryView()
@@ -375,6 +376,139 @@ struct ProductionPanelGalleryView: View {
     }
 }
 
+private enum EventNoticeGalleryScenario: String, CaseIterable, Identifiable {
+    case single = "single"
+    case burst = "three-event burst"
+    case reread = "replay from recent"
+    case unknown = "unknown source"
+
+    var id: String { rawValue }
+}
+
+/// DEBUG-only interaction gallery for the C-direction surface. The buttons intentionally drive
+/// the same public model inputs as the receiver, so one/three/replay and light/dark checks do not
+/// grow a second preview-only presentation state machine.
+struct EventNoticeGalleryView: View {
+    var body: some View {
+        GallerySection(
+            title: "Event Source Notice C · 2 languages × 2 themes × 4 interaction states"
+        ) {
+            ForEach(ClaudioAppLanguage.allCases) { language in
+                ForEach(SettingsGalleryAppearance.allCases) { appearance in
+                    ForEach(EventNoticeGalleryScenario.allCases) { scenario in
+                        GalleryFrame(
+                            caption:
+                                "\(language.selfName) · \(appearance.rawValue) · \(scenario.rawValue)"
+                        ) {
+                            EventNoticeGalleryFrame(
+                                language: language,
+                                scenario: scenario
+                            )
+                            .environment(\.colorScheme, appearance.colorScheme)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@MainActor
+private struct EventNoticeGalleryFrame: View {
+    let language: ClaudioAppLanguage
+    let scenario: EventNoticeGalleryScenario
+
+    @StateObject private var model: EventNoticeModel
+    @StateObject private var languageStore: ClaudioPreferences
+
+    init(language: ClaudioAppLanguage, scenario: EventNoticeGalleryScenario) {
+        self.language = language
+        self.scenario = scenario
+        _model = StateObject(wrappedValue: EventNoticeModel(receiverEpoch: UUID()))
+        _languageStore = StateObject(wrappedValue: ClaudioPreferences(previewLanguage: language))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            EventNoticeView(
+                model: model,
+                languageStore: languageStore,
+                onViewSource: { _ in model.openRecent() },
+                onCopySessionID: { _ in false },
+                onClose: { model.dismiss() })
+
+            HStack(spacing: 6) {
+                Button("One") { emit(count: 1) }
+                Button("Three") { emit(count: 3) }
+                Button("Replay") { model.openRecent() }
+                Button("Clear") { model.clearForPrivacy() }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Text("Model-driven DEBUG controls · no host route or disk history")
+                .font(.system(size: 9, design: .rounded))
+                .foregroundColor(.secondary)
+        }
+        .padding(8)
+        .onAppear(perform: seed)
+    }
+
+    private func seed() {
+        guard model.snapshot.recent.isEmpty else { return }
+        switch scenario {
+        case .single:
+            emit(count: 1)
+        case .burst:
+            emit(count: 3)
+        case .reread:
+            emit(count: 1)
+            model.hideImmediately()
+        case .unknown:
+            emit(count: 1, unknownSource: true)
+        }
+    }
+
+    private func emit(count: Int, unknownSource: Bool = false) {
+        let bindings = HostCapabilityCatalog.bindings(for: .claudeCode)
+        for index in 0..<count {
+            let binding = bindings[index % bindings.count]
+            guard let nativeEvent = binding.nativeEvent else { continue }
+            _ = model.accept(
+                makeEventNoticeGalleryNotice(
+                    epoch: model.receiverEpoch,
+                    binding: binding,
+                    nativeEvent: nativeEvent,
+                    language: language,
+                    unknownSource: unknownSource))
+        }
+    }
+}
+
+private func makeEventNoticeGalleryNotice(
+    epoch: UUID,
+    binding: HostCapabilityBinding,
+    nativeEvent: String,
+    language: ClaudioAppLanguage,
+    unknownSource: Bool
+) -> HostEventNotice {
+    HostEventNotice(
+        receiverEpoch: epoch,
+        surface: .claudeCode,
+        bindingID: binding.id,
+        installationID: UUID(),
+        nativeEvent: nativeEvent,
+        event: binding.event,
+        occurredAt: Date(),
+        source: unknownSource
+            ? nil
+            : HostEventSource(
+                projectLabel: language == .english ? "Orbit Signals" : "Orbit 示例项目",
+                projectKey: "debug-gallery-project",
+                sessionID: "12345678-debug-gallery",
+                sessionLabel: "session · 12345678"))
+}
+
 @MainActor
 private struct ProductionPanelStateFrame: View {
     let language: ClaudioAppLanguage
@@ -384,6 +518,7 @@ private struct ProductionPanelStateFrame: View {
     @StateObject private var focusCoordinator: PanelFocusCoordinator
     @StateObject private var hostIntegrations: HostIntegrationPresentationStore
     @StateObject private var languageStore: ClaudioPreferences
+    @StateObject private var eventNoticeModel: EventNoticeModel
     private let panelModel: PanelConfigController
     private let selectedScope: PanelSoundScopeID
     private let soundScopeExpanded: Bool
@@ -412,6 +547,8 @@ private struct ProductionPanelStateFrame: View {
         let languageStore = ClaudioPreferences(previewLanguage: language)
         languageStore.setCompactPreviewDensity(textSize)
         _languageStore = StateObject(wrappedValue: languageStore)
+        _eventNoticeModel = StateObject(
+            wrappedValue: EventNoticeModel(receiverEpoch: UUID()))
 
         let baseConfig = ClaudioConfig(
             selectedPack: "gallery-pack",
@@ -495,7 +632,8 @@ private struct ProductionPanelStateFrame: View {
             audioEnvironment: previewAudioImportEnvironment,
             focusCoordinator: focusCoordinator,
             hostIntegrations: hostIntegrations,
-            languageStore: languageStore
+            languageStore: languageStore,
+            eventNoticeModel: eventNoticeModel
         )
         .frame(height: 560)
     }

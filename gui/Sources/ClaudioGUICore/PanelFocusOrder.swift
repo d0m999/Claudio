@@ -10,6 +10,7 @@ public enum PanelFocusTarget: Sendable, Hashable {
     case disconnect
 
     case headerSettings
+    case recentNotices
     case soundScope
     case activityRange
     case activityMetric(Event)
@@ -85,7 +86,7 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         let hasResetSurface,
         let hasConfigFailureNotice,
         let bootstrapReportActions):
-        var order: [PanelFocusTarget] = [.soundScope]
+        var order: [PanelFocusTarget] = [.soundScope, .recentNotices]
         order.append(contentsOf: bootstrapReportActions)
         if hasConfigFailureNotice { order.append(.configReveal) }
         for event in events {
@@ -103,7 +104,7 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         let hasActivityOverview,
         let hasMasterVolume,
         let hasConfigFailureNotice):
-        var order: [PanelFocusTarget] = [.headerSettings, .soundScope]
+        var order: [PanelFocusTarget] = [.headerSettings, .recentNotices, .soundScope]
         if hasActivityOverview {
             order.append(.activityRange)
             order.append(contentsOf: ActivityOverviewBarLayout.events.map { .activityMetric($0) })

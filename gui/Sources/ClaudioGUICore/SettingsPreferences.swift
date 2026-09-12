@@ -19,6 +19,7 @@ public enum ClaudioPreferenceRecoveryIssue: String, Sendable, Hashable {
     case invalidSettingsDestination
     case invalidMenuBarStatusDot
     case invalidIntegrationSurface
+    case invalidEventSourcePromptVisibility
 }
 
 /// One atomic projection of the Settings preferences currently owned by Claudio. New preference
@@ -30,6 +31,7 @@ public struct ClaudioPreferenceSnapshot: Sendable, Equatable {
     public fileprivate(set) var lastSettingsDestination: SettingsDestination
     public fileprivate(set) var lastIntegrationSurface: HostSurfaceID
     public fileprivate(set) var showsMenuBarStatusDot: Bool
+    public fileprivate(set) var showsEventSourcePrompts: Bool
     public fileprivate(set) var recoveryIssues: Set<ClaudioPreferenceRecoveryIssue>
 
     public init(
@@ -38,6 +40,7 @@ public struct ClaudioPreferenceSnapshot: Sendable, Equatable {
         lastSettingsDestination: SettingsDestination,
         lastIntegrationSurface: HostSurfaceID = .claudeCode,
         showsMenuBarStatusDot: Bool,
+        showsEventSourcePrompts: Bool = true,
         recoveryIssues: Set<ClaudioPreferenceRecoveryIssue> = []
     ) {
         self.languageMode = languageMode
@@ -45,6 +48,7 @@ public struct ClaudioPreferenceSnapshot: Sendable, Equatable {
         self.lastSettingsDestination = lastSettingsDestination
         self.lastIntegrationSurface = lastIntegrationSurface
         self.showsMenuBarStatusDot = showsMenuBarStatusDot
+        self.showsEventSourcePrompts = showsEventSourcePrompts
         self.recoveryIssues = recoveryIssues
     }
 }
@@ -64,6 +68,7 @@ public final class ClaudioPreferences: ObservableObject {
     }
     public var lastIntegrationSurface: HostSurfaceID { snapshot.lastIntegrationSurface }
     public var showsMenuBarStatusDot: Bool { snapshot.showsMenuBarStatusDot }
+    public var showsEventSourcePrompts: Bool { snapshot.showsEventSourcePrompts }
     public var recoveryIssues: Set<ClaudioPreferenceRecoveryIssue> {
         snapshot.recoveryIssues
     }
@@ -109,6 +114,10 @@ public final class ClaudioPreferences: ObservableObject {
             } ?? .claudeCode
         let statusDotObject = defaults.object(forKey: Self.menuBarStatusDotDefaultsKey)
         let showsMenuBarStatusDot = statusDotObject as? Bool ?? true
+        let eventSourcePromptObject = defaults.object(
+            forKey: Self.eventSourcePromptsDefaultsKey)
+        let showsEventSourcePrompts =
+            (eventSourcePromptObject as? Bool) ?? (eventSourcePromptObject == nil)
         var recoveryIssues: Set<ClaudioPreferenceRecoveryIssue> = []
         if languageObject != nil {
             if let languageRawValue {
@@ -133,6 +142,9 @@ public final class ClaudioPreferences: ObservableObject {
         if statusDotObject != nil, statusDotObject is Bool == false {
             recoveryIssues.insert(.invalidMenuBarStatusDot)
         }
+        if eventSourcePromptObject != nil, eventSourcePromptObject is Bool == false {
+            recoveryIssues.insert(.invalidEventSourcePromptVisibility)
+        }
         if integrationSurfaceObject != nil {
             if integrationSurfaceRawValue != nil {
                 if parsedIntegrationSurface.map(legalIntegrationSurfaces.contains) != true {
@@ -150,6 +162,7 @@ public final class ClaudioPreferences: ObservableObject {
             lastSettingsDestination: destination,
             lastIntegrationSurface: integrationSurface,
             showsMenuBarStatusDot: showsMenuBarStatusDot,
+            showsEventSourcePrompts: showsEventSourcePrompts,
             recoveryIssues: recoveryIssues)
 
         localeCancellable =
@@ -233,6 +246,15 @@ public final class ClaudioPreferences: ObservableObject {
         snapshot = next
     }
 
+    public func setShowsEventSourcePrompts(_ showsPrompts: Bool) {
+        var next = snapshot
+        next.showsEventSourcePrompts = showsPrompts
+        next.recoveryIssues.remove(.invalidEventSourcePromptVisibility)
+        guard next != snapshot else { return }
+        defaults.set(showsPrompts, forKey: Self.eventSourcePromptsDefaultsKey)
+        snapshot = next
+    }
+
     private func refreshSystemLanguage() {
         guard snapshot.languageMode == .system else { return }
         let language = snapshot.languageMode.resolvedLanguage(
@@ -245,4 +267,5 @@ public final class ClaudioPreferences: ObservableObject {
 
     public static let menuBarStatusDotDefaultsKey = "Claudio.MenuBarStatusDot"
     public static let integrationSurfaceDefaultsKey = "Claudio.Settings.LastIntegrationSurface"
+    public static let eventSourcePromptsDefaultsKey = "Claudio.Notifications.EventSourcePrompts"
 }

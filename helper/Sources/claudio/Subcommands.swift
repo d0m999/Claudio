@@ -17,7 +17,21 @@ extension Claudio {
             guard let parsedHost = HostID(rawValue: host),
                 let parsedID = UUID(uuidString: installationID)
             else { return }
-            let environment = systemHostHookEnvironment(for: parsedHost)
+            // Source input is opt-in to an already validated, GUI-owned descriptor.  A missing
+            // or unsafe descriptor deliberately means stdin is untouched.
+            let descriptor = EventNoticeTransport.loadDescriptor()
+            let sourceInput = descriptor == nil ? nil : HookInputReader.read().data
+            let sender: HostEventNoticeSender?
+            if let descriptor {
+                sender = { notice in EventNoticeTransport.send(notice, to: descriptor) }
+            } else {
+                sender = nil
+            }
+            let environment = systemHostHookEnvironment(
+                for: parsedHost,
+                sourcePayload: sourceInput ?? nil,
+                receiverEpoch: descriptor?.epoch,
+                eventNoticeSender: sender)
             _ = handleHostHook(
                 host: parsedHost,
                 nativeEvent: nativeEvent,

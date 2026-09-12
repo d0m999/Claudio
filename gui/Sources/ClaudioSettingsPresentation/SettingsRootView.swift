@@ -471,6 +471,27 @@ package struct SettingsRootView: View {
 
                     Divider()
 
+                    Toggle(isOn: eventSourcePromptBinding) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(l10n.text(.settingsNotificationsEventSourcePromptsTitle))
+                                .font(.headline)
+                            Text(l10n.text(.settingsNotificationsEventSourcePromptsDescription))
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .accessibilityValue(
+                        l10n.text(
+                            preferences.showsEventSourcePrompts
+                                ? .settingsNotificationsEventSourcePromptsEnabled
+                                : .settingsNotificationsEventSourcePromptsDisabled
+                        )
+                    )
+                    .accessibilityIdentifier("settings.notifications.event-source-prompts")
+
+                    Divider()
+
                     Toggle(isOn: calendarQuietBinding) {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(l10n.text(.settingsNotificationsCalendarTitle))
@@ -555,6 +576,19 @@ package struct SettingsRootView: View {
         Binding(
             get: { dynamicQuietPolicy.presentation.focusIsEnabled },
             set: { dynamicQuietPolicy.setFocusEnabled($0) })
+    }
+
+    private var eventSourcePromptBinding: Binding<Bool> {
+        Binding(
+            get: { preferences.showsEventSourcePrompts },
+            set: {
+                preferences.setShowsEventSourcePrompts($0)
+                onAnnouncement(
+                    l10n.text(
+                        $0
+                            ? .settingsNotificationsEventSourcePromptsEnabled
+                            : .settingsNotificationsEventSourcePromptsDisabled))
+            })
     }
 
     private var menuBarStatusDotBinding: Binding<Bool> {

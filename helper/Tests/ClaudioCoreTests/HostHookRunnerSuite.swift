@@ -15,6 +15,23 @@ private final class HostHookRunnerSpawner: ProcessSpawning, @unchecked Sendable 
     }
 }
 
+private final class HostEventNoticeCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var notices: [HostEventNotice] = []
+
+    func append(_ notice: HostEventNotice) {
+        lock.lock()
+        notices.append(notice)
+        lock.unlock()
+    }
+
+    var values: [HostEventNotice] {
+        lock.lock()
+        defer { lock.unlock() }
+        return notices
+    }
+}
+
 @MainActor
 func runHostHookRunnerSuites() {
     suite("host hook：UserPromptSubmit 严格映射任务开始，Codex StopFailure 与未知事件失败关闭") {
@@ -212,7 +229,8 @@ func runHostHookRunnerSuites() {
             expect(second?.playbackResult == .debounced, "静音重复回调仍须写 debounced")
 
             let missingRoot = root.appendingPathComponent("missing-start", isDirectory: true)
-            try! FileManager.default.createDirectory(at: missingRoot, withIntermediateDirectories: true)
+            try! FileManager.default.createDirectory(
+                at: missingRoot, withIntermediateDirectories: true)
             let missing = makeHostHookRunnerEnvironment(
                 root: missingRoot, host: .codex, spawner: HostHookRunnerSpawner(),
                 activeInstallationID: id)
@@ -224,6 +242,88 @@ func runHostHookRunnerSuites() {
                 environment: missing)
             expect(missingFirst?.playbackResult == .notReady, "首次缺音必须记录 notReady")
             expect(missingSecond?.playbackResult == .debounced, "缺音重复回调仍须去抖")
+        }
+    }
+
+    suite("host hook：来源提示是旁路 best-effort，不改变播放、回执与 CLI 结果") {
+        withTempDirectory { root in
+            let id = UUID()
+            let spawner = HostHookRunnerSpawner()
+            let base = makeHostHookRunnerEnvironment(
+                root: root,
+                host: .codex,
+                spawner: spawner,
+                fixtureIsReady: true,
+                activeInstallationID: id)
+            let collector = HostEventNoticeCollector()
+            let epoch = UUID()
+            let environment = HostHookEnvironment(
+                host: base.host,
+                playEnvironment: base.playEnvironment,
+                taskStartDebounceStateFile: base.taskStartDebounceStateFile,
+                taskStartDebounceInterval: base.taskStartDebounceInterval,
+                receiptStore: base.receiptStore,
+                activityStore: base.activityStore,
+                sourcePayload: Data(
+                    #"{"cwd":"/tmp/same-name","session_id":"12345678-secret"}"#.utf8),
+                receiverEpoch: epoch,
+                eventNoticeSender: { notice in
+                    collector.append(notice)
+                    return .sent
+                },
+                now: base.now)
+            let outcome = handleHostHook(
+                host: .codex,
+                nativeEvent: "Stop",
+                installationID: id,
+                environment: environment)
+            let notices = collector.values
+            expect(outcome?.playbackResult == .played, "来源旁路失败不得改变既有播放结果")
+            expect(outcome?.receiptWritten == true, "来源旁路失败不得改变既有回执结果")
+            expect(notices.count == 1, "当前 installation 的有效事件必须发送一条 notice")
+            expect(
+                notices.first?.receiverEpoch == epoch
+                    && notices.first?.source?.projectLabel == "same-name"
+                    && notices.first?.source?.sessionID == "12345678-secret",
+                "notice 必须携带脱敏后的项目与会话来源，而非回执内容")
+            let receiptData = base.receiptStore.receiptFile(
+                host: .codex,
+                nativeEvent: "Stop"
+            )
+            .flatMap { try? Data(contentsOf: $0) }
+            let receiptText = receiptData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            let logText = (try? String(contentsOf: base.playEnvironment.logFile)) ?? ""
+            expect(
+                !receiptText.contains("12345678-secret") && !logText.contains("12345678-secret"),
+                "项目/会话 sentinel 不得进入回执或日志")
+
+            let droppedEnvironment = HostHookEnvironment(
+                host: base.host,
+                playEnvironment: PlayEnvironment(
+                    surfaceID: base.playEnvironment.surfaceID,
+                    afplayPath: base.playEnvironment.afplayPath,
+                    lockFile: root.appendingPathComponent("second-play.lock"),
+                    configFile: base.playEnvironment.configFile,
+                    userPacksDirectory: base.playEnvironment.userPacksDirectory,
+                    bundledPacksDirectory: base.playEnvironment.bundledPacksDirectory,
+                    spawner: spawner,
+                    debounceStateFile: root.appendingPathComponent("second-play.state"),
+                    now: base.playEnvironment.now,
+                    logFile: base.playEnvironment.logFile,
+                    logLockFile: base.playEnvironment.logLockFile),
+                receiptStore: base.receiptStore,
+                sourcePayload: Data(#"{"cwd":"/tmp/same-name"}"#.utf8),
+                receiverEpoch: epoch,
+                eventNoticeSender: { _ in .dropped(.endpointClosed) },
+                now: base.now)
+            let dropped = handleHostHook(
+                host: .codex,
+                nativeEvent: "PermissionRequest",
+                installationID: id,
+                environment: droppedEnvironment)
+            expect(
+                dropped?.playbackResult == .played && dropped?.receiptWritten == true,
+                "发送失败不得改变既有 hook 成功退出所依赖的播放与回执语义")
         }
     }
 
@@ -316,7 +416,8 @@ private func makeHostHookRunnerEnvironment(
     return HostHookEnvironment(
         host: host,
         playEnvironment: play,
-        taskStartDebounceStateFile: root.appendingPathComponent("\(host.rawValue)-task-start.state"),
+        taskStartDebounceStateFile: root.appendingPathComponent(
+            "\(host.rawValue)-task-start.state"),
         receiptStore: receiptStore,
         now: { now })
 }

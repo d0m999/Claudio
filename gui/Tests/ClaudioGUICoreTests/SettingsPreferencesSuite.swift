@@ -92,6 +92,9 @@ func runSettingsPreferencesSuites() async {
             isolated.languageMode == .system && isolated.lastSettingsDestination == .general,
             "不同 defaults suite 不得互相泄漏偏好")
         expect(
+            isolated.showsEventSourcePrompts,
+            "事件来源提示偏好缺失时必须默认开启")
+        expect(
             isolated.availableSettingsDestinations
                 == [
                     .general, .integrations, .eventsAndSounds, .notifications, .display, .sounds,
@@ -103,9 +106,16 @@ func runSettingsPreferencesSuites() async {
             isolated.lastSettingsDestination == .usage
                 && secondDefaults.string(forKey: SettingsDestination.defaultsKey) == "usage",
             "已交付的 Usage destination 必须可由 production owner 持久化")
+        isolated.setShowsEventSourcePrompts(false)
+        expect(
+            !isolated.showsEventSourcePrompts
+                && secondDefaults.object(
+                    forKey: ClaudioPreferences.eventSourcePromptsDefaultsKey) as? Bool == false,
+            "事件来源提示偏好必须由同一 typed owner 持久化")
 
         firstDefaults.set(["broken"], forKey: ClaudioAppLanguage.defaultsKey)
         firstDefaults.set(87, forKey: SettingsDestination.defaultsKey)
+        firstDefaults.set("broken", forKey: ClaudioPreferences.eventSourcePromptsDefaultsKey)
         let damaged = ClaudioPreferences(
             defaults: firstDefaults,
             notificationCenter: NotificationCenter(),
@@ -118,7 +128,11 @@ func runSettingsPreferencesSuites() async {
             "损坏 destination 必须回退到通用")
         expect(
             damaged.recoveryIssues
-                == [.invalidLanguageMode, .invalidSettingsDestination],
+                == [
+                    .invalidLanguageMode,
+                    .invalidSettingsDestination,
+                    .invalidEventSourcePromptVisibility,
+                ],
             "typed owner 必须发布可见失败态所需的完整恢复原因")
     }
 
