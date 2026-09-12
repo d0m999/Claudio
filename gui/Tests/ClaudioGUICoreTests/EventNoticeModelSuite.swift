@@ -97,6 +97,78 @@ func runEventNoticeModelSuites() {
         model.dismiss(animated: false)
     }
 
+    suite("Attention：淡出中新瞬时与待接手事件抢占旧展示") {
+        let cases: [(native: String, kind: EventNoticeKind)] = [
+            ("Stop", .transient),
+            ("PermissionRequest", .permission),
+        ]
+        for item in cases {
+            let clock = ManualEventNoticeScheduler()
+            let model = makeModel(clock)
+            _ = model.accept(attentionNotice(epoch: model.receiverEpoch, native: "Stop"))
+            clock.advance(0.18)
+            clock.advance(4)
+            expect(model.snapshot.phase == .exiting, "首个横幅已进入淡出")
+
+            clock.advance(0.09)
+            let replacement = attentionNotice(
+                epoch: model.receiverEpoch, native: item.native)
+            expect(model.accept(replacement) == .accepted, "淡出中的新事件有效")
+            expect(
+                model.snapshot.phase == .entering
+                    && model.snapshot.current?.id == replacement.id
+                    && model.snapshot.current?.kind == item.kind,
+                "新事件必须立即开始新展示：\(item.native)")
+
+            clock.advance(0.1)
+            expect(
+                model.snapshot.phase == .entering
+                    && model.snapshot.current?.id == replacement.id,
+                "旧淡出截止点不得关闭新展示：\(item.native)")
+            clock.advance(0.09)
+            expect(
+                model.snapshot.phase == .visible
+                    && model.snapshot.current?.id == replacement.id
+                    && model.snapshot.remainingTime.map { abs($0 - 4) < 0.001 } == true,
+                "新展示必须获得完整四秒阅读期：\(item.native)")
+        }
+    }
+
+    suite("Attention：淡出中显式重开列表与详情失效旧任务") {
+        let listClock = ManualEventNoticeScheduler()
+        let listModel = makeModel(listClock)
+        _ = listModel.accept(attentionNotice(epoch: listModel.receiverEpoch))
+        listClock.advance(0.18)
+        listClock.advance(4)
+        listClock.advance(0.09)
+        listModel.openRecent()
+        expect(
+            listModel.snapshot.phase == .visible && listModel.snapshot.isExpanded
+                && !listModel.snapshot.isDetail,
+            "淡出中重开列表必须稳定可见")
+        listClock.advance(0.1)
+        expect(
+            listModel.snapshot.phase == .visible && listModel.snapshot.isExpanded,
+            "旧淡出回调不得关闭刚重开的列表")
+
+        let detailClock = ManualEventNoticeScheduler()
+        let detailModel = makeModel(detailClock)
+        _ = detailModel.accept(attentionNotice(epoch: detailModel.receiverEpoch))
+        detailClock.advance(0.18)
+        let action = detailModel.snapshot.current!.action!
+        detailClock.advance(4)
+        detailClock.advance(0.09)
+        expect(detailModel.viewSource(action) == .applied, "淡出中的当前来源仍可查看")
+        expect(
+            detailModel.snapshot.phase == .visible && detailModel.snapshot.isExpanded
+                && detailModel.snapshot.isDetail,
+            "淡出中打开详情必须稳定可见")
+        detailClock.advance(0.1)
+        expect(
+            detailModel.snapshot.phase == .visible && detailModel.snapshot.isDetail,
+            "旧淡出回调不得关闭刚打开的详情")
+    }
+
     suite("Attention：暂停交叠只恢复剩余时间，展开不会重置横幅倒计时") {
         let clock = ManualEventNoticeScheduler()
         let model = makeModel(clock)

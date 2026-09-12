@@ -93,7 +93,10 @@ public struct EventNoticeView: View {
             if actionable != true { copyFeedback = nil }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(l10n.text(.eventNoticeRecent))
+        .accessibilityLabel(
+            EventNoticeProjection.accessibilityLabel(
+                for: snapshot, language: languageStore.language)
+        )
         .accessibilityIdentifier("event-notice.capsule")
     }
 

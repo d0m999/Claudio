@@ -571,6 +571,7 @@ public final class EventNoticeModel: ObservableObject {
     public func openRecent() {
         guard canReceive else { return }
         expireEntries()
+        invalidatePresentationTimer()
         if !isExpanded {
             frozen = entries.reversed()
             currentID = nil
@@ -600,6 +601,7 @@ public final class EventNoticeModel: ObservableObject {
     public func viewSource(_ action: EventNoticeAction) -> EventNoticeActionOutcome {
         expireEntries()
         guard let entry = actionableEntry(action) else { publish(); return .stale }
+        invalidatePresentationTimer()
         if !isExpanded { frozen = entries.reversed() }
         if entry.kind == .transient { transient = entry }
         currentID = entry.id
@@ -762,7 +764,7 @@ public final class EventNoticeModel: ObservableObject {
     public func expireNow() { expireEntries(); publish(immediateBadge: true) }
 
     private var canAutomaticallyDisplay: Bool {
-        !isAutomaticallySuppressed && !isExpanded && phase == .hidden
+        !isAutomaticallySuppressed && !isExpanded && (phase == .hidden || phase == .exiting)
     }
 
     private var currentEntry: Entry? {

@@ -79,4 +79,16 @@ public enum EventNoticeProjection {
         .filter { !$0.isEmpty }
         .joined(separator: language == .english ? ", " : "，")
     }
+
+    /// A collapsed ordinary-progress banner announces what just happened. Attention banners and
+    /// every interactive container retain the established Needs You label.
+    public static func accessibilityLabel(
+        for snapshot: EventNoticeModelSnapshot,
+        language: ClaudioAppLanguage
+    ) -> String {
+        if !snapshot.isExpanded, snapshot.current?.kind == .transient {
+            return accessibilitySummary(for: snapshot.current, language: language)
+        }
+        return ClaudioL10n(language: language).text(.eventNoticeRecent)
+    }
 }

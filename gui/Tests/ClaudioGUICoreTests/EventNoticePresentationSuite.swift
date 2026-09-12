@@ -195,6 +195,50 @@ func runEventNoticePresentationSuites() {
                 == "Claude Code · Information", "英文与中文含义一致")
     }
 
+    suite("EventNoticeProjection：瞬时横幅根标签中性，待接手与展开态保留紧迫语义") {
+        for language in [ClaudioAppLanguage.english, .zhHans] {
+            let transientClock = ManualEventNoticeScheduler()
+            let transientModel = EventNoticeModel(
+                receiverEpoch: UUID(), now: { transientClock.time },
+                scheduler: transientClock.scheduler())
+            _ = transientModel.accept(
+                attentionNotice(epoch: transientModel.receiverEpoch, native: "Stop"))
+            let transient = transientModel.snapshot.current!
+            expect(
+                EventNoticeProjection.accessibilityLabel(
+                    for: transientModel.snapshot, language: language)
+                    == EventNoticeProjection.accessibilitySummary(
+                        for: transient, language: language),
+                "未展开瞬时横幅必须使用当前事件的中性摘要：\(language.rawValue)")
+
+            let needsYou = ClaudioL10n(language: language).text(.eventNoticeRecent)
+            expect(
+                EventNoticeProjection.accessibilityLabel(
+                    for: transientModel.snapshot, language: language) != needsYou,
+                "普通进展不得播报为需要用户处理：\(language.rawValue)")
+            _ = transientModel.viewSource(transient.action!)
+            expect(
+                EventNoticeProjection.accessibilityLabel(
+                    for: transientModel.snapshot, language: language) == needsYou,
+                "详情态保留已有根标签：\(language.rawValue)")
+
+            let attentionClock = ManualEventNoticeScheduler()
+            let attentionModel = EventNoticeModel(
+                receiverEpoch: UUID(), now: { attentionClock.time },
+                scheduler: attentionClock.scheduler())
+            _ = attentionModel.accept(attentionNotice(epoch: attentionModel.receiverEpoch))
+            expect(
+                EventNoticeProjection.accessibilityLabel(
+                    for: attentionModel.snapshot, language: language) == needsYou,
+                "待接手横幅继续播报 Needs You/需要你：\(language.rawValue)")
+            attentionModel.openRecent()
+            expect(
+                EventNoticeProjection.accessibilityLabel(
+                    for: attentionModel.snapshot, language: language) == needsYou,
+                "展开列表继续播报 Needs You/需要你：\(language.rawValue)")
+        }
+    }
+
     suite("EventNoticePlacement：刘海与菜单栏共同决定顶部安全位置") {
         let frame = CGRect(x: 0, y: 0, width: 1512, height: 982)
         // 刘海屏且菜单栏常驻：visibleFrame 已让出菜单栏（24pt），刘海 32pt 中 8pt 侵入可见区。

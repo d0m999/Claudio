@@ -346,6 +346,26 @@ private func guiCoreSources() -> [ScannedSource] {
 
 @MainActor
 func runViewWiringSuites() {
+    suite("Event Notice：根辅助功能标签按当前 snapshot 与语言分流") {
+        guard
+            let view = codeWithoutStrings(
+                "gui/Sources/ClaudioGUIComponents/EventNoticeView.swift"),
+            let body = closureBody(after: "public var body: some View", in: view)
+        else {
+            expect(false, "必须能解析 EventNoticeView 的根视图接线")
+            return
+        }
+        let normalized = collapsingWhitespace(body)
+        expect(
+            normalized.contains(
+                ".accessibilityLabel( EventNoticeProjection.accessibilityLabel( for: snapshot, language: languageStore.language) )"
+            ),
+            "根 AX label 必须把当前 snapshot 与语言交给共享投影决策")
+        expect(
+            !normalized.contains(".accessibilityLabel(l10n.text(.eventNoticeRecent))"),
+            "根 AX label 不得重新硬连到 Needs You/需要你常量")
+    }
+
     suite("Event Notice：executable 跨窗口接线转交 Settings restoration，重复交互不重捕获") {
         guard
             let settings = codeWithoutStrings(
