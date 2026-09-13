@@ -160,12 +160,17 @@ func runEventNoticePresentationSuites() {
                     document.scrollToVisible(copyRect)
                     hosting.layoutSubtreeIfNeeded()
                     let point = document.convert(NSPoint(x: 45, y: copyRect.midY), to: nil)
-                    for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    let eventTimestamp = ProcessInfo.processInfo.systemUptime
+                    for (offset, type) in [
+                        NSEvent.EventType.leftMouseDown, .leftMouseUp,
+                    ].enumerated() {
                         diagnostic("before-send-event type=\(type.rawValue) \(diagnosticContext)")
                         if let event = NSEvent.mouseEvent(
                             with: type, location: point,
-                            modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
-                            context: nil, eventNumber: 1, clickCount: 1, pressure: 1)
+                            modifierFlags: [],
+                            timestamp: eventTimestamp + (Double(offset) * 0.001),
+                            windowNumber: window.windowNumber,
+                            context: nil, eventNumber: offset + 1, clickCount: 1, pressure: 1)
                         {
                             window.sendEvent(event)
                         }
