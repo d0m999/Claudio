@@ -1,8 +1,10 @@
 # 瞬时提示与「需要你」：实现与验收台账
 
-基线：`a33d077`。最终源码范围：`d2059b8`、`497f6fc`、`ed884cf`、`4160baf`（review 修复）。
+基线：`a33d077`。最终源码范围：`d2059b8`、`497f6fc`、`ed884cf`、`4160baf`（review 修复）、`e41587d`、
+`2987fea`、`3143048`（对账轮），及工作树中未提交的对账轮 review 修复（见下「review 修复轮」段）。
 日期：2026-09-12–13。环境：macOS 26.6.2、arm64、Apple Swift 6.3.3。
-范围来自用户提供的 T1–T8 规格；评审发现由用户在会话中提供、未在仓库内跟踪，其修复即 `4160baf`。
+范围来自用户提供的 T1–T8 规格；评审发现由用户在会话中提供、未在仓库内跟踪，其修复即 `4160baf`，
+对账轮与 review 修复轮的分拆见 `plan/FIX-EVENT-NOTICE-REVIEW-20260913.md`（未提交）。
 本次是本地实现，不提交、推送、发布或替换运行中的 app。
 既有未跟踪计划、HTML 原型和报告未改写。
 
@@ -32,20 +34,20 @@ Stop、查看、复制和收起不移除提醒；移除原因区分用户操作�
 
 ## 自动化及资源证据
 
-以下执行均返回 exit 0：
+除注明项外，以下执行均返回 exit 0：
 
 | 检查 | 结果 | 本机日志 |
 | --- | --- | --- |
 | helper Debug executable harness | 3,259 checks，通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/helper-debug.log` |
 | helper Release executable harness | 3,222 checks，通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/helper-release.log` |
-| GUI 完整 executable harness | 9,152 checks，通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/gui-full.log` |
-| 最后一次 GUI 专项 | 337 checks，通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/gui-attention.log` |
-| GUI Debug product | 通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/gui-debug-build.log` |
+| GUI 完整 executable harness | 9,153 checks，通过 | 2026-09-13 review 修复轮重跑（最终态）：`/tmp/claudio-review-fixes-20260913/logs/gui-full-final.log` |
+| 最后一次 GUI 专项 | 337 checks，通过 | 2026-09-13 重跑：`/tmp/claudio-review-fixes-20260913/logs/gui-attention.log` |
+| GUI Debug product | 通过 | 2026-09-13 重跑：`/tmp/claudio-review-fixes-20260913/logs/gui-debug-build.log` |
 | GUI/helper/LoginItem Release、组装及签名 | 通过，见下方产物表 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/dev-bundle.log` |
-| 修改范围 Swift 严格格式 | 累计 28 个 Swift 文件通过（含修复子集 6 文件） | 2026-09-13 重跑：`/tmp/claudio-review-fixes-format.log`（strict 通过时无输出） |
-| 本地化 JSON、占位符及注册 | JSON 检查与 GUI harness 通过 | `jq empty`、GUI 日志 |
+| 修改范围 Swift 严格格式 | 累计 28 个 Swift 文件通过（本轮改动的 1 个已重跑） | 2026-09-13 重跑：`/tmp/claudio-review-fixes-20260913/logs/swift-format.log`（strict 通过时无输出） |
+| 本地化 JSON、占位符及注册 | JSON 检查与 GUI harness 通过 | 2026-09-13 重跑通过：`jq empty` 无输出、GUI 日志 |
 | selector state、sound-pack candidates | 通过；Python 11 tests | 仓库原 Node/Python 脚本 |
-| 工作区 diff 空白检查 | 通过 | `git diff --check` |
+| 工作区 diff 空白检查 | 通过 | 2026-09-13 重跑通过：`git diff --check` 无输出 |
 
 完整 GUI harness 通过后，最后以 337 项专项复核事件提醒修复；同会话 watermark 拒绝缺失、
 epoch 前及未来观察，瞬时项精确返回确认不再误走提醒移除。最终 Debug/Release 产物均使用这些修复后的源码。
@@ -65,6 +67,20 @@ SwiftPM manifest 解析、release-size fixture 的 stat 调用、SwiftPM dump �
 Swift 文件重跑通过（见上表）。本机 sandbox 内 SwiftPM 需 `--disable-sandbox` 才能运行，否则
 manifest 编译被 sandbox_apply 拒绝。
 
+2026-09-13 review 修复轮（来源：`plan/FIX-EVENT-NOTICE-REVIEW-20260913.md`，工作树未提交）：
+修复对账轮 review 的 actionable findings。① resignKey 失焦断言折入极性腿（闭包体不得出现
+`!isInteractive`），断言消息如实标注「存在性+极性断言，不证明分支内归属；等价 guard 改写不得假红；
+De Morgan 等价改写（`if !isInteractive` 互换两分支体）会假红，属已知边界」；
+变异实测：极性取反（`if !isInteractive`）判红、删除 `window.delegate = self` 判红、等价 guard
+改写判绿、else-first 分支交换判绿（后两者为已披露边界：文本绊线不证明哪个效果属于哪个分支，
+也不接受取反的等价重写）。② 台账头部「最终源码范围」补入对账轮三个提交。③ 证据表 GUI 完整
+harness 行按本轮重跑更正为 9,153 checks 全过：对账轮记录的 9,151（该计数沿用对账轮段落自身的
+记录、当轮未留存日志路径）含 5 项本机 sandbox 既有失败，失败 suite 提前退出使计数偏少，与本轮
+9,153 的差值不对应任何源码增减（本轮测试改动为零新增 expect）；`--disable-sandbox` 重跑全绿。
+本轮证据：`/tmp/claudio-review-fixes-20260913/logs/`（gui-full-final、gui-attention、
+gui-debug-build、swift-format、mutation-a-rerun、mutation-b-rerun 及首轮四条变异日志）。
+helper 各行沿用上轮证据（本轮未触碰 helper 源码）。
+
 可重复执行：
 
 ```bash
@@ -83,7 +99,10 @@ git diff --check
 - 暂停交叠、完整冻结版本、旧内容独立 TTL、重复 UUID、乱序观察、无效观察拒绝、元数据淘汰及容量阅读保护。
 - Stop 不清除，提交清除默认关闭，缺失/相等/倒序/异常/parent 观察不清除。
 - 双击、失败、永不完成后超时、取消/隐私/能力代次/版本变化后完成；精确返回只移除待接手提醒，瞬时项保留成功结果。
-- 源码接线断言（delegate 赋值 + resignKey 关闭路径的行为内容，含等价重构与删除接线的变异验证）保证交互面板失去 key window 后沿关闭路径收起；真实失焦触发、外部点击及透传仍按下方人工门槛验收。
+- 源码接线断言（delegate 赋值 + resignKey 闭包含未取反的 isInteractive 判别与 close()、键盘暂停解除
+  的行为内容；极性取反、删除接线变异实测判红，等价 guard 改写实测判绿）在文本层守住失焦收起接线；
+  else-first 分支交换与 De Morgan 等价改写属已披露边界（前者判绿、后者假红），不证明分支内归属。
+  真实失焦触发、外部点击及透传仍按下方人工门槛验收。
 - 复制成功、失败和陈旧版本拒绝，隐私清空不覆盖用户主动导出。
 - 实际调度器中取消或释放 token 后，30 分钟定时闭包捕获对象立即释放；没有被旧 asyncAfter 截止时间挂住。
 - 真正挂载 `EventNoticeView` 到 NSPanel：英中、浅深主题 0/1/5/7/50 项、末行滚动、300×180pt 详情、256 字符无断点 ID、滚动后的实际按钮点击与失败反馈；HostingView 固有尺寸不能反向撑高受控窗口。

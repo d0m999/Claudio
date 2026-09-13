@@ -359,8 +359,11 @@ func runViewWiringSuites() {
         expect(
             normalized.contains("close()")
                 && normalized.contains("isInteractive")
+                && !normalized.contains("!isInteractive")
                 && normalized.contains("model.setKeyboardFocused(false)"),
-            "失焦闭包体必须引用 isInteractive 判别并含 close() 与键盘暂停解除（存在性断言，不证明分支归属；等价重构不得假红）")
+            "失焦闭包体必须引用 isInteractive 判别（不得取反极性）并含 close() 与键盘暂停解除"
+                + "（存在性+极性断言，不证明分支内归属；等价 guard 改写不得假红；"
+                + "De Morgan 等价改写（`if !isInteractive` 互换两分支体）会假红，属已知边界）")
         expect(
             controller.contains("NSWindowDelegate")
                 && controller.contains("window.delegate = self"),
