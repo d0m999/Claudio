@@ -322,6 +322,10 @@ func runAICueGenerationEngineSuites() async {
             ]
             for (index, failure) in failures.enumerated() {
                 let tempRoot = root.appendingPathComponent("prepare-failure-\(index)")
+                let sibling = tempRoot.appendingPathComponent("keep-sibling", isDirectory: true)
+                try! FileManager.default.createDirectory(
+                    at: sibling,
+                    withIntermediateDirectories: true)
                 let checkpoint = GenerationPreparationCheckpointFixture(.fail(failure))
                 let engine = AICueGenerationEngine(
                     credentialManager: GenerationCredentialLeaseManagerFixture(
@@ -340,7 +344,9 @@ func runAICueGenerationEngineSuites() async {
                         deadline: .startingNow())
                 } catch {}
                 expect(await checkpoint.sawPreparedDirectory(), "检查点必须位于 generation mkdir 之后")
-                expect(generationDirectories(in: tempRoot).isEmpty, "prepare 后失败必须清理本次 UUID child")
+                expect(
+                    generationDirectories(in: tempRoot) == [sibling],
+                    "prepare 后失败只能清理本次 UUID child，必须保留共享根与兄弟目录")
             }
         }
     }
