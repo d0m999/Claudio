@@ -7,6 +7,9 @@
 - macOS 12 内嵌 `claudi0-login-item`：每架构最多 `500,000 B`；
 - app 内其余正规文件合计预留 `1,500,000 B`；
 - GUI、helper 与 LoginItem 必须包含相同架构；`Contents/Resources/bin/claudio` 必须是精确指向同目录 `claudi0` 的相对符号链接。LoginItem 的固定 bundle identity、executable 和 macOS 12 floor 也会在签名前失败关闭。
+- GUI 每个切片不得含产品定义的 external symbol；Xcode 16.4 即使在
+  `-no_exported_symbols` 与完整 `strip` 后仍可能保留工具链拥有的
+  `__mh_execute_header` Mach-O 主程序头哨兵，门禁只精确允许该哨兵。
 
 ## 2026-08-06 基线
 
@@ -150,5 +153,11 @@ helper、LoginItem、资源、架构一致性或无导出符号门禁。
 
 GUI 每架构默认预算据此重定为 `6,000,000 B`，为 Xcode 16.4 实测保留 `179,784 B`
 （约 `3.0%`）余量。helper、LoginItem、非可执行资源预算，以及逐切片、架构一致性、GUI
-零导出符号和 bundle 总量门禁均保持不变；CI 和 release workflow 也不设置环境变量绕过默认值。
+无产品导出符号和 bundle 总量门禁均保持不变；CI 和 release workflow 也不设置环境变量绕过默认值。
 该远端 arm64 CI 回执不等同于 universal 双架构、Developer ID 签名、公证或正式 release 验收。
+
+同一固定工具链随后在 `c164aea` 的 `dev-bundle.sh` 组装阶段报告唯一 defined external 为
+`__mh_execute_header`，而本机较新工具链的同口径产物没有报告该符号。门禁现按语义区分
+工具链主程序头哨兵与 Claudio 产品导出：只允许精确的 `__mh_execute_header`，并继续对任何
+额外 Swift/业务符号或 `nm` 检查失败关闭。这是工具链兼容性修复，不取消
+`-no_exported_symbols`，也不把未知导出加入允许列表。

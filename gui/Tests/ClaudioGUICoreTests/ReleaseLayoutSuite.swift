@@ -1019,16 +1019,32 @@ func runReleaseLayoutSuites() {
                 exact.status == 0,
                 "每个切片恰好等于预算必须通过，status=\(exact.status)：\(exact.output)")
 
+            let executableHeaderOnly = runReleaseSizeGate(
+                app: app,
+                fakeLipo: fakeLipo,
+                fakeNM: fakeNM,
+                overrides: [
+                    "FAKE_GUI_ARM64_EXPORTS": "__mh_execute_header\n",
+                    "FAKE_GUI_X86_64_EXPORTS": "__mh_execute_header\n",
+                ])
+            expect(
+                executableHeaderOnly.status == 0,
+                "Xcode 保留的 Mach-O executable-header 哨兵不是产品导出："
+                    + executableHeaderOnly.output)
+
             let exported = runReleaseSizeGate(
                 app: app,
                 fakeLipo: fakeLipo,
                 fakeNM: fakeNM,
-                overrides: ["FAKE_GUI_X86_64_EXPORTS": "_$s11ClaudioGUI6LeakedyyF"])
+                overrides: [
+                    "FAKE_GUI_X86_64_EXPORTS":
+                        "__mh_execute_header\n_$s11ClaudioGUI6LeakedyyF\n"
+                ])
             expect(
                 exported.status != 0
                     && exported.output.contains("claudi0-app [x86_64]")
                     && exported.output.contains("_$s11ClaudioGUI6LeakedyyF"),
-                "任一 GUI 架构仍有导出符号时必须失败关闭并指出切片：\(exported.output)")
+                "任一 GUI 架构仍有产品导出符号时必须失败关闭并指出切片：\(exported.output)")
 
             let inspectionFailure = runReleaseSizeGate(
                 app: app,
