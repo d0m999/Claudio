@@ -2,7 +2,7 @@
 
 发布流程在 codesign 前执行 `scripts/check-release-size.sh`。门禁按 Mach-O 架构数线性放大：
 
-- `claudi0-app`：每架构最多 `5,600,000 B`；
+- `claudi0-app`：每架构最多 `6,000,000 B`；
 - `claudi0` helper：每架构最多 `3,250,000 B`；
 - macOS 12 内嵌 `claudi0-login-item`：每架构最多 `500,000 B`；
 - app 内其余正规文件合计预留 `1,500,000 B`；
@@ -139,3 +139,16 @@ helper、LoginItem、资源、架构一致性或无导出符号门禁。
 
 这是本机 arm64、ad-hoc 签名前的本地走查证据，不等同于 universal 双架构、Developer ID
 签名、公证或真实宿主/原生 UI 验收；CI 仍会对最终 release 产物重新执行同一失败关闭门禁。
+
+## 2026-09-13 Xcode 16.4 CI 产物重基线
+
+`fe3ce99` 在固定的 GitHub `macos-15` / Xcode 16.4 CI 上，以 Release `-Osize`、完整
+`strip`、签名前的共享 `scripts/check-release-size.sh` 口径生成 `5,820,216 B` 的 arm64 GUI，
+超过 `5,600,000 B` 旧预算 `220,216 B`。同一生产源码此前在本机工具链下得到
+`5,575,552 B`；两者相差 `244,664 B`。这组证据确认旧预算不能容纳固定发布工具链的真实
+产物，但没有用同一构建机隔离工具链以外的变量，因此不把差值进一步归因给编译器或链接器。
+
+GUI 每架构默认预算据此重定为 `6,000,000 B`，为 Xcode 16.4 实测保留 `179,784 B`
+（约 `3.0%`）余量。helper、LoginItem、非可执行资源预算，以及逐切片、架构一致性、GUI
+零导出符号和 bundle 总量门禁均保持不变；CI 和 release workflow 也不设置环境变量绕过默认值。
+该远端 arm64 CI 回执不等同于 universal 双架构、Developer ID 签名、公证或正式 release 验收。
