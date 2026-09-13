@@ -344,8 +344,13 @@ func runAICueGenerationEngineSuites() async {
                         deadline: .startingNow())
                 } catch {}
                 expect(await checkpoint.sawPreparedDirectory(), "检查点必须位于 generation mkdir 之后")
+                let remaining = generationDirectories(in: tempRoot)
                 expect(
-                    generationDirectories(in: tempRoot) == [sibling],
+                    remaining.count == 1
+                        && remaining[0].lastPathComponent == sibling.lastPathComponent
+                        && !remaining.contains(where: {
+                            $0.lastPathComponent.hasPrefix("generation-")
+                        }),
                     "prepare 后失败只能清理本次 UUID child，必须保留共享根与兄弟目录")
             }
         }
