@@ -161,20 +161,32 @@ func runEventNoticePresentationSuites() {
                     hosting.layoutSubtreeIfNeeded()
                     let point = document.convert(NSPoint(x: 45, y: copyRect.midY), to: nil)
                     let eventTimestamp = ProcessInfo.processInfo.systemUptime
-                    for (offset, type) in [
-                        NSEvent.EventType.leftMouseDown, .leftMouseUp,
-                    ].enumerated() {
-                        diagnostic("before-send-event type=\(type.rawValue) \(diagnosticContext)")
-                        if let event = NSEvent.mouseEvent(
-                            with: type, location: point,
-                            modifierFlags: [],
-                            timestamp: eventTimestamp + (Double(offset) * 0.001),
-                            windowNumber: window.windowNumber,
-                            context: nil, eventNumber: offset + 1, clickCount: 1, pressure: 1)
+                    let mouseDown = NSEvent.mouseEvent(
+                        with: .leftMouseDown, location: point,
+                        modifierFlags: [], timestamp: eventTimestamp,
+                        windowNumber: window.windowNumber,
+                        context: nil, eventNumber: 1, clickCount: 1, pressure: 1)
+                    let mouseUp = NSEvent.mouseEvent(
+                        with: .leftMouseUp, location: point,
+                        modifierFlags: [], timestamp: eventTimestamp + 0.001,
+                        windowNumber: window.windowNumber,
+                        context: nil, eventNumber: 2, clickCount: 1, pressure: 1)
+                    if let mouseDown, let mouseUp {
+                        diagnostic("before-queue-mouse-up \(diagnosticContext)")
+                        NSApplication.shared.postEvent(mouseUp, atStart: true)
+                        diagnostic("before-send-mouse-down \(diagnosticContext)")
+                        window.sendEvent(mouseDown)
+                        diagnostic("after-send-mouse-down \(diagnosticContext)")
+                        if let pendingMouseUp = NSApplication.shared.nextEvent(
+                            matching: .leftMouseUp,
+                            until: .distantPast,
+                            inMode: .default,
+                            dequeue: true)
                         {
-                            window.sendEvent(event)
+                            diagnostic("before-send-pending-mouse-up \(diagnosticContext)")
+                            window.sendEvent(pendingMouseUp)
+                            diagnostic("after-send-pending-mouse-up \(diagnosticContext)")
                         }
-                        diagnostic("after-send-event type=\(type.rawValue) \(diagnosticContext)")
                     }
                     expect(copyCalls == 1, "滚动后的真实复制按钮回送捕获版本")
                     RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
