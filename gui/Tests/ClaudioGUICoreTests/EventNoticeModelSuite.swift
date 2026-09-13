@@ -85,15 +85,17 @@ func runEventNoticeModelSuites() {
         expect(
             model.snapshot.current?.id == first.id && model.snapshot.remainingTime == 2, "新事件不替换或延长"
         )
-        expect(model.snapshot.recent.isEmpty && model.snapshot.totalCount == 0, "普通事件不成为历史")
+        expect(
+            model.snapshot.attentionReminders.isEmpty && model.snapshot.totalCount == 0,
+            "普通事件不成为历史")
         clock.advance(2.18)
         expect(
             model.snapshot.phase == .hidden && model.resourceUsage.transientVersions == 0,
             "展示完即释放来源")
-        model.openRecent()
+        model.openAttentionReminders()
         expect(
             model.snapshot.isExpanded && model.snapshot.current == nil
-                && model.snapshot.recent.isEmpty, "零项仍可打开")
+                && model.snapshot.attentionReminders.isEmpty, "零项仍可打开")
         model.dismiss(animated: false)
     }
 
@@ -173,7 +175,7 @@ func runEventNoticeModelSuites() {
         listClock.advance(0.18)
         listClock.advance(4)
         listClock.advance(0.09)
-        listModel.openRecent()
+        listModel.openAttentionReminders()
         expect(
             listModel.snapshot.phase == .visible && listModel.snapshot.isExpanded
                 && !listModel.snapshot.isDetail,
@@ -226,8 +228,8 @@ func runEventNoticeModelSuites() {
         _ = model.accept(first)
         clock.advance(0.18)
         let banner = model.snapshot.current!
-        model.openRecent()
-        let frozen = model.snapshot.recent
+        model.openAttentionReminders()
+        let frozen = model.snapshot.attentionReminders
         let action = frozen[0].action!
         _ = model.accept(
             attentionNotice(
@@ -237,12 +239,15 @@ func runEventNoticeModelSuites() {
                     sessionID: "session-id", mainSessionIsKnown: true)))
         expect(model.snapshot.totalCount == 1 && model.snapshot.pendingCount == 1, "同完整会话更新一行")
         expect(
-            model.snapshot.recent[0].notice == frozen[0].notice
-                && model.snapshot.recent[0].version == 1, "完整内容与版本冻结")
-        expect(!model.snapshot.recent[0].isActionable && model.remove(action) == .stale, "陈旧移除拒绝")
+            model.snapshot.attentionReminders[0].notice == frozen[0].notice
+                && model.snapshot.attentionReminders[0].version == 1, "完整内容与版本冻结")
+        expect(
+            !model.snapshot.attentionReminders[0].isActionable
+                && model.remove(action) == .stale,
+            "陈旧移除拒绝")
         expect(model.viewSource(action) == .stale && model.snapshot.totalCount == 1, "陈旧来源动作不绑定最新")
-        model.refreshRecent()
-        let latest = model.snapshot.recent[0]
+        model.refreshAttentionReminders()
+        let latest = model.snapshot.attentionReminders[0]
         expect(
             latest.id == banner.id && latest.version == 2
                 && latest.source?.projectLabel == "updated label", "刷新后同稳定 ID 新版本")
@@ -295,8 +300,8 @@ func runEventNoticeModelSuites() {
         let first = attentionNotice(
             epoch: model.receiverEpoch, installation: installation, observed: clock.time)
         _ = model.accept(first)
-        model.openRecent()
-        let original = model.snapshot.recent[0]
+        model.openAttentionReminders()
+        let original = model.snapshot.attentionReminders[0]
         _ = model.viewSource(original.action!)
         clock.advance(100)
         expect(model.accept(first) == .duplicate, "重复 UUID 不增加版本或延长期限")
@@ -311,11 +316,12 @@ func runEventNoticeModelSuites() {
         expect(
             model.snapshot.current?.notice == nil && model.snapshot.current?.occurredAt == nil,
             "冻结旧版本到期擦除来源与时间")
-        model.refreshRecent()
-        expect(model.snapshot.recent[0].version == 2, "新版只经刷新展示")
+        model.refreshAttentionReminders()
+        expect(model.snapshot.attentionReminders[0].version == 2, "新版只经刷新展示")
         clock.advance(100)
         expect(
-            model.snapshot.totalCount == 0 && model.snapshot.recent.allSatisfy { $0.notice == nil },
+            model.snapshot.totalCount == 0
+                && model.snapshot.attentionReminders.allSatisfy { $0.notice == nil },
             "新版本独立过期")
     }
 
@@ -409,15 +415,15 @@ func runEventNoticeModelSuites() {
                 expect(model.snapshot.totalCount == min(50, count), "容量与首屏数无关：\(count)")
             }
             if count == 1 {
-                model.openRecent()
-                _ = model.viewSource(model.snapshot.recent[0].action!)
+                model.openAttentionReminders()
+                _ = model.viewSource(model.snapshot.attentionReminders[0].action!)
             }
         }
         expect(
             model.snapshot.current?.notice != nil && model.snapshot.totalCount == 50, "当前详情免于容量淘汰")
         expect(model.snapshot.droppedCount == 1 && model.lastRemovalReason == .capacity, "如实记录容量淘汰")
-        model.refreshRecent()
-        expect(model.snapshot.recent.count == 50, "全部五十项可达")
+        model.refreshAttentionReminders()
+        expect(model.snapshot.attentionReminders.count == 50, "全部五十项可达")
     }
 
     suite("Attention：容量压力也不能擦除正在阅读的横幅") {
@@ -444,7 +450,7 @@ func runEventNoticeModelSuites() {
         )
         model.setAutomaticallySuppressed(false)
         expect(model.snapshot.phase == .hidden, "解除不补播")
-        model.openRecent()
+        model.openAttentionReminders()
         model.setAutomaticallySuppressed(true)
         expect(model.snapshot.isExpanded, "动态静默不打断用户主动阅读列表")
         let previous = attentionNotice(epoch: model.receiverEpoch)
@@ -486,8 +492,8 @@ func runEventNoticeModelSuites() {
         let first = attentionNotice(
             epoch: model.receiverEpoch, installation: installation, observed: clock.time)
         _ = model.accept(first)
-        model.openRecent()
-        _ = model.viewSource(model.snapshot.recent[0].action!)
+        model.openAttentionReminders()
+        _ = model.viewSource(model.snapshot.attentionReminders[0].action!)
         clock.advance(1)
         for _ in 0..<300 {
             _ = model.accept(attentionNotice(epoch: model.receiverEpoch, observed: clock.time))

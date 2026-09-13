@@ -52,7 +52,7 @@ func runEventNoticePresentationSuites() {
                                 source: HostEventSource(
                                     projectLabel: "project", sessionID: sessionID)))
                     }
-                    model.openRecent()
+                    model.openAttentionReminders()
                     let preferences = ClaudioPreferences(previewLanguage: language)
                     var copyCalls = 0
                     let hosting = EventNoticeHostingView(
@@ -113,7 +113,10 @@ func runEventNoticePresentationSuites() {
                             )
                         }
                     }
-                    guard count > 0, let action = model.snapshot.recent.first?.action else {
+                    guard
+                        count > 0,
+                        let action = model.snapshot.attentionReminders.first?.action
+                    else {
                         continue
                     }
                     _ = model.viewSource(action)
@@ -231,7 +234,7 @@ func runEventNoticePresentationSuites() {
                 EventNoticeProjection.accessibilityLabel(
                     for: attentionModel.snapshot, language: language) == needsYou,
                 "待接手横幅继续播报 Needs You/需要你：\(language.rawValue)")
-            attentionModel.openRecent()
+            attentionModel.openAttentionReminders()
             expect(
                 EventNoticeProjection.accessibilityLabel(
                     for: attentionModel.snapshot, language: language) == needsYou,

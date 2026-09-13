@@ -10,7 +10,7 @@ public struct EventNoticeView: View {
     @ObservedObject private var model: EventNoticeModel
     @ObservedObject private var languageStore: ClaudioPreferences
     private let onViewSource: @MainActor (EventNoticeAction) -> Void
-    private let onOpenRecent: (@MainActor () -> Void)?
+    private let onOpenAttentionReminders: (@MainActor () -> Void)?
     private let onCopySessionID: @MainActor (EventNoticeAction) -> Bool
     private let onClose: @MainActor () -> Void
     @Environment(\.colorScheme) private var colorScheme
@@ -21,14 +21,14 @@ public struct EventNoticeView: View {
         model: EventNoticeModel,
         languageStore: ClaudioPreferences,
         onViewSource: @escaping @MainActor (EventNoticeAction) -> Void = { _ in },
-        onOpenRecent: (@MainActor () -> Void)? = nil,
+        onOpenAttentionReminders: (@MainActor () -> Void)? = nil,
         onCopySessionID: @escaping @MainActor (EventNoticeAction) -> Bool = { _ in false },
         onClose: @escaping @MainActor () -> Void = {}
     ) {
         _model = ObservedObject(wrappedValue: model)
         _languageStore = ObservedObject(wrappedValue: languageStore)
         self.onViewSource = onViewSource
-        self.onOpenRecent = onOpenRecent
+        self.onOpenAttentionReminders = onOpenAttentionReminders
         self.onCopySessionID = onCopySessionID
         self.onClose = onClose
     }
@@ -36,7 +36,7 @@ public struct EventNoticeView: View {
     public static func preferredHeight(for snapshot: EventNoticeModelSnapshot) -> CGFloat {
         if snapshot.isDetail { return 360 }
         if snapshot.isExpanded {
-            return CGFloat(min(5, max(1, snapshot.recent.count))) * 54 + 92
+            return CGFloat(min(5, max(1, snapshot.attentionReminders.count))) * 54 + 92
                 + (snapshot.needsRefresh ? 32 : 0) + (snapshot.droppedCount > 0 ? 28 : 0)
         }
         return 112
@@ -123,7 +123,11 @@ public struct EventNoticeView: View {
 
     private var listButton: some View {
         Button {
-            if let onOpenRecent { onOpenRecent() } else { model.openRecent() }
+            if let onOpenAttentionReminders {
+                onOpenAttentionReminders()
+            } else {
+                model.openAttentionReminders()
+            }
         } label: {
             Text(l10n.text(.eventNoticeRecent) + " " + String(model.badgeCount))
                 .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -155,7 +159,7 @@ public struct EventNoticeView: View {
                             ? l10n.format(.eventNoticeNewNotices, Int64(snapshot.pendingCount))
                             : l10n.text(.eventNoticeRefresh)
                     ) {
-                        model.refreshRecent()
+                        model.refreshAttentionReminders()
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -164,14 +168,14 @@ public struct EventNoticeView: View {
                 }
                 ScrollView(.vertical, showsIndicators: true) {
                     VStack(alignment: .leading, spacing: 0) {
-                        if snapshot.recent.isEmpty {
+                        if snapshot.attentionReminders.isEmpty {
                             Text(l10n.text(.eventNoticeEmpty))
                                 .font(.system(size: 12, design: .rounded))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
                                 .accessibilityIdentifier("event-notice.empty")
                         }
-                        ForEach(snapshot.recent) { record in
+                        ForEach(snapshot.attentionReminders) { record in
                             HStack(spacing: 4) {
                                 Button {
                                     if let action = record.action { onViewSource(action) }
@@ -182,7 +186,7 @@ public struct EventNoticeView: View {
                                 .disabled(!record.isActionable)
                                 .accessibilityIdentifier(
                                     "event-notice.recent.\(record.id.uuidString)")
-                                if record.kind != .transient { removeButton(record) }
+                                if record.kind.isAttention { removeButton(record) }
                             }
                             .frame(minHeight: 54)
                             .overlay(alignment: .bottom) { Divider() }
@@ -191,7 +195,8 @@ public struct EventNoticeView: View {
                 }
                 .frame(
                     maxWidth: .infinity,
-                    maxHeight: CGFloat(min(5, max(1, snapshot.recent.count))) * 54
+                    maxHeight: CGFloat(
+                        min(5, max(1, snapshot.attentionReminders.count))) * 54
                 )
                 .accessibilityIdentifier("event-notice.recent-list")
                 Text(l10n.text(.eventNoticeRecentDisclaimer))
@@ -285,7 +290,7 @@ public struct EventNoticeView: View {
                             )
                             .accessibilityIdentifier("event-notice.copy-result")
                         }
-                        if record.kind != .transient { removeButton(record, withTitle: true) }
+                        if record.kind.isAttention { removeButton(record, withTitle: true) }
                     }
                 }
                 .font(.system(size: 12, design: .rounded))

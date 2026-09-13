@@ -40,7 +40,7 @@ fileprivate final class EventNoticeContent: Sendable, Equatable {
     }
 }
 
-/// A recent notice is a presentation record, not a receipt or activity fact. `notice` becomes
+/// A notice record is a presentation record, not a receipt or activity fact. `notice` becomes
 /// nil when its short privacy TTL expires; the event and safe focus identity may remain so the
 /// current control does not jump underneath a user.
 public struct EventNoticeRecord: Identifiable, Sendable, Equatable {
@@ -101,21 +101,23 @@ public struct EventNoticeRecord: Identifiable, Sendable, Equatable {
 public struct EventNoticeModelSnapshot: Sendable, Equatable {
     public let phase: EventNoticePresentationPhase
     public let current: EventNoticeRecord?
-    public let recent: [EventNoticeRecord]
+    public let attentionReminders: [EventNoticeRecord]
     public let pendingCount: Int
     public let pauseReasons: EventNoticePauseReason
     public let remainingTime: TimeInterval?
     public let isExpanded: Bool
     public let isDetail: Bool
     public let totalCount: Int
-    public var needsRefresh: Bool { pendingCount > 0 || recent.contains { !$0.isActionable } }
+    public var needsRefresh: Bool {
+        pendingCount > 0 || attentionReminders.contains { !$0.isActionable }
+    }
     public let droppedCount: Int
     public let receiverEpoch: UUID
 
     public init(
         phase: EventNoticePresentationPhase,
         current: EventNoticeRecord?,
-        recent: [EventNoticeRecord],
+        attentionReminders: [EventNoticeRecord],
         pendingCount: Int,
         pauseReasons: EventNoticePauseReason,
         remainingTime: TimeInterval?,
@@ -127,7 +129,7 @@ public struct EventNoticeModelSnapshot: Sendable, Equatable {
     ) {
         self.phase = phase
         self.current = current
-        self.recent = recent
+        self.attentionReminders = attentionReminders
         self.pendingCount = pendingCount
         self.pauseReasons = pauseReasons
         self.remainingTime = remainingTime
@@ -285,7 +287,7 @@ public final class EventNoticeModel: ObservableObject {
     public static let displayDuration: TimeInterval = 4
     public static let fadeDuration: TimeInterval = 0.18
     public static let retentionDuration: TimeInterval = 30 * 60
-    public static let maximumRecentCount = 50
+    public static let maximumAttentionReminderCount = 50
     public static let maximumMetadataCount = 256
 
     @Published public private(set) var snapshot: EventNoticeModelSnapshot
@@ -425,7 +427,8 @@ public final class EventNoticeModel: ObservableObject {
         self.verifiedSubmissionSurfaces = verifiedSubmissionSurfaces
         epochStartedAt = now()
         snapshot = EventNoticeModelSnapshot(
-            phase: .hidden, current: nil, recent: [], pendingCount: 0, pauseReasons: [],
+            phase: .hidden, current: nil, attentionReminders: [], pendingCount: 0,
+            pauseReasons: [],
             remainingTime: nil, isExpanded: false, droppedCount: 0, receiverEpoch: receiverEpoch)
     }
 
@@ -511,7 +514,7 @@ public final class EventNoticeModel: ObservableObject {
                 notice, kind: kind, identity: identity, id: previous.id,
                 version: previous.version + 1)
         } else {
-            if entries.count >= Self.maximumRecentCount {
+            if entries.count >= Self.maximumAttentionReminderCount {
                 guard
                     let index = entries.firstIndex(where: {
                         $0.id != currentID && $0.id != protectedAction?.id
@@ -572,9 +575,11 @@ public final class EventNoticeModel: ObservableObject {
 
     public func setHovering(_ value: Bool) { setPauseReason(.hover, active: value) }
     public func setKeyboardFocused(_ value: Bool) { setPauseReason(.keyboardFocus, active: value) }
-    public func setExpanded(_ value: Bool) { value ? openRecent() : closeRecent() }
+    public func setExpanded(_ value: Bool) {
+        value ? openAttentionReminders() : closeAttentionReminders()
+    }
 
-    public func openRecent() {
+    public func openAttentionReminders() {
         guard canReceive else { return }
         expireEntries()
         invalidatePresentationTimer()
@@ -591,9 +596,9 @@ public final class EventNoticeModel: ObservableObject {
     }
 
     /// Esc from list collapses it; it never removes reminders or starts a replay queue.
-    public func closeRecent() { dismiss() }
+    public func closeAttentionReminders() { dismiss() }
 
-    public func refreshRecent() {
+    public func refreshAttentionReminders() {
         guard isExpanded else { return }
         expireEntries()
         frozen = entries.reversed()
@@ -627,9 +632,11 @@ public final class EventNoticeModel: ObservableObject {
         publish()
     }
 
-    /// Compatibility for callers selecting a visible row; never resolves a stale row to latest.
-    public func selectRecent(id: UUID) {
-        guard let record = snapshot.recent.first(where: { $0.id == id }), let action = record.action
+    /// Selects a visible reminder without resolving a stale row to its latest version.
+    public func selectAttentionReminder(id: UUID) {
+        guard
+            let record = snapshot.attentionReminders.first(where: { $0.id == id }),
+            let action = record.action
         else { return }
         _ = viewSource(action)
     }
@@ -946,7 +953,7 @@ public final class EventNoticeModel: ObservableObject {
         }
         let updated = EventNoticeModelSnapshot(
             phase: phase, current: currentEntry.map(record),
-            recent: (isExpanded ? frozen : Array(entries.reversed())).map(record),
+            attentionReminders: (isExpanded ? frozen : Array(entries.reversed())).map(record),
             pendingCount: pendingRefreshCount, pauseReasons: pauseReasons,
             remainingTime: currentDeadline.map { max(0, $0 - now()) } ?? pausedRemaining,
             isExpanded: isExpanded, droppedCount: droppedCount, receiverEpoch: receiverEpoch,

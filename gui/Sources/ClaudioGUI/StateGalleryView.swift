@@ -459,7 +459,7 @@ private struct EventNoticeGalleryFrame: View {
             HStack(spacing: 6) {
                 Button("One") { emit(count: 1) }
                 Button("Three") { emit(count: 3) }
-                Button("Replay") { model.openRecent() }
+                Button("Replay") { model.openAttentionReminders() }
                 Button("Clear") { model.clearForPrivacy() }
             }
             .buttonStyle(.bordered)
@@ -506,7 +506,7 @@ private struct EventNoticeGalleryFrame: View {
     }
 
     private func seed() {
-        guard model.snapshot.recent.isEmpty else { return }
+        guard model.snapshot.attentionReminders.isEmpty else { return }
         switch scenario {
         case .single:
             emit(count: 1)

@@ -60,7 +60,7 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
                 onViewSource: { [weak self] notice in
                     self?.viewSource(notice)
                 },
-                onOpenRecent: { [weak self] in
+                onOpenAttentionReminders: { [weak self] in
                     self?.openInteractive()
                 },
                 onCopySessionID: { [weak self] sessionID in
@@ -81,7 +81,7 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
     }
 
     func openInteractive() {
-        model.openRecent()
+        model.openAttentionReminders()
         guard model.snapshot.isExpanded else { return }
         becomeInteractive()
     }

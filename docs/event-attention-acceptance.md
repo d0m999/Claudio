@@ -1,12 +1,12 @@
 # 瞬时提示与「需要你」：实现与验收台账
 
 基线：`a33d077`。最终源码范围：`d2059b8`、`497f6fc`、`ed884cf`、`4160baf`（review 修复）、`e41587d`、
-`2987fea`、`3143048`（对账轮）、`f0d99f0`（review 修复轮，见下「review 修复轮」段）。
+`2987fea`、`3143048`（对账轮）、`f0d99f0`（review 修复轮）、`ebdbed6`（第三轮修复），以及当前
+本地提交的 Standards 命名/谓词收敛与最终证据重建改动。
 日期：2026-09-12–13。环境：macOS 26.6.2、arm64、Apple Swift 6.3.3。
 范围来自用户提供的 T1–T8 规格；评审发现由用户在会话中提供、未在仓库内跟踪，其修复即 `4160baf`，
 对账轮与 review 修复轮的分拆见 `plan/FIX-EVENT-NOTICE-REVIEW-20260913.md`。
-review 修复轮已提交为 `f0d99f0`，第三轮修复已随后提交；均未推送、未发布、未替换运行中的 app。
-既有未跟踪计划、HTML 原型和报告未改写。
+上述既有实现提交已推送到 PR #177；本轮修复已本地提交，未 push、发布或替换运行中的 app。
 
 **总规格尚未正式验收。** 自动化、实际挂载视图、真实宿主回调与分发证据分开记录。
 本文不把 synthetic、协议解码、构建成功或 ad-hoc 签名当成生产激活或正式验收。
@@ -38,16 +38,17 @@ Stop、查看、复制和收起不移除提醒；移除原因区分用户操作�
 
 | 检查 | 结果 | 本机日志 |
 | --- | --- | --- |
-| helper Debug executable harness | 3,259 checks，通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/helper-debug.log` |
-| helper Release executable harness | 3,222 checks，通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/helper-release.log` |
-| GUI 完整 executable harness | 9,153 checks，通过 | 2026-09-13 review 修复轮重跑（最终态）：`/tmp/claudio-review-fixes-20260913/logs/gui-full-final.log` |
-| 最后一次 GUI 专项 | 337 checks，通过 | 2026-09-13 重跑：`/tmp/claudio-review-fixes-20260913/logs/gui-attention.log` |
-| GUI Debug product | 通过 | 2026-09-13 重跑：`/tmp/claudio-review-fixes-20260913/logs/gui-debug-build.log` |
-| GUI/helper/LoginItem Release、组装及签名 | 通过，见下方产物表 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/dev-bundle.log` |
-| 修改范围 Swift 严格格式 | 累计 28 个 Swift 文件通过（本轮改动的 1 个已重跑） | 2026-09-13 重跑：`/tmp/claudio-review-fixes-20260913/logs/swift-format.log`（strict 通过时无输出） |
-| 本地化 JSON、占位符及注册 | JSON 检查与 GUI harness 通过 | 2026-09-13 重跑通过：`jq empty` 无输出、GUI 日志 |
-| selector state、sound-pack candidates | 通过；Python 11 tests | 仓库原 Node/Python 脚本 |
-| 工作区 diff 空白检查 | 通过 | 2026-09-13 重跑通过：`git diff --check` 无输出 |
+| helper Debug executable harness | 3,259 checks，通过 | `/tmp/claudio-attention-validation-final-jig8mg/logs/helper-debug.log` |
+| helper Release executable harness | 3,222 checks，通过 | `/tmp/claudio-attention-validation-final-jig8mg/logs/helper-release.log` |
+| GUI 完整 executable harness | 9,153 checks，通过 | `/tmp/claudio-attention-validation-final-jig8mg/logs/gui-full.log` |
+| 最后一次 GUI 专项 | 337 checks，通过 | `/tmp/claudio-attention-validation-final-jig8mg/logs/gui-attention.log` |
+| GUI Debug product | 通过 | `/tmp/claudio-attention-validation-final-jig8mg/logs/gui-debug-build.log` |
+| GUI Release product | 通过 | `/tmp/claudio-attention-validation-final-jig8mg/logs/gui-release-build.log` |
+| GUI/helper/LoginItem Release、组装及签名 | 通过，见下方产物表 | `/tmp/claudio-attention-validation-final-jig8mg/logs/dev-bundle.log` |
+| 修改范围 Swift 严格格式 | 本轮 7 个 Swift 文件通过 | `/tmp/claudio-attention-validation-final-jig8mg/logs/swift-format.log`（strict 通过时无输出） |
+| 本地化 JSON、占位符及注册 | JSON 检查与 GUI harness 通过 | `/tmp/claudio-attention-validation-final-jig8mg/logs/localization-json.log`、GUI 日志 |
+| selector state、sound-pack candidates | 通过；Python 11 tests | 同目录 `selector-state.log`、`sound-pack-candidates.log` |
+| 工作区 diff 空白检查 | 通过 | 同目录 `git-diff-check.log`（通过时无输出） |
 
 完整 GUI harness 通过后，最后以 337 项专项复核事件提醒修复；同会话 watermark 拒绝缺失、
 epoch 前及未来观察，瞬时项精确返回确认不再误走提醒移除。最终 Debug/Release 产物均使用这些修复后的源码。
@@ -94,6 +95,12 @@ helper 各行沿用上轮证据（本轮未触碰 helper 源码）。
 （`swift-format-r3.log`，无输出）；`jq empty` 与 `git diff --check` 通过。helper 各行沿用上轮证据
 （本轮未触碰 helper 源码）。证据表各行维持有效（源码改动对检查计数中性）。
 
+2026-09-13 Standards judgement 与最终证据收口（本轮本地提交）：`EventNoticeModelSnapshot.recent`
+及 `openRecent` / `closeRecent` / `refreshRecent` / `selectRecent` 等模型 API 改用领域词
+`attentionReminders`，避免把只含待接手提醒的集合命名成通用近期历史；既有本地化 key、AX identifier
+和面板焦点标识保持不变。`EventNoticeView` 两处移除按钮条件统一消费 `EventNoticeKind.isAttention`，
+不再重复编码 `!= .transient`。行为与测试计数不变；本节及上表证据均绑定下述新独立源码快照。
+
 可重复执行：
 
 ```bash
@@ -126,11 +133,11 @@ git diff --check
 
 | 测量 | 结果与范围 |
 | --- | --- |
-| 来源启用相对禁用的 helper 增量 | Release 100 对真实 pipe/socket，配对增量 p95 **0.63ms**，门槛 ≤30ms；启用 p95 3.14ms、禁用 p95 3.05ms。配对差值分位数不等于两个分位数之差 |
-| stub hook 返回 | Release 100 次 p95 2.99ms；不代表真实播放器和真实宿主 |
-| 半包 stdin 不关闭 | 配置 20ms；故障墙钟 22.02ms，含 poll 取整和 OS 调度 |
-| 生产 ingress → model | 最后专项 synthetic 1000 条/9.997 秒，p95 **0.847ms**，门槛 ≤100ms |
-| 首次徽标 | 最后专项实测 **103.327ms**；100ms 截止另由手动时钟断言，不被持续到达重置 |
+| 来源启用相对禁用的 helper 增量 | Release 100 对真实 pipe/socket，配对增量 p95 **0.44ms**，门槛 ≤30ms；启用 p95 2.91ms、禁用 p95 2.84ms。配对差值分位数不等于两个分位数之差 |
+| stub hook 返回 | Release 100 次 p95 2.72ms；不代表真实播放器和真实宿主 |
+| 半包 stdin 不关闭 | 配置 20ms；故障墙钟 21.02ms，含 poll 取整和 OS 调度 |
+| 生产 ingress → model | 最后专项 synthetic 1000 条/10.000 秒，p95 **4.069ms**，门槛 ≤100ms |
+| 首次徽标 | 最后专项实测 **101.180ms**；100ms 截止另由手动时钟断言，不被持续到达重置 |
 | 常驻状态与 timer | 50/50/1 版本、256/256 元数据、128 ingress、至多 3 个模型 timer；隐私清空后计数归零；取消/释放 token 的实际捕获对象释放回归通过 |
 | receiver FD | 100 次创建、发送、停止，FD 0..<1024 探测为 **3 → 3 → 3**；持续发送期间停止不迟到交付 |
 
@@ -144,7 +151,7 @@ git diff --check
 helper/LoginItem Release）。未启动该 app，未写工作区的 `dist/`。体积预算和脚本未修改。
 
 签名后再次执行原 `check-release-size.sh`，全部通过
-（`/tmp/claudio-attention-validation-final-mSKtCQ/logs/release-size-signed.log`；签名复验见同目录
+（`/tmp/claudio-attention-validation-final-jig8mg/logs/release-size-signed.log`；签名复验见同目录
 `dev-signature.log`）：
 
 | 项目 | 实测 | 原门槛 |
@@ -159,13 +166,16 @@ GUI 无导出符号；原 `verify-dev-bundle-signature.sh` 通过。签名前 st
 （GUI 5,589,912 B）；签名过程会改变 Mach-O 与资源封装大小，因此以上表格采用签名后的复检值。
 版本为 `0.0.0-dev`，不是发布版本。
 
-本机证据目录：`/tmp/claudio-attention-validation-final-mSKtCQ`；源码快照清单为
+本机证据目录：`/tmp/claudio-attention-validation-final-jig8mg`；源码快照清单为
 `validation-source-sha256.json`，构建日志为同目录 `logs/dev-bundle.log`。
-清单覆盖当前 554 个 tracked 文件及本范围 2 个未跟踪规格/原型文件，并已逐项与最终工作树重算一致。
+清单覆盖当前全部 555 个 tracked 文件，并已逐项与最终工作树重算一致；本轮修改的 7 个 Swift 文件
+与本台账均包含在内。
 这些临时产物未纳入 Git，可能随系统临时目录清理消失。
 
-- GUI SHA-256：`000cf368f6741c8ad2197525c040e702244c138a18b7cc924309e1858135aae1`
-- helper SHA-256：`8d19c522b61948549f0c88224f9293f870c1d2b254e95e692e0730ce060023c2`
+- GUI SHA-256：`69dd8c919cc3d5c226a42969ace1b38a12e49aca97dce430b420dc2045e2fa3f`
+- helper SHA-256：`79327cf9bcfdb28328d67b44ebc9c806285b4988705a99cff5f7ad2af5915878`
+- LoginItem SHA-256：`6f6ac8fc24465a650980b96ab6d93c22f3054817a5e1ab0790ec8202f032ac24`
+- bundle 文件哈希清单聚合 SHA-256：`3a90713b6c45af4341db27d7ae8df5add49bdab2d79674872ccbbdc9e8d18a7e`
 
 ## 尚未验证的人工或外部门槛
 

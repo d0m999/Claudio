@@ -435,7 +435,8 @@ func runViewWiringSuites() {
             "notice close 必须消费一次转交动作，并由当前焦点所有权守卫")
         expect(privacy.contains("focusRestoration = nil"), "隐私清空必须释放延迟归还动作")
         expect(
-            closureBody(after: "onOpenRecent:", in: notice)?.contains("self?.openInteractive()")
+            closureBody(after: "onOpenAttentionReminders:", in: notice)?
+                .contains("self?.openInteractive()")
                 == true,
             "数量入口必须接到同一个原生 interactive 焦点移交路径")
         let render = closureBody(after: "private func render(", in: notice) ?? ""
