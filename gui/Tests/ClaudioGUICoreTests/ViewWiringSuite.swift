@@ -357,9 +357,14 @@ func runViewWiringSuites() {
         }
         let normalized = collapsingWhitespace(resignKey)
         expect(
-            normalized.contains("model.setKeyboardFocused(false)")
-                && normalized.contains("if isInteractive { close() }"),
-            "失去 key window 必须解除键盘暂停并只关闭显式交互面板")
+            normalized.contains("close()")
+                && normalized.contains("isInteractive")
+                && normalized.contains("model.setKeyboardFocused(false)"),
+            "失焦闭包体必须引用 isInteractive 判别并含 close() 与键盘暂停解除（存在性断言，不证明分支归属；等价重构不得假红）")
+        expect(
+            controller.contains("NSWindowDelegate")
+                && controller.contains("window.delegate = self"),
+            "resignKey 路径必须真实接线：控制器声明 NSWindowDelegate 并被设为窗口 delegate")
         expect(
             controller.contains("window.hidesOnDeactivate = false"),
             "自动非交互横幅必须继续使用自身生命周期，不得随应用失活强制隐藏")
