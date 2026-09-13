@@ -22,19 +22,19 @@ func runHookInputReaderSuites() {
         pipe.fileHandleForReading.closeFile()
     }
 
-    suite("HookInputReader：真实分片 pipe 只做 framing，字符串括号与转义不提前结束") {
+    suite("HookInputReader：真实 pipe 跨 read framing，字符串括号与转义不提前结束") {
         let pipe = Pipe()
         let payload = try! JSONSerialization.data(withJSONObject: [
             "cwd": "/tmp/project", "session_id": "session-1", "hook_event_name": "Notification",
             "notification_type": "elicitation_dialog",
             "message": String(repeating: "[}\\\"", count: 1800),
         ])
+        expect(payload.count > 4096, "fixture 必须超过生产 reader 的单次 4096 B buffer")
         let writer = pipe.fileHandleForWriting
+        // Preload two writes while keeping the writer open. The payload size itself guarantees
+        // multiple production read(2) calls without coupling framing correctness to CI scheduling.
         writer.write(payload.prefix(3000))
-        DispatchQueue.global().async {
-            Thread.sleep(forTimeInterval: 0.002)
-            writer.write(payload.dropFirst(3000))
-        }
+        writer.write(payload.dropFirst(3000))
         let result = HookInputReader.read(
             from: pipe.fileHandleForReading.fileDescriptor, budget: 0.02)
         expect(result.data == payload, "跨 read 边界必须保留完整输入，不受正文括号影响")
