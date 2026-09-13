@@ -44,46 +44,30 @@ private actor AICueAssetSleeperFixture: AICueAssetRetrySleeping {
 private actor AICueAssetBlockingSleeperFixture: AICueAssetRetrySleeping {
     private var delays: [Int] = []
     private var entered = false
-    private var cancellationRequested = false
-    private var sleepContinuation: CheckedContinuation<Void, Error>?
-    private var entryWaiters: [CheckedContinuation<Void, Never>] = []
 
     func sleep(seconds: Int) async throws {
         delays.append(seconds)
-        try Task.checkCancellation()
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                installSleepContinuation(continuation)
-            }
-        } onCancel: {
-            Task { await self.cancelSleep() }
-        }
-    }
-
-    private func installSleepContinuation(_ continuation: CheckedContinuation<Void, Error>) {
-        guard !cancellationRequested, !Task.isCancelled else {
-            continuation.resume(throwing: CancellationError())
-            return
-        }
-        sleepContinuation = continuation
         entered = true
-        let waiters = entryWaiters
-        entryWaiters.removeAll()
-        for waiter in waiters { waiter.resume() }
+        let boundedSeconds = min(max(seconds, 1), 5)
+        try await Task.sleep(nanoseconds: UInt64(boundedSeconds) * 1_000_000_000)
     }
 
-    private func cancelSleep() {
-        cancellationRequested = true
-        let continuation = sleepContinuation
-        sleepContinuation = nil
-        continuation?.resume(throwing: CancellationError())
+    nonisolated func waitUntilEntered(
+        timeoutNanoseconds: UInt64 = 10_000_000_000
+    ) async -> Bool {
+        let start = DispatchTime.now().uptimeNanoseconds
+        while DispatchTime.now().uptimeNanoseconds &- start < timeoutNanoseconds {
+            if await hasEntered() { return true }
+            do {
+                try await Task.sleep(nanoseconds: 10_000_000)
+            } catch {
+                return false
+            }
+        }
+        return await hasEntered()
     }
 
-    func waitUntilEntered() async {
-        if entered { return }
-        await withCheckedContinuation { entryWaiters.append($0) }
-    }
-
+    private func hasEntered() -> Bool { entered }
     func facts() -> [Int] { delays }
 }
 
@@ -1007,7 +991,12 @@ func runAICueAssetFetchSuites() async {
         let backoffTask = Task {
             try await backoffFetcher.fetch(url, policy: policy, deadline: .startingNow())
         }
-        await blockingSleeper.waitUntilEntered()
+        let enteredBackoff = await blockingSleeper.waitUntilEntered()
+        expect(enteredBackoff, "retry backoff 必须在 10 秒 watchdog 内进入 sleeper")
+        guard enteredBackoff else {
+            backoffTask.cancel()
+            return
+        }
         backoffTask.cancel()
         let backoffCancelled = await observedAssetFetchError {
             try await backoffTask.value
