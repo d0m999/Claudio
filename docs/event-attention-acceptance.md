@@ -1,8 +1,9 @@
 # 瞬时提示与「需要你」：实现与验收台账
 
-基线：`a33d077`。最终源码范围：`d2059b8`、`497f6fc`、`ed884cf` 及其当前未提交的 review
-修复工作树。日期：2026-09-12–13。环境：macOS 26.6.2、arm64、Apple Swift 6.3.3。
-范围来自用户提供的 T1–T8 规格及 Issue #178–#182；本次是本地实现，不提交、推送、发布或替换运行中的 app。
+基线：`a33d077`。最终源码范围：`d2059b8`、`497f6fc`、`ed884cf`、`4160baf`（review 修复）。
+日期：2026-09-12–13。环境：macOS 26.6.2、arm64、Apple Swift 6.3.3。
+范围来自用户提供的 T1–T8 规格；评审发现由用户在会话中提供、未在仓库内跟踪，其修复即 `4160baf`。
+本次是本地实现，不提交、推送、发布或替换运行中的 app。
 既有未跟踪计划、HTML 原型和报告未改写。
 
 **总规格尚未正式验收。** 自动化、实际挂载视图、真实宿主回调与分发证据分开记录。
@@ -25,6 +26,8 @@
 Stop、查看、复制和收起不移除提醒；移除原因区分用户操作、精确返回确认、后续提交、过期、容量和隐私清空。
 容量保护当前阅读横幅、详情和在途动作；冻结内容不会因后续更新而延长自身 TTL。
 最多保留 50 个最新版本、50 个冻结版本和 1 个瞬时版本；去重与顺序元数据各最多 256 条、最长 30 分钟。
+同会话建立有效观察水位后，旧 schema（无有效 `observed_uptime`）或乱序观察的同会话更新被静默拒绝，
+直至该顺序元数据过期；`observed_uptime` 在 schema 中仍为可选，但可选不等于水位建立后可绕过排序。
 聚焦占位只保留安全身份，来源及发生时间擦除；刷新后可移走占位。零项不代表宿主任务完成。
 
 ## 自动化及资源证据
@@ -39,7 +42,7 @@ Stop、查看、复制和收起不移除提醒；移除原因区分用户操作�
 | 最后一次 GUI 专项 | 337 checks，通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/gui-attention.log` |
 | GUI Debug product | 通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/gui-debug-build.log` |
 | GUI/helper/LoginItem Release、组装及签名 | 通过，见下方产物表 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/dev-bundle.log` |
-| 修改范围 Swift 严格格式 | 6 个文件通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/swift-format.log` |
+| 修改范围 Swift 严格格式 | 累计 28 个 Swift 文件通过（含修复子集 6 文件） | 2026-09-13 重跑：`/tmp/claudio-review-fixes-format.log`（strict 通过时无输出） |
 | 本地化 JSON、占位符及注册 | JSON 检查与 GUI harness 通过 | `jq empty`、GUI 日志 |
 | selector state、sound-pack candidates | 通过；Python 11 tests | 仓库原 Node/Python 脚本 |
 | 工作区 diff 空白检查 | 通过 | `git diff --check` |
@@ -49,6 +52,18 @@ epoch 前及未来观察，瞬时项精确返回确认不再误走提醒移除�
 构建仍有仓库已有的弃用 API / 测试捕获等警告，未将其表述为零警告。
 早先与编译并行的一次 GUI 全量执行出现 SoundPacksEditorMutationSuite 两项收敛超时；
 未改动该无关实现，之后串行全量通过，不据此宣称长期运行稳定性已验收。
+
+2026-09-13 follow-up（`4160baf` 的对账轮）：`isAttentionRevision` 改名 `isAttentionReminder`
+并收敛待接手谓词（纯重构，行为不变）；失焦接线断言由语句形态改为行为内容与接线存在性，变异验证
+通过（等价 `guard` 改写保持绿、删除 `window.delegate = self` 时新断言按预期变红）；ADR 0013 补记
+watermark carve-out。上表格式检查行此前为「6 个文件通过」，系 `4160baf` 对修复子集的重跑口径、
+曾静默收窄原 28 文件声明，本轮按累计范围重跑并更正。本轮证据：GUI 完整 harness 9,151 checks
+（较上轮 +1，即新接线断言），5 项失败与对账改动无关，均为本机 sandbox 环境既有失败（嵌套
+SwiftPM manifest 解析、release-size fixture 的 stat 调用、SwiftPM dump 读取）；HitTargetSuite
+悬停检查在六次全量执行中失败一次（基线及其余各轮均通过），判为与改动无关的偶发。
+`--event-attention` 专项 337 checks 全过；GUI Debug product 构建通过；格式检查按累计 28 个
+Swift 文件重跑通过（见上表）。本机 sandbox 内 SwiftPM 需 `--disable-sandbox` 才能运行，否则
+manifest 编译被 sandbox_apply 拒绝。
 
 可重复执行：
 
@@ -68,7 +83,7 @@ git diff --check
 - 暂停交叠、完整冻结版本、旧内容独立 TTL、重复 UUID、乱序观察、无效观察拒绝、元数据淘汰及容量阅读保护。
 - Stop 不清除，提交清除默认关闭，缺失/相等/倒序/异常/parent 观察不清除。
 - 双击、失败、永不完成后超时、取消/隐私/能力代次/版本变化后完成；精确返回只移除待接手提醒，瞬时项保留成功结果。
-- executable delegate 接线保证交互面板失去 key window 后关闭；真实外部点击及透传仍按下方人工门槛验收。
+- 源码接线断言（delegate 赋值 + resignKey 关闭路径的行为内容，含等价重构与删除接线的变异验证）保证交互面板失去 key window 后沿关闭路径收起；真实失焦触发、外部点击及透传仍按下方人工门槛验收。
 - 复制成功、失败和陈旧版本拒绝，隐私清空不覆盖用户主动导出。
 - 实际调度器中取消或释放 token 后，30 分钟定时闭包捕获对象立即释放；没有被旧 asyncAfter 截止时间挂住。
 - 真正挂载 `EventNoticeView` 到 NSPanel：英中、浅深主题 0/1/5/7/50 项、末行滚动、300×180pt 详情、256 字符无断点 ID、滚动后的实际按钮点击与失败反馈；HostingView 固有尺寸不能反向撑高受控窗口。
