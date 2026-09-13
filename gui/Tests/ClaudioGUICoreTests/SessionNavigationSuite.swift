@@ -122,6 +122,29 @@ func runSessionNavigationSuites() async {
             "确认只消除对应版本")
     }
 
+    suite("Navigation：瞬时项精确返回确认成功但不执行提醒移除") {
+        let clock = ManualEventNoticeScheduler()
+        let model = model(clock)
+        let notice = attentionNotice(
+            epoch: model.receiverEpoch, native: "UserPromptSubmit")
+        expect(model.accept(notice) == .accepted, "完整来源的瞬时项可进入当前展示")
+        let action = model.snapshot.current!.action!
+        let coordinator = SessionNavigationCoordinator(
+            model: model, scheduler: clock.scheduler()
+        ) { _, complete in
+            complete(.exactReturnConfirmed)
+            return EventNoticeCancellation {}
+        }
+        coordinator.openSession(
+            capability(notice), action: action, generation: coordinator.capabilityGeneration)
+        expect(
+            coordinator.result == .exactReturnConfirmed,
+            "瞬时项精确返回成功不得因 attention remove 不适用而降级")
+        expect(
+            model.isCurrent(action) && model.snapshot.current?.kind == .transient,
+            "瞬时项成功不消费不存在的待接手提醒")
+    }
+
     suite("Navigation：复制如实反馈、陈旧 ID 不写入、隐私清空不改主动导出") {
         let clock = ManualEventNoticeScheduler()
         let model = model(clock)

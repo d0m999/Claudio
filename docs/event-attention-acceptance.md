@@ -1,7 +1,8 @@
 # 瞬时提示与「需要你」：实现与验收台账
 
-基线：`a33d077`。日期：2026-09-12。环境：macOS 26.6.2、arm64、Apple Swift 6.3.3。
-范围来自本次用户提供的 T1–T8 规格；本次是本地实现，不创建 GitHub issue，不提交、推送、发布或替换运行中的 app。
+基线：`a33d077`。最终源码范围：`d2059b8`、`497f6fc`、`ed884cf` 及其当前未提交的 review
+修复工作树。日期：2026-09-12–13。环境：macOS 26.6.2、arm64、Apple Swift 6.3.3。
+范围来自用户提供的 T1–T8 规格及 Issue #178–#182；本次是本地实现，不提交、推送、发布或替换运行中的 app。
 既有未跟踪计划、HTML 原型和报告未改写。
 
 **总规格尚未正式验收。** 自动化、实际挂载视图、真实宿主回调与分发证据分开记录。
@@ -32,19 +33,19 @@ Stop、查看、复制和收起不移除提醒；移除原因区分用户操作�
 
 | 检查 | 结果 | 本机日志 |
 | --- | --- | --- |
-| helper Debug executable harness | 3,259 checks，通过 | `/tmp/claudio-attention-delivery-helper.log` |
-| helper Release executable harness | 3,222 checks，通过 | `/tmp/claudio-attention-helper-release-final.log` |
-| GUI 完整 executable harness | 9,102 checks，通过 | `/tmp/claudio-attention-final-gui.log` |
-| 最后一次 GUI 专项 | 291 checks，通过 | `/tmp/claudio-attention-source-free-view.log` |
-| GUI Debug product | 通过 | `/tmp/claudio-attention-delivery-debug.log` |
-| GUI/helper/LoginItem Release、组装及签名 | 通过，见下方产物表 | `/tmp/claudio-attention-delivery-bundle.log` |
-| 修改范围 Swift 严格格式 | 28 个文件通过 | `swift format lint --strict --configuration .swift-format` |
+| helper Debug executable harness | 3,259 checks，通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/helper-debug.log` |
+| helper Release executable harness | 3,222 checks，通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/helper-release.log` |
+| GUI 完整 executable harness | 9,152 checks，通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/gui-full.log` |
+| 最后一次 GUI 专项 | 337 checks，通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/gui-attention.log` |
+| GUI Debug product | 通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/gui-debug-build.log` |
+| GUI/helper/LoginItem Release、组装及签名 | 通过，见下方产物表 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/dev-bundle.log` |
+| 修改范围 Swift 严格格式 | 6 个文件通过 | `/tmp/claudio-attention-validation-final-mSKtCQ/logs/swift-format.log` |
 | 本地化 JSON、占位符及注册 | JSON 检查与 GUI harness 通过 | `jq empty`、GUI 日志 |
 | selector state、sound-pack candidates | 通过；Python 11 tests | 仓库原 Node/Python 脚本 |
 | 工作区 diff 空白检查 | 通过 | `git diff --check` |
 
-完整 GUI harness 通过后，最后的视图观察键收窄以 291 项专项复核；观察键只保留身份和有效性，
-不为变化检测额外保留完整来源快照。最终 Debug/Release 产物均使用收窄后的源码。
+完整 GUI harness 通过后，最后以 337 项专项复核事件提醒修复；同会话 watermark 拒绝缺失、
+epoch 前及未来观察，瞬时项精确返回确认不再误走提醒移除。最终 Debug/Release 产物均使用这些修复后的源码。
 构建仍有仓库已有的弃用 API / 测试捕获等警告，未将其表述为零警告。
 早先与编译并行的一次 GUI 全量执行出现 SoundPacksEditorMutationSuite 两项收敛超时；
 未改动该无关实现，之后串行全量通过，不据此宣称长期运行稳定性已验收。
@@ -64,9 +65,10 @@ git diff --check
 专项回归包括：
 
 - 0/1/5/6/50/51 项，完整身份及不完整/parent/旧消息身份，跨项目/安装与 Unicode ID。
-- 暂停交叠、完整冻结版本、旧内容独立 TTL、重复 UUID、乱序观察、元数据淘汰及容量阅读保护。
+- 暂停交叠、完整冻结版本、旧内容独立 TTL、重复 UUID、乱序观察、无效观察拒绝、元数据淘汰及容量阅读保护。
 - Stop 不清除，提交清除默认关闭，缺失/相等/倒序/异常/parent 观察不清除。
-- 双击、失败、永不完成后超时、取消/隐私/能力代次/版本变化后完成，以及仅确认精确返回才移除。
+- 双击、失败、永不完成后超时、取消/隐私/能力代次/版本变化后完成；精确返回只移除待接手提醒，瞬时项保留成功结果。
+- executable delegate 接线保证交互面板失去 key window 后关闭；真实外部点击及透传仍按下方人工门槛验收。
 - 复制成功、失败和陈旧版本拒绝，隐私清空不覆盖用户主动导出。
 - 实际调度器中取消或释放 token 后，30 分钟定时闭包捕获对象立即释放；没有被旧 asyncAfter 截止时间挂住。
 - 真正挂载 `EventNoticeView` 到 NSPanel：英中、浅深主题 0/1/5/7/50 项、末行滚动、300×180pt 详情、256 字符无断点 ID、滚动后的实际按钮点击与失败反馈；HostingView 固有尺寸不能反向撑高受控窗口。
@@ -76,11 +78,11 @@ git diff --check
 
 | 测量 | 结果与范围 |
 | --- | --- |
-| 来源启用相对禁用的 helper 增量 | Release 100 对真实 pipe/socket，配对增量 p95 **0.88ms**，门槛 ≤30ms；启用 p95 3.37ms、禁用 p95 3.45ms。配对差值分位数不等于两个分位数之差 |
-| stub hook 返回 | Release 100 次 p95 3.26ms；不代表真实播放器和真实宿主 |
-| 半包 stdin 不关闭 | 配置 20ms；故障墙钟 21.05ms，含 poll 取整和 OS 调度 |
-| 生产 ingress → model | 最后专项 synthetic 1000 条/9.996 秒，p95 **1.534ms**，门槛 ≤100ms |
-| 首次徽标 | 最后专项实测 **102.259ms**；100ms 截止另由手动时钟断言，不被持续到达重置 |
+| 来源启用相对禁用的 helper 增量 | Release 100 对真实 pipe/socket，配对增量 p95 **0.63ms**，门槛 ≤30ms；启用 p95 3.14ms、禁用 p95 3.05ms。配对差值分位数不等于两个分位数之差 |
+| stub hook 返回 | Release 100 次 p95 2.99ms；不代表真实播放器和真实宿主 |
+| 半包 stdin 不关闭 | 配置 20ms；故障墙钟 22.02ms，含 poll 取整和 OS 调度 |
+| 生产 ingress → model | 最后专项 synthetic 1000 条/9.997 秒，p95 **0.847ms**，门槛 ≤100ms |
+| 首次徽标 | 最后专项实测 **103.327ms**；100ms 截止另由手动时钟断言，不被持续到达重置 |
 | 常驻状态与 timer | 50/50/1 版本、256/256 元数据、128 ingress、至多 3 个模型 timer；隐私清空后计数归零；取消/释放 token 的实际捕获对象释放回归通过 |
 | receiver FD | 100 次创建、发送、停止，FD 0..<1024 探测为 **3 → 3 → 3**；持续发送期间停止不迟到交付 |
 
@@ -90,10 +92,12 @@ git diff --check
 
 ## 独立 Release 产物
 
-使用与最终生产源码哈希一致的独立快照运行原 `scripts/dev-bundle.sh`（GUI `Release -Osize`、
+使用与本轮最终生产源码字节一致的独立快照运行原 `scripts/dev-bundle.sh`（GUI `Release -Osize`、
 helper/LoginItem Release）。未启动该 app，未写工作区的 `dist/`。体积预算和脚本未修改。
 
-签名后再次执行原 `check-release-size.sh`，全部通过：
+签名后再次执行原 `check-release-size.sh`，全部通过
+（`/tmp/claudio-attention-validation-final-mSKtCQ/logs/release-size-signed.log`；签名复验见同目录
+`dev-signature.log`）：
 
 | 项目 | 实测 | 原门槛 |
 | --- | ---: | ---: |
@@ -107,12 +111,13 @@ GUI 无导出符号；原 `verify-dev-bundle-signature.sh` 通过。签名前 st
 （GUI 5,589,912 B）；签名过程会改变 Mach-O 与资源封装大小，因此以上表格采用签名后的复检值。
 版本为 `0.0.0-dev`，不是发布版本。
 
-本机证据目录：`/tmp/claudio-attention-validation-5z2tnqov`；源码快照清单为
-`validation-source-sha256.json`，构建日志为 `/tmp/claudio-attention-delivery-bundle.log`。
+本机证据目录：`/tmp/claudio-attention-validation-final-mSKtCQ`；源码快照清单为
+`validation-source-sha256.json`，构建日志为同目录 `logs/dev-bundle.log`。
+清单覆盖当前 554 个 tracked 文件及本范围 2 个未跟踪规格/原型文件，并已逐项与最终工作树重算一致。
 这些临时产物未纳入 Git，可能随系统临时目录清理消失。
 
-- GUI SHA-256：`75069feaa891be8c33674e4371286b3675c31e70ce70b4442517bca34b54eb23`
-- helper SHA-256：`b7cffe7e8496f2cb67795f37b6a436dc4c422da00d1e0e32c0d3bb3c71f41d02`
+- GUI SHA-256：`000cf368f6741c8ad2197525c040e702244c138a18b7cc924309e1858135aae1`
+- helper SHA-256：`8d19c522b61948549f0c88224f9293f870c1d2b254e95e692e0730ce060023c2`
 
 ## 尚未验证的人工或外部门槛
 

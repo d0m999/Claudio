@@ -346,6 +346,25 @@ private func guiCoreSources() -> [ScannedSource] {
 
 @MainActor
 func runViewWiringSuites() {
+    suite("Event Notice：交互式面板失去 key window 时沿关闭路径收起") {
+        guard
+            let controller = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/EventNoticeWindowController.swift"),
+            let resignKey = closureBody(after: "func windowDidResignKey", in: controller)
+        else {
+            expect(false, "必须能解析 EventNoticeWindowController 的失焦接线")
+            return
+        }
+        let normalized = collapsingWhitespace(resignKey)
+        expect(
+            normalized.contains("model.setKeyboardFocused(false)")
+                && normalized.contains("if isInteractive { close() }"),
+            "失去 key window 必须解除键盘暂停并只关闭显式交互面板")
+        expect(
+            controller.contains("window.hidesOnDeactivate = false"),
+            "自动非交互横幅必须继续使用自身生命周期，不得随应用失活强制隐藏")
+    }
+
     suite("Event Notice：根辅助功能标签按当前 snapshot 与语言分流") {
         guard
             let view = codeWithoutStrings(

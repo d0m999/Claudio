@@ -136,7 +136,11 @@ final class EventNoticeWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        model.setKeyboardFocused(false)
+        if isInteractive {
+            close()
+        } else {
+            model.setKeyboardFocused(false)
+        }
     }
 
     private func render(_ snapshot: EventNoticeModelSnapshot) {

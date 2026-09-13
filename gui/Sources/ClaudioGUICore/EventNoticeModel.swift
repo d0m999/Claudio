@@ -449,24 +449,27 @@ public final class EventNoticeModel: ObservableObject {
         let existing = existingIndex.map { entries[$0] }
         let observation = validObservation(notice)
         let kind = EventNoticeKind.classify(notice)
-        if let identity, let observation,
+        let requiresOrderedObservation =
             kind != .transient
-                || (notice.event == .taskStart
-                    && verifiedSubmissionSurfaces.contains(notice.surface))
-        {
+            || (notice.event == .taskStart
+                && verifiedSubmissionSurfaces.contains(notice.surface))
+        if let identity, requiresOrderedObservation {
             let metadataTime = observations.first(where: { $0.identity == identity })?.uptime
             let latestTime = existing?.notice.flatMap(validObservation)
-            if let previous = [metadataTime, latestTime].compactMap({ $0 }).max(),
-                observation <= previous
-            {
+            let previousObservation = [metadataTime, latestTime].compactMap { $0 }.max()
+            if let observation, let previousObservation, observation <= previousObservation {
                 return .staleObservation
             }
-            observations.removeAll { $0.identity == identity }
-            observations.append(
-                Observation(
-                    identity: identity, uptime: observation,
-                    expiresAt: now() + Self.retentionDuration))
-            if observations.count > Self.maximumMetadataCount { observations.removeFirst() }
+            if let observation {
+                observations.removeAll { $0.identity == identity }
+                observations.append(
+                    Observation(
+                        identity: identity, uptime: observation,
+                        expiresAt: now() + Self.retentionDuration))
+                if observations.count > Self.maximumMetadataCount { observations.removeFirst() }
+            } else if previousObservation != nil {
+                return .staleObservation
+            }
         }
 
         if notice.event == .taskStart, verifiedSubmissionSurfaces.contains(notice.surface),
@@ -627,6 +630,11 @@ public final class EventNoticeModel: ObservableObject {
 
     public func isCurrent(_ action: EventNoticeAction) -> Bool {
         actionableEntry(action) != nil
+    }
+
+    func isAttentionRevision(_ action: EventNoticeAction) -> Bool {
+        guard let kind = actionableEntry(action)?.kind else { return false }
+        return kind != .transient
     }
 
     public func sourceNotice(for action: EventNoticeAction) -> HostEventNotice? {

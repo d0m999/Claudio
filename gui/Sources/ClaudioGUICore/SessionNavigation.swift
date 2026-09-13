@@ -169,7 +169,7 @@ public final class SessionNavigationCoordinator: ObservableObject {
             reset(); return
         }
         cancelRequest()
-        if outcome == .exactReturnConfirmed {
+        if outcome == .exactReturnConfirmed, model.isAttentionRevision(action) {
             // Removing this exact version may synchronously invalidate the observed action.
             self.action = nil
             guard model.remove(action, reason: .exactReturnConfirmed) == .applied else {

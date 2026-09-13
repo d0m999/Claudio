@@ -319,6 +319,42 @@ func runEventNoticeModelSuites() {
             "新版本独立过期")
     }
 
+    suite("Attention：同会话 watermark 拒绝缺失或无效观察的版本覆盖") {
+        let legacyClock = ManualEventNoticeScheduler()
+        let legacyModel = makeModel(legacyClock)
+        expect(
+            legacyModel.accept(attentionNotice(epoch: legacyModel.receiverEpoch)) == .accepted,
+            "尚无有效 watermark 时保留旧 schema 首条提醒兼容")
+
+        let clock = ManualEventNoticeScheduler()
+        let model = makeModel(clock)
+        let installation = UUID()
+        expect(
+            model.accept(
+                attentionNotice(
+                    epoch: model.receiverEpoch, installation: installation,
+                    reason: .permission, observed: clock.time)) == .accepted,
+            "首个有效观察建立同会话 watermark")
+        let acceptedAction = model.snapshot.current!.action!
+        clock.advance(1)
+        for observation in [nil, 99, 102] as [TimeInterval?] {
+            expect(
+                model.accept(
+                    attentionNotice(
+                        epoch: model.receiverEpoch, installation: installation,
+                        reason: .needsInput, observed: observation)) == .staleObservation,
+                "已有 watermark 后缺失、epoch 前或未来观察都不可排序：\(String(describing: observation))"
+            )
+            expect(
+                model.snapshot.totalCount == 1
+                    && model.snapshot.current?.action == acceptedAction
+                    && model.snapshot.current?.kind == .permission,
+                "不可排序版本不得覆盖原因、revision 或当前提醒")
+        }
+        clock.advance(EventNoticeModel.retentionDuration - 1)
+        expect(model.snapshot.totalCount == 0, "被拒绝的版本不得延长已接受提醒 TTL")
+    }
+
     suite("Attention：Stop 不清，生产后续提交关闭，可信主会话严格后序才移除") {
         for verified in [false, true] {
             let clock = ManualEventNoticeScheduler()
