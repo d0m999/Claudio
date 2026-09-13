@@ -271,6 +271,18 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let eventNoticeOccurredAt: Self = "event-notice.occurred-at"
     public static let eventNoticeRecentDisclaimer: Self = "event-notice.recent-disclaimer"
     public static let eventNoticeRecentOverflow: Self = "event-notice.recent-overflow"
+    public static let eventNoticeEmpty: Self = "event-notice.empty"
+    public static let eventNoticePermission: Self = "event-notice.permission"
+    public static let eventNoticeNeedsInput: Self = "event-notice.needs-input"
+    public static let eventNoticeReview: Self = "event-notice.review"
+    public static let eventNoticeRemove: Self = "event-notice.remove"
+    public static let eventNoticeBack: Self = "event-notice.back"
+    public static let eventNoticeCopyFailed: Self = "event-notice.copy-failed"
+    public static let eventNoticeStale: Self = "event-notice.stale"
+    public static let eventNoticeMissingSource: Self = "event-notice.missing-source"
+    public static let eventNoticeUnknownReason: Self = "event-notice.unknown-reason"
+    public static let eventNoticeInformational: Self = "event-notice.informational"
+    public static let eventNoticeRefresh: Self = "event-notice.refresh"
     public static let eventNoticeSessionShort: Self = "event-notice.session-short"
     public static let settingsNotificationsEventSourceReceiverUnavailable: Self =
         "settings.notifications.event-source-receiver-unavailable"
@@ -1429,7 +1441,11 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .eventNoticeCollapseHint, .eventNoticeViewSource, .eventNoticeCopySession,
         .eventNoticeCopied, .eventNoticeNavigationUnavailable,
         .eventNoticeNewNotices, .eventNoticeOccurredAt, .eventNoticeRecentDisclaimer,
-        .eventNoticeRecentOverflow, .eventNoticeSessionShort,
+        .eventNoticeRecentOverflow, .eventNoticeSessionShort, .eventNoticeInformational,
+        .eventNoticeRefresh,
+        .eventNoticeEmpty, .eventNoticePermission, .eventNoticeNeedsInput, .eventNoticeReview,
+        .eventNoticeRemove, .eventNoticeBack, .eventNoticeCopyFailed, .eventNoticeStale,
+        .eventNoticeMissingSource, .eventNoticeUnknownReason,
         .settingsNotificationsEventSourceReceiverUnavailable,
         .cellAudible, .cellMuted, .cellMasterVolumeZero, .cellMissingSound, .cellNotConnected,
         .cellAwaitingActivation, .cellLegacy, .cellUnsupported, .cellDegraded,

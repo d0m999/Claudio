@@ -1,3 +1,4 @@
+import Dispatch
 import Foundation
 
 package enum AICueHTTPMethod: String, Sendable, Equatable {
@@ -95,6 +96,7 @@ public struct SequentialAICueCandidateSetAdapter: AICueCandidateSetProvider, Sen
     private let registry: AICueProviderRegistry
     private let compiler: AICueProviderRequestCompiler
     private let retrySleeper: any AICueRetrySleeping
+    private let currentUptimeNanoseconds: @Sendable () -> UInt64
 
     public init(
         provider: any AICueProvider,
@@ -103,19 +105,24 @@ public struct SequentialAICueCandidateSetAdapter: AICueCandidateSetProvider, Sen
         self.init(
             provider: provider,
             registry: registry,
-            retrySleeper: AICueSystemRetrySleeper())
+            retrySleeper: AICueSystemRetrySleeper(),
+            currentUptimeNanoseconds: { DispatchTime.now().uptimeNanoseconds })
     }
 
     package init(
         provider: any AICueProvider,
         registry: AICueProviderRegistry,
-        retrySleeper: any AICueRetrySleeping
+        retrySleeper: any AICueRetrySleeping,
+        currentUptimeNanoseconds: @escaping @Sendable () -> UInt64 = {
+            DispatchTime.now().uptimeNanoseconds
+        }
     ) {
         self.provider = provider
         profile = provider.profile
         self.registry = registry
         compiler = AICueProviderRequestCompiler(registry: registry)
         self.retrySleeper = retrySleeper
+        self.currentUptimeNanoseconds = currentUptimeNanoseconds
     }
 
     public func validateCredential(_ credential: SensitiveCredentialInput) async throws {
@@ -204,6 +211,9 @@ public struct SequentialAICueCandidateSetAdapter: AICueCandidateSetProvider, Sen
         {
             try await retrySleeper.sleep(seconds: retryAfter)
             try Task.checkCancellation()
+            guard deadline.remainingNanoseconds(at: currentUptimeNanoseconds()) != nil else {
+                throw AICueProviderError.deadlineExceeded
+            }
             return (
                 try await provider.generateCandidate(
                     request: request,

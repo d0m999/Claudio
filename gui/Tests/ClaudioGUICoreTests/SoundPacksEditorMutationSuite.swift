@@ -494,6 +494,7 @@ func runSoundPacksEditorMutationSuites() async {
             await waitForSoundEditorOperation(owner, operationID: completedID)
             await waitForSoundEditorScanCount(fixture.recorder, atLeast: scansBefore + 1)
             await fixture.library.waitUntilIdleForTesting()
+            await owner.waitForMutationTransactionsToQuiesceForTesting()
             let object = soundEditorJSONObject(at: manifest)
             let events = object?["events"] as? [String: String]
             expect(

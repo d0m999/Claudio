@@ -23,13 +23,13 @@ final class EventNoticeRuntime {
             installationsRoot: ClaudioPaths.activeInstallationsDirectory,
             installationLocksRoot: ClaudioPaths.activeInstallationLocksDirectory)
         ingress = EventNoticeIngress { [weak model] notices in
-            _ = model?.accept(contentsOf: notices)
+            model?.acceptBatch(notices).count ?? notices.count
         }
         startReceiver()
     }
 
     func startReceiver() {
-        guard receiver == nil, model.isEnabled else { return }
+        guard receiver == nil, model.canReceive else { return }
         do {
             let receiptStore = self.receiptStore
             let receiver = try EventNoticeReceiver(
@@ -72,13 +72,14 @@ final class EventNoticeRuntime {
 
     /// Sleep and screen lock share one privacy boundary: hide immediately, clear source memory,
     /// and invalidate the epoch so a locked screen never replays private notices on return.
-    func suspendForSystemPrivacy() {
+    func suspendForSystemPrivacy(_ reason: EventNoticePrivacyReason) {
         stopReceiver()
-        model.clearForPrivacy()
+        model.setSystemPrivacy(reason, active: true)
         health.reportDisabled()
     }
 
-    func resumeAfterSystemPrivacy() {
+    func resumeAfterSystemPrivacy(_ reason: EventNoticePrivacyReason) {
+        model.setSystemPrivacy(reason, active: false)
         startReceiver()
     }
 

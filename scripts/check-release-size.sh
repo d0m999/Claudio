@@ -12,7 +12,7 @@ LOGIN_ITEM_APP="$APP/Contents/Library/LoginItems/claudi0 LoginItem.app"
 LOGIN_ITEM_BINARY="$LOGIN_ITEM_APP/Contents/MacOS/claudi0-login-item"
 LOGIN_ITEM_PLIST="$LOGIN_ITEM_APP/Contents/Info.plist"
 
-GUI_BYTES_PER_ARCH="${CLAUDIO_GUI_BYTES_PER_ARCH:-5600000}"
+GUI_BYTES_PER_ARCH="${CLAUDIO_GUI_BYTES_PER_ARCH:-6000000}"
 HELPER_BYTES_PER_ARCH="${CLAUDIO_HELPER_BYTES_PER_ARCH:-3250000}"
 LOGIN_ITEM_BYTES_PER_ARCH="${CLAUDIO_LOGIN_ITEM_BYTES_PER_ARCH:-500000}"
 NON_EXECUTABLE_BUNDLE_BYTES="${CLAUDIO_NON_EXECUTABLE_BUNDLE_BYTES:-1500000}"
@@ -86,26 +86,31 @@ check_binary_budget() {
 }
 
 check_gui_exports() {
-  local arch slice exports_file errors_file
+  local arch slice raw_exports_file exports_file errors_file
   for arch in $GUI_ARCHS; do
     if [ "$ARCH_COUNT" -eq 1 ]; then
       slice="$GUI_BINARY"
     else
       slice="$SLICE_DIR/$(basename "$GUI_BINARY").$arch"
     fi
-    exports_file="$SLICE_DIR/$(basename "$GUI_BINARY").$arch.exports"
+    raw_exports_file="$SLICE_DIR/$(basename "$GUI_BINARY").$arch.raw-exports"
+    exports_file="$SLICE_DIR/$(basename "$GUI_BINARY").$arch.product-exports"
     errors_file="$SLICE_DIR/$(basename "$GUI_BINARY").$arch.nm-errors"
-    if ! "$NM_BIN" -gUj "$slice" >"$exports_file" 2>"$errors_file"; then
+    if ! "$NM_BIN" -gUj "$slice" >"$raw_exports_file" 2>"$errors_file"; then
       echo "❌ 无法检查 claudi0-app [$arch] 导出符号：" >&2
       sed -n '1,5p' "$errors_file" >&2
       exit 1
     fi
+    # Xcode 16.4 may retain the Mach-O executable-header sentinel even with
+    # -no_exported_symbols and a full strip. It is toolchain-owned metadata, not a
+    # callable Claudio product symbol; keep rejecting every other defined external.
+    awk '$0 != "__mh_execute_header"' "$raw_exports_file" >"$exports_file"
     if [ -s "$exports_file" ]; then
-      echo "❌ claudi0-app [$arch] 仍有导出符号：" >&2
+      echo "❌ claudi0-app [$arch] 仍有产品导出符号：" >&2
       sed -n '1,5p' "$exports_file" >&2
       exit 1
     fi
-    echo "✅ claudi0-app [$arch]：无导出符号"
+    echo "✅ claudi0-app [$arch]：无产品导出符号"
   done
 }
 

@@ -14,7 +14,7 @@
 | `swift build -c release --package-path gui --product ClaudioGUI` | 构建 Release app |
 | `jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings` | 校验 localization JSON |
 | `bash scripts/dev-bundle.sh` | 组装当前架构、ad-hoc 签名的 `dist/claudi0.app` |
-| `bash scripts/check-release-size.sh dist/claudi0.app` | 检查 app 架构、GUI 每架构零导出与体积预算 |
+| `bash scripts/check-release-size.sh dist/claudi0.app` | 检查 app 架构、GUI 每架构无产品导出与体积预算 |
 | `bash scripts/local-pre-rc.sh` | 在 clean HEAD 上运行本机 pre-RC 基线并写入 `dist/local-pre-rc-report.json` |
 | `bash scripts/test-hook-cli-contract.sh` | 校验真实 CLI hook 的 exit/output 和 Debug root 隔离 |
 | `bash scripts/test-legacy-install-cli-contract.sh` | 校验 legacy install 的用户配置保持契约 |

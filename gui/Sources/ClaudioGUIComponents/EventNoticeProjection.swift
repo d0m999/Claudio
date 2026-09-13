@@ -13,7 +13,19 @@ public enum EventNoticeProjection {
     ) -> String {
         let l10n = ClaudioL10n(language: language)
         let host = record.notice?.host?.displayName ?? l10n.text(.eventNoticeUnknownSource)
-        let event = localizedEventName(record.event, language: language)
+        let event: String
+        if record.isExpired { return l10n.text(.eventNoticeExpired) }
+        switch record.kind {
+        case .permission: event = l10n.text(.eventNoticePermission)
+        case .needsInput: event = l10n.text(.eventNoticeNeedsInput)
+        case .review: event = l10n.text(.eventNoticeReview)
+        case .transient:
+            event =
+                record.event == .notification
+                ? l10n.text(.eventNoticeInformational)
+                : localizedEventName(record.event, language: language)
+        case .interrupted: event = localizedEventName(record.event, language: language)
+        }
         return "\(host) · \(event)"
     }
 
@@ -22,20 +34,14 @@ public enum EventNoticeProjection {
         language: ClaudioAppLanguage
     ) -> String {
         let l10n = ClaudioL10n(language: language)
-        guard let source = record.source else {
-            return l10n.text(.eventNoticeUnknownSource)
+        guard let source = record.source else { return "" }
+        var components: [String] = []
+        if let project = source.projectLabel { components.append(project) }
+        if let session = sessionLabel(for: source, language: language) {
+            components.append(session)
+            if source.isParentSession { components.append(l10n.text(.eventNoticeParentSession)) }
         }
-        let project = source.projectLabel ?? l10n.text(.eventNoticeUnknownProject)
-        let session: String
-        if let label = sessionLabel(for: source, language: language) {
-            session =
-                source.isParentSession
-                ? "\(label) · \(l10n.text(.eventNoticeParentSession))"
-                : label
-        } else {
-            session = l10n.text(.eventNoticeUnknownSession)
-        }
-        return "\(project) · \(session)"
+        return components.joined(separator: " · ")
     }
 
     /// An adapter-supplied trusted label wins; otherwise the default short label is projected
@@ -70,6 +76,19 @@ public enum EventNoticeProjection {
             primaryLine(for: record, language: language),
             secondaryLine(for: record, language: language),
         ]
+        .filter { !$0.isEmpty }
         .joined(separator: language == .english ? ", " : "，")
+    }
+
+    /// A collapsed ordinary-progress banner announces what just happened. Attention banners and
+    /// every interactive container retain the established Needs You label.
+    public static func accessibilityLabel(
+        for snapshot: EventNoticeModelSnapshot,
+        language: ClaudioAppLanguage
+    ) -> String {
+        if !snapshot.isExpanded, snapshot.current?.kind == .transient {
+            return accessibilitySummary(for: snapshot.current, language: language)
+        }
+        return ClaudioL10n(language: language).text(.eventNoticeRecent)
     }
 }

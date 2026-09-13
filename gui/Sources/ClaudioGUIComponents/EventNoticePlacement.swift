@@ -38,7 +38,18 @@ public enum EventNoticePlacement {
     }
 
     public static func clampedWidth(visibleFrame: CGRect) -> CGFloat {
-        min(preferredWidth, max(minimumWidth, visibleFrame.width - 2 * horizontalMargin))
+        min(preferredWidth, max(1, visibleFrame.width - 2 * horizontalMargin))
+    }
+
+    public static func availableHeight(
+        screenFrame: CGRect, visibleFrame: CGRect, safeAreaTop: CGFloat
+    ) -> CGFloat {
+        max(
+            1,
+            visibleFrame.height
+                - effectiveTopSafeInset(
+                    screenFrame: screenFrame, visibleFrame: visibleFrame, safeAreaTop: safeAreaTop)
+                - topOffset - horizontalMargin)
     }
 
     public static func clampedX(visibleFrame: CGRect, width: CGFloat) -> CGFloat {

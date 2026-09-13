@@ -346,6 +346,54 @@ private func guiCoreSources() -> [ScannedSource] {
 
 @MainActor
 func runViewWiringSuites() {
+    suite("Event Notice：交互式面板失去 key window 时沿关闭路径收起") {
+        guard
+            let controller = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/EventNoticeWindowController.swift"),
+            let resignKey = closureBody(after: "func windowDidResignKey", in: controller)
+        else {
+            expect(false, "必须能解析 EventNoticeWindowController 的失焦接线")
+            return
+        }
+        let normalized = collapsingWhitespace(resignKey)
+        expect(
+            normalized.contains("close()")
+                && normalized.contains("isInteractive")
+                && !normalized.contains("!isInteractive")
+                && normalized.contains("model.setKeyboardFocused(false)"),
+            "失焦闭包体必须引用 isInteractive 判别（不得取反极性）并含 close() 与键盘暂停解除"
+                + "（存在性+极性断言，不证明分支内归属；等价 guard 改写不得假红；"
+                + "De Morgan 等价改写（`if !isInteractive` 互换两分支体）会假红，属已知边界；"
+                + "`isInteractive == false` 式取反不含 `!` 词元、不判红，同为已披露边界）")
+        expect(
+            controller.contains("NSWindowDelegate")
+                && controller.contains("window.delegate = self"),
+            "resignKey 路径必须真实接线：控制器声明 NSWindowDelegate 并被设为窗口 delegate")
+        expect(
+            controller.contains("window.hidesOnDeactivate = false"),
+            "自动非交互横幅必须继续使用自身生命周期，不得随应用失活强制隐藏")
+    }
+
+    suite("Event Notice：根辅助功能标签按当前 snapshot 与语言分流") {
+        guard
+            let view = codeWithoutStrings(
+                "gui/Sources/ClaudioGUIComponents/EventNoticeView.swift"),
+            let body = closureBody(after: "public var body: some View", in: view)
+        else {
+            expect(false, "必须能解析 EventNoticeView 的根视图接线")
+            return
+        }
+        let normalized = collapsingWhitespace(body)
+        expect(
+            normalized.contains(
+                ".accessibilityLabel( EventNoticeProjection.accessibilityLabel( for: snapshot, language: languageStore.language) )"
+            ),
+            "根 AX label 必须把当前 snapshot 与语言交给共享投影决策")
+        expect(
+            !normalized.contains(".accessibilityLabel(l10n.text(.eventNoticeRecent))"),
+            "根 AX label 不得重新硬连到 Needs You/需要你常量")
+    }
+
     suite("Event Notice：executable 跨窗口接线转交 Settings restoration，重复交互不重捕获") {
         guard
             let settings = codeWithoutStrings(
@@ -356,7 +404,7 @@ func runViewWiringSuites() {
             let transfer = closureBody(after: "func closeForMutualExclusion()", in: settings),
             let route = closureBody(
                 after: "func dismissSettingsForEventNoticeInteraction()", in: router),
-            let entry = closureBody(after: "func openInteractive()", in: notice),
+            let entry = closureBody(after: "private func becomeInteractive()", in: notice),
             let firstEntry = closureBody(after: "if !isInteractive", in: entry),
             let close = closureBody(after: "func close()", in: notice),
             let privacy = closureBody(after: "func clearForPrivacy()", in: notice),
@@ -387,12 +435,14 @@ func runViewWiringSuites() {
             "notice close 必须消费一次转交动作，并由当前焦点所有权守卫")
         expect(privacy.contains("focusRestoration = nil"), "隐私清空必须释放延迟归还动作")
         expect(
-            closureBody(after: "onOpenRecent:", in: notice)?.contains("self?.openInteractive()")
+            closureBody(after: "onOpenAttentionReminders:", in: notice)?
+                .contains("self?.openInteractive()")
                 == true,
             "数量入口必须接到同一个原生 interactive 焦点移交路径")
         let render = closureBody(after: "private func render(", in: notice) ?? ""
         expect(
-            closureBody(after: "guard snapshot.current != nil", in: render)?
+            closureBody(
+                after: "guard (snapshot.current != nil || snapshot.isExpanded)", in: render)?
                 .contains("focusRestoration = nil") == true,
             "runtime 经共享模型清空隐私时，也必须丢弃旧的焦点归还动作")
     }

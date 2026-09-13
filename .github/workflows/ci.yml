@@ -15,8 +15,10 @@ jobs:
   verify:
     name: Test and build
     runs-on: macos-15
+    timeout-minutes: 15
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      NSUnbufferedIO: YES
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -79,6 +81,35 @@ jobs:
 
       - name: Run helper harness
         run: swift run --package-path helper claudio-tests
+
+      - name: Diagnose event-attention harness
+        shell: bash
+        env:
+          CLAUDIO_HANG_DIAGNOSTICS: "1"
+        run: |
+          set -u
+          swift run --package-path gui claudio-gui-tests --event-attention &
+          HARNESS_PID=$!
+          (
+            sleep 240 &
+            TIMER_PID=$!
+            trap 'kill "$TIMER_PID" 2>/dev/null || true; exit 0' TERM INT
+            wait "$TIMER_PID"
+            trap - TERM INT
+            if kill -0 "$HARNESS_PID" 2>/dev/null; then
+              echo "::error::event-attention harness exceeded 240 seconds; sampling pid $HARNESS_PID"
+              /usr/bin/sample "$HARNESS_PID" 5 10 || true
+              kill -ABRT "$HARNESS_PID" 2>/dev/null || true
+            fi
+          ) &
+          WATCHDOG_PID=$!
+          set +e
+          wait "$HARNESS_PID"
+          STATUS=$?
+          set -e
+          kill "$WATCHDOG_PID" 2>/dev/null || true
+          wait "$WATCHDOG_PID" 2>/dev/null || true
+          exit "$STATUS"
 
       - name: Run GUI harness
         run: swift run --package-path gui claudio-gui-tests

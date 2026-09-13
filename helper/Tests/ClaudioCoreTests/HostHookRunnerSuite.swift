@@ -5,12 +5,17 @@ private let hostHookRunnerTestScope = "test-scope-v1"
 
 private final class HostHookRunnerSpawner: ProcessSpawning, @unchecked Sendable {
     private let succeeds: Bool
+    private let onSpawn: @Sendable () -> Void
     private(set) var callCount = 0
 
-    init(succeeds: Bool = true) { self.succeeds = succeeds }
+    init(succeeds: Bool = true, onSpawn: @escaping @Sendable () -> Void = {}) {
+        self.succeeds = succeeds
+        self.onSpawn = onSpawn
+    }
 
     func spawn(executablePath: String, arguments: [String]) -> Bool {
         callCount += 1
+        onSpawn()
         return succeeds
     }
 }
@@ -344,6 +349,7 @@ func runHostHookRunnerSuites() {
                 root: root, host: .codex, spawner: spawner,
                 fixtureIsReady: true, activeInstallationID: id)
             var durations: [TimeInterval] = []
+            let collector = HostEventNoticeCollector()
             durations.reserveCapacity(100)
 
             for index in 0..<100 {
@@ -355,6 +361,14 @@ func runHostHookRunnerSuites() {
                     taskStartDebounceStateFile: root.appendingPathComponent(
                         "performance-task-start-\(index).state"),
                     receiptStore: base.receiptStore,
+                    eventNoticeChannel: HostEventNoticeChannel(
+                        sourcePayload: Data(
+                            #"{"cwd":"/tmp/project","session_id":"s","hook_event_name":"UserPromptSubmit"}"#
+                                .utf8),
+                        receiverEpoch: UUID(),
+                        sender: {
+                            collector.append($0); return .sent
+                        }),
                     now: base.now)
                 let started = ProcessInfo.processInfo.systemUptime
                 let outcome = handleHostHook(
@@ -366,10 +380,133 @@ func runHostHookRunnerSuites() {
 
             let p95 = durations.sorted()[94]
             expect(spawner.callCount == 100, "100 次主路径必须全部调用 playback stub")
+            expect(collector.values.count == 100, "来源解析、规范化和发送必须纳入相同延迟门槛")
+            print(
+                "  helper source-enabled hook p95: \(String(format: "%.2f", p95 * 1_000))ms (100 calls, playback/send stub)"
+            )
             expect(
                 p95 <= 0.100,
                 "hook 返回延迟 p95 必须 ≤ 100ms，实测 \(String(format: "%.2f", p95 * 1_000))ms")
         }
+    }
+
+    suite("host hook：真实 pipe/socket 来源增量 p95 保持 30ms 门槛") {
+        withTempDirectory { root in
+            let id = UUID()
+            let spawner = HostHookRunnerSpawner()
+            let base = makeHostHookRunnerEnvironment(
+                root: root, host: .codex, spawner: spawner,
+                fixtureIsReady: true, activeInstallationID: id)
+            let received = HostEventNoticeCollector()
+            guard
+                let receiver = try? EventNoticeReceiver(
+                    descriptorFile: root.appendingPathComponent("performance-descriptor.json"),
+                    ownerLockFile: root.appendingPathComponent("performance-owner.lock"),
+                    currentInstallationID: { $0 == .codex ? id : nil },
+                    callback: { received.append($0) })
+            else {
+                expect(false, "性能 fixture 必须有真实 receiver")
+                return
+            }
+            receiver.start()
+            defer { receiver.stop() }
+            let descriptor = receiver.descriptor
+            let payload = Data(
+                #"{"cwd":"/tmp/project","session_id":"performance-session","hook_event_name":"UserPromptSubmit","prompt":"PRIVATE_SENTINEL"}"#
+                    .utf8)
+            var enabled: [TimeInterval] = []
+            var disabled: [TimeInterval] = []
+            for index in 0..<100 {
+                var pair: [Bool: TimeInterval] = [:]
+                for withSource in index.isMultiple(of: 2) ? [false, true] : [true, false] {
+                    let pipe = withSource ? Pipe() : nil
+                    pipe?.fileHandleForWriting.write(payload)
+                    let started = ProcessInfo.processInfo.systemUptime
+                    let channel = pipe.map {
+                        HostEventNoticeChannel(
+                            sourcePayload: HookInputReader.read(
+                                from: $0.fileHandleForReading.fileDescriptor
+                            ).data,
+                            receiverEpoch: descriptor.epoch, observedUptime: started,
+                            sender: { EventNoticeTransport.send($0, to: descriptor) })
+                    }
+                    let environment = HostHookEnvironment(
+                        host: .codex, playEnvironment: base.playEnvironment,
+                        taskStartDebounceStateFile: root.appendingPathComponent(
+                            "delta-\(index)-\(withSource).state"),
+                        receiptStore: base.receiptStore, eventNoticeChannel: channel, now: base.now)
+                    let outcome = handleHostHook(
+                        host: .codex, nativeEvent: "UserPromptSubmit", installationID: id,
+                        environment: environment)
+                    pair[withSource] = ProcessInfo.processInfo.systemUptime - started
+                    pipe?.fileHandleForWriting.closeFile()
+                    pipe?.fileHandleForReading.closeFile()
+                    expect(outcome?.playbackResult == .played, "每次基准都必须走相同的完整 playback stub 路径")
+                }
+                enabled.append(pair[true]!)
+                disabled.append(pair[false]!)
+            }
+            let p95Enabled = enabled.sorted()[94]
+            let p95Disabled = disabled.sorted()[94]
+            let p95Delta = zip(enabled, disabled).map { $0 - $1 }.sorted()[94]
+            for _ in 0..<100 {
+                if received.values.count == 100 { break }
+                Thread.sleep(forTimeInterval: 0.005)
+            }
+            expect(received.values.count == 100, "100 次 source-enabled 基准必须到达真实 receiver")
+            print(
+                "  helper source delta p95: \(String(format: "%.2f", p95Delta * 1000))ms; enabled \(String(format: "%.2f", p95Enabled * 1000))ms; disabled \(String(format: "%.2f", p95Disabled * 1000))ms (100 pairs, real pipe/socket, playback stub)"
+            )
+            expect(p95Delta <= 0.030, "同进程来源增量 p95 必须 ≤ 30ms，不包括进程/构建冷启动")
+        }
+    }
+
+    suite("host hook：观察时间在播放前捕获，入口时间跨过声音失败仍保留") {
+        withTempDirectory { root in
+            let id = UUID()
+            let clock = HostHookUptimeClock(100)
+            let spawner = HostHookRunnerSpawner(succeeds: false, onSpawn: { clock.set(200) })
+            let base = makeHostHookRunnerEnvironment(
+                root: root, host: .codex, spawner: spawner,
+                fixtureIsReady: true, activeInstallationID: id)
+            for entryObservation in [nil, 50.0] {
+                clock.set(100)
+                let collector = HostEventNoticeCollector()
+                let environment = HostHookEnvironment(
+                    host: .codex, playEnvironment: base.playEnvironment,
+                    taskStartDebounceStateFile: root.appendingPathComponent(UUID().uuidString),
+                    receiptStore: base.receiptStore,
+                    eventNoticeChannel: HostEventNoticeChannel(
+                        sourcePayload: nil, receiverEpoch: UUID(), observedUptime: entryObservation,
+                        sender: {
+                            collector.append($0); return .sent
+                        }),
+                    now: base.now, uptime: { clock.value })
+                let result = handleHostHook(
+                    host: .codex, nativeEvent: "UserPromptSubmit", installationID: id,
+                    environment: environment)
+                expect(result?.playbackResult == .playbackFailed, "测试必须实际经过播放失败")
+                expect(
+                    collector.values.first?.observedUptime == (entryObservation ?? 100),
+                    "不得以播放后的时间替代 hook 入口或归约前观察")
+            }
+        }
+    }
+}
+
+private final class HostHookUptimeClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValue: TimeInterval
+    init(_ value: TimeInterval) { storedValue = value }
+    var value: TimeInterval {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedValue
+    }
+    func set(_ value: TimeInterval) {
+        lock.lock()
+        storedValue = value
+        lock.unlock()
     }
 }
 

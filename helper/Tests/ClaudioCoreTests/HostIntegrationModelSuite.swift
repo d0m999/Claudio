@@ -268,8 +268,17 @@ func runHostIntegrationModelSuites() {
 
     suite("AudibilityMatrix 完全消费 adapter 能力数据，Codex 4/5 是中性就绪") {
         // 故意输入全部兼容 identity，证明矩阵只投影正常产品 registry。
-        let readySnapshots = HostID.allCases.map {
-            HostIntegrationSnapshot.connectedForTesting(host: $0)
+        let readySnapshots = HostID.allCases.map { host in
+            // Keep this harness runnable in Release without enabling DEBUG production APIs.
+            let installationID = UUID(uuidString: "00000000-0000-4000-8000-000000000001")!
+            let evidence = HostReceiptEvidence(
+                installationID: installationID, nativeEvent: "UserPromptSubmit", event: .taskStart,
+                timestamp: Date(timeIntervalSince1970: 1), playbackResult: .played)
+            return HostIntegrationSnapshot(
+                host: host, runtime: .ready, availability: .available,
+                configuration: .configured, writability: .writable,
+                activation: .observed(evidence), latestReceipt: evidence,
+                installationID: installationID)
         }
         let coverage = Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) })
         let enabled = Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) })

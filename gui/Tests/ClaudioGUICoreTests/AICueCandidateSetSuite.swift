@@ -50,6 +50,29 @@ private actor CandidateSetRetrySleeperFixture: AICueRetrySleeping {
     func observedDelays() -> [Int] { delays }
 }
 
+private final class CandidateSetUptimeClockFixture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: UInt64
+
+    init(value: UInt64) { self.value = value }
+
+    func now() -> UInt64 { lock.withLock { value } }
+
+    func advance(by nanoseconds: UInt64) {
+        lock.withLock { value += nanoseconds }
+    }
+}
+
+private actor CandidateSetDeadlineExpiringSleeperFixture: AICueRetrySleeping {
+    private let clock: CandidateSetUptimeClockFixture
+
+    init(clock: CandidateSetUptimeClockFixture) { self.clock = clock }
+
+    func sleep(seconds: Int) async throws {
+        clock.advance(by: UInt64(seconds) * 1_000_000_000)
+    }
+}
+
 private actor NativeCandidateSetProviderFixture: AICueCandidateSetProvider {
     nonisolated let profile: AICueProviderProfile
     private let responses: [AICueProviderCandidateResponse]
@@ -213,6 +236,35 @@ func runAICueCandidateSetSuites() async {
         expect(observed == .rateLimited(retryAfterSeconds: 3), "第二个 429 必须直接结束集合生成")
         expect(await sleeper.observedDelays() == [2], "整个集合只能执行一次保守 retry")
         expect(await provider.requests().count == 4, "retry 只能增加一次 legacy POST")
+    }
+
+    await suite("AI 提示音 legacy adapter：retry sleep 耗尽绝对预算后不得再次请求") {
+        let provider = CandidateSetLegacyProviderFixture(
+            profileID: .elevenLabsGlobal,
+            steps: [
+                .failure(.rateLimited(retryAfterSeconds: 1)),
+                .success,
+            ])
+        let clock = CandidateSetUptimeClockFixture(value: 100)
+        let sleeper = CandidateSetDeadlineExpiringSleeperFixture(clock: clock)
+        let adapter = SequentialAICueCandidateSetAdapter(
+            provider: provider,
+            registry: AICueProviderRegistry(),
+            retrySleeper: sleeper,
+            currentUptimeNanoseconds: { clock.now() })
+        var observed: AICueProviderError?
+        do {
+            _ = try await adapter.generateCandidateSet(
+                plan: candidateSetPlan(profileID: .elevenLabsGlobal),
+                credential: try SensitiveCredentialInput("fixture-key"),
+                deadline: AICueGenerationDeadline(
+                    startedAtUptimeNanoseconds: 100,
+                    durationNanoseconds: 1_000_000_000))
+        } catch let error as AICueProviderError {
+            observed = error
+        } catch {}
+        expect(observed == .deadlineExceeded, "retry sleep 后必须复查同一个 absolute deadline")
+        expect(await provider.requests().count == 1, "预算耗尽后不得发起 retry 请求")
     }
 
     await suite("AI 提示音 candidate-set engine：乱序 styled 响应排序后完整提交") {

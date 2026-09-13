@@ -14,6 +14,7 @@ extension Claudio {
         @Option(name: .long, help: "当前连接 installation UUID") var installationID: String
 
         func run() throws {
+            let observedUptime = ProcessInfo.processInfo.systemUptime
             guard let parsedHost = HostID(rawValue: host),
                 let parsedID = UUID(uuidString: installationID)
             else { return }
@@ -23,6 +24,7 @@ extension Claudio {
                 HostEventNoticeChannel(
                     sourcePayload: HookInputReader.read().data,
                     receiverEpoch: descriptor.epoch,
+                    observedUptime: observedUptime,
                     sender: { notice in EventNoticeTransport.send(notice, to: descriptor) })
             }
             let environment = systemHostHookEnvironment(

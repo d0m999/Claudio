@@ -64,6 +64,17 @@ func suite(_ name: String, _ body: @MainActor () async -> Void) async {
     await body()
 }
 
+if CommandLine.arguments.contains("--event-attention") {
+    runEventNoticeModelSuites()
+    await runSessionNavigationSuites()
+    await runEventAttentionStressSuites()
+    // Native AppKit event delivery stays terminal: on newer macOS versions, yielding back to
+    // Swift's async-main drain queue after synthetic window tracking can end the harness early.
+    runEventNoticePresentationSuites()
+    print("Event attention: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
 runOnboardingStateSuites()
 runLocalizationSuites()
 runAboutInformationSuites()
@@ -130,8 +141,8 @@ runEventMuteControllerSuites()
 runMasterVolumeControllerSuites()
 runPanelFocusOrderSuites()
 runEventNoticeModelSuites()
-runEventNoticePresentationSuites()
 await runSessionNavigationSuites()
+await runEventAttentionStressSuites()
 runPanelSoundScopeInteractionSuites()
 await runPanelPresentationSuites()
 runEventSettingsWindowSelectionSuites()
@@ -174,6 +185,8 @@ runMultiProviderPrototypeContractSuites()
 runVolumeDragSessionSuites()
 runPanelWriteFailuresSuites()
 runActivityOverviewSuites()
+// Keep the native AppKit suite after every async suite; see the targeted ordering above.
+runEventNoticePresentationSuites()
 
 // MARK: - Summary
 
