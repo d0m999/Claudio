@@ -269,8 +269,120 @@ private actor GenerationSlowRetrySleeperFixture: AICueRetrySleeping {
     func calls() -> Int { invocationCount }
 }
 
+private actor GenerationPreparationCheckpointFixture: AICueGenerationPreparationCheckpoint {
+    enum Behavior: Sendable {
+        case fail(AICueGenerationError)
+        case waitForCancellation
+    }
+
+    private let behavior: Behavior
+    private var entered = false
+    private var observedDirectoryExists = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(_ behavior: Behavior) {
+        self.behavior = behavior
+    }
+
+    func generationDirectoryDidPrepare(_ directory: URL) async throws {
+        observedDirectoryExists = FileManager.default.fileExists(atPath: directory.path)
+        entered = true
+        let currentWaiters = waiters
+        waiters.removeAll()
+        for waiter in currentWaiters { waiter.resume() }
+
+        switch behavior {
+        case .fail(let error):
+            throw error
+        case .waitForCancellation:
+            try await Task.sleep(nanoseconds: 60_000_000_000)
+        }
+    }
+
+    func waitUntilEntered() async {
+        guard !entered else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func sawPreparedDirectory() -> Bool { observedDirectoryExists }
+}
+
 @MainActor
 func runAICueGenerationEngineSuites() async {
+    await suite("AI 提示音生成：目录 prepare 后的错误由既有 owner 确定性清理") {
+        await withTempDirectory { root in
+            let registry = AICueProviderRegistry()
+            let profile = try! registry.profile(for: .elevenLabsGlobal)
+            let provider = SequentialAICueCandidateSetAdapter(
+                provider: GenerationProviderFixture(steps: [.success(validMP3ID3Data())]),
+                registry: registry)
+            let failures: [AICueGenerationError] = [
+                .deadlineExceeded,
+                .temporaryStorageUnavailable,
+            ]
+            for (index, failure) in failures.enumerated() {
+                let tempRoot = root.appendingPathComponent("prepare-failure-\(index)")
+                let checkpoint = GenerationPreparationCheckpointFixture(.fail(failure))
+                let engine = AICueGenerationEngine(
+                    credentialManager: GenerationCredentialLeaseManagerFixture(
+                        profileID: profile.id,
+                        source: .active),
+                    candidateSetProvider: provider,
+                    temporaryRoot: tempRoot,
+                    durationProbe: StubDurationProbe(fixedDuration: 1),
+                    registry: registry,
+                    preparationCheckpoint: checkpoint)
+                do {
+                    _ = try await engine.generate(
+                        description: "短促木琴音效",
+                        locale: "zh-Hans",
+                        providerProfileID: profile.id,
+                        deadline: .startingNow())
+                } catch {}
+                expect(await checkpoint.sawPreparedDirectory(), "检查点必须位于 generation mkdir 之后")
+                expect(generationDirectories(in: tempRoot).isEmpty, "prepare 后失败必须清理本次 UUID child")
+            }
+        }
+    }
+
+    await suite("AI 提示音生成：目录 prepare 后取消会清理且不触发 provider") {
+        await withTempDirectory { root in
+            let registry = AICueProviderRegistry()
+            let providerFixture = GenerationProviderFixture(steps: [.success(validMP3ID3Data())])
+            let checkpoint = GenerationPreparationCheckpointFixture(.waitForCancellation)
+            let tempRoot = root.appendingPathComponent("prepare-cancel")
+            let engine = AICueGenerationEngine(
+                credentialManager: GenerationCredentialLeaseManagerFixture(
+                    profileID: .elevenLabsGlobal,
+                    source: .active),
+                candidateSetProvider: SequentialAICueCandidateSetAdapter(
+                    provider: providerFixture,
+                    registry: registry),
+                temporaryRoot: tempRoot,
+                durationProbe: StubDurationProbe(fixedDuration: 1),
+                registry: registry,
+                preparationCheckpoint: checkpoint)
+            let task = Task {
+                try await engine.generate(
+                    description: "短促木琴音效",
+                    locale: "zh-Hans",
+                    providerProfileID: .elevenLabsGlobal,
+                    deadline: .startingNow())
+            }
+            await checkpoint.waitUntilEntered()
+            task.cancel()
+            var cancelled = false
+            do {
+                _ = try await task.value
+            } catch AICueGenerationError.cancelled {
+                cancelled = true
+            } catch {}
+            expect(cancelled, "prepare 后取消必须稳定映射 cancelled")
+            expect(await providerFixture.requests().isEmpty, "prepare 检查点取消后不得请求 provider")
+            expect(generationDirectories(in: tempRoot).isEmpty, "prepare 后取消必须清理本次 UUID child")
+        }
+    }
+
     await suite("AI 提示音生成：profile、能力、locale 与台词门禁先于 key/network") {
         await withTempDirectory { root in
             let vault = GenerationVaultFixture(configured: true)
