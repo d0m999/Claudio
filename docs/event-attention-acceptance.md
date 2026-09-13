@@ -1,11 +1,11 @@
 # 瞬时提示与「需要你」：实现与验收台账
 
 基线：`a33d077`。最终源码范围：`d2059b8`、`497f6fc`、`ed884cf`、`4160baf`（review 修复）、`e41587d`、
-`2987fea`、`3143048`（对账轮），及工作树中未提交的对账轮 review 修复（见下「review 修复轮」段）。
+`2987fea`、`3143048`（对账轮）、`f0d99f0`（review 修复轮，见下「review 修复轮」段）。
 日期：2026-09-12–13。环境：macOS 26.6.2、arm64、Apple Swift 6.3.3。
 范围来自用户提供的 T1–T8 规格；评审发现由用户在会话中提供、未在仓库内跟踪，其修复即 `4160baf`，
-对账轮与 review 修复轮的分拆见 `plan/FIX-EVENT-NOTICE-REVIEW-20260913.md`（未提交）。
-本次是本地实现，不提交、推送、发布或替换运行中的 app。
+对账轮与 review 修复轮的分拆见 `plan/FIX-EVENT-NOTICE-REVIEW-20260913.md`。
+review 修复轮已提交为 `f0d99f0`，第三轮修复已随后提交；均未推送、未发布、未替换运行中的 app。
 既有未跟踪计划、HTML 原型和报告未改写。
 
 **总规格尚未正式验收。** 自动化、实际挂载视图、真实宿主回调与分发证据分开记录。
@@ -60,17 +60,19 @@ epoch 前及未来观察，瞬时项精确返回确认不再误走提醒移除�
 通过（等价 `guard` 改写保持绿、删除 `window.delegate = self` 时新断言按预期变红）；ADR 0013 补记
 watermark carve-out。上表格式检查行此前为「6 个文件通过」，系 `4160baf` 对修复子集的重跑口径、
 曾静默收窄原 28 文件声明，本轮按累计范围重跑并更正。本轮证据：GUI 完整 harness 9,151 checks
-（较上轮 +1，即新接线断言），5 项失败与对账改动无关，均为本机 sandbox 环境既有失败（嵌套
+（该轮为含 5 项失败的 run 实测计数；同源码完整通过口径为 9,153，计数差系失败 suite 提前退出、
+不对应任何源码增减，reconciliation 见下「review 修复轮」段），5 项失败与对账改动无关，均为本机 sandbox 环境既有失败（嵌套
 SwiftPM manifest 解析、release-size fixture 的 stat 调用、SwiftPM dump 读取）；HitTargetSuite
 悬停检查在六次全量执行中失败一次（基线及其余各轮均通过），判为与改动无关的偶发。
 `--event-attention` 专项 337 checks 全过；GUI Debug product 构建通过；格式检查按累计 28 个
 Swift 文件重跑通过（见上表）。本机 sandbox 内 SwiftPM 需 `--disable-sandbox` 才能运行，否则
 manifest 编译被 sandbox_apply 拒绝。
 
-2026-09-13 review 修复轮（来源：`plan/FIX-EVENT-NOTICE-REVIEW-20260913.md`，工作树未提交）：
+2026-09-13 review 修复轮（来源：`plan/FIX-EVENT-NOTICE-REVIEW-20260913.md`，已提交为 `f0d99f0`）：
 修复对账轮 review 的 actionable findings。① resignKey 失焦断言折入极性腿（闭包体不得出现
-`!isInteractive`），断言消息如实标注「存在性+极性断言，不证明分支内归属；等价 guard 改写不得假红；
-De Morgan 等价改写（`if !isInteractive` 互换两分支体）会假红，属已知边界」；
+`!isInteractive`），断言消息标注「存在性+极性断言，不证明分支内归属；等价 guard 改写不得假红；
+De Morgan 等价改写（`if !isInteractive` 互换两分支体）会假红，属已知边界」——消息终稿补入
+`isInteractive == false` 式取反披露，见下「第三轮 review 修复」段；
 变异实测：极性取反（`if !isInteractive`）判红、删除 `window.delegate = self` 判红、等价 guard
 改写判绿、else-first 分支交换判绿（后两者为已披露边界：文本绊线不证明哪个效果属于哪个分支，
 也不接受取反的等价重写）。② 台账头部「最终源码范围」补入对账轮三个提交。③ 证据表 GUI 完整
@@ -80,6 +82,17 @@ harness 行按本轮重跑更正为 9,153 checks 全过：对账轮记录的 9,1
 本轮证据：`/tmp/claudio-review-fixes-20260913/logs/`（gui-full-final、gui-attention、
 gui-debug-build、swift-format、mutation-a-rerun、mutation-b-rerun 及首轮四条变异日志）。
 helper 各行沿用上轮证据（本轮未触碰 helper 源码）。
+
+2026-09-13 第三轮 review 修复（本会话第二轮 review 的 actionable findings，已提交）：
+① 台账自洽——对账轮段 9,151 的「较上轮 +1」叙述与 review 修复轮段的「失败 suite 提前退出」
+叙述矛盾，统一为后者（计数差 2 不对应任何源码增减）；台账头部「未提交」前提过期，「最终源码范围」
+补入 `f0d99f0`。② `EventNoticeModel` 提取 `isVerifiedSubmissionStart`（`requiresOrderedObservation`
+与后续提交清除两处共享的 taskStart × verified-surface 谓词，纯重构）。③ resignKey 断言消息补披露
+`isInteractive == false` 式取反边界（文本绊线能力边界，不新增断言腿）。
+本轮证据：GUI 完整 harness 9,153 checks 全过（计数与上轮一致，零新增 expect），日志
+`/tmp/claudio-review-fixes-20260913/logs/gui-full-r3.log`；变更的 2 个 Swift 文件严格格式重跑通过
+（`swift-format-r3.log`，无输出）；`jq empty` 与 `git diff --check` 通过。helper 各行沿用上轮证据
+（本轮未触碰 helper 源码）。证据表各行维持有效（源码改动对检查计数中性）。
 
 可重复执行：
 
@@ -101,7 +114,8 @@ git diff --check
 - 双击、失败、永不完成后超时、取消/隐私/能力代次/版本变化后完成；精确返回只移除待接手提醒，瞬时项保留成功结果。
 - 源码接线断言（delegate 赋值 + resignKey 闭包含未取反的 isInteractive 判别与 close()、键盘暂停解除
   的行为内容；极性取反、删除接线变异实测判红，等价 guard 改写实测判绿）在文本层守住失焦收起接线；
-  else-first 分支交换与 De Morgan 等价改写属已披露边界（前者判绿、后者假红），不证明分支内归属。
+  else-first 分支交换与 De Morgan 等价改写属已披露边界（前者判绿、后者假红），不证明分支内归属；
+  `isInteractive == false` 式取反不含 `!` 词元、判绿，同为已披露边界（第三轮补录）。
   真实失焦触发、外部点击及透传仍按下方人工门槛验收。
 - 复制成功、失败和陈旧版本拒绝，隐私清空不覆盖用户主动导出。
 - 实际调度器中取消或释放 token 后，30 分钟定时闭包捕获对象立即释放；没有被旧 asyncAfter 截止时间挂住。

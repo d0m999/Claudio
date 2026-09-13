@@ -429,6 +429,10 @@ public final class EventNoticeModel: ObservableObject {
             remainingTime: nil, isExpanded: false, droppedCount: 0, receiverEpoch: receiverEpoch)
     }
 
+    private func isVerifiedSubmissionStart(_ notice: HostEventNotice) -> Bool {
+        notice.event == .taskStart && verifiedSubmissionSurfaces.contains(notice.surface)
+    }
+
     @discardableResult
     public func accept(_ notice: HostEventNotice) -> EventNoticeAcceptance {
         expireEntries()
@@ -454,8 +458,7 @@ public final class EventNoticeModel: ObservableObject {
         let kind = EventNoticeKind.classify(notice)
         let requiresOrderedObservation =
             kind.isAttention
-            || (notice.event == .taskStart
-                && verifiedSubmissionSurfaces.contains(notice.surface))
+            || isVerifiedSubmissionStart(notice)
         if let identity, requiresOrderedObservation {
             let metadataTime = observations.first(where: { $0.identity == identity })?.uptime
             let latestTime = existing?.notice.flatMap(validObservation)
@@ -475,7 +478,7 @@ public final class EventNoticeModel: ObservableObject {
             }
         }
 
-        if notice.event == .taskStart, verifiedSubmissionSurfaces.contains(notice.surface),
+        if isVerifiedSubmissionStart(notice),
             identity != nil, let observation,
             let previous = existing,
             let previousNotice = previous.notice,
