@@ -220,6 +220,9 @@ public final class EventNoticeCancellation: @unchecked Sendable {
 public enum EventNoticeKind: Sendable, Equatable {
     case transient, permission, needsInput, interrupted, review
 
+    /// Attention kinds are retained as versioned reminders; transient is display-only.
+    public var isAttention: Bool { self != .transient }
+
     public static func classify(_ notice: HostEventNotice) -> Self {
         switch notice.event {
         case .taskStart, .stop, .subagentStop: return .transient
@@ -450,7 +453,7 @@ public final class EventNoticeModel: ObservableObject {
         let observation = validObservation(notice)
         let kind = EventNoticeKind.classify(notice)
         let requiresOrderedObservation =
-            kind != .transient
+            kind.isAttention
             || (notice.event == .taskStart
                 && verifiedSubmissionSurfaces.contains(notice.surface))
         if let identity, requiresOrderedObservation {
@@ -632,9 +635,10 @@ public final class EventNoticeModel: ObservableObject {
         actionableEntry(action) != nil
     }
 
-    func isAttentionRevision(_ action: EventNoticeAction) -> Bool {
+    /// True when the action still resolves to a live attention reminder (not the transient slot).
+    func isAttentionReminder(_ action: EventNoticeAction) -> Bool {
         guard let kind = actionableEntry(action)?.kind else { return false }
-        return kind != .transient
+        return kind.isAttention
     }
 
     public func sourceNotice(for action: EventNoticeAction) -> HostEventNotice? {
