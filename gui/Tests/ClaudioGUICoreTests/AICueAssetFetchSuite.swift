@@ -44,15 +44,39 @@ private actor AICueAssetSleeperFixture: AICueAssetRetrySleeping {
 private actor AICueAssetBlockingSleeperFixture: AICueAssetRetrySleeping {
     private var delays: [Int] = []
     private var entered = false
+    private var cancellationRequested = false
+    private var sleepContinuation: CheckedContinuation<Void, Error>?
     private var entryWaiters: [CheckedContinuation<Void, Never>] = []
 
     func sleep(seconds: Int) async throws {
         delays.append(seconds)
+        try Task.checkCancellation()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                installSleepContinuation(continuation)
+            }
+        } onCancel: {
+            Task { await self.cancelSleep() }
+        }
+    }
+
+    private func installSleepContinuation(_ continuation: CheckedContinuation<Void, Error>) {
+        guard !cancellationRequested, !Task.isCancelled else {
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        sleepContinuation = continuation
         entered = true
         let waiters = entryWaiters
         entryWaiters.removeAll()
         for waiter in waiters { waiter.resume() }
-        try await Task.sleep(nanoseconds: .max)
+    }
+
+    private func cancelSleep() {
+        cancellationRequested = true
+        let continuation = sleepContinuation
+        sleepContinuation = nil
+        continuation?.resume(throwing: CancellationError())
     }
 
     func waitUntilEntered() async {
