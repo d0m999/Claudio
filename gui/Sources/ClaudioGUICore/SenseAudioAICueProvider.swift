@@ -247,6 +247,13 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
                     item.url,
                     policy: assetPolicy,
                     deadline: deadline)
+                // The SFX contract fixes `output_format` to MP3. MIME and the provider's JSON
+                // declaration are both untrusted, so reject a valid non-MP3 container here rather
+                // than letting the format-agnostic engine accept it. Keep this provider-specific:
+                // other routes, notably Qwen, legitimately return WAV.
+                guard sniffAudioFormat(fetched.data) == .mp3 else {
+                    continue
+                }
                 guard let ordinal = AICueCandidateOrdinal(rawValue: item.variantIndex + 1) else {
                     throw AICueProviderError.invalidAudioResponse
                 }

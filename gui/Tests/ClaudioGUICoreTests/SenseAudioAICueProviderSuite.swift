@@ -474,6 +474,44 @@ func runSenseAudioAICueProviderSuites() async {
             "partial 必须保留真实候选 3，不得压缩成候选 1")
     }
 
+    await suite("SenseAudio SFX：声明 MP3 但实际为 WAV/AIFF 时只淘汰对应单项") {
+        let urls = (0...2).map {
+            "\(senseAudioAssetOrigin)/generated/sniff-\($0).mp3?signature=\($0)"
+        }
+        let response = senseAudioSFXResponse(
+            status: "completed",
+            items: (0...2).map { senseAudioSFXItem(index: $0, url: urls[$0]) })
+        let provider = senseAudioProvider(
+            transport: SenseAudioUnaryTransportFixture([.success(response)]),
+            assetFetcher: SenseAudioAssetFetcherFixture([
+                .success(validWAVData(), "audio/mpeg"),
+                .success(validMP3ID3Data(), "audio/mpeg"),
+                .success(validAIFFData(), "audio/mpeg"),
+            ]))
+
+        let candidates = try! await provider.generateCandidateSet(
+            plan: senseAudioEffectPlan(),
+            credential: try! SensitiveCredentialInput("fixture-key"),
+            deadline: .startingNow())
+        expect(
+            candidates.map(\.identity)
+                == [.numbered(AICueCandidateOrdinal(rawValue: 2)!)],
+            "SFX adapter 必须按实际字节只保留真正的 MP3，并保留 provider ordinal")
+
+        let noMP3Provider = senseAudioProvider(
+            transport: SenseAudioUnaryTransportFixture([.success(response)]),
+            assetFetcher: SenseAudioAssetFetcherFixture([
+                .success(validWAVData(), "audio/mpeg"),
+                .success(validAIFFData(), "audio/mpeg"),
+                .success(Data("not-audio".utf8), "audio/mpeg"),
+            ]))
+        let noMP3Candidates = try! await noMP3Provider.generateCandidateSet(
+            plan: senseAudioEffectPlan(),
+            credential: try! SensitiveCredentialInput("fixture-key"),
+            deadline: .startingNow())
+        expect(noMP3Candidates.isEmpty, "零个真实 MP3 必须交由 engine 判定 insufficient candidates")
+    }
+
     await suite("SenseAudio SFX：未知 batch 状态、index/URL 冲突和越界 URL 整批拒绝") {
         let url0 = "\(senseAudioAssetOrigin)/generated/structure-0.mp3?signature=zero"
         let url1 = "\(senseAudioAssetOrigin)/generated/structure-1.mp3?signature=one"
