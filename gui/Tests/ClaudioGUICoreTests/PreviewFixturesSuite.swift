@@ -1,6 +1,7 @@
 import ClaudioCore
 import ClaudioGUICore
 import ClaudioLocalization
+import ClaudioSettingsPresentation
 import Foundation
 
 // MARK: - PreviewFixtures: single-source-of-truth + exhaustiveness (ENGINEERING.md T14 D1/D3)
@@ -132,6 +133,7 @@ func runPreviewFixturesSuites() {
             "aiCueGallery.composer.generating",
             "aiCueGallery.composer.candidates",
             "aiCueGallery.composer.senseaudio-partial",
+            "aiCueGallery.composer.senseaudio-partial-playing",
             "aiCueGallery.composer.playing",
             "aiCueGallery.composer.adopting",
             "aiCueGallery.composer.applied",
@@ -554,7 +556,7 @@ func runPreviewFixturesSuites() {
                     "qwen-beijing.unavailable", "senseaudio-cn.missing",
                     "senseaudio-cn.voice-unavailable", "composer.editing", "composer.generating",
                     "composer.candidates", "composer.playing", "composer.adopting",
-                    "composer.senseaudio-partial",
+                    "composer.senseaudio-partial", "composer.senseaudio-partial-playing",
                     "composer.applied", "composer.unsupported-modality",
                     "composer.unsupported-locale", "composer.provider-failure",
                     "composer.validation-failure", "composer.display-name-failure",
@@ -563,7 +565,9 @@ func runPreviewFixturesSuites() {
                     "composer.adoption-rollback",
                 ]),
             "AI Cue gallery 不得漏掉凭据、播放/采用或失败族")
-        let partial = PreviewFixtures.AICueGalleryScenario.senseAudioPartial.previewState
+        let partialFixture = SettingsPresentationFixtures.generalLogin(
+            aiCueScenario: .senseAudioPartial)
+        let partial = partialFixture.aiCueViewModel
         expect(
             partial.providerProfileID == .senseAudioChina
                 && partial.generation?.profileID == .senseAudioChina
@@ -579,11 +583,14 @@ func runPreviewFixturesSuites() {
             "DEBUG fixture 不得把 SenseAudio 反向加入 production registry")
         expect(
             PreviewFixtures.AICueGalleryScenario.playing.playingCandidateID != nil
+                && PreviewFixtures.AICueGalleryScenario.senseAudioPartialPlaying
+                    .playingCandidateID
+                    == partial.generation?.candidates.last?.id
                 && PreviewFixtures.AICueGalleryScenario.candidates.playingCandidateID == nil,
             "playing 必须是候选状态上的正交视觉事实，不能伪造第二个 composer phase")
         expect(
             PreviewFixtures.AICueGalleryScenario.qwenBeijingPendingReplacement
-                .previewState.credentialStatus
+                .previewState().credentialStatus
                 == .stored(verification: .verified, hasPendingReplacement: true),
             "Qwen pending replacement 必须保留 active verified 与 pending 两条事实")
         expect(
@@ -591,10 +598,12 @@ func runPreviewFixturesSuites() {
                 PreviewFixtures.AICueGalleryScenario.elevenLabsProbeFailure,
                 .qwenSingaporeSaveFailure,
                 .miniMaxDeleteFailure,
-            ].allSatisfy { $0.previewState.credentialFailure != nil },
+            ].allSatisfy { $0.previewState().credentialFailure != nil },
             "credential probe/save/delete failure 必须各有真实 credentialFailure fixture")
+        let displayNameFixture = SettingsPresentationFixtures.generalLogin(
+            aiCueScenario: .displayNameFailure)
         expect(
-            PreviewFixtures.AICueGalleryScenario.displayNameFailure.previewState.failure
+            displayNameFixture.aiCueViewModel.failure
                 == .displayName(.displayNameTooLong(maximumCharacters: 40)),
             "候选采用前的 display-name validation failure 必须进入 gallery")
     }

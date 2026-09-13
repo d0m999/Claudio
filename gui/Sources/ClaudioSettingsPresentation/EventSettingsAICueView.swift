@@ -485,7 +485,11 @@ struct EventSettingsAICueComposerView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(viewModel.phase == .adopting || !adoptionEnabled)
-            .accessibilityLabel(l10n.text(.aiCueUseForEvent))
+            .accessibilityLabel(
+                localizedAICueCandidateUseAccessibilityLabel(
+                    identity: candidate.identity,
+                    language: languageStore.language)
+            )
             .accessibilityHint(
                 adoptionEnabled ? l10n.text(.aiCueUseForEvent) : adoptionUnavailableHint
             )

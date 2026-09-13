@@ -472,6 +472,7 @@ public enum PreviewFixtures {
         case generating = "composer.generating"
         case candidates = "composer.candidates"
         case senseAudioPartial = "composer.senseaudio-partial"
+        case senseAudioPartialPlaying = "composer.senseaudio-partial-playing"
         case playing = "composer.playing"
         case adopting = "composer.adopting"
         case applied = "composer.applied"
@@ -490,17 +491,38 @@ public enum PreviewFixtures {
         public var rendersCredentialSheet: Bool { facts.rendersCredentialSheet }
 
         public var playingCandidateID: UUID? {
-            self == .playing ? PreviewFixtures.aiCueCandidateIDs[0] : nil
+            switch self {
+            case .playing: PreviewFixtures.aiCueCandidateIDs[0]
+            case .senseAudioPartialPlaying: PreviewFixtures.aiCueCandidateIDs[2]
+            default: nil
+            }
         }
 
-        public var previewState: AICueGenerationPreviewState {
-            let session = rendersCredentialSheet ? nil : PreviewFixtures.aiCueSession
+        package var previewSession: AICueComposerSession? {
+            rendersCredentialSheet ? nil : PreviewFixtures.aiCueSession
+        }
+
+        package var candidateIdentities: [AICueCandidateIdentity] {
+            guard facts.needsGeneration else { return [] }
+            if usesSenseAudioPartialGeneration {
+                return [1, 3].map { .numbered(AICueCandidateOrdinal(rawValue: $0)!) }
+            }
+            return AICueVariant.allCases.map(AICueCandidateIdentity.styled)
+        }
+
+        package func previewState(
+            candidateAssets: [AICueCandidateIdentity: AICueTemporaryAudioAsset] = [:]
+        ) -> AICueGenerationPreviewState {
+            precondition(
+                Set(candidateAssets.keys) == Set(candidateIdentities),
+                "AI Cue gallery candidates require exact, lifecycle-owned audio assets")
+            let session = previewSession
             let generation: AICueGeneration?
             if facts.needsGeneration {
                 generation =
-                    self == .senseAudioPartial
-                    ? PreviewFixtures.senseAudioPartialGeneration
-                    : PreviewFixtures.aiCueGeneration
+                    usesSenseAudioPartialGeneration
+                    ? PreviewFixtures.senseAudioPartialGeneration(candidateAssets: candidateAssets)
+                    : PreviewFixtures.aiCueGeneration(candidateAssets: candidateAssets)
             } else {
                 generation = nil
             }
@@ -519,6 +541,10 @@ public enum PreviewFixtures {
                 generation: self == .applied ? nil : generation,
                 failure: facts.composerFailure,
                 adoptionOutcome: outcome)
+        }
+
+        private var usesSenseAudioPartialGeneration: Bool {
+            self == .senseAudioPartial || self == .senseAudioPartialPlaying
         }
 
         private var facts: Facts {
@@ -611,7 +637,7 @@ public enum PreviewFixtures {
                 Facts(composerPhase: .generating)
             case .candidates, .playing:
                 Facts(composerPhase: .candidatesReady, needsGeneration: true)
-            case .senseAudioPartial:
+            case .senseAudioPartial, .senseAudioPartialPlaying:
                 Facts(
                     providerProfileID: .senseAudioChina,
                     composerPhase: .candidatesReady,
@@ -788,66 +814,77 @@ public enum PreviewFixtures {
         styleDescription: "温和、清晰、短促",
         targetDurationMilliseconds: 1_800,
         instructionVersion: AICueSoundPlanner.instructionVersion)
-    private static let aiCueGeneration = AICueGeneration(
-        id: aiCueGenerationID,
-        profileID: .elevenLabsGlobal,
-        plan: aiCuePlan,
-        candidates: zip(AICueVariant.allCases, aiCueCandidateIDs).map { variant, id in
-            AICueCandidate(
-                id: id,
-                variant: variant,
-                asset: AICueTemporaryAudioAsset(
-                    fileURL: URL(
-                        fileURLWithPath: "/dev/null/claudio-ai-cue-\(variant.rawValue).mp3"),
-                    byteCount: 128_000,
-                    sniffedFormat: .mp3),
-                durationMilliseconds: 1_600 + variant.ordinal * 100,
-                mediaType: "audio/mpeg",
-                provenance: AICueCandidateProvenance(
-                    providerID: .elevenLabs,
-                    profileID: .elevenLabsGlobal,
-                    modelID: "eleven_v3",
-                    generationID: aiCueGenerationID,
-                    requestOrdinal: variant.ordinal,
-                    providerRequestID: "gallery-\(variant.ordinal)"))
-        },
-        generatedAt: Date(timeIntervalSince1970: 1_700_000_000))
-    private static let senseAudioPartialGeneration = AICueGeneration(
-        id: UUID(uuidString: "A1000000-0000-0000-0000-000000000002")!,
-        profileID: .senseAudioChina,
-        plan: AICueSoundPlan(
-            suggestedDisplayName: "短促木琴",
-            modality: .soundEffect,
-            soundDescription: "短促木琴音效",
-            spokenContent: nil,
-            languageTag: nil,
-            styleDescription: "短促木琴音效",
-            targetDurationMilliseconds: 1_500,
-            instructionVersion: AICueSoundPlanner.instructionVersion),
-        candidates: [1, 3].map { ordinalValue in
-            let ordinal = AICueCandidateOrdinal(rawValue: ordinalValue)!
-            return AICueCandidate(
-                id: aiCueCandidateIDs[ordinalValue - 1],
-                identity: .numbered(ordinal),
-                asset: AICueTemporaryAudioAsset(
-                    fileURL: URL(
-                        fileURLWithPath:
-                            "/dev/null/claudio-ai-cue-numbered-\(ordinalValue).mp3"),
-                    byteCount: 96_000,
-                    sniffedFormat: .mp3),
-                durationMilliseconds: 1_400 + ordinalValue * 100,
-                mediaType: "audio/mpeg",
-                provenance: AICueCandidateProvenance(
-                    providerID: .senseAudio,
-                    profileID: .senseAudioChina,
-                    modelID: "senseaudio-sfx-1.0-260626",
-                    generationID: UUID(
-                        uuidString: "A1000000-0000-0000-0000-000000000002")!,
-                    requestOrdinal: ordinalValue,
-                    providerRequestID: "gallery-senseaudio-\(ordinalValue)"))
-        },
-        completion: .partial,
-        generatedAt: Date(timeIntervalSince1970: 1_700_000_000))
+    private static func aiCueGeneration(
+        candidateAssets: [AICueCandidateIdentity: AICueTemporaryAudioAsset]
+    ) -> AICueGeneration {
+        AICueGeneration(
+            id: aiCueGenerationID,
+            profileID: .elevenLabsGlobal,
+            plan: aiCuePlan,
+            candidates: zip(AICueVariant.allCases, aiCueCandidateIDs).map { variant, id in
+                let identity = AICueCandidateIdentity.styled(variant)
+                return AICueCandidate(
+                    id: id,
+                    identity: identity,
+                    asset: candidateAssets[identity]!,
+                    durationMilliseconds: 1_600 + variant.ordinal * 100,
+                    mediaType: previewMediaType(for: candidateAssets[identity]!.sniffedFormat),
+                    provenance: AICueCandidateProvenance(
+                        providerID: .elevenLabs,
+                        profileID: .elevenLabsGlobal,
+                        modelID: "eleven_v3",
+                        generationID: aiCueGenerationID,
+                        requestOrdinal: variant.ordinal,
+                        providerRequestID: "gallery-\(variant.ordinal)"))
+            },
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000))
+    }
+
+    private static func senseAudioPartialGeneration(
+        candidateAssets: [AICueCandidateIdentity: AICueTemporaryAudioAsset]
+    ) -> AICueGeneration {
+        let generationID = UUID(uuidString: "A1000000-0000-0000-0000-000000000002")!
+        return AICueGeneration(
+            id: generationID,
+            profileID: .senseAudioChina,
+            plan: AICueSoundPlan(
+                suggestedDisplayName: "短促木琴",
+                modality: .soundEffect,
+                soundDescription: "短促木琴音效",
+                spokenContent: nil,
+                languageTag: nil,
+                styleDescription: "短促木琴音效",
+                targetDurationMilliseconds: 1_500,
+                instructionVersion: AICueSoundPlanner.instructionVersion),
+            candidates: [1, 3].map { ordinalValue in
+                let ordinal = AICueCandidateOrdinal(rawValue: ordinalValue)!
+                let identity = AICueCandidateIdentity.numbered(ordinal)
+                return AICueCandidate(
+                    id: aiCueCandidateIDs[ordinalValue - 1],
+                    identity: identity,
+                    asset: candidateAssets[identity]!,
+                    durationMilliseconds: 1_400 + ordinalValue * 100,
+                    mediaType: previewMediaType(for: candidateAssets[identity]!.sniffedFormat),
+                    provenance: AICueCandidateProvenance(
+                        providerID: .senseAudio,
+                        profileID: .senseAudioChina,
+                        modelID: "senseaudio-sfx-1.0-260626",
+                        generationID: generationID,
+                        requestOrdinal: ordinalValue,
+                        providerRequestID: "gallery-senseaudio-\(ordinalValue)"))
+            },
+            completion: .partial,
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000))
+    }
+
+    private static func previewMediaType(for format: AudioFormat) -> String {
+        switch format {
+        case .wav: "audio/wav"
+        case .mp3: "audio/mpeg"
+        case .aiff: "audio/aiff"
+        case .m4a: "audio/mp4"
+        }
+    }
     private static let aiCueAdoptionOutcome = AICueComposerAdoptionOutcome(
         finalDisplayName: aiCueDisplayName)
 

@@ -591,7 +591,9 @@ func runSettingsPresentationLifecycleSuites() async {
     }
 
     await suite("Settings Events AI generation：emitted tuple 必须签发当前 candidate adoption permit") {
-        let generation = PreviewFixtures.AICueGalleryScenario.candidates.previewState.generation!
+        let generationFixture = SettingsPresentationFixtures.generalLogin(
+            aiCueScenario: .candidates)
+        let generation = generationFixture.aiCueViewModel.generation!
         let aiCueViewModel = AICueGenerationViewModel(
             credentialManager: SettingsLifecycleCredentialManager(),
             generator: SettingsLifecycleGenerator(generation: generation),

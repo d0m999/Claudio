@@ -398,6 +398,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let aiCueCandidateDuration: Self = "ai-cue.candidate.duration"
     public static let aiCueCandidatePlayAction: Self = "ai-cue.candidate.play-action"
     public static let aiCueCandidateStopAction: Self = "ai-cue.candidate.stop-action"
+    public static let aiCueCandidateUseAction: Self = "ai-cue.candidate.use-action"
     public static let aiCueCandidatePlaybackStarted: Self = "ai-cue.candidate.playback-started"
     public static let aiCueCandidatePlaybackStopped: Self = "ai-cue.candidate.playback-stopped"
     public static let aiCueComposerClosed: Self = "ai-cue.composer.closed"
@@ -1219,6 +1220,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .aiCueNameHelp, .aiCueCandidateClear, .aiCueCandidateBrisk, .aiCueCandidateRestrained,
         .aiCueCandidateNumbered, .aiCueCandidatePartial,
         .aiCueCandidateDuration, .aiCueCandidatePlayAction, .aiCueCandidateStopAction,
+        .aiCueCandidateUseAction,
         .aiCueCandidatePlaybackStarted, .aiCueCandidatePlaybackStopped, .aiCueComposerClosed,
         .aiCueComposerClosedCandidatesCleared,
         .aiCueUseForEvent, .aiCueRegenerate, .aiCueAppliedTitle,

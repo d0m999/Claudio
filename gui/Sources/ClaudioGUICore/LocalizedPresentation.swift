@@ -567,6 +567,16 @@ public func localizedAICueCandidatePreviewAccessibilityLabel(
     return l10n.format(action, title) + " · " + duration
 }
 
+public func localizedAICueCandidateUseAccessibilityLabel(
+    identity: AICueCandidateIdentity,
+    language: ClaudioAppLanguage
+) -> String {
+    let l10n = ClaudioL10n(language: language)
+    return l10n.format(
+        .aiCueCandidateUseAction,
+        localizedAICueCandidateActionName(identity, language: language))
+}
+
 public func localizedAICueCandidatePreviewAccessibilityLabel(
     variant: AICueVariant,
     duration: String,
