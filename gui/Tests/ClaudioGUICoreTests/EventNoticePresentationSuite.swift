@@ -35,12 +35,21 @@ private func makePresentationRecord(
 func runEventNoticePresentationSuites() {
     suite("EventNoticeView：五行列表及小屏长详情实际挂载可滚动到达") {
         _ = NSApplication.shared
+        let diagnosticsEnabled =
+            ProcessInfo.processInfo.environment["CLAUDIO_HANG_DIAGNOSTICS"] == "1"
+        func diagnostic(_ message: String) {
+            guard diagnosticsEnabled else { return }
+            FileHandle.standardError.write(Data("  EVENT_NOTICE_DIAGNOSTIC \(message)\n".utf8))
+        }
         @MainActor func descendants(_ view: NSView) -> [NSView] {
             [view] + view.subviews.flatMap { descendants($0) }
         }
         for appearance in [NSAppearance.Name.aqua, .darkAqua] {
             for language in [ClaudioAppLanguage.english, .zhHans] {
                 for count in [0, 1, 5, 7, 50] {
+                    let diagnosticContext =
+                        "appearance=\(appearance.rawValue) language=\(language.rawValue) count=\(count)"
+                    diagnostic("iteration-start \(diagnosticContext)")
                     let clock = ManualEventNoticeScheduler()
                     let model = EventNoticeModel(
                         receiverEpoch: UUID(), now: { clock.time }, scheduler: clock.scheduler())
@@ -75,8 +84,10 @@ func runEventNoticePresentationSuites() {
                     window.orderFrontRegardless()
                     defer { window.orderOut(nil); window.close() }
                     expect(!(window is NSPanel), "命令行 harness 不使用需要特殊激活语义的 NSPanel")
+                    diagnostic("before-list-layout \(diagnosticContext)")
                     hosting.layoutSubtreeIfNeeded()
                     RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+                    diagnostic("after-list-layout \(diagnosticContext)")
                     expect(
                         abs(hosting.frame.height - height) <= 1,
                         "窗口遵循模型布局高度：count=\(count) actual=\(hosting.frame.height) expected=\(height)"
@@ -118,12 +129,15 @@ func runEventNoticePresentationSuites() {
                         count > 0,
                         let action = model.snapshot.attentionReminders.first?.action
                     else {
+                        diagnostic("iteration-complete \(diagnosticContext)")
                         continue
                     }
+                    diagnostic("before-open-detail \(diagnosticContext)")
                     _ = model.viewSource(action)
                     window.setFrame(NSRect(x: 0, y: 0, width: 300, height: 180), display: true)
                     hosting.layoutSubtreeIfNeeded()
                     RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+                    diagnostic("after-detail-layout \(diagnosticContext)")
                     let views = descendants(hosting)
                     guard let scroll = views.compactMap({ $0 as? NSScrollView }).first,
                         let document = scroll.documentView,
@@ -147,6 +161,7 @@ func runEventNoticePresentationSuites() {
                     hosting.layoutSubtreeIfNeeded()
                     let point = document.convert(NSPoint(x: 45, y: copyRect.midY), to: nil)
                     for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                        diagnostic("before-send-event type=\(type.rawValue) \(diagnosticContext)")
                         if let event = NSEvent.mouseEvent(
                             with: type, location: point,
                             modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
@@ -154,6 +169,7 @@ func runEventNoticePresentationSuites() {
                         {
                             window.sendEvent(event)
                         }
+                        diagnostic("after-send-event type=\(type.rawValue) \(diagnosticContext)")
                     }
                     expect(copyCalls == 1, "滚动后的真实复制按钮回送捕获版本")
                     RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
@@ -177,6 +193,7 @@ func runEventNoticePresentationSuites() {
                                 .appendingPathComponent(
                                     "copy-failed-\(appearance.rawValue)-\(language.rawValue).png"))
                     }
+                    diagnostic("iteration-complete \(diagnosticContext)")
                 }
             }
         }
