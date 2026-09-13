@@ -132,6 +132,14 @@ _Avoid_: 全局三候选假设、界面临时放宽
 一次可展示候选集合的完整程度。`complete` 恰好包含三个有效候选；`partial` 只包含一至两个有效候选，且仅在所选路线的候选集合政策明确允许时成立。
 _Avoid_: 导入部分成功、manifest 部分写入、任意残缺响应
 
+**生产资格（Production Eligibility）**:
+一个 Provider profile 可以出现在可分发应用中的条件。实现完成、fixture 通过或本地构建成功都不等于具备生产资格；涉及远端资源的 profile 还必须把官方资源合同、经授权的真实调用、原生人工验收与最终构建身份绑定为同一组证据。
+_Avoid_: 已实现即上线、自动门禁即正式验收、单路线通过即开放整个 profile
+
+**非分发验收候选（Non-distribution Acceptance Candidate）**:
+只为经授权的真实 Provider 与原生人工验收构造、并绑定明确源码、固定政策和 Bundle 身份的应用候选。它不得发布或交付，也不会仅因验收开始而取得生产资格；候选身份发生实质变化时，受影响的证据必须重验。
+_Avoid_: release candidate、生产构建、可公开下载的测试版
+
 **提示音采用目标（Cue Adoption Target）**:
 一次采用操作捕获的 `HostSurfaceID`、公共 `Event` 和用户声音包 ID。三者在导入和绑定前必须重新验证，避免生成期间 UI 选择变化导致写入错误来源或声音包。
 _Avoid_: 只传 Event、当前 UI 隐式选择、全局目标

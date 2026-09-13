@@ -1,0 +1,294 @@
+# SenseAudio 生产候选验收、证据身份与回滚台账
+
+本文件是 `senseaudio-cn` 从受门禁实现走向生产暴露的唯一操作台账。领域与网络合同仍由
+`CONTEXT.md`、ADR 0011 和 `plan/PLAN-CONSUMER-TTS-EXECUTION.md` 拥有；本文件只规定如何构造
+非分发验收候选、如何记录证据、何时允许 activation，以及如何安全回滚。
+
+发布这份文档不会完成任何门禁。本文创建时没有使用真实 API Key、没有执行付费调用、没有联系
+SenseAudio、没有构造非分发 app、没有完成原生键盘或 VoiceOver 验收，也没有授权 production
+activation。默认 registry 仍只有既有四个 profile，`productionSenseAudioAssetPolicy` 必须保持
+`nil`，默认 Provider 仍为 `elevenlabs-global`。
+
+关联工作：总规格 #183；本台账 #188；外部验收 #187；外部门禁通过后的 activation #189。
+
+## 状态词与初始状态
+
+只使用以下状态，禁止用“基本完成”“看起来可用”代替：
+
+- `NOT RUN`：没有在绑定身份上执行；
+- `NOT AUTHORIZED`：需要真实 Key、付费、厂商联系或生产变更，但尚未取得单独授权；
+- `NOT VERIFIED`：缺少满足本台账的证据；
+- `BLOCKED EXTERNAL`：本地工作不能替代的外部合同或真实系统证据尚未取得；
+- `CLOSED`：production policy 明确为 `nil`，profile 未进入默认 allowlist；
+- `PREPARED LOCAL`：绑定 commit 上的 fixture、harness 与 build 已通过，仅证明本地准备；
+- `PASSED` / `FAILED`：对应门禁在绑定身份上有完整、脱敏且可复核的记录；
+- `ACTIVATED`：单独评审的 production policy 与 allowlist 变更已完成，且后续 Bundle 复验通过。
+
+本文创建时的状态如下；后续只能在实际执行并填写证据引用后更新：
+
+| 层级 | 初始状态 | 当前事实 |
+|---|---|---|
+| 本地实现聚合与自动门禁 | `NOT RUN` | 已有 gated SenseAudio 实现与 deterministic fixtures；#183 hardening 子任务尚需在聚合 commit 上复验 |
+| production 暴露 | `CLOSED` | `productionSenseAudioAssetPolicy == nil`；`senseaudio-cn` 不在默认 allowlist |
+| 官方资源合同 | `BLOCKED EXTERNAL` | 稳定 exact origin、MIME、免 Bearer、redirect 与有效期/轮换合同尚无已记录证据 |
+| 首次真实付费 smoke | `NOT AUTHORIZED` / `NOT RUN` | #188 不授权真实 Key 或付费调用 |
+| 原生听感、键盘、VoiceOver | `NOT RUN` | fixture、SwiftUI harness 或 build 不能替代 |
+| production activation | `BLOCKED EXTERNAL` | 由 #189 单独实施；本 ticket 不修改 policy/allowlist |
+| Release / distribution | `NOT RUN` | 没有签名 universal RC、notarization、双架构或正式批准 |
+
+## 不可跳过的门禁顺序
+
+```text
+本地准备
+  → 官方资源合同
+  → 单独授权的付费 TTS/SFX smoke
+  → 绑定同一非分发候选的听感、键盘与 VoiceOver
+  → 单独评审的 activation
+  → 最终 Bundle 复验
+  → 独立 Release/分发流程
+```
+
+前一层成功不能替代后一层。TTS 成功不能证明 SFX；SFX 返回 URL 不能证明资源 origin 可信；HTTP 2xx
+不能证明音频可播放；自动化不能证明原生键盘、VoiceOver 或真实听感；ad-hoc app 不能证明 Release。
+
+## 1. 本地准备与非分发候选构造
+
+### 1.1 聚合 commit
+
+先在隔离 worktree 中汇总 #183 的已批准实现，工作树与 index 必须为空。记录完整 commit 和 tree
+身份，不接受分支名、短 SHA 或未提交补丁作为候选身份：
+
+```bash
+git status --porcelain=v1
+git rev-parse HEAD
+git rev-parse HEAD^{tree}
+```
+
+在 production policy 仍为 `nil` 的该 commit 上执行仓库门禁：
+
+```bash
+swift run --package-path helper claudio-tests
+swift run --package-path gui claudio-gui-tests
+swift build -c debug --package-path gui --product ClaudioGUI
+jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings
+git diff --check
+```
+
+只有命令、完整 commit、环境和脱敏结果都记录后，才可把本层改为 `PREPARED LOCAL`。这仍然不证明
+真实 Provider、资源合同、真实音频、原生 UI、签名、公证或 production readiness。
+
+### 1.2 官方合同先于 policy
+
+非分发候选只能使用 SenseAudio 官方明确确认的精确 HTTPS origin:443 与 MIME；随后真实 smoke 必须在
+同一 policy 上验证这些事实，才能继续原生验收与 activation。
+不得从 schema 示例、一次返回的临时 host、DNS 后缀或 URL 路径推断通配范围。若只能获得动态或不可
+确认的 host，状态写 `FAILED`，停止构造候选；不得改成任意 HTTPS、自定义资源服务器或 TTS-only。
+
+用于证据绑定的 policy 规范化记录固定为 UTF-8、LF、key 排序的 JSON，只包含：
+
+```json
+{
+  "acceptable_mime_types": ["<sorted exact MIME>"],
+  "allowed_origins": ["https://<exact-host>:443"],
+  "profile_id": "senseaudio-cn"
+}
+```
+
+对这份规范化字节计算 SHA-256，并同时记录完整内容与 digest。不得写入路径、签名 query、示例完整
+URL 或 credential。policy 内容或 digest 变化会使依赖它的 smoke、原生候选与 activation 证据失效。
+
+### 1.3 构造非分发 app
+
+真实 Provider 与原生验收需要一个显式标记为 `NON-DISTRIBUTION` 的隔离候选。它从 1.1 的聚合 commit
+建立，只允许加入已经确认的精确 asset policy 与让该固定 profile 可达所必需的 activation patch；
+该 patch 必须形成独立本地 commit，不能夹带其他功能或证据文件。可分发分支中的
+`productionSenseAudioAssetPolicy` 在外部门禁完成前仍必须为 `nil`。
+
+验收候选不得上传 release、公开下载、发给未授权测试者或合入可分发分支。构建前再次确认工作树为空，
+然后运行完整门禁和本地 bundle 构建：
+
+```bash
+bash scripts/dev-bundle.sh
+bash scripts/check-release-size.sh dist/claudi0.app
+```
+
+`scripts/dev-bundle.sh` 只产生当前架构、ad-hoc signed 的本地 inspection app。它不是 universal、
+Developer ID signed、notarized 或可分发 RC。候选 archive 应放在 Git 外的临时目录；它只用于固定本次
+被测试字节，验收结束后可删除：
+
+```bash
+candidate_evidence_dir="$(mktemp -d)"
+ditto -c -k --sequesterRsrc --keepParent \
+  dist/claudi0.app "$candidate_evidence_dir/claudi0-NON-DISTRIBUTION.zip"
+shasum -a 256 "$candidate_evidence_dir/claudi0-NON-DISTRIBUTION.zip"
+```
+
+每个候选必须记录以下身份；任一项待填都不能开始付费或原生验收：
+
+| 字段 | 值 |
+|---|---|
+| Candidate ID | 待填（`NOT VERIFIED`） |
+| 聚合 base commit / tree | 待填（完整 SHA） |
+| 候选 commit / tree | 待填（完整 SHA） |
+| base→candidate 精确 diff | 待填（仅 policy/activation patch） |
+| Policy 规范化 JSON / SHA-256 | 待填 |
+| `CFBundleIdentifier` | 待填 |
+| `CFBundleShortVersionString` / `CFBundleVersion` | 待填 |
+| CPU / macOS | 待填 |
+| signing identity / Team ID / CDHash | 待填；ad-hoc 必须明确写 ad-hoc |
+| 主 app executable SHA-256 | 待填 |
+| helper / LoginItem executable SHA-256 | 待填 |
+| 非分发 archive SHA-256 | 待填；archive 保持在 Git 外 |
+| 自动门禁结果引用 | 待填 |
+
+不得用 `dist/` 路径、分支名、窗口截图或“刚刚构建”替代这些身份字段。
+
+## 2. 官方资源合同
+
+官方确认必须覆盖同一个固定 `senseaudio-cn` SFX route，并记录确认日期与可复核的脱敏引用：
+
+| 合同 | 状态 | 允许记录的结果 |
+|---|---|---|
+| 稳定下载 origin | `NOT VERIFIED` | 精确 scheme + hostname + `:443`；不含 path/query |
+| MIME | `NOT VERIFIED` | 明确允许的 exact MIME 集合 |
+| GET 认证 | `NOT VERIFIED` | 是否完全不需要 Bearer、Cookie、Referer |
+| redirect | `NOT VERIFIED` | 是否保证零 redirect；实际 smoke 也必须为零 |
+| URL 有效期与 host 轮换 | `NOT VERIFIED` | 非敏感合同摘要与确认日期 |
+
+厂商若无法确认任一项，写 `FAILED` 并保持生产门关闭。观察到一次成功响应不能代替官方稳定合同。
+
+## 3. 首次付费 smoke
+
+#188 不授权真实 Key 或付费。执行前必须取得一次新的、明确的授权，内容至少包括测试账户、可撤销限额
+Key、最大生成请求数、预计费用上限、候选身份和执行窗口。Key 只进入应用的 Keychain 输入路径；不得
+进入 shell history、环境变量、文档、issue、日志、截图或 Git。
+
+建议首次付费预算恰好为：
+
+- TTS：3 次生成 POST，对应三个 numbered speech 候选；
+- SFX：1 次 native-batch 生成 POST，`variants_count=3`；
+- 合计：最多 4 次生成 POST。
+
+`POST /v1/get_voice` 是保存 Key 所需的只读 probe，但必须另记网络尝试次数，不能把它称为已确认免费。
+SFX asset GET 也要记录尝试数；它不是增加生成 POST 预算的理由。SenseAudio 生成 POST 一律不自动 retry。
+任何失败后的第二轮生成、扩大预算或更换账户，都需要新的明确授权。asset GET 只能按既有合同执行同一
+URL 最多一次限定瞬态 retry。
+
+执行结果按路线独立记录：
+
+| 检查 | 状态 | 脱敏证据引用 |
+|---|---|---|
+| required voice probe 可见 `female_0033_b` | `NOT RUN` | 待填 |
+| TTS 三次 POST、零 retry | `NOT RUN` | 待填 |
+| TTS 三个 MP3 均通过 5 MiB / 3 秒本地检查 | `NOT RUN` | 待填 |
+| SFX 单次 batch POST、零 retry | `NOT RUN` | 待填 |
+| SFX 所有实际 URL 在首个 GET 前通过 exact policy preflight | `NOT RUN` | 待填 |
+| GET 无 credential、无 redirect、MIME 与 MP3 magic 匹配 | `NOT RUN` | 待填 |
+| complete/partial 与实际可播放候选数一致 | `NOT RUN` | 待填 |
+| `.mixed` / 非 `zh*` speech 在读 Key 与联网前失败 | `NOT RUN` | 待填（本地自动证据） |
+
+真实 smoke 失败时保留失败状态与脱敏原因，不自动增加预算，不把 TTS 成功写成整个 profile 成功。
+
+## 4. 原生与听感验收
+
+本层必须在 1.3 绑定的同一 app 字节、同一 policy 和同一 macOS/CPU 上完成。DEBUG gallery、fixture、
+compiled SwiftUI tests 与源代码检查只能作准备证据。
+
+| 流程 | 状态 | 必须观察 |
+|---|---|---|
+| profile 与披露 | `NOT RUN` | SenseAudio 名称、固定 voice 资格、`.cn` 非驻留承诺、费用/数据边界 |
+| credential | `NOT RUN` | 保存只读 probe；invalid key 与 voice missing 分开；失败保留旧 active key |
+| 中文 speech | `NOT RUN` | 恰好 3 个“候选 1/2/3”，均可播放、不截断、不朗读 style 描述 |
+| animal / soundEffect | `NOT RUN` | 各一次真实 SFX；候选与描述匹配 |
+| SFX partial | `NOT RUN` | 1/3 与 2/3 的可见 banner、候选顺序、VoiceOver 数量摘要 |
+| unsupported | `NOT RUN` | `.mixed` 与非中文 speech 在读 Key/联网前明确失败并保留描述 |
+| 键盘 | `NOT RUN` | profile、生成、候选、播放/停止、改名、采用、错误恢复的完整焦点顺序 |
+| VoiceOver | `NOT RUN` | 编号、时长、播放/停止、partial、名称与采用动作语义稳定 |
+| 采用与回滚 | `NOT RUN` | 采用走 `AudioImport`/bind；失败保留旧绑定；未采用候选清理 |
+
+听感记录只保存每个可见候选的 `pass/fail + 非敏感原因`。不得保存音频、台词、声音描述、响应正文或
+可反推出内容的逐字转录。numbered 候选只评价可辨差异和意图匹配，不虚构 styled 标准。
+
+## 5. 证据 allowlist 与禁区
+
+### 允许写入台账、issue 或评审材料
+
+- 完整 source commit/tree SHA、ticket/评审引用、执行时间、macOS 与 CPU；
+- 固定 endpoint path、model、voice、HTTP status 与脱敏 request ID；
+- 精确 asset origin（仅 scheme + hostname + port）、exact MIME、redirect 次数与 GET 是否带认证；
+- 每项字节数、时长、容器/magic 结论、候选数量、`complete` / `partial`；
+- 生成 POST / probe / asset GET 的尝试次数和批准预算是否用尽；
+- policy 的规范化 JSON 与 SHA-256；
+- Bundle identifier/version、架构、签名类型、Team ID/CDHash、可执行文件与 archive SHA-256；
+- 自动门禁的命令、通过/失败摘要；人工项目的 `pass/fail + 非敏感原因`。
+
+request ID 必须脱敏为不可用于查询原请求的摘要，例如只保留有标识的 SHA-256；不得保留原值。
+
+### 禁止写入或附加
+
+- API Key、Authorization、Cookie、Referer、Keychain 内容或任何可恢复 credential；
+- 声音描述、prompt、台词、请求 body、响应 body、错误中的原始 payload；
+- 完整 asset URL、path、签名 query、query 参数或 redirect target；
+- 生成音频、波形、可反推出内容的转录或包含音频的 screen recording；
+- 用户/账户标识、私有项目路径、临时目录、真实包名、manifest、receipt、日志原件；
+- 可能露出上述内容的终端输出、网络抓包、截图或第三方 dashboard 导出。
+
+若现有工具只能产出含禁区字段的原始文件，证据保留在受控本机且不进入仓库、issue 或评审附件；台账只
+写人工复核后的 allowlist 摘要。不要先提交再删除，因为 Git 历史仍会保留秘密。
+
+## 6. Activation 与最终 Bundle 绑定
+
+只有第 1–4 层全部 `PASSED`，#189 才可在单独分支中：
+
+1. 把官方确认、smoke 匹配的精确 policy 固化为非 `nil`；
+2. 将完整 `senseaudio-cn` 加入默认 allowlist，同时保持默认 Provider 为 `elevenlabs-global`；
+3. 不增加任意 endpoint/model/voice/region/origin，也不加入 TTS-only 或 fallback；
+4. 运行全部自动门禁，构造新的最终 Bundle，并完成最低限度的 profile、credential、speech、SFX、
+   partial、键盘、VoiceOver 与采用复验；
+5. 记录最终 commit/tree、policy digest 和 Bundle identity，并与非分发候选逐项比较。
+
+若最终 commit 与候选 commit 不同，必须记录相关路径的精确 diff。若 provider、registry、runtime、
+transport、asset fetch、generation、credential、UI、localization、音频验证或构建脚本有任何实质变化，
+受影响的付费、原生与 Bundle 证据必须重验；不能用“只是合并 commit”自行豁免。只有相关 source tree、
+policy digest 与实际 Bundle 字节都完成绑定后，状态才可写 `ACTIVATED`。
+
+Activation 仍不等于 Release。universal 架构、Developer ID、Hardened Runtime、notarization、staple、
+Gatekeeper、DMG checksum、双架构真机与正式批准继续走独立 release 台账。非分发 ad-hoc 候选不能被
+改名或复制成 RC。
+
+## 7. 安全回滚
+
+如果外部合同失败、Provider 行为漂移、回归出现或上线后需要撤回：
+
+1. 在单独评审的修复中把 production asset policy 恢复为 `nil` 并从默认 allowlist 移除
+   `senseaudio-cn`，或分发上一已知安全版本；
+2. 验证 production registry 恢复既有四 profile，默认仍是 `elevenlabs-global`，且不会自动改用其他
+   Provider 重新生成；
+3. 不删除或改写 `senseaudio-cn` Keychain item；是否删除凭据仍由用户显式决定；
+4. 不删除已采用的本地音频、用户声音包或 manifest 绑定；它们已经是普通本地资产；
+5. 只清理由当前 generation 拥有、尚未采用的私有临时候选，不触碰共享根、兄弟目录或历史资产；
+6. 保留脱敏验收摘要与撤回原因，移除任何公开下载候选，但不伪造旧证据为“从未发生”。
+
+回滚只关闭新的生成入口，不撤销用户已完成的本地采用，也不引入跨 Provider fallback。
+
+## 8. 验收记录模板
+
+以下字段全部绑定后才允许签字；不得预填成功：
+
+| 字段 | 结果 |
+|---|---|
+| Candidate ID | 待填（`NOT VERIFIED`） |
+| Source commit / tree | 待填 |
+| Policy JSON / SHA-256 | 待填 |
+| Bundle identity / executable digests | 待填 |
+| 自动门禁 | `NOT RUN` |
+| 官方资源合同 | `NOT VERIFIED` |
+| 付费授权引用 / 预算 | `NOT AUTHORIZED` |
+| TTS smoke | `NOT RUN` |
+| SFX smoke | `NOT RUN` |
+| 听感 | `NOT RUN` |
+| 键盘 | `NOT RUN` |
+| VoiceOver | `NOT RUN` |
+| Activation commit / Bundle | `BLOCKED EXTERNAL` |
+| Release | `NOT RUN` |
+| 验收人 / 日期 / 结论 | 待填；当前不得写通过 |
