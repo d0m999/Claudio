@@ -72,7 +72,7 @@ func runEventNoticePresentationSuites() {
                     panel.appearance = NSAppearance(named: appearance)
                     panel.contentView = hosting
                     panel.setFrame(NSRect(x: 0, y: 0, width: 440, height: height), display: true)
-                    panel.orderFront(nil)
+                    panel.orderFrontRegardless()
                     defer { panel.orderOut(nil); panel.close() }
                     hosting.layoutSubtreeIfNeeded()
                     RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))

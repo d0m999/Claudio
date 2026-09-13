@@ -30,8 +30,8 @@ func runHookInputReaderSuites() {
             "message": String(repeating: "[}\\\"", count: 1800),
         ])
         let writer = pipe.fileHandleForWriting
+        writer.write(payload.prefix(3000))
         DispatchQueue.global().async {
-            writer.write(payload.prefix(3000))
             Thread.sleep(forTimeInterval: 0.002)
             writer.write(payload.dropFirst(3000))
         }
