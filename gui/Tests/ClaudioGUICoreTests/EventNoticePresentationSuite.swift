@@ -64,16 +64,17 @@ func runEventNoticePresentationSuites() {
                                 return model.copySessionID(action) { _ in false }
                             }, onClose: { model.dismiss(animated: false) }))
                     let height = EventNoticeView.preferredHeight(for: model.snapshot)
-                    let panel = NSPanel(
+                    let window = NSWindow(
                         contentRect: NSRect(x: 0, y: 0, width: 440, height: height),
-                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered,
+                        styleMask: [.borderless], backing: .buffered,
                         defer: false)
-                    panel.isReleasedWhenClosed = false
-                    panel.appearance = NSAppearance(named: appearance)
-                    panel.contentView = hosting
-                    panel.setFrame(NSRect(x: 0, y: 0, width: 440, height: height), display: true)
-                    panel.orderFrontRegardless()
-                    defer { panel.orderOut(nil); panel.close() }
+                    window.isReleasedWhenClosed = false
+                    window.appearance = NSAppearance(named: appearance)
+                    window.contentView = hosting
+                    window.setFrame(NSRect(x: 0, y: 0, width: 440, height: height), display: true)
+                    window.orderFrontRegardless()
+                    defer { window.orderOut(nil); window.close() }
+                    expect(!(window is NSPanel), "命令行 harness 不使用需要特殊激活语义的 NSPanel")
                     hosting.layoutSubtreeIfNeeded()
                     RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
                     expect(
@@ -120,7 +121,7 @@ func runEventNoticePresentationSuites() {
                         continue
                     }
                     _ = model.viewSource(action)
-                    panel.setFrame(NSRect(x: 0, y: 0, width: 300, height: 180), display: true)
+                    window.setFrame(NSRect(x: 0, y: 0, width: 300, height: 180), display: true)
                     hosting.layoutSubtreeIfNeeded()
                     RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
                     let views = descendants(hosting)
@@ -148,10 +149,10 @@ func runEventNoticePresentationSuites() {
                     for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                         if let event = NSEvent.mouseEvent(
                             with: type, location: point,
-                            modifierFlags: [], timestamp: 0, windowNumber: panel.windowNumber,
+                            modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
                             context: nil, eventNumber: 1, clickCount: 1, pressure: 1)
                         {
-                            panel.sendEvent(event)
+                            window.sendEvent(event)
                         }
                     }
                     expect(copyCalls == 1, "滚动后的真实复制按钮回送捕获版本")
