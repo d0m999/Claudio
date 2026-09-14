@@ -10,41 +10,55 @@ public enum AICueProviderRegistryError: Error, Sendable, Equatable {
 /// The application-owned profile allowlist. A selected raw ID is only trusted after a lookup;
 /// endpoint, model, voice, region, authentication and credential-slot values never come from it.
 public struct AICueProviderRegistry: Sendable {
+    private struct BuiltInContract {
+        let profiles: [AICueProviderProfile]
+        let assetPoliciesByProfileID: [AICueProviderProfileID: AICueAssetPolicy]
+    }
+
     private let orderedProfiles: [AICueProviderProfile]
     private let profilesByID: [AICueProviderProfileID: AICueProviderProfile]
     private let assetPoliciesByProfileID: [AICueProviderProfileID: AICueAssetPolicy]
 
     public init() {
-        do {
-            try self.init(
-                validating: Self.allowlistedProfiles,
-                expectedProfiles: Self.allowlistedProfiles,
-                assetPoliciesByProfileID: [:])
-        } catch {
-            preconditionFailure("Built-in AI cue provider profiles are invalid")
-        }
+        self.init(
+            evidenceGatedSenseAudioAssetPolicy: Self.productionSenseAudioAssetPolicy)
     }
 
     package init(validating profiles: [AICueProviderProfile]) throws {
+        let contract = Self.builtInContract(senseAudioAssetPolicy: nil)
         try self.init(
             validating: profiles,
-            expectedProfiles: Self.allowlistedProfiles,
-            assetPoliciesByProfileID: [:])
+            expectedProfiles: contract.profiles,
+            assetPoliciesByProfileID: contract.assetPoliciesByProfileID)
     }
 
     /// Deterministic fixtures can exercise the complete SenseAudio contract while production
     /// remains on the four-profile allowlist. A real build may use this initializer only after an
     /// official, smoke-verified exact asset origin has replaced the nil evidence gate.
-    package init(evidenceGatedSenseAudioAssetPolicy assetPolicy: AICueAssetPolicy) {
-        let expected = Self.allowlistedProfiles + [Self.senseAudioChina]
+    package init(evidenceGatedSenseAudioAssetPolicy assetPolicy: AICueAssetPolicy?) {
+        let contract = Self.builtInContract(senseAudioAssetPolicy: assetPolicy)
         do {
             try self.init(
-                validating: expected,
-                expectedProfiles: expected,
-                assetPoliciesByProfileID: [.senseAudioChina: assetPolicy])
+                validating: contract.profiles,
+                expectedProfiles: contract.profiles,
+                assetPoliciesByProfileID: contract.assetPoliciesByProfileID)
         } catch {
-            preconditionFailure("Evidence-gated SenseAudio provider profile is invalid")
+            preconditionFailure("Built-in AI cue provider profiles are invalid")
         }
+    }
+
+    /// Package tests can mutate the compiled contract and policy map independently. Production
+    /// construction always uses ``builtInContract(senseAudioAssetPolicy:)`` for both values.
+    package init(
+        validating profiles: [AICueProviderProfile],
+        evidenceGatedSenseAudioAssetPolicy assetPolicy: AICueAssetPolicy?,
+        assetPoliciesByProfileID: [AICueProviderProfileID: AICueAssetPolicy]
+    ) throws {
+        let contract = Self.builtInContract(senseAudioAssetPolicy: assetPolicy)
+        try self.init(
+            validating: profiles,
+            expectedProfiles: contract.profiles,
+            assetPoliciesByProfileID: assetPoliciesByProfileID)
     }
 
     private init(
@@ -74,7 +88,13 @@ public struct AICueProviderRegistry: Sendable {
                 throw AICueProviderRegistryError.invalidProfileContract
             }
         }
-        guard Set(assetPoliciesByProfileID.keys).isSubset(of: actualIDs) else {
+        let remoteAssetProfileIDs = Set(
+            profiles.compactMap { profile in
+                profile.routes.values.contains(where: { $0.transport == .remoteAssets })
+                    ? profile.id
+                    : nil
+            })
+        guard Set(assetPoliciesByProfileID.keys) == remoteAssetProfileIDs else {
             throw AICueProviderRegistryError.invalidProfileContract
         }
 
@@ -110,6 +130,19 @@ public struct AICueProviderRegistry: Sendable {
     /// Intentionally nil until SenseAudio confirms a stable production asset origin and a paid
     /// smoke proves exact origin, MIME, no-auth GET and no-redirect behavior.
     package static let productionSenseAudioAssetPolicy: AICueAssetPolicy? = nil
+
+    private static func builtInContract(
+        senseAudioAssetPolicy: AICueAssetPolicy?
+    ) -> BuiltInContract {
+        guard let senseAudioAssetPolicy else {
+            return BuiltInContract(
+                profiles: allowlistedProfiles,
+                assetPoliciesByProfileID: [:])
+        }
+        return BuiltInContract(
+            profiles: allowlistedProfiles + [senseAudioChina],
+            assetPoliciesByProfileID: [.senseAudioChina: senseAudioAssetPolicy])
+    }
 
     private static let styledComplete = AICueCandidateSetPolicy(
         semantics: .styled,

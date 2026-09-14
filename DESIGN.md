@@ -74,9 +74,22 @@
 - **活动概览**显示今日/7 日、用户发起、响应结束、严格由 `task_start + stop` 得出的消息往来，以及四段固定顺序色条（用户发起、响应结束、等待介入、子任务结束）。执行中断独立显示，不占第五段；零、unsupported、unavailable、stale 和 partial 由文字/形状共同表达。
 - **统一设置窗口**对应仓库内原型 `mockups/ai-app-manager-native-macos.html`，以固定侧栏承载「通用、集成、事件与提示音、通知、显示、声音、用量、快捷键、关于」九个真实目的页。窗口在 app 生命周期内复用，所有菜单与页间动作只提交类型化路由；关闭后由这一处统一归还焦点。
   - **集成**复用现有 capability、连接、回执与恢复事实，按 Host Product 分组但以 `HostSurfaceID` 为动作目标。
-  - **事件与提示音**保留 Global/Surface、五事件、试听/静音和 effective profile；AI 使用“描述 → 3 个候选与命名 → 明确采用”，内部声音方案隐藏。
+  - **事件与提示音**保留 Global/Surface、五事件、试听/静音和 effective profile；AI 使用“描述 → 候选与命名 → 明确采用”，内部声音方案隐藏。完整集合显示 3 个候选；只有路线政策允许时才显示 1–2 个候选，并以 `N/3` 明示 partial。
   - **声音**迁入完整 Sound Packs 编辑能力，并继续是唯一包级映射写入面；Global 写顶层 `selected_pack`，Surface 写稀疏覆盖，不制造 per-surface manifest 副本。
   - **通用、通知、显示、用量、快捷键、关于**不得是占位或演示常量；各自的真实事实源、权限、失败、持久化和验收边界见 `plan/PLAN-SETTINGS-EXPERIENCE.md`。
+
+### AI 提示音候选与生产资格（现行 · 2026-09-13）
+
+候选身份只投影路线事实：真正发送风格控制的路线显示风格名；服务只返回顺序的路线显示“候选
+1/2/3”，不得借“清晰/轻快/克制”等标签虚构差异。`complete` 固定显示三个候选；允许 partial 的
+SenseAudio SFX 路线显示一至两个可播放候选，并在候选区顶部和 VoiceOver 摘要中共同说明“仅生成
+N/3 个可用候选”。partial 不改变单候选试听、命名、采用或失败回滚的视觉顺序。
+
+Provider 选择器只呈现具备生产资格的 profile。`senseaudio-cn` 的确定性 fixture 可进入 DEBUG
+State Gallery，但在官方精确资源合同、经授权的真实 TTS/SFX smoke、听感、键盘、VoiceOver 与最终
+Bundle 身份全部验收前，不得进入可分发应用的选择器。非分发验收候选必须以外部台账明确标记，不能
+依靠原型、fixture、build 成功或 TTS 单路线制造“已可用”的产品状态。SenseAudio 凭据说明同时公开
+固定 `female_0033_b` 音色资格、`.cn` 路线不构成数据驻留承诺，以及保存只执行不生成音频的只读探针。
 
 ### 顶部事件来源提示（现行 · 瞬时提示与「需要你」）
 

@@ -135,6 +135,7 @@ package enum AICueAssetFetchError: Error, Sendable, Equatable {
     case cancelled
     case transientNetwork
     case transportFailure
+    case retryBackoffFailure
 }
 
 package struct AICueFetchedAsset: Sendable, Equatable {
@@ -200,13 +201,14 @@ package struct AICueURLSessionAssetFetcher: AICueAssetFetching, Sendable {
         policy: AICueAssetPolicy,
         deadline: AICueGenerationDeadline
     ) async throws -> AICueFetchedAsset {
+        do {
+            try Task.checkCancellation()
+        } catch {
+            throw AICueAssetFetchError.cancelled
+        }
         let request = try Self.request(url: url, policy: policy, deadline: deadline)
         do {
-            return try await loader.load(
-                request,
-                acceptedMediaTypes: policy.acceptedMediaTypes,
-                maximumWireBytes: Self.maximumWireBytes,
-                deadline: deadline)
+            return try await load(request, policy: policy, deadline: deadline)
         } catch let error as AICueAssetFetchError where Self.isRetryable(error) {
             let delay = Self.retryDelay(for: error)
             if delay > 0 {
@@ -215,19 +217,46 @@ package struct AICueURLSessionAssetFetcher: AICueAssetFetching, Sendable {
                         at: DispatchTime.now().uptimeNanoseconds),
                     remaining > UInt64(delay) * 1_000_000_000
                 else { throw AICueAssetFetchError.deadlineExceeded }
-                try await retrySleeper.sleep(seconds: delay)
+                do {
+                    try await retrySleeper.sleep(seconds: delay)
+                } catch is CancellationError {
+                    throw AICueAssetFetchError.cancelled
+                } catch {
+                    throw AICueAssetFetchError.retryBackoffFailure
+                }
             }
-            try Task.checkCancellation()
+            do {
+                try Task.checkCancellation()
+            } catch {
+                throw AICueAssetFetchError.cancelled
+            }
             guard
                 deadline.remainingNanoseconds(at: DispatchTime.now().uptimeNanoseconds) != nil
             else { throw AICueAssetFetchError.deadlineExceeded }
+            return try await load(request, policy: policy, deadline: deadline)
+        }
+    }
+
+    /// Both attempts share one normalization boundary. In particular, cancellation thrown by the
+    /// retry load must not escape as a raw `CancellationError` while the first load reports the
+    /// domain-level `.cancelled` case.
+    private func load(
+        _ request: URLRequest,
+        policy: AICueAssetPolicy,
+        deadline: AICueGenerationDeadline
+    ) async throws -> AICueFetchedAsset {
+        do {
             return try await loader.load(
                 request,
                 acceptedMediaTypes: policy.acceptedMediaTypes,
                 maximumWireBytes: Self.maximumWireBytes,
                 deadline: deadline)
+        } catch let error as AICueAssetFetchError {
+            throw error
         } catch is CancellationError {
             throw AICueAssetFetchError.cancelled
+        } catch {
+            throw AICueAssetFetchError.transportFailure
         }
     }
 
@@ -263,7 +292,7 @@ package struct AICueURLSessionAssetFetcher: AICueAssetFetching, Sendable {
             if code == 408 || (500...599).contains(code) { return true }
             return code == 429 && retryAfter.map { (1...5).contains($0) } == true
         case .invalidURL, .redirectRejected, .unexpectedMediaType, .responseTooLarge,
-            .deadlineExceeded, .cancelled, .transportFailure:
+            .deadlineExceeded, .cancelled, .transportFailure, .retryBackoffFailure:
             return false
         }
     }

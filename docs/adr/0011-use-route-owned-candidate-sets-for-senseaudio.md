@@ -40,15 +40,23 @@ HTTPS origin、443 和 MIME，拒绝 IP、userinfo、fragment、redirect 与 fin
 
 官方 SFX schema 目前没有冻结真实生产资源 hostname、MIME、redirect 和有效期合同。因此可以先实现
 固定 profile、可注入 asset policy 与 deterministic fixtures，但在以下证据全部齐备前，默认
-`allowlistedProfiles` 不得注册 `senseaudio-cn`，也不得发布 TTS-only 半成品：
+`allowlistedProfiles` 不得注册 `senseaudio-cn`，`productionSenseAudioAssetPolicy` 必须保持 `nil`，
+也不得发布 TTS-only 半成品：
 
 1. SenseAudio 官方确认稳定的精确资源 origin 与可接受 MIME；
 2. 经单独付费调用授权完成真实 TTS 与 SFX smoke，确认 SFX GET 无 Bearer、无 redirect 且输出可解码；
 3. 完成三候选语音、SFX partial、真实听感、键盘和 VoiceOver 人工验收。
 
+真实 Provider 与原生验收必须使用非分发验收候选。候选须绑定唯一的完整 source commit、精确 asset
+policy 的规范化摘要与 digest，以及实际被测试 app 的 Bundle identifier、版本、架构、签名身份和可执行
+文件 digest。验收候选可以在隔离分支中注入已经由官方确认的精确 policy，但不得合入可分发分支、上传或
+交付；它也不能把生产 policy 的 `nil` 门禁视为已经解除。只有上述证据全部通过后，才能在单独评审的
+activation 变更中固化 policy 并加入 allowlist。activation 或最终 Bundle 身份与验收候选不一致时，
+必须对受影响的合同重新验收，不能沿用旧候选结论。
+
 如果资源 host 只能观察到不稳定动态值或无法得到官方确认，SFX 验收失败；不得退化成任意 HTTPS、
-通配域名或用户自定义资源服务器。回滚只从 allowlist 移除 profile 或使用上一版本应用，不自动删除
-Keychain 项、已采用音频或 manifest 绑定。
+通配域名或用户自定义资源服务器。回滚只把 production policy 恢复为 `nil`、从 allowlist 移除 profile
+或使用上一版本应用，不自动删除 Keychain 项、已采用音频或 manifest 绑定，也不自动切换到其他 Provider。
 
 ## 取代范围
 
@@ -56,4 +64,5 @@ Keychain 项、已采用音频或 manifest 绑定。
 条款，并保留其固定 profile、route-derived capability、Keychain-only、无自定义 endpoint/model/voice、
 无自动 fallback 与真实 smoke 单独授权的其余决策。ADR 0007 的独立用户包与采用目标边界保持不变。
 
-详细合同与分层验收见 `plan/PLAN-CONSUMER-TTS-EXECUTION.md`。
+详细合同见 `plan/PLAN-CONSUMER-TTS-EXECUTION.md`；候选构造、证据字段、付费预算、激活与回滚台账见
+`docs/senseaudio-production-acceptance.md`。

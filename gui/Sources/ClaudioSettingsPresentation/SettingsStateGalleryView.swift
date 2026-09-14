@@ -8,7 +8,7 @@ import SwiftUI
 /// isolated fixture from this module.
 @MainActor
 package struct SettingsStateGalleryView: View {
-    @StateObject private var session: SettingsPresentationSession
+    @StateObject private var fixture: SettingsPresentationFixture
 
     package init(
         route: SettingsRoute,
@@ -29,11 +29,11 @@ package struct SettingsStateGalleryView: View {
             aiCueScenario: aiCueScenario,
             integrationScenario: integrationScenario,
             integrationInFlightAction: integrationInFlightAction)
-        _session = StateObject(wrappedValue: fixture.session)
+        _fixture = StateObject(wrappedValue: fixture)
     }
 
     package var body: some View {
-        SettingsRootView(session: session)
+        SettingsRootView(session: fixture.session)
     }
 }
 #endif

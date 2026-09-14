@@ -663,7 +663,7 @@ func runSettingsPresentationSliceSuites() {
             SettingsMountRecorder.reset()
             let probe = SettingsRootNativeProbe(session: fixture.session)
             let state = fixture.session.state.eventPresentation
-            let scenarioSession = scenario.previewState.session
+            let scenarioSession = scenario.previewSession
 
             expect(
                 state.credentialSheetIsPresented == scenario.rendersCredentialSheet,
@@ -747,12 +747,72 @@ func runSettingsPresentationSliceSuites() {
         }
     }
 
+    suite("Settings AI Cue fixture：可播放私有 WAV、partial 1/3 与 exact cleanup") {
+        withTempDirectory { fixtureParent in
+            let sentinel = fixtureParent.appendingPathComponent("user-path-sentinel")
+            let sentinelBytes = Data("do-not-touch".utf8)
+            try? sentinelBytes.write(to: sentinel)
+            var fixture: SettingsPresentationFixture? = SettingsPresentationFixtures.generalLogin(
+                temporaryParent: fixtureParent,
+                route: .events(scope: .surface(.workBuddy), event: .stop),
+                availability: PreviewFixtures.settingsRouteAvailability,
+                aiCueScenario: .senseAudioPartialPlaying)
+            guard let generation = fixture?.aiCueViewModel.generation
+            else {
+                expect(false, "SenseAudio partial fixture 必须物化 generation")
+                return
+            }
+            let root = fixture!.temporaryRoot
+            let candidates = generation.candidates
+            let candidateDirectories = Set(
+                candidates.map { $0.asset.fileURL.deletingLastPathComponent() })
+            expect(
+                generation.completion == .partial
+                    && candidates.map(\.identity)
+                        == [1, 3].map {
+                            .numbered(AICueCandidateOrdinal(rawValue: $0)!)
+                        }
+                    && fixture!.session.state.eventPresentation.playingCandidateID
+                        == candidates.last?.id,
+                "partial playing fixture 必须保留真实 1/3 identity 与候选 3 播放状态")
+            expect(
+                candidateDirectories.count == 1
+                    && candidateDirectories.first?.deletingLastPathComponent() == root
+                    && settingsFixturePOSIXPermissions(root) == 0o700
+                    && candidateDirectories.first.flatMap(settingsFixturePOSIXPermissions) == 0o700,
+                "fixture 根与候选目录必须是 exact UUID child 且权限为 0700")
+            expect(
+                candidates.allSatisfy { candidate in
+                    guard let data = try? Data(contentsOf: candidate.asset.fileURL) else {
+                        return false
+                    }
+                    return candidate.asset.fileURL.pathExtension == "wav"
+                        && candidate.asset.sniffedFormat == .wav
+                        && candidate.asset.byteCount == data.count
+                        && sniffAudioFormat(data) == .wav
+                        && settingsFixturePOSIXPermissions(candidate.asset.fileURL) == 0o600
+                        && NSSound(contentsOf: candidate.asset.fileURL, byReference: false) != nil
+                },
+                "partial [1,3] 必须落为可由原生播放器解码的合成 WAV，并以 0600 隔离")
+
+            fixture = nil
+            expect(
+                !FileManager.default.fileExists(atPath: root.path)
+                    && (try? Data(contentsOf: sentinel)) == sentinelBytes,
+                "fixture 释放必须只清理自己的 UUID root，不得触碰 supplied parent 的兄弟文件")
+        }
+    }
+
     #endif
 }
 
 private struct SettingsDestinationMountObservation {
     let destination: SettingsDestination
     let mountedIdentifiers: [String]
+}
+
+private func settingsFixturePOSIXPermissions(_ url: URL) -> Int? {
+    (try? FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions]) as? Int
 }
 
 private func settingsDestinationMountsAreComplete(

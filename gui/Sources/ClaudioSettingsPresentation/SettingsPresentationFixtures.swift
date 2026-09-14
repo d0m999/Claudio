@@ -2,8 +2,10 @@
 import AppKit
 import ClaudioCore
 import ClaudioGUICore
+import ClaudioGUIComponents
 import ClaudioLocalization
 import Combine
+import Darwin
 import Foundation
 import SoundPacksWindow
 
@@ -32,7 +34,7 @@ package final class SettingsPresentationActionRecorder {
 /// Production-shape DEBUG fixture composed only from the package presentation seams. The sound
 /// editor remains owned by `SoundPacksEditorOwner`; no raw model or runtime library is exposed.
 @MainActor
-package struct SettingsPresentationFixture {
+package final class SettingsPresentationFixture: ObservableObject {
     package let temporaryRoot: URL
     package let session: SettingsPresentationSession
     package let soundPacksEditor: SoundPacksEditorOwner
@@ -41,6 +43,33 @@ package struct SettingsPresentationFixture {
     package let integrationsModel: IntegrationDestinationModel
     package let aiCueViewModel: AICueGenerationViewModel
     package let actionRecorder: SettingsPresentationActionRecorder
+    private let aiCueAudioFixture: SettingsPresentationAICueAudioFixture?
+
+    fileprivate init(
+        temporaryRoot: URL,
+        session: SettingsPresentationSession,
+        soundPacksEditor: SoundPacksEditorOwner,
+        activityDiagnostics: ActivityDiagnosticsModel,
+        eventSettingsModel: PanelConfigController,
+        integrationsModel: IntegrationDestinationModel,
+        aiCueViewModel: AICueGenerationViewModel,
+        actionRecorder: SettingsPresentationActionRecorder,
+        aiCueAudioFixture: SettingsPresentationAICueAudioFixture?
+    ) {
+        self.temporaryRoot = temporaryRoot
+        self.session = session
+        self.soundPacksEditor = soundPacksEditor
+        self.activityDiagnostics = activityDiagnostics
+        self.eventSettingsModel = eventSettingsModel
+        self.integrationsModel = integrationsModel
+        self.aiCueViewModel = aiCueViewModel
+        self.actionRecorder = actionRecorder
+        self.aiCueAudioFixture = aiCueAudioFixture
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: temporaryRoot)
+    }
 
     package var lastSettingsDestination: SettingsDestination {
         session.dependencies.preferences.lastSettingsDestination
@@ -97,6 +126,20 @@ package enum SettingsPresentationFixtures {
         let temporaryRoot = temporaryParent.appendingPathComponent(
             "claudio-settings-presentation-fixture-\(UUID().uuidString)",
             isDirectory: true)
+        try! FileManager.default.createDirectory(
+            at: temporaryRoot,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700])
+        let resolvedAICueScenario =
+            aiCueScenario ?? PreviewFixtures.AICueGalleryScenario.editing
+        let aiCueAudioFixture =
+            resolvedAICueScenario.candidateIdentities.isEmpty
+            ? nil
+            : try! SettingsPresentationAICueAudioFixture(
+                parentDirectory: temporaryRoot,
+                identities: resolvedAICueScenario.candidateIdentities)
+        let aiCuePreviewState = resolvedAICueScenario.previewState(
+            candidateAssets: aiCueAudioFixture?.assets ?? [:])
         let actionRecorder = SettingsPresentationActionRecorder(result: platformActionResult)
         let preferences = ClaudioPreferences(previewLanguage: language)
         preferences.setCompactPreviewDensity(textSize)
@@ -210,8 +253,7 @@ package enum SettingsPresentationFixtures {
         let aiCueViewModel =
             injectedAICueViewModel
             ?? AICueGenerationViewModel(
-                previewState: (aiCueScenario ?? PreviewFixtures.AICueGalleryScenario.editing)
-                    .previewState,
+                previewState: aiCuePreviewState,
                 registry: PreviewFixtures.aiCueEvidenceRegistry)
         let session = SettingsPresentationSession(
             dependencies: SettingsPresentationDependencies(
@@ -237,13 +279,14 @@ package enum SettingsPresentationFixtures {
             session.replaceAvailabilityForTesting(availability)
         }
         let presentationRoute: SettingsRoute
-        if let aiSession = aiCueScenario?.previewState.session {
+        if let aiSession = aiCueScenario == nil ? nil : aiCuePreviewState.session {
             presentationRoute = .events(scope: aiSession.scope, event: aiSession.event)
         } else {
             presentationRoute = route
         }
         if case .events(let scope, let event) = presentationRoute,
-            aiCueScenario?.previewState.session != nil
+            aiCueScenario != nil,
+            aiCuePreviewState.session != nil
         {
             session.eventSettingsSelection.select(
                 EventSettingsWindowRoute(scope: scope, event: event))
@@ -264,7 +307,8 @@ package enum SettingsPresentationFixtures {
             eventSettingsModel: eventSettingsModel,
             integrationsModel: integrationsModel,
             aiCueViewModel: aiCueViewModel,
-            actionRecorder: actionRecorder)
+            actionRecorder: actionRecorder,
+            aiCueAudioFixture: aiCueAudioFixture)
     }
 }
 
@@ -326,7 +370,7 @@ extension SettingsPresentationDependencies {
                 refreshHandler: IntegrationDestinationRefreshHandler { integrationOutcome },
                 actionHandler: IntegrationDestinationActionHandler { _ in integrationOutcome }),
             aiCueViewModel: AICueGenerationViewModel(
-                previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState,
+                previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState(),
                 registry: PreviewFixtures.aiCueEvidenceRegistry))
     }
 }
@@ -523,6 +567,90 @@ private struct SettingsPresentationFixtureDurationProbe: AudioDurationProbing {
     func probeDuration(of _: URL) -> TimeInterval? { 0.25 }
 }
 
+private final class SettingsPresentationAICueAudioFixture {
+    let directory: URL
+    let assets: [AICueCandidateIdentity: AICueTemporaryAudioAsset]
+
+    init(parentDirectory: URL, identities: [AICueCandidateIdentity]) throws {
+        directory = parentDirectory.appendingPathComponent(
+            "ai-cue-candidates-\(UUID().uuidString)",
+            isDirectory: true)
+        var materialized: [AICueCandidateIdentity: AICueTemporaryAudioAsset] = [:]
+        do {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700])
+            for identity in identities {
+                let data = Self.syntheticWAVData(for: identity)
+                precondition(sniffAudioFormat(data) == .wav)
+                let fileURL = directory.appendingPathComponent(
+                    "\(aiCueCandidateAccessibilityIdentifierComponent(identity)).wav")
+                try data.write(to: fileURL, options: .atomic)
+                try FileManager.default.setAttributes(
+                    [.posixPermissions: 0o600],
+                    ofItemAtPath: fileURL.path)
+                materialized[identity] = AICueTemporaryAudioAsset(
+                    fileURL: fileURL,
+                    byteCount: data.count,
+                    sniffedFormat: .wav)
+            }
+            assets = materialized
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw error
+        }
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    private static func syntheticWAVData(for identity: AICueCandidateIdentity) -> Data {
+        let sampleRate = 16_000
+        let durationMilliseconds: Int =
+            switch identity {
+            case .styled(let variant): 1_600 + variant.ordinal * 100
+            case .numbered(let ordinal): 1_400 + ordinal.rawValue * 100
+            }
+        let sampleCount = sampleRate * durationMilliseconds / 1_000
+        let bytesPerSample = MemoryLayout<Int16>.size
+        let dataByteCount = sampleCount * bytesPerSample
+        var data = Data()
+        data.reserveCapacity(44 + dataByteCount)
+        data.append(contentsOf: "RIFF".utf8)
+        data.appendLittleEndian(UInt32(36 + dataByteCount))
+        data.append(contentsOf: "WAVEfmt ".utf8)
+        data.appendLittleEndian(UInt32(16))
+        data.appendLittleEndian(UInt16(1))
+        data.appendLittleEndian(UInt16(1))
+        data.appendLittleEndian(UInt32(sampleRate))
+        data.appendLittleEndian(UInt32(sampleRate * bytesPerSample))
+        data.appendLittleEndian(UInt16(bytesPerSample))
+        data.appendLittleEndian(UInt16(16))
+        data.append(contentsOf: "data".utf8)
+        data.appendLittleEndian(UInt32(dataByteCount))
+
+        let frequency = Double(240 + identity.ordinal * 90)
+        let fadeSampleCount = min(sampleRate / 100, sampleCount / 2)
+        for sampleIndex in 0..<sampleCount {
+            let edgeDistance = min(sampleIndex, sampleCount - sampleIndex - 1)
+            let envelope = min(1, Double(edgeDistance) / Double(max(fadeSampleCount, 1)))
+            let phase = 2 * Double.pi * frequency * Double(sampleIndex) / Double(sampleRate)
+            let sample = Int16(Double(Int16.max) * 0.12 * envelope * sin(phase))
+            data.appendLittleEndian(UInt16(bitPattern: sample))
+        }
+        return data
+    }
+}
+
+extension Data {
+    fileprivate mutating func appendLittleEndian<T: FixedWidthInteger>(_ value: T) {
+        var littleEndian = value.littleEndian
+        Swift.withUnsafeBytes(of: &littleEndian) { append(contentsOf: $0) }
+    }
+}
+
 @MainActor
 private final class SettingsPresentationFixturePublicationGate {
     var succeeds = true
@@ -532,9 +660,19 @@ private final class SettingsPresentationFixturePublicationGate {
 private final class SettingsPresentationFixtureNativeEffectsAdapter:
     SoundPacksEditorNativeEffectsAdapter
 {
+    private let previewPlayer = NSSoundAudioPreviewPlayer()
+
     func selectAudioFiles(allowsMultipleSelection _: Bool) -> [URL] { [] }
-    func playAudio(fileURL _: URL, volume _: Double) -> TimeInterval? { nil }
-    func stopAudio() {}
+    func playAudio(fileURL: URL, volume: Double) -> TimeInterval? {
+        previewPlayer.playWithDuration(
+            fileAt: fileURL,
+            volume: Float(min(max(volume, 0), 1)))
+    }
+
+    func stopAudio() {
+        previewPlayer.stop()
+    }
+
     func revealInFinder(fileURL _: URL) {}
 }
 #endif

@@ -137,6 +137,19 @@ package protocol AICueRetrySleeping: Sendable {
     func sleep(seconds: Int) async throws
 }
 
+/// A package-only deterministic test seam at the narrow directory-preparation boundary. Production
+/// uses the no-op implementation; tests can stop exactly after the generation directory exists to
+/// prove cancellation and errors cannot escape the cleanup owner.
+package protocol AICueGenerationPreparationCheckpoint: Sendable {
+    func generationDirectoryDidPrepare(_ directory: URL) async throws
+}
+
+package struct AICueNoopGenerationPreparationCheckpoint:
+    AICueGenerationPreparationCheckpoint
+{
+    package func generationDirectoryDidPrepare(_ directory: URL) async throws {}
+}
+
 public protocol AICueGenerating: Sendable {
     func generate(
         description: String,
@@ -167,6 +180,7 @@ public actor AICueGenerationEngine: AICueGenerating {
     private let registry: AICueProviderRegistry
     private let temporaryRoot: URL
     private let durationProbe: any AudioDurationProbing
+    private let preparationCheckpoint: any AICueGenerationPreparationCheckpoint
     private let planner = AICueSoundPlanner()
     private let compiler: AICueProviderRequestCompiler
     private var activeDirectories: [UUID: URL] = [:]
@@ -255,11 +269,29 @@ public actor AICueGenerationEngine: AICueGenerating {
         durationProbe: any AudioDurationProbing,
         registry: AICueProviderRegistry = AICueProviderRegistry()
     ) {
+        self.init(
+            credentialManager: credentialManager,
+            candidateSetProvider: candidateSetProvider,
+            temporaryRoot: temporaryRoot,
+            durationProbe: durationProbe,
+            registry: registry,
+            preparationCheckpoint: AICueNoopGenerationPreparationCheckpoint())
+    }
+
+    package init(
+        credentialManager: any AICueGenerationCredentialManaging,
+        candidateSetProvider: any AICueCandidateSetProvider,
+        temporaryRoot: URL,
+        durationProbe: any AudioDurationProbing,
+        registry: AICueProviderRegistry = AICueProviderRegistry(),
+        preparationCheckpoint: any AICueGenerationPreparationCheckpoint
+    ) {
         self.credentialManager = credentialManager
         self.candidateSetProvider = candidateSetProvider
         self.registry = registry
         self.temporaryRoot = temporaryRoot
         self.durationProbe = durationProbe
+        self.preparationCheckpoint = preparationCheckpoint
         compiler = AICueProviderRequestCompiler(registry: registry)
     }
 
@@ -337,14 +369,10 @@ public actor AICueGenerationEngine: AICueGenerating {
         let directory = temporaryRoot.appendingPathComponent(
             "generation-\(generationID.uuidString.lowercased())",
             isDirectory: true)
-        do {
-            try ensurePrivateDirectoryTree(at: temporaryRoot)
-            purgeStaleDirectories(now: Date())
-            try ensurePrivateDirectoryTree(at: directory)
-        } catch {
-            throw AICueGenerationError.temporaryStorageUnavailable
-        }
-        try requireRemainingBudget(deadline)
+        // Install ownership before the first mkdir. Every exit after this line, including a root
+        // or child preparation failure and the immediately following deadline check, removes only
+        // this generation's UUID child. A successful commit keeps ownership in activeDirectories
+        // until explicit discard; siblings and the shared root are never cleanup targets here.
         activeDirectories[generationID] = directory
         var succeeded = false
         defer {
@@ -353,6 +381,23 @@ public actor AICueGenerationEngine: AICueGenerating {
                 try? FileManager.default.removeItem(at: directory)
             }
         }
+        do {
+            try ensurePrivateDirectoryTree(at: temporaryRoot)
+            purgeStaleDirectories(now: Date())
+            try ensurePrivateDirectoryTree(at: directory)
+        } catch {
+            throw AICueGenerationError.temporaryStorageUnavailable
+        }
+        do {
+            try await preparationCheckpoint.generationDirectoryDidPrepare(directory)
+        } catch let error as AICueGenerationError {
+            throw error
+        } catch is CancellationError {
+            throw AICueGenerationError.cancelled
+        } catch {
+            throw AICueGenerationError.temporaryStorageUnavailable
+        }
+        try requireRemainingBudget(deadline)
 
         let candidates: [AICueCandidate]
         if let sequentialProvider = candidateSetProvider

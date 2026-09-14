@@ -3576,13 +3576,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Your sound description, speech, and generation metadata are sent directly to SenseAudio through its fixed .cn API route; this route is not a data-residency promise. Generation may consume quota, and processing, retention, and model-improvement use follow SenseAudio's terms. Saving runs only a read-only voice-list probe and does not generate audio."
+            "value": "Your sound description, speech, and generation metadata are sent directly to SenseAudio through its fixed .cn API route; this route is not a data-residency promise. Generation may consume quota, and processing, retention, and model-improvement use follow SenseAudio's terms. Saving uses a read-only voice-list probe to confirm that your account can access the fixed female_0033_b voice; it does not generate audio. If that voice is unavailable, an existing saved API Key remains unchanged."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "声音描述、台词和生成元数据会由本机通过固定 .cn API 路由直接发送给 SenseAudio；该路由不构成数据驻留承诺。生成可能消耗配额，数据处理、留存及是否用于模型改进以 SenseAudio 条款为准。保存前只执行不生成音频的音色列表只读检查。"
+            "value": "声音描述、台词和生成元数据会由本机通过固定 .cn API 路由直接发送给 SenseAudio；该路由不构成数据驻留承诺。生成可能消耗配额，数据处理、留存及是否用于模型改进以 SenseAudio 条款为准。保存前会通过音色列表只读检查确认当前账户可使用固定音色 female_0033_b；该检查不生成音频。如果该音色不可用，已有的已保存 API Key 保持不变。"
           }
         }
       }
@@ -4143,6 +4143,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "停止候选 %@"
+          }
+        }
+      }
+    },
+    "ai-cue.candidate.use-action": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use candidate %@ for this event"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将候选 %@ 用于此事件"
           }
         }
       }

@@ -192,6 +192,16 @@ func runAICueDomainSuites() {
                 language: .zhHans) == "停止候选 2 · 1.8 秒",
             "numbered 候选的 VoiceOver 标签必须共享本地化序号")
         expect(
+            localizedAICueCandidateUseAccessibilityLabel(
+                identity: .numbered(second),
+                language: .english) == "Use candidate 2 for this event",
+            "numbered 候选的采用焦点必须读出稳定候选身份")
+        expect(
+            localizedAICueCandidateUseAccessibilityLabel(
+                identity: .styled(.clear),
+                language: .zhHans) == "将候选 A · 清晰 用于此事件",
+            "styled 候选的采用焦点必须保留既有风格身份")
+        expect(
             aiCueCandidateAccessibilityIdentifierComponent(.styled(.clear)) == "clear",
             "styled 候选必须保持现有 AX identifier component")
         expect(

@@ -96,6 +96,10 @@ func runAICueProviderContractsSuites() {
             replacingRoute(
                 in: elevenLabs,
                 key: .speech,
+                with: copying(speechRoute, transport: .remoteAssets)),
+            replacingRoute(
+                in: elevenLabs,
+                key: .speech,
                 with: copying(
                     speechRoute,
                     candidateSetPolicy: AICueCandidateSetPolicy(
@@ -167,6 +171,105 @@ func runAICueProviderContractsSuites() {
             "animal/soundEffect 必须共享 fixed native-batch SFX route 并允许 1 个本地有效候选")
         expect(
             registry.assetPolicy(for: .senseAudioChina) == policy, "asset policy 必须由 registry 拥有")
+    }
+
+    suite("AI 提示音 Provider registry：可选 asset policy 唯一决定四或五个固定 profile") {
+        let policy = try! AICueAssetPolicy(
+            allowedOrigins: [try! AICueAssetOrigin("https://assets.fixture.invalid")],
+            acceptedMediaTypes: ["audio/mpeg"])
+        let production = AICueProviderRegistry(
+            evidenceGatedSenseAudioAssetPolicy: nil)
+        let evidenceGated = AICueProviderRegistry(
+            evidenceGatedSenseAudioAssetPolicy: policy)
+
+        expect(
+            production.profiles() == AICueProviderRegistry().profiles()
+                && production.profiles().map(\.id) == [
+                    .elevenLabsGlobal, .miniMaxGlobal, .qwenSingapore, .qwenBeijing,
+                ]
+                && production.assetPolicy(for: .senseAudioChina) == nil,
+            "nil policy 必须与 public default 共用同一套四 profile 合同")
+        expect(
+            evidenceGated.profiles().map(\.id) == [
+                .elevenLabsGlobal, .miniMaxGlobal, .qwenSingapore, .qwenBeijing,
+                .senseAudioChina,
+            ]
+                && evidenceGated.assetPolicy(for: .senseAudioChina) == policy,
+            "非 nil policy 必须只追加固定 SenseAudio profile 并由 registry 持有 policy")
+        let suiteName = "AICueOptionalPolicy.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        expect(
+            AICueProviderPreferences(
+                defaults: defaults,
+                registry: evidenceGated
+            ).selectedProfileID() == .elevenLabsGlobal,
+            "增加 evidence-gated profile 不得改变默认 Provider")
+
+        let productionProfiles = production.profiles()
+        let invalidProductionSets = [
+            Array(productionProfiles.dropLast()),
+            productionProfiles + [productionProfiles[0]],
+            productionProfiles + [evidenceGated.profiles().last!],
+        ]
+        for invalidProfiles in invalidProductionSets {
+            expect(
+                throwsRegistryError {
+                    _ = try AICueProviderRegistry(validating: invalidProfiles)
+                },
+                "public default 的 missing、duplicate 或 extra profile 必须失败关闭")
+        }
+    }
+
+    suite("AI 提示音 Provider registry：policy keys 精确等于 remote-assets profile 集合") {
+        let policy = try! AICueAssetPolicy(
+            allowedOrigins: [try! AICueAssetOrigin("https://assets.fixture.invalid")],
+            acceptedMediaTypes: ["audio/mpeg"])
+        let profiles = AICueProviderRegistry(
+            evidenceGatedSenseAudioAssetPolicy: policy
+        ).profiles()
+
+        let exactRegistry = try! AICueProviderRegistry(
+            validating: profiles,
+            evidenceGatedSenseAudioAssetPolicy: policy,
+            assetPoliciesByProfileID: [.senseAudioChina: policy])
+        let remoteAssetProfileIDs = Set(
+            exactRegistry.profiles().compactMap { profile in
+                profile.routes.values.contains(where: { $0.transport == .remoteAssets })
+                    ? profile.id
+                    : nil
+            })
+        expect(
+            remoteAssetProfileIDs == [.senseAudioChina]
+                && exactRegistry.assetPolicy(for: .senseAudioChina) == policy,
+            "唯一 remote-assets profile 必须拥有且只拥有同 ID policy")
+        expect(
+            throwsRegistryError {
+                _ = try AICueProviderRegistry(
+                    validating: profiles,
+                    evidenceGatedSenseAudioAssetPolicy: policy,
+                    assetPoliciesByProfileID: [:])
+            },
+            "remote-assets profile 缺 policy 必须失败关闭")
+        expect(
+            throwsRegistryError {
+                _ = try AICueProviderRegistry(
+                    validating: profiles,
+                    evidenceGatedSenseAudioAssetPolicy: policy,
+                    assetPoliciesByProfileID: [
+                        .senseAudioChina: policy,
+                        .elevenLabsGlobal: policy,
+                    ])
+            },
+            "非 remote-assets profile 多余 policy 必须失败关闭")
+        expect(
+            throwsRegistryError {
+                _ = try AICueProviderRegistry(
+                    validating: profiles + [profiles.last!],
+                    evidenceGatedSenseAudioAssetPolicy: policy,
+                    assetPoliciesByProfileID: [.senseAudioChina: policy])
+            },
+            "evidence-gated 合同的 duplicate profile 必须失败关闭")
     }
 
     suite("AI 提示音 Provider registry：四个 profile 的 route、slot 与 policy 精确冻结") {
@@ -405,6 +508,7 @@ private func copying(
     voiceID: String? = nil,
     supportedLanguageTags: Set<String>? = nil,
     authentication: AICueProviderAuthentication? = nil,
+    transport: AICueProviderAudioTransport? = nil,
     candidateSetPolicy: AICueCandidateSetPolicy? = nil
 ) -> AICueProviderRoute {
     AICueProviderRoute(
@@ -414,7 +518,7 @@ private func copying(
         voiceID: voiceID ?? route.voiceID,
         supportedLanguageTags: supportedLanguageTags ?? route.supportedLanguageTags,
         authentication: authentication ?? route.authentication,
-        transport: route.transport,
+        transport: transport ?? route.transport,
         candidateSetPolicy: candidateSetPolicy ?? route.candidateSetPolicy)
 }
 

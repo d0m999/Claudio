@@ -115,7 +115,15 @@ func runLocalizationSuites() {
                 && chinese.text(.aiCueCredentialPrivacySenseAudioChina).contains(
                     "不构成数据驻留承诺")
                 && english.text(.aiCueCredentialPrivacySenseAudioChina).contains(
-                    "not a data-residency promise"),
+                    "not a data-residency promise")
+                && chinese.text(.aiCueCredentialPrivacySenseAudioChina).contains(
+                    "female_0033_b")
+                && english.text(.aiCueCredentialPrivacySenseAudioChina).contains(
+                    "female_0033_b")
+                && chinese.text(.aiCueCredentialPrivacySenseAudioChina).contains(
+                    "已有的已保存 API Key 保持不变")
+                && english.text(.aiCueCredentialPrivacySenseAudioChina).contains(
+                    "existing saved API Key remains unchanged"),
             "MiniMax/Qwen/SenseAudio 必须逐 profile 披露供应商与 route 边界")
         expect(
             chinese.format(

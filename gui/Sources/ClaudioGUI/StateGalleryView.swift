@@ -260,7 +260,7 @@ struct AICueExperienceGalleryView: View {
     var body: some View {
         GallerySection(
             title:
-                "Events AI Cue · 4 profiles + credential/composer/failure states · 2 languages × compact density"
+                "Events AI Cue · 4 production profiles + gated SenseAudio fixture · credential/composer/failure states · 2 languages × compact density"
         ) {
             ForEach(ClaudioAppLanguage.allCases) { language in
                 ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in

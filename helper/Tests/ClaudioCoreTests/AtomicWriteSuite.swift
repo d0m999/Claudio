@@ -579,6 +579,10 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     "gui/Sources/ClaudioGUICore/AICueGenerationEngine.swift": [
         ".write(", "fchmod(", "open(", "write(",
     ],
+    // DEBUG Settings gallery candidates are synthesized into a process-unique private root.
+    // Each immutable WAV is atomically published before the fixture exposes it, and the retained
+    // fixture removes only that exact root at the end of its lifetime.
+    "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationFixtures.swift": [".write("],
     // 星标删除：锁内重验后的单目录项 `unlink(2)`；不跟随 symlink，也不递归删除目录。
     "gui/Sources/ClaudioGUICore/PackGallery.swift": ["unlink("],
     // Usage 日志清理：与 append/rotation 共用 log lock，只 unlink 固定日志叶路径；ENOENT 成功。
@@ -614,6 +618,7 @@ private let contentReplacingWriteSites: [String: Int] = [
     "helper/Sources/ClaudioCore/ConcreteHostIntegrationAdapters.swift": 1,
     "gui/Sources/ClaudioGUICore/AudioImport.swift": 1,
     "gui/Sources/ClaudioGUICore/ManifestBinding.swift": 1,
+    "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationFixtures.swift": 1,
 ]
 
 /// 写意图的 `open(2)` flag。`O_RDONLY` 刻意不在里面 —— `SafeFileRead` / `AudioImport` 的有界只读走的
