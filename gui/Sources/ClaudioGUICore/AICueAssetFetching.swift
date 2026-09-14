@@ -135,6 +135,7 @@ package enum AICueAssetFetchError: Error, Sendable, Equatable {
     case cancelled
     case transientNetwork
     case transportFailure
+    case retryBackoffFailure
 }
 
 package struct AICueFetchedAsset: Sendable, Equatable {
@@ -221,7 +222,7 @@ package struct AICueURLSessionAssetFetcher: AICueAssetFetching, Sendable {
                 } catch is CancellationError {
                     throw AICueAssetFetchError.cancelled
                 } catch {
-                    throw AICueAssetFetchError.transportFailure
+                    throw AICueAssetFetchError.retryBackoffFailure
                 }
             }
             do {
@@ -291,7 +292,7 @@ package struct AICueURLSessionAssetFetcher: AICueAssetFetching, Sendable {
             if code == 408 || (500...599).contains(code) { return true }
             return code == 429 && retryAfter.map { (1...5).contains($0) } == true
         case .invalidURL, .redirectRejected, .unexpectedMediaType, .responseTooLarge,
-            .deadlineExceeded, .cancelled, .transportFailure:
+            .deadlineExceeded, .cancelled, .transportFailure, .retryBackoffFailure:
             return false
         }
     }

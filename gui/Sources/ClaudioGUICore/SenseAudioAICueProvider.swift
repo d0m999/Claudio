@@ -254,12 +254,9 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
                 guard sniffAudioFormat(fetched.data) == .mp3 else {
                     continue
                 }
-                guard let ordinal = AICueCandidateOrdinal(rawValue: item.variantIndex + 1) else {
-                    throw AICueProviderError.invalidAudioResponse
-                }
                 candidates.append(
                     AICueProviderCandidateResponse(
-                        identity: .numbered(ordinal),
+                        identity: .numbered(item.ordinal),
                         audio: AICueProviderAudioResponse(
                             data: fetched.data,
                             mediaType: fetched.mediaType,
@@ -269,6 +266,8 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
                 throw AICueProviderError.cancelled
             } catch AICueAssetFetchError.deadlineExceeded {
                 throw AICueProviderError.deadlineExceeded
+            } catch AICueAssetFetchError.retryBackoffFailure {
+                throw AICueProviderError.transportFailure
             } catch is CancellationError {
                 throw AICueProviderError.cancelled
             } catch {
@@ -358,7 +357,7 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
     }
 
     private struct SFXDownloadItem {
-        let variantIndex: Int
+        let ordinal: AICueCandidateOrdinal
         let url: URL
     }
 
@@ -420,6 +419,7 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
             guard
                 let variantIndex = integer(rawItem["variant_index"]),
                 (0..<requestedCount).contains(variantIndex),
+                let ordinal = AICueCandidateOrdinal(rawValue: variantIndex + 1),
                 seenIndexes.insert(variantIndex).inserted,
                 let itemStatus = rawItem["status"] as? String,
                 itemStatus == "completed" || itemStatus == "failed"
@@ -457,7 +457,7 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
                 // failures; the route policy decides whether the remaining local set is publishable.
                 continue
             }
-            downloadable.append(SFXDownloadItem(variantIndex: variantIndex, url: url))
+            downloadable.append(SFXDownloadItem(ordinal: ordinal, url: url))
         }
 
         switch status {
@@ -474,7 +474,7 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
         }
         return SFXBatch(
             requestID: sanitizedAICueProviderRequestID(root["generation_id"] as? String),
-            items: downloadable.sorted { $0.variantIndex < $1.variantIndex })
+            items: downloadable.sorted { $0.ordinal.rawValue < $1.ordinal.rawValue })
     }
 
     private func transportRequest(

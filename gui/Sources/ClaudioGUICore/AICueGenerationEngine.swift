@@ -269,13 +269,13 @@ public actor AICueGenerationEngine: AICueGenerating {
         durationProbe: any AudioDurationProbing,
         registry: AICueProviderRegistry = AICueProviderRegistry()
     ) {
-        self.credentialManager = credentialManager
-        self.candidateSetProvider = candidateSetProvider
-        self.registry = registry
-        self.temporaryRoot = temporaryRoot
-        self.durationProbe = durationProbe
-        preparationCheckpoint = AICueNoopGenerationPreparationCheckpoint()
-        compiler = AICueProviderRequestCompiler(registry: registry)
+        self.init(
+            credentialManager: credentialManager,
+            candidateSetProvider: candidateSetProvider,
+            temporaryRoot: temporaryRoot,
+            durationProbe: durationProbe,
+            registry: registry,
+            preparationCheckpoint: AICueNoopGenerationPreparationCheckpoint())
     }
 
     package init(

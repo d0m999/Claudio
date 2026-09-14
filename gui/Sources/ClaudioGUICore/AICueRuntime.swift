@@ -63,7 +63,6 @@ package struct AICueRuntime {
         let expectedProfileIDs = Set(expectedByID.keys)
         let actualProfileIDs = Set(providerBindings.map(\.profile.id))
         guard
-            providerBindings.count == profiles.count,
             actualProfileIDs.count == providerBindings.count,
             actualProfileIDs == expectedProfileIDs,
             providerBindings.allSatisfy({ expectedByID[$0.profile.id] == $0.profile })
@@ -80,9 +79,6 @@ package struct AICueRuntime {
         where expectedValidatorProfileIDs.contains(binding.profile.id) {
             validators[binding.profile.id] = binding
         }
-        guard Set(validators.keys) == expectedValidatorProfileIDs else {
-            throw AICueRuntimeError.invalidProviderBindings
-        }
 
         let credentialManager = AICueCredentialManager(
             vault: vault,
@@ -97,9 +93,6 @@ package struct AICueRuntime {
                 temporaryRoot: temporaryRoot,
                 durationProbe: durationProbe,
                 registry: registry)
-        }
-        guard Set(generators.keys) == expectedProfileIDs else {
-            throw AICueRuntimeError.invalidProviderBindings
         }
 
         do {

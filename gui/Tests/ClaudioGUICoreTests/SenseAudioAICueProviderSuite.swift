@@ -113,6 +113,21 @@ private actor SenseAudioAssetRetrySleeperFixture: AICueAssetRetrySleeping {
     func facts() -> [Int] { delays }
 }
 
+private enum SenseAudioAssetRetrySleeperFixtureError: Error, Sendable {
+    case failed
+}
+
+private actor SenseAudioFailingAssetRetrySleeperFixture: AICueAssetRetrySleeping {
+    private var delays: [Int] = []
+
+    func sleep(seconds: Int) throws {
+        delays.append(seconds)
+        throw SenseAudioAssetRetrySleeperFixtureError.failed
+    }
+
+    func facts() -> [Int] { delays }
+}
+
 private struct SenseAudioGenerationVaultFacts: Sendable {
     let reads: Int
     let replacements: Int
@@ -693,6 +708,43 @@ func runSenseAudioAICueProviderSuites() async {
             candidates.reduce(0) { $0 + $1.audio.data.count }
                 <= 3 * AICueURLSessionAssetFetcher.maximumWireBytes,
             "存活的三项候选 payload 必须受 15 MiB 上界约束")
+    }
+
+    await suite("SenseAudio SFX：backoff 基础设施故障终止整批而非静默 partial") {
+        let urls = (0...2).map {
+            URL(
+                string:
+                    "\(senseAudioAssetOrigin)/generated/backoff-failure-\($0).mp3?signature=opaque-\($0)"
+            )!
+        }
+        let response = senseAudioSFXResponse(
+            status: "completed",
+            items: (0...2).map { senseAudioSFXItem(index: $0, url: urls[$0].absoluteString) })
+        let fetched = AICueFetchedAsset(data: validMP3ID3Data(), mediaType: "audio/mpeg")
+        let loader = SenseAudioBudgetAssetLoaderFixture([
+            .failure(.httpStatus(code: 429, retryAfterSeconds: 1)),
+            .success(fetched),
+            .success(fetched),
+        ])
+        let sleeper = SenseAudioFailingAssetRetrySleeperFixture()
+        let assetFetcher = AICueURLSessionAssetFetcher(loader: loader, retrySleeper: sleeper)
+        let provider = senseAudioProvider(
+            transport: SenseAudioUnaryTransportFixture([.success(response)]),
+            assetFetcher: assetFetcher)
+
+        var observed: AICueProviderError?
+        do {
+            _ = try await provider.generateCandidateSet(
+                plan: senseAudioEffectPlan(),
+                credential: try SensitiveCredentialInput("fixture-key"),
+                deadline: .startingNow())
+        } catch let error as AICueProviderError {
+            observed = error
+        } catch {}
+        let facts = await loader.facts()
+        expect(observed == .transportFailure, "backoff 基础设施故障必须保持整批 transport failure")
+        expect(facts.requests.count == 1, "backoff 基础设施故障后不得下载 sibling 或发布 partial")
+        expect(await sleeper.facts() == [1], "429 backoff 必须进入一次受控等待后终止")
     }
 
     await suite("SenseAudio SFX：partial_success 与普通单项下载失败保留真实编号") {
