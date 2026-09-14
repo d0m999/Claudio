@@ -1,13 +1,13 @@
 # PLAN — 描述式 AI 提示音（BYOK、多 Provider）执行计划
 
-> 状态：**既有四个 allowlisted profile 与统一设置自动合同已落地；SenseAudio gated 双路线与确定性 fixture 已有基线，#183 production hardening 尚待聚合复验；默认 allowlist 暂不暴露，真实资源 origin、付费 smoke、真机无障碍与发布证据均未验收**
+> 状态：**既有四个 allowlisted profile 与统一设置自动合同已落地；SenseAudio gated 双路线与确定性 fixture 已有基线，#183 production hardening 尚待聚合复验；项目所有者已接受固定 SFX 实测资源合同，默认 allowlist 仍不暴露，绑定候选的正式 smoke、真机无障碍与发布证据均未验收**
 >
-> 日期：2026-09-13
+> 日期：2026-09-14
 >
 > 范围：AI 提示音命名、描述生成、隐藏的内部声音方案、allowlisted provider profile、按能力路由的
 > BYOK 凭据管理、route-owned 候选集合与现有 `AudioImport` / manifest bind 闭环。当前已暴露 Provider
 > 为 ElevenLabs、MiniMax 和 Qwen TTS；新增的固定 `senseaudio-cn` 候选同时实现 TTS 与 native-batch
-> SFX，但在资源 origin 和真实验收门禁完成前不进入默认 allowlist。不支持任意自定义 endpoint、model、
+> SFX，但在固定资源 policy 和真实验收门禁完成前不进入默认 allowlist。不支持任意自定义 endpoint、model、
 > voice、region 或资源服务器。
 >
 > 文件名沿用 `TTS` 以保持计划路径稳定；产品能力不再限定为文字转语音，也包括动物叫声、
@@ -23,12 +23,12 @@
 >
 > 当前基线已完成四个 allowlisted profile、provider-neutral registry/request compiler、hardened
 > transports、逐 profile credential policy、ElevenLabs/MiniMax/Qwen adapters 与统一设置投影的
-> deterministic fixture 验证。自动测试只使用假 key/fixture；未输入真实 key、未发真实供应商或
-> 付费请求，也未据此宣称音质、费用或正式发布验收。
+> deterministic fixture 验证。自动测试只使用假 key/fixture，不包含真实 key 或真实供应商请求；此前
+> 单独执行的资源发现不属于该自动基线，也不据此宣称正式 smoke、音质或发布验收。
 >
 > 兼容性说明：`docs/adr/0011-use-route-owned-candidate-sets-for-senseaudio.md` 只取代 ADR 0006 的全局
 > styled / 三候选全有或全无假设；固定 profile、route-derived capability、Keychain-only 与无 fallback
-> 边界继续成立。SenseAudio deterministic fixture 或本地构建不能替代真实 Provider、资源 origin、
+> 边界继续成立。SenseAudio deterministic fixture 或本地构建不能替代绑定固定资源 policy 的真实 Provider、
 > 原生 UI、双架构、签名、公证与发布的独立 `NOT VERIFIED` 证据层。
 
 ## 0. 目标与完成定义
@@ -69,7 +69,7 @@
 | 提示音名称 | 不进入生成表单或 provider request；候选阶段建议、确认或修改，采用时保存 |
 | 首发调用路线 | **仅 BYOK**；用户输入自己的 API Key，本机直连 provider |
 | Hosted 路线 | v1 不做账号、额度、支付、Hosted API 或自动 fallback |
-| provider 范围 | 默认 allowlist 仍包含 ElevenLabs、MiniMax、Qwen；`senseaudio-cn` 只有 TTS、SFX、真实资源 origin 和人工验收全部完成后才整体加入，不发布 TTS-only；不允许自定义 base URL / model / voice / region / 资源服务器 |
+| provider 范围 | 默认 allowlist 仍包含 ElevenLabs、MiniMax、Qwen；`senseaudio-cn` 只有 TTS、SFX、固定资源 policy 的正式 smoke 和人工验收全部完成后才整体加入，不发布 TTS-only；不允许自定义 base URL / model / voice / region / 资源服务器 |
 | provider 选择 | 用户显式选择 Provider/profile；切换会使未采用候选失效，不自动 fallback 或跨供应商重试 |
 | model / voice | 每个 profile 使用应用内固定且可审计的 model/voice；UI 不接受任意 model ID、voice ID |
 | region | 需要区域的 Provider 使用显式 allowlisted region profile；不自动跨区，不把不同区域 key 混用 |
@@ -95,7 +95,7 @@ profile。用户只选择 profile 并输入对应的 key；实现前必须重新
 | `minimax-global` | `readOnlyProbe`：`POST https://api.minimax.io/v1/get_voice`，body 固定为 `{"voice_type":"all"}`；生成使用 Bearer + `POST https://api.minimax.io/v1/t2a_v2` | `speech-2.8-hd` + voice `Chinese (Mandarin)_Reliable_Executive`；`output_format: hex`；32 kHz / 128 kbps / mono MP3；响应 `data.audio` 解 hex | 首批只开放 `speech` 和 `zh` / `zh-Hans`；sound tags / voice effects 不等价于纯音效生成 | unary adapter 已实现；MiniMax 候选改为真实 numbered 语义 |
 | `qwen-singapore` | `deferredUntilExplicitGeneration`；Bearer + `POST https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`；credential slot `qwen-singapore`；`X-DashScope-SSE: enable` | `qwen3-tts-instruct-flash` + voice `Cherry`；SSE Base64 PCM，24 kHz / 16-bit / mono / little-endian，封装 WAV | 首批只开放 `speech`；locale 仅映射 `zh* → Chinese`、`en* → English` | SSE adapter 已实现；保存 key 时不发可计费请求 |
 | `qwen-beijing` | `deferredUntilExplicitGeneration`；Bearer + `POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`；credential slot `qwen-beijing`；独立 region key | 与 Singapore 相同的 model、voice、SSE 和 PCM 合同 | 与 `qwen-singapore` 相同，必须单独做地区 smoke | 独立 profile 已实现；不得隐式自动切换 |
-| `senseaudio-cn` | `readOnlyProbe`：Bearer + `POST https://api.senseaudio.cn/v1/get_voice`，body 固定为 `{"voice_type":"all"}`；TTS `POST /v1/t2a_v2`；SFX `POST /v1/sound-effects/generations`；credential slot `senseaudio-cn` | speech：`sensenova-tts-2.0` + `female_0033_b`，32 kHz / 128 kbps / mono hex MP3；animal/soundEffect：`senseaudio-sfx-1.0-260626`、一次 native batch 返回资源 URL | `speech` 仅 `zh*`；`animal` / `soundEffect`；`.mixed` 明确不支持 | **预生产候选**；在官方稳定资源 origin/MIME、真实 TTS+SFX smoke 与人工验收全部完成前不进入默认 allowlist |
+| `senseaudio-cn` | `readOnlyProbe`：Bearer + `POST https://api.senseaudio.cn/v1/get_voice`，body 固定为 `{"voice_type":"all"}`；TTS `POST /v1/t2a_v2`；SFX `POST /v1/sound-effects/generations`；credential slot `senseaudio-cn` | speech：`sensenova-tts-2.0` + `female_0033_b`，32 kHz / 128 kbps / mono hex MP3；animal/soundEffect：`senseaudio-sfx-1.0-260626`、一次 native batch 返回资源 URL | `speech` 仅 `zh*`；`animal` / `soundEffect`；`.mixed` 明确不支持 | **预生产候选**；ADR 0014 已固定实测资源合同并接受剩余可用性风险，真实 TTS+SFX smoke 与人工验收完成前仍不进入默认 allowlist |
 
 能力规则：
 
@@ -157,11 +157,12 @@ profile。用户只选择 profile 并输入对应的 key；实现前必须重新
 3. provider-neutral request 到实际 API body/header 的编译器，不把 provider 字段泄漏进领域模型；
 4. 成功、空响应、畸形响应、认证/额度/限流/5xx、取消和输出过大 fixture；
 5. 真实 provider smoke 的单独授权、可撤销限额 key、候选集合回执和未完成项记录；返回资源 URL 的
-   路线还必须有官方确认的精确下载 origin/MIME、无凭据下载合同和 redirect 行为。
+   路线还必须有官方资源合同。若供应商没有可复核承诺，只能通过单独 ADR 让项目所有者接受固定的实测
+   origin/MIME、无凭据 GET、零 redirect 政策与剩余可用性风险，不能让运行时自行学习信任范围。
 
 Provider 只有其计划暴露的全部路线通过后才能显示为可用；纯音效、动物叫声、混合声音和声音克隆都是
 独立 capability，不能从“有 TTS API”推导出来。尤其 `senseaudio-cn` 是一个不可拆分的固定 profile：
-TTS 通过而 SFX 资源 origin 未确认时，整个 profile 仍不可用，不能发布 TTS-only 半成品。
+TTS 通过而 SFX 固定资源 policy 的正式 smoke 未通过时，整个 profile 仍不可用，不能发布 TTS-only 半成品。
 
 ### 0.2.2 跨文档 SoT 对齐门禁
 
@@ -183,12 +184,17 @@ production UI 已实现，也不把 issue label、静态原型或本地文档升
 2026-09-11 的 SenseAudio 扩展由 ADR 0011 取代 ADR 0006 的全局候选集合假设，并要求本计划、
 `CONTEXT.md` 和 `TODOS.md` 同步记录 candidate-set 术语、生产暴露门禁与 `senseaudio-a1` mixed P3。
 这次文档对齐不等于 `senseaudio-cn` 已进入默认 allowlist；该状态只能由 production registry 与第 11 节
-的外部证据共同证明。
+的 T8 验收证据共同证明。
 
-2026-09-13 的 #188 进一步把 prep、官方资源合同、经授权付费 smoke、原生验收、activation 与
+2026-09-13 的 #188 进一步把 prep、资源合同依据、经授权付费 smoke、原生验收、activation 与
 Release/Bundle 证据拆成不可互相替代的层级。`docs/senseaudio-production-acceptance.md` 是这些步骤的
 唯一操作台账；在该台账绑定完整 source commit、精确 policy digest 与实际 Bundle 身份前，任何
 fixture、harness、build、原型或单路线成功都不能取得生产资格。
+
+2026-09-14 的 ADR 0014 部分取代 ADR 0011 对 SenseAudio 官方资源确认的硬依赖。项目所有者接受
+`https://dynamic.senseaudio.cn:443`、`audio/mpeg`、匿名 GET、零 redirect、立即下载且不持久化 URL 的
+实测资源合同，并承担 URL 有效期与 host 轮换未知造成的可用性风险。该决定允许构造绑定此 exact policy
+的非分发候选，不代表正式 smoke 或 production activation 已通过。
 
 ### 0.3 共享事件边界
 
@@ -763,9 +769,11 @@ speech 只支持 `zh*`，并在同一 deadline 内顺序调用三次
 校验，淘汰单项后可以降为本地 partial。零个有效项返回 `insufficientValidCandidates` 并清理。
 
 官方 SFX schema 只冻结 `audio_url` 字段，示例仍使用 `example.com`，没有给出生产资源 hostname、MIME、
-redirect 或有效期合同。因此实现与 fixture 可以注入非 production asset policy，但 production policy
-必须等待官方确认与真实 smoke；若只能观察到不稳定 host，不得改成任意 HTTPS，整个 `senseaudio-cn`
-继续不进入默认 allowlist。
+redirect 或有效期合同。ADR 0014 因此固定项目所有者接受的实测 policy：只允许
+`https://dynamic.senseaudio.cn:443`、`audio/mpeg`、匿名 GET、零 redirect、final URL 不漂移，并在当前
+显式生成中立即下载且不持久化 URL。URL 有效期与 host 轮换未知是已接受的可用性风险；任何行为漂移都
+fail closed，不得改成任意 HTTPS、通配 host 或运行时学习 policy。绑定候选的正式 smoke 与人工验收完成
+前，整个 `senseaudio-cn` 继续不进入默认 allowlist。
 
 ## 3. 用户流程与状态
 
@@ -908,11 +916,11 @@ provider 输出不得绕过现有 `AudioImport`：
 | TTS-MP-5 | Qwen `qwen3-tts-instruct-flash` SSE adapter 与 region profiles | TTS-MP-1T | 已完成（#109） | 固定 host/path/header/model/voice、SSE/Base64 PCM、合法 WAV、取消/大小/终态校验；只开放 `speech`，地区 smoke 分开 |
 | TTS-SA-0 | ADR 0011、candidate-set policy/identity/completion 与 legacy sequential adapter | TTS-MP-1 | gated 基线已落地；#183 聚合门禁待复验 | 旧 Provider 行为不变；MiniMax 显示 numbered；complete/partial 与 cleanup 合同有确定性覆盖 |
 | TTS-SA-1 | `senseaudio-cn` read-only voice probe 与三次顺序 TTS | TTS-SA-0、TTS-MP-1T | deterministic 基线已落地；真实调用 `NOT VERIFIED` | 固定 endpoint/model/voice/body；仅 zh；无 POST retry；三候选全有或全无 |
-| TTS-SA-2 | SenseAudio native-batch SFX 与 credential-free asset fetcher | TTS-SA-0、TTS-MP-1T | deterministic fixture 基线已落地；production origin 阻塞 | exact batch parser、URL 全量 preflight、无 credential GET、实际 MP3 验证、1–3 候选与 partial |
-| TTS-SA-3 | optional-policy registry、`AICueRuntime`、清理 ownership、披露/partial UI 与 deterministic suites | TTS-SA-1–TTS-SA-2 | #183 hardening 实施中；默认 allowlist 继续关闭 | production policy 为 nil；真模块装配和异步失败矩阵在聚合 commit 复验；无 origin 证据时用户不可见 |
-| TTS-SA-4P | 非分发候选、证据身份、首次预算、activation 与回滚协议（#188） | TTS-SA-3 | 文档已冻结；真实/付费/原生证据均未发生 | `docs/senseaudio-production-acceptance.md` 区分六层证据并绑定 commit/policy/Bundle |
-| TTS-SA-4E | 官方资源合同、真实 TTS/SFX、听感、键盘与 VoiceOver 验收（#187） | TTS-SA-3、TTS-SA-4P、单独付费授权 | `NOT AUTHORIZED` / `BLOCKED EXTERNAL` | 使用绑定的非分发候选完成全部路线；不得以 TTS-only、fixture 或 build 代替 |
-| TTS-SA-4A | 固化 production policy、加入 allowlist 并复验最终 Bundle（#189） | TTS-SA-4E 全部通过 | `BLOCKED EXTERNAL` | 单独评审 activation；默认仍 ElevenLabs；相关身份漂移时重验 |
+| TTS-SA-2 | SenseAudio native-batch SFX 与 credential-free asset fetcher | TTS-SA-0、TTS-MP-1T | deterministic fixture 基线已落地；ADR 0014 已固定 policy，正式 smoke `NOT RUN` | exact batch parser、URL 全量 preflight、无 credential GET、实际 MP3 验证、1–3 候选与 partial |
+| TTS-SA-3 | optional-policy registry、`AICueRuntime`、清理 ownership、披露/partial UI 与 deterministic suites | TTS-SA-1–TTS-SA-2 | #183 hardening 实施中；默认 allowlist 继续关闭 | production policy 为 nil；真模块装配和异步失败矩阵在聚合 commit 复验；T8 未通过时用户不可见 |
+| TTS-SA-4P | 非分发候选、证据身份、首次预算、activation 与回滚协议（#188） | TTS-SA-3 | 台账已按 ADR 0014 修订；绑定候选的正式/原生证据未完成 | `docs/senseaudio-production-acceptance.md` 区分各层证据并绑定 commit/policy/Bundle |
+| TTS-SA-4E | 实测资源 policy、真实 TTS/SFX、听感、键盘与 VoiceOver 验收（#187） | TTS-SA-3、TTS-SA-4P、单独付费授权 | 资源风险 `RISK ACCEPTED`；正式验收 `NOT RUN` | 使用绑定的非分发候选完成全部路线；不得以资源发现、TTS-only、fixture 或 build 代替 |
+| TTS-SA-4A | 固化 production policy、加入 allowlist 并复验最终 Bundle（#189） | TTS-SA-4E 全部通过 | `NOT VERIFIED`；等待 T8 | 单独评审 activation；默认仍 ElevenLabs；相关身份漂移时重验 |
 | TTS-3 | 事件页 Provider/profile 选择、逐 profile 配置/管理 key、能力不支持提示、候选试听/采用 | TTS-MP-2–TTS-MP-5 | 多 Provider production UI 与自动 fixture 已完成；真机 AX `NOT VERIFIED` | 默认 ElevenLabs；切换不自动生成；不支持 modality 在网络前阻止；改名不重新生成；键盘/VoiceOver 可用 |
 | TTS-4 | 临时候选 acquisition、`AudioImport`、manifest bind、名称投影和清理 | TTS-1–TTS-MP-1 | 已完成 fixture 验证 | 所有 adapter 输出走同一安全导入链；坏音频 fail closed；失败保留旧绑定；仅采用一个 |
 | TTS-5 | 文档、按 Provider 的隐私/费用披露、自动/手工/真实 provider 分层验收 | TTS-MP-0–TTS-4 | 多 Provider 文档与自动交接已完成；原生/真实 Provider/发布层 `NOT VERIFIED` | 不含 key/内容；每个 profile 的能力/地区/费用证据清楚；所有对应门禁通过 |
@@ -930,7 +938,7 @@ TTS-5 等待 TTS-MP-0...TTS-4
 
 TTS-MP-1/1T → TTS-SA-0 → TTS-SA-1 ─┐
                          └→ TTS-SA-2 ─┴→ TTS-SA-3 → TTS-SA-4P
-                                                        └→ TTS-SA-4E（外部门禁）
+                                                        └→ TTS-SA-4E（外部与人工验收）
                                                               └→ TTS-SA-4A（activation）
 ~~~
 
@@ -949,7 +957,7 @@ commit、push、release 或部署仍需分别授权。
 |---|---|
 | `gui/Sources/ClaudioGUICore/AICueDomain.swift` | 保留声音方案、候选与采用领域类型；加入明确台词 invariant 和 generation identity，不放 provider HTTP 字段 |
 | `gui/Sources/ClaudioGUICore/AICueProviderContracts.swift`（新） | provider/profile/route、credential slot/policy、provider-neutral request/response 和 route-derived capability |
-| `gui/Sources/ClaudioGUICore/AICueProviderRegistry.swift`（新） | 保留四个默认 profile，并用同一 optional-policy builder 准备受证据门禁的 `senseaudio-cn`；policy keys 精确等于所有 remote-assets profile；生产 policy 在外部门禁前为 nil；不接受用户 URL/model/voice/resource host |
+| `gui/Sources/ClaudioGUICore/AICueProviderRegistry.swift`（新） | 保留四个默认 profile，并用同一 optional-policy builder 准备受证据门禁的 `senseaudio-cn`；policy keys 精确等于所有 remote-assets profile；生产 policy 在 T8 全部门禁前为 nil；不接受用户 URL/model/voice/resource host |
 | `gui/Sources/ClaudioGUICore/AICueRuntime.swift`（新） | package-only `Registry → credential validators → Dispatcher → Engine → preferences` 装配值；构造不读 Key、不发网、不写偏好 |
 | `gui/Sources/ClaudioGUICore/AICueHTTPTransport.swift`（新） | hardened unary URLSession、exact-origin 校验、认证注入、redirect rejection、wire ceiling 与取消 |
 | `gui/Sources/ClaudioGUICore/AICueSSETransport.swift`（新） | 增量 SSE framing/parser、CRLF/LF、terminal/cancel、Base64/wire ceiling；不缓冲完整 stream |
@@ -963,7 +971,7 @@ commit、push、release 或部署仍需分别授权。
 | `gui/Sources/ClaudioGUICore/AICueGenerationEngine.swift` | 在首个可能 mkdir 前建立本次 UUID child 清理 ownership；冻结 profile/generation/deadline、route/language/台词门禁、调用 candidate-set provider；校验 complete/partial、minimum 与 identity，迟到结果 fail closed |
 | `gui/Sources/ClaudioGUICore/AICueGenerationViewModel.swift` | 管理 profile、逐 profile stored/verification/pending 状态、切换取消和 provider-specific 脱敏错误 |
 | `gui/Sources/ClaudioGUI/EventSettingsAICueView.swift` | 增加 Provider/profile 选择、差异化保存文案、region/能力/台词帮助；保持 `SecureField` 和显式 Generate |
-| `gui/Sources/ClaudioGUI/MenuBarController.swift` | composition root 注入 registry、credential manager、unary/SSE/asset transport 和 adapters；UI 无 provider switch，默认 allowlist 受外部证据门禁 |
+| `gui/Sources/ClaudioGUI/MenuBarController.swift` | composition root 注入 registry、credential manager、unary/SSE/asset transport 和 adapters；UI 无 provider switch，默认 allowlist 受 T8 证据门禁 |
 | `gui/Tests/ClaudioGUICoreTests/AICueDomainSuite.swift` | profile-neutral domain、明确台词语法、unsupported modality/language 和 generation identity |
 | `gui/Tests/ClaudioGUICoreTests/AICueCredentialSuite.swift` | slot mapping、无迁移 legacy account、read-only/deferred、pending promotion/cancel 和 region 隔离 |
 | `gui/Tests/ClaudioGUICoreTests/AICueHTTPTransportSuite.swift`（新） | auth header 隔离、exact origin、redirect、unary wire ceiling、deadline 与取消 |
@@ -999,8 +1007,8 @@ commit、push、release 或部署仍需分别授权。
 | TTS-MP-5 | 2–3 天 | Qwen SSE、PCM→WAV、region profile、取消和输出校验 |
 | TTS-SA-0–TTS-SA-3 | 3–5 天 | candidate-set seam、SenseAudio probe/TTS/SFX、asset fetch、runtime、清理、UI 与 deterministic fixtures |
 | TTS-SA-4P | 0.5 天 | 冻结非分发候选、证据身份、预算、activation 与回滚台账；不执行真实调用 |
-| TTS-SA-4E | 另计 | 官方资源 origin 确认、付费 smoke、听感、键盘与 VoiceOver；需要独立授权 |
-| TTS-SA-4A | 0.5–1 天 | 外部门禁通过后单独固化 policy、allowlist 并复验最终 Bundle |
+| TTS-SA-4E | 另计 | 固定实测资源 policy 的正式付费 smoke、听感、键盘与 VoiceOver；需要独立授权 |
+| TTS-SA-4A | 0.5–1 天 | T8 门禁通过后单独固化 policy、allowlist 并复验最终 Bundle |
 | TTS-3、TTS-5 | 2–3 天 | 多 Provider UI、文案、AX、手工矩阵和证据整理；真实 smoke 时间另计 |
 
 估时不包含真实 key 申请、供应商审批、付费等待、签名、公证或发布排队。SenseAudio 回滚时把
@@ -1017,7 +1025,7 @@ production policy 恢复为 nil 并从 registry 移除 `senseaudio-cn`；`eleven
 - 空/过长描述；名称 trim、1...40 字符、控制字符和同名后缀；名称不得决定文件路径。
 - speech / animal / soundEffect / mixed 四类 fixture；非语音时 `spokenContent == nil`，speech/mixed 时
   台词必须从完整引号中逐字提取。`说任务完成`、缺失右引号、空引号均本地失败且网络计数为 0。
-- production `allowlistedProfiles` 在外部门禁完成前只返回四个既有 profile：`elevenlabs-global`、
+- production `allowlistedProfiles` 在 T8 全部门禁完成前只返回四个既有 profile：`elevenlabs-global`、
   `minimax-global`、`qwen-singapore`、`qwen-beijing`；deterministic suite 可通过显式非 production policy
   构造固定 `senseaudio-cn`。未知 profile/region 或自由 endpoint/model/voice/resource host 均拒绝。
 - `supportedModalities == Set(routes.keys)`；route key/modality、origin/auth、credential slot、locale allowlist
@@ -1144,7 +1152,7 @@ adapter/fixture 已验证，不能升级为真实生成或用户可接受音质�
 
 SenseAudio 的实际执行记录必须写入 `docs/senseaudio-production-acceptance.md`，并遵守其中的非分发
 候选、首次最多 3 次 TTS POST + 1 次 SFX POST、证据 allowlist/禁区和 commit/policy/Bundle 身份绑定。
-本计划不预填未发生的官方确认、付费调用、真实音频、键盘、VoiceOver 或 Release 结果。
+本计划不把风险接受或资源发现预填为正式付费 smoke、真实音频、键盘、VoiceOver 或 Release 结果。
 
 ## 9. 失败模式
 
@@ -1184,8 +1192,8 @@ SenseAudio 的实际执行记录必须写入 `docs/senseaudio-production-accepta
   ID、区域自动切换、任意 HTTPS、通配下载域名或用户自定义资源服务器。
 - MiniMax/Qwen 仍只支持 `speech`；SenseAudio 支持 `speech`、`animal` 与 `soundEffect`，明确不支持
   `.mixed`。`senseaudio-a1` mixed 作为 `TODOS.md` 的 P3 独立工作，不塞入本次三秒 v1 合同。
-- 不发布 SenseAudio TTS-only 半成品；只有 TTS、native-batch SFX、官方稳定资源 origin/MIME 和人工
-  验收全部通过后，才把完整 `senseaudio-cn` 加入默认 allowlist。
+- 不发布 SenseAudio TTS-only 半成品；只有 TTS、native-batch SFX、ADR 0014 固定资源 policy 的正式
+  smoke 和人工验收全部通过后，才把完整 `senseaudio-cn` 加入默认 allowlist。
 - 不做自定义 SenseAudio voice、音色克隆、流式 TTS、可调采样率、可调模型或可调 region。
 - 不对可能计费的 SenseAudio TTS/SFX POST 自动 retry；GET 的有限幂等 retry 不能推广到生成请求。
 - 不做本地 Qwen/MiniMax 权重下载、Core ML/MLX 推理、离线模型管理或云 Provider 的自动选择器；
@@ -1228,14 +1236,15 @@ allowlist 并被表述为真实集成完成：
 - adapter 按 route policy 返回候选集合：complete 恰好 3 个，只有 SenseAudio SFX 可返回 1–2 个
   partial；无自动播放；每次生成由用户显式触发；不支持 modality 不会发送请求或自动 fallback；全部
   子请求与资源 GET 共享 60 秒 generation deadline，profile switch 的迟到结果不能污染新状态。
-- SenseAudio 官方确认稳定的精确资源 origin 与 MIME；经单独授权的真实 TTS/SFX smoke 证明
-  `female_0033_b` 可用、SFX GET 无 Bearer/redirect 且音频合同成立；人工听感、键盘和 VoiceOver 通过。
+- 项目所有者已接受 ADR 0014 的精确实测资源 policy 与剩余可用性风险；经单独授权、绑定非分发候选的
+  真实 TTS/SFX smoke 证明 `female_0033_b` 可用、全部 SFX URL/GET 符合该 policy 且音频合同成立；
+  人工听感、键盘和 VoiceOver 通过。
 - 上一项完成前，production `allowlistedProfiles` 仍只有既有四项，默认 Provider 仍为
   `elevenlabs-global`，`productionSenseAudioAssetPolicy` 仍为 `nil`；不得以 fixture 或 TTS 单路线证据
   暴露 SenseAudio。
 - `docs/senseaudio-production-acceptance.md` 已把真实证据绑定到完整 source commit、精确 policy digest
   和实际被测 Bundle identity；非分发候选没有上传、发布或冒充 RC。
-- 只有前述外部门禁全部通过，才由 #189 单独评审 production policy 与 allowlist activation；最终
+- 只有前述 T8 门禁全部通过，才由 #189 单独评审 production policy 与 allowlist activation；最终
   Bundle 身份或相关 source/policy 漂移时，对受影响路线重新验收。
 - 选中候选完整走现有 `AudioImport` 和 manifest bind，任何失败保留旧声音。
 - helper/GUI test harness、显式 GUI debug build、xcstrings 校验和 `git diff --check` 全绿。
@@ -1280,6 +1289,6 @@ credential-free asset fetcher 和对应 UI 接缝；不得在 UI 或 adapter 中
 文档类型：AI 提示音子域工程执行计划，兼具内部接口 reference 与架构 explanation。AI 子域的
 provider-neutral registry、transports、逐 profile credential policy、ElevenLabs/MiniMax/Qwen adapters、
 统一设置 production UI、窗口迁移与既有 deterministic fixtures 已落地。SenseAudio 的代码与 fixture
-实施状态以本轮实际 gate 为准；在官方资源 origin、真实 Provider 与人工验收完成前始终是未暴露候选。
+实施状态以本轮实际 gate 为准；在固定资源 policy 的正式 smoke、真实 Provider 与人工验收完成前始终是未暴露候选。
 原生 UI/VoiceOver、真实 Provider、双架构、签名、公证、push、release 和部署不由本地自动证据证明，
 均需要后续单独授权或验收。

@@ -1,7 +1,7 @@
 # SenseAudio 生产候选验收、证据身份与回滚台账
 
 本文件是 `senseaudio-cn` 从受门禁实现走向生产暴露的唯一操作台账。领域与网络合同仍由
-`CONTEXT.md`、ADR 0011 和 `plan/PLAN-CONSUMER-TTS-EXECUTION.md` 拥有；本文件只规定如何构造
+`CONTEXT.md`、ADR 0011、ADR 0014 和 `plan/PLAN-CONSUMER-TTS-EXECUTION.md` 拥有；本文件只规定如何构造
 非分发验收候选、如何记录证据、何时允许 activation，以及如何安全回滚。
 
 发布这份文档不会完成任何门禁。本文创建时没有使用真实 API Key、没有执行付费调用、没有联系
@@ -9,9 +9,14 @@ SenseAudio、没有构造非分发 app、没有完成原生键盘或 VoiceOver �
 activation。默认 registry 仍只有既有四个 profile，`productionSenseAudioAssetPolicy` 必须保持
 `nil`，默认 Provider 仍为 `elevenlabs-global`。
 
-关联工作：总规格 #183；本台账 #188；外部验收 #187；外部门禁通过后的 activation #189。
+2026-09-14，项目所有者采用 ADR 0014 的“项目所有者接受的实测资源合同”，固定
+`https://dynamic.senseaudio.cn:443` 与 `audio/mpeg`，并接受 URL 有效期和 host 轮换未知造成的可用性
+风险。本次文档决定只解除“必须等待官方确认”这一外部依赖；它不把此前资源发现升级为正式 smoke，
+也不完成非分发候选、原生验收或 production activation。
 
-## 状态词与初始状态
+关联工作：总规格 #183；本台账 #188；外部与人工验收 #187；T8 门禁通过后的 activation #189。
+
+## 状态词与当前基线
 
 只使用以下状态，禁止用“基本完成”“看起来可用”代替：
 
@@ -19,28 +24,29 @@ activation。默认 registry 仍只有既有四个 profile，`productionSenseAud
 - `NOT AUTHORIZED`：需要真实 Key、付费、厂商联系或生产变更，但尚未取得单独授权；
 - `NOT VERIFIED`：缺少满足本台账的证据；
 - `BLOCKED EXTERNAL`：本地工作不能替代的外部合同或真实系统证据尚未取得；
+- `RISK ACCEPTED`：项目所有者已明确接受一项有边界的剩余风险；它不代表对应真实 smoke 已通过；
 - `CLOSED`：production policy 明确为 `nil`，profile 未进入默认 allowlist；
 - `PREPARED LOCAL`：绑定 commit 上的 fixture、harness 与 build 已通过，仅证明本地准备；
 - `PASSED` / `FAILED`：对应门禁在绑定身份上有完整、脱敏且可复核的记录；
 - `ACTIVATED`：单独评审的 production policy 与 allowlist 变更已完成，且后续 Bundle 复验通过。
 
-本文创建时的状态如下；后续只能在实际执行并填写证据引用后更新：
+当前基线如下；后续只能在实际执行并填写证据引用后更新：
 
-| 层级 | 初始状态 | 当前事实 |
+| 层级 | 当前状态 | 当前事实 |
 |---|---|---|
 | 本地实现聚合与自动门禁 | `NOT RUN` | 已有 gated SenseAudio 实现与 deterministic fixtures；#183 hardening 子任务尚需在聚合 commit 上复验 |
 | production 暴露 | `CLOSED` | `productionSenseAudioAssetPolicy == nil`；`senseaudio-cn` 不在默认 allowlist |
-| 官方资源合同 | `BLOCKED EXTERNAL` | 稳定 exact origin、MIME、免 Bearer、redirect 与有效期/轮换合同尚无已记录证据 |
-| 首次真实付费 smoke | `NOT AUTHORIZED` / `NOT RUN` | #188 不授权真实 Key 或付费调用 |
+| 实测资源合同决策 | `RISK ACCEPTED` | exact origin/MIME/匿名 GET/零 redirect 已固定；URL 有效期与 host 轮换未知作为可用性风险接受 |
+| 首次正式付费 smoke | `NOT RUN` | 尚未在绑定的非分发候选上完成；此前资源发现不计入本层 |
 | 原生听感、键盘、VoiceOver | `NOT RUN` | fixture、SwiftUI harness 或 build 不能替代 |
-| production activation | `BLOCKED EXTERNAL` | 由 #189 单独实施；本 ticket 不修改 policy/allowlist |
+| production activation | `NOT VERIFIED` | 严格依赖 T8 其余层全部通过；由 #189 单独实施，本 ticket 不修改 policy/allowlist |
 | Release / distribution | `NOT RUN` | 没有签名 universal RC、notarization、双架构或正式批准 |
 
 ## 不可跳过的门禁顺序
 
 ```text
 本地准备
-  → 官方资源合同
+  → 项目所有者接受的实测资源合同与精确 policy
   → 单独授权的付费 TTS/SFX smoke
   → 绑定同一非分发候选的听感、键盘与 VoiceOver
   → 单独评审的 activation
@@ -48,7 +54,7 @@ activation。默认 registry 仍只有既有四个 profile，`productionSenseAud
   → 独立 Release/分发流程
 ```
 
-前一层成功不能替代后一层。TTS 成功不能证明 SFX；SFX 返回 URL 不能证明资源 origin 可信；HTTP 2xx
+前一层成功不能替代后一层。TTS 成功不能证明 SFX；SFX 返回 URL 不能证明它符合固定 asset policy；HTTP 2xx
 不能证明音频可播放；自动化不能证明原生键盘、VoiceOver 或真实听感；ad-hoc app 不能证明 Release。
 
 ## 1. 本地准备与非分发候选构造
@@ -77,32 +83,31 @@ git diff --check
 只有命令、完整 commit、环境和脱敏结果都记录后，才可把本层改为 `PREPARED LOCAL`。这仍然不证明
 真实 Provider、资源合同、真实音频、原生 UI、签名、公证或 production readiness。
 
-### 1.2 官方合同先于 policy
+### 1.2 实测资源合同先于验收候选
 
-非分发候选只能使用 SenseAudio 官方明确确认的精确 HTTPS origin:443 与 MIME；随后真实 smoke 必须在
-同一 policy 上验证这些事实，才能继续原生验收与 activation。
-不得从 schema 示例、一次返回的临时 host、DNS 后缀或 URL 路径推断通配范围。若只能获得动态或不可
-确认的 host，状态写 `FAILED`，停止构造候选；不得改成任意 HTTPS、自定义资源服务器或 TTS-only。
+非分发候选只能使用 ADR 0014 已固定的精确 HTTPS origin:443 与 MIME；随后正式 smoke 必须在同一
+policy 上验证每个返回 URL 和 GET，才能继续原生验收与 activation。不得从后续响应、DNS 后缀或 URL
+路径动态学习或扩大信任范围。返回值一旦偏离固定 policy，状态写 `FAILED` 并停止候选；不得改成任意
+HTTPS、通配 host、自定义资源服务器或 TTS-only。
 
-用于证据绑定的 policy 规范化记录固定为 UTF-8、LF、key 排序的 JSON，只包含：
+用于证据绑定的 policy 规范化字节固定为以下单行、key 排序的 UTF-8 JSON，并在行末追加一个 LF；
+除该 LF 外没有空白：
 
 ```json
-{
-  "acceptable_mime_types": ["<sorted exact MIME>"],
-  "allowed_origins": ["https://<exact-host>:443"],
-  "profile_id": "senseaudio-cn"
-}
+{"acceptable_mime_types":["audio/mpeg"],"allowed_origins":["https://dynamic.senseaudio.cn:443"],"profile_id":"senseaudio-cn"}
 ```
 
-对这份规范化字节计算 SHA-256，并同时记录完整内容与 digest。不得写入路径、签名 query、示例完整
-URL 或 credential。policy 内容或 digest 变化会使依赖它的 smoke、原生候选与 activation 证据失效。
+该规范化字节的 SHA-256 固定为
+`6f570cf99d8fc8bfcf040c49ac4182afa1ab16d0baca74eb072a7f083e5d200d`。不得写入路径、签名 query、
+示例完整 URL 或 credential。policy 内容或 digest 变化会使依赖它的 smoke、原生候选与 activation
+证据失效。
 
 ### 1.3 构造非分发 app
 
 真实 Provider 与原生验收需要一个显式标记为 `NON-DISTRIBUTION` 的隔离候选。它从 1.1 的聚合 commit
-建立，只允许加入已经确认的精确 asset policy 与让该固定 profile 可达所必需的 activation patch；
+建立，只允许加入 ADR 0014 固定的精确 asset policy 与让该固定 profile 可达所必需的 activation patch；
 该 patch 必须形成独立本地 commit，不能夹带其他功能或证据文件。可分发分支中的
-`productionSenseAudioAssetPolicy` 在外部门禁完成前仍必须为 `nil`。
+`productionSenseAudioAssetPolicy` 在 T8 全部门禁完成前仍必须为 `nil`。
 
 验收候选不得上传 release、公开下载、发给未授权测试者或合入可分发分支。构建前再次确认工作树为空，
 然后运行完整门禁和本地 bundle 构建：
@@ -143,23 +148,28 @@ shasum -a 256 "$candidate_evidence_dir/claudi0-NON-DISTRIBUTION.zip"
 
 不得用 `dist/` 路径、分支名、窗口截图或“刚刚构建”替代这些身份字段。
 
-## 2. 官方资源合同
+## 2. 项目所有者接受的实测资源合同
 
-官方确认必须覆盖同一个固定 `senseaudio-cn` SFX route，并记录确认日期与可复核的脱敏引用：
+项目所有者于 2026-09-14 接受以下固定合同及剩余风险。它是 Claudio 自己执行的信任边界，不是
+SenseAudio 对未来行为的保证，也不因决策本身而取得真实 smoke 的 `PASSED`：
 
-| 合同 | 状态 | 允许记录的结果 |
-|---|---|---|
-| 稳定下载 origin | `NOT VERIFIED` | 精确 scheme + hostname + `:443`；不含 path/query |
-| MIME | `NOT VERIFIED` | 明确允许的 exact MIME 集合 |
-| GET 认证 | `NOT VERIFIED` | 是否完全不需要 Bearer、Cookie、Referer |
-| redirect | `NOT VERIFIED` | 是否保证零 redirect；实际 smoke 也必须为零 |
-| URL 有效期与 host 轮换 | `NOT VERIFIED` | 非敏感合同摘要与确认日期 |
+| 合同项 | 固定政策或已接受风险 |
+|---|---|
+| 下载 origin | 只允许 `https://dynamic.senseaudio.cn:443`；不含 path/query，不允许子域通配、IP 或其他端口 |
+| MIME | 只允许 exact `audio/mpeg`；随后仍检查 MP3 magic、5 MiB 与 3 秒限制 |
+| GET 认证 | 完全匿名；独立 asset fetcher 不发送 Bearer、Cookie 或 Referer |
+| redirect / final URL | redirect 必须为零；final URL 必须与预检 URL 完全一致 |
+| URL 生命周期 | 收到后只在当前显式生成中立即下载，不持久化完整 URL、path 或 query |
+| URL 有效期与 host 轮换 | 未知，状态为 `RISK ACCEPTED`；任何漂移都作为可用性失败，不允许扩大 policy |
 
-厂商若无法确认任一项，写 `FAILED` 并保持生产门关闭。观察到一次成功响应不能代替官方稳定合同。
+正式验证状态仍为 `NOT RUN`。同一绑定候选的真实 smoke 必须证明所有实际 URL 在首个 GET 前通过整批
+preflight，且每个 GET 的 origin、MIME、认证、redirect、final URL 与音频校验均符合上表。任一项失败，
+T8 写 `FAILED` 并保持 production 隐藏；若 activation 后观察到漂移，本次生成 fail closed，并按第 7 节
+回滚，而不是运行时学习新 host。此前不绑定正式候选的资源发现只能作为该决策的输入，不能代替本层。
 
 ## 3. 首次付费 smoke
 
-#188 不授权真实 Key 或付费。执行前必须取得一次新的、明确的授权，内容至少包括测试账户、可撤销限额
+#188 和本文件本身不授权真实 Key 或付费。执行前必须取得一次新的、明确的授权，内容至少包括测试账户、可撤销限额
 Key、最大生成请求数、预计费用上限、候选身份和执行窗口。Key 只进入应用的 Keychain 输入路径；不得
 进入 shell history、环境变量、文档、issue、日志、截图或 Git。
 
@@ -240,7 +250,7 @@ request ID 必须脱敏为不可用于查询原请求的摘要，例如只保留
 
 只有第 1–4 层全部 `PASSED`，#189 才可在单独分支中：
 
-1. 把官方确认、smoke 匹配的精确 policy 固化为非 `nil`；
+1. 把 ADR 0014 固定且经正式 smoke 匹配的精确 policy 固化为非 `nil`；
 2. 将完整 `senseaudio-cn` 加入默认 allowlist，同时保持默认 Provider 为 `elevenlabs-global`；
 3. 不增加任意 endpoint/model/voice/region/origin，也不加入 TTS-only 或 fallback；
 4. 运行全部自动门禁，构造新的最终 Bundle，并完成最低限度的 profile、credential、speech、SFX、
@@ -258,7 +268,7 @@ Gatekeeper、DMG checksum、双架构真机与正式批准继续走独立 releas
 
 ## 7. 安全回滚
 
-如果外部合同失败、Provider 行为漂移、回归出现或上线后需要撤回：
+如果固定资源合同不再匹配、Provider 行为漂移、回归出现或上线后需要撤回：
 
 1. 在单独评审的修复中把 production asset policy 恢复为 `nil` 并从默认 allowlist 移除
    `senseaudio-cn`，或分发上一已知安全版本；
@@ -282,13 +292,13 @@ Gatekeeper、DMG checksum、双架构真机与正式批准继续走独立 releas
 | Policy JSON / SHA-256 | 待填 |
 | Bundle identity / executable digests | 待填 |
 | 自动门禁 | `NOT RUN` |
-| 官方资源合同 | `NOT VERIFIED` |
+| 实测资源合同决策 | `RISK ACCEPTED`；正式 policy smoke `NOT RUN` |
 | 付费授权引用 / 预算 | `NOT AUTHORIZED` |
 | TTS smoke | `NOT RUN` |
 | SFX smoke | `NOT RUN` |
 | 听感 | `NOT RUN` |
 | 键盘 | `NOT RUN` |
 | VoiceOver | `NOT RUN` |
-| Activation commit / Bundle | `BLOCKED EXTERNAL` |
+| Activation commit / Bundle | `NOT VERIFIED`；严格依赖 T8 |
 | Release | `NOT RUN` |
 | 验收人 / 日期 / 结论 | 待填；当前不得写通过 |

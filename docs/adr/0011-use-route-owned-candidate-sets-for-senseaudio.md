@@ -4,6 +4,10 @@ status: accepted
 
 # 为 SenseAudio 使用路线拥有的候选集合与受证据门禁的固定 profile
 
+本 ADR 中要求 SenseAudio 官方确认资源合同后才能构造 asset policy 的门禁，已由
+[ADR 0014](0014-accept-observed-senseaudio-asset-contract.md) 部分取代；route-owned 候选集合、
+固定 profile、非分发候选、真实 smoke、人工验收与单独 activation 的其余决定继续有效。
+
 ## 决策
 
 AI 提示音的候选身份、请求数量和最少可接受数量由每条 `AICueProviderRoute` 的候选集合政策唯一拥有，
@@ -38,25 +42,28 @@ HTTPS origin、443 和 MIME，拒绝 IP、userinfo、fragment、redirect 与 fin
 
 ## 生产暴露门禁
 
-官方 SFX schema 目前没有冻结真实生产资源 hostname、MIME、redirect 和有效期合同。因此可以先实现
-固定 profile、可注入 asset policy 与 deterministic fixtures，但在以下证据全部齐备前，默认
-`allowlistedProfiles` 不得注册 `senseaudio-cn`，`productionSenseAudioAssetPolicy` 必须保持 `nil`，
-也不得发布 TTS-only 半成品：
+SenseAudio SFX 使用 ADR 0014 的项目所有者接受实测资源合同：唯一允许的资源 origin 固定为
+`https://dynamic.senseaudio.cn:443`，唯一允许的 MIME 固定为 `audio/mpeg`，GET 不携带 credential、
+Cookie 或 Referer，禁止 redirect 与 final-URL 漂移，并只在当前显式生成中立即下载、不持久化 URL。
+在以下证据全部齐备前，默认 `allowlistedProfiles` 不得注册 `senseaudio-cn`，
+`productionSenseAudioAssetPolicy` 必须保持 `nil`，也不得发布 TTS-only 半成品：
 
-1. SenseAudio 官方确认稳定的精确资源 origin 与可接受 MIME；
-2. 经单独付费调用授权完成真实 TTS 与 SFX smoke，确认 SFX GET 无 Bearer、无 redirect 且输出可解码；
+1. 上述固定 policy 绑定到非分发候选，并计算规范化内容与 digest；
+2. 经单独付费调用授权完成真实 TTS 与 SFX smoke，确认全部 SFX URL、GET、MIME 与音频均符合该 policy；
 3. 完成三候选语音、SFX partial、真实听感、键盘和 VoiceOver 人工验收。
 
 真实 Provider 与原生验收必须使用非分发验收候选。候选须绑定唯一的完整 source commit、精确 asset
 policy 的规范化摘要与 digest，以及实际被测试 app 的 Bundle identifier、版本、架构、签名身份和可执行
-文件 digest。验收候选可以在隔离分支中注入已经由官方确认的精确 policy，但不得合入可分发分支、上传或
+文件 digest。验收候选可以在隔离分支中注入 ADR 0014 固定的精确 policy，但不得合入可分发分支、上传或
 交付；它也不能把生产 policy 的 `nil` 门禁视为已经解除。只有上述证据全部通过后，才能在单独评审的
 activation 变更中固化 policy 并加入 allowlist。activation 或最终 Bundle 身份与验收候选不一致时，
 必须对受影响的合同重新验收，不能沿用旧候选结论。
 
-如果资源 host 只能观察到不稳定动态值或无法得到官方确认，SFX 验收失败；不得退化成任意 HTTPS、
-通配域名或用户自定义资源服务器。回滚只把 production policy 恢复为 `nil`、从 allowlist 移除 profile
-或使用上一版本应用，不自动删除 Keychain 项、已采用音频或 manifest 绑定，也不自动切换到其他 Provider。
+如果任一资源 URL、MIME、认证要求或 redirect 行为偏离 ADR 0014 的固定 policy，SFX 验收失败；不得
+退化成任意 HTTPS、通配域名、运行时学习 host 或用户自定义资源服务器。URL 有效期与 host 轮换未知是
+项目所有者接受的可用性风险，不是放宽安全政策的理由。回滚只把 production policy 恢复为 `nil`、从
+allowlist 移除 profile 或使用上一版本应用，不自动删除 Keychain 项、已采用音频或 manifest 绑定，也不
+自动切换到其他 Provider。
 
 ## 取代范围
 

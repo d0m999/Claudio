@@ -133,8 +133,12 @@ _Avoid_: 全局三候选假设、界面临时放宽
 _Avoid_: 导入部分成功、manifest 部分写入、任意残缺响应
 
 **生产资格（Production Eligibility）**:
-一个 Provider profile 可以出现在可分发应用中的条件。实现完成、fixture 通过或本地构建成功都不等于具备生产资格；涉及远端资源的 profile 还必须把官方资源合同、经授权的真实调用、原生人工验收与最终构建身份绑定为同一组证据。
+一个 Provider profile 可以出现在可分发应用中的条件。实现完成、fixture 通过或本地构建成功都不等于具备生产资格；涉及远端资源的 profile 还必须把已接受的资源合同、经授权的真实调用、原生人工验收与最终构建身份绑定为同一组证据。
 _Avoid_: 已实现即上线、自动门禁即正式验收、单路线通过即开放整个 profile
+
+**项目所有者接受的实测资源合同（Owner-Accepted Observed Asset Contract）**:
+供应商未正式承诺资源分发行为时，由项目所有者基于已观察结果固定 exact origin、MIME、无凭据 GET 与零 redirect 政策，并明确承担未知 URL 有效期和 host 轮换的可用性风险。它是政策与风险决定，不是供应商保证或正式 smoke 证据。
+_Avoid_: 把实测值称为官方确认、一次成功即稳定合同、任意 HTTPS
 
 **非分发验收候选（Non-distribution Acceptance Candidate）**:
 只为经授权的真实 Provider 与原生人工验收构造、并绑定明确源码、固定政策和 Bundle 身份的应用候选。它不得发布或交付，也不会仅因验收开始而取得生产资格；候选身份发生实质变化时，受影响的证据必须重验。

@@ -40,7 +40,7 @@ func runAICueProviderContractsSuites() {
         expect(
             (try? registry.profile(for: .senseAudioChina)) == nil
                 && AICueProviderRegistry.productionSenseAudioAssetPolicy == nil,
-            "真实资源 origin 与付费 smoke 前 production registry 不得暴露 SenseAudio")
+            "固定资源 policy 的正式 smoke 与 T8 人工验收前 production registry 不得暴露 SenseAudio")
         expect(
             try! registry.profile(for: .elevenLabsGlobal).supportedModalities
                 == Set(AICueModality.allCases),
