@@ -198,7 +198,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             "ai-cue-temporary",
             isDirectory: true)
         let aiCueRuntime = try! AICueRuntime(
-            vault: AICueKeychainCredentialVault(),
+            vault: AICueAppCredentialVault(),
             temporaryRoot: aiCueTemporaryRoot,
             durationProbe: audioEnvironment.durationProbe)
         let aiCueViewModel = AICueGenerationViewModel(

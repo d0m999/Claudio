@@ -9,6 +9,10 @@ SenseAudio、没有构造非分发 app、没有完成原生键盘或 VoiceOver �
 activation。默认 registry 仍只有既有四个 profile，`productionSenseAudioAssetPolicy` 必须保持
 `nil`，默认 Provider 仍为 `elevenlabs-global`。
 
+2026-09-15，ADR 0015 将 SenseAudio 凭据录入收口到 Claudio 内的掩码输入框和私有本地文件。
+该路径不再依赖 Data Protection Keychain 签名权限。旧 Keychain 项保持原样；新候选须验证保存、
+重启读取和生成取用，不沿用旧候选的凭据验收结论。本地存储不是加密存储或同用户进程隔离。
+
 2026-09-14，项目所有者采用 ADR 0014 的“项目所有者接受的实测资源合同”，固定
 `https://dynamic.senseaudio.cn:443` 与 `audio/mpeg`，并接受 URL 有效期和 host 轮换未知造成的可用性
 风险。本次文档决定只解除“必须等待官方确认”这一外部依赖；它不把此前资源发现升级为正式 smoke，
@@ -170,7 +174,8 @@ T8 写 `FAILED` 并保持 production 隐藏；若 activation 后观察到漂移�
 ## 3. 首次付费 smoke
 
 #188 和本文件本身不授权真实 Key 或付费。执行前必须取得一次新的、明确的授权，内容至少包括测试账户、可撤销限额
-Key、最大生成请求数、预计费用上限、候选身份和执行窗口。Key 只进入应用的 Keychain 输入路径；不得
+Key、最大生成请求数、预计费用上限、候选身份和执行窗口。Key 只通过应用掩码输入进入 ADR 0015
+规定的私有本地凭据文件；不得
 进入 shell history、环境变量、文档、issue、日志、截图或 Git。
 
 建议首次付费预算恰好为：
@@ -208,6 +213,7 @@ compiled SwiftUI tests 与源代码检查只能作准备证据。
 |---|---|---|
 | profile 与披露 | `NOT RUN` | SenseAudio 名称、固定 voice 资格、`.cn` 非驻留承诺、费用/数据边界 |
 | credential | `NOT RUN` | 保存只读 probe；invalid key 与 voice missing 分开；失败保留旧 active key |
+| 本地凭据持久化 | `NOT RUN` | 保存后重启可读取并供生成使用；目录/文件为 0700/0600；SenseAudio 的旧 Keychain 项无访问或迁移；文件不进入导出 |
 | 中文 speech | `NOT RUN` | 恰好 3 个“候选 1/2/3”，均可播放、不截断、不朗读 style 描述 |
 | animal / soundEffect | `NOT RUN` | 各一次真实 SFX；候选与描述匹配 |
 | SFX partial | `NOT RUN` | 1/3 与 2/3 的可见 banner、候选顺序、VoiceOver 数量摘要 |
@@ -274,7 +280,7 @@ Gatekeeper、DMG checksum、双架构真机与正式批准继续走独立 releas
    `senseaudio-cn`，或分发上一已知安全版本；
 2. 验证 production registry 恢复既有四 profile，默认仍是 `elevenlabs-global`，且不会自动改用其他
    Provider 重新生成；
-3. 不删除或改写 `senseaudio-cn` Keychain item；是否删除凭据仍由用户显式决定；
+3. 不删除或改写 `senseaudio-cn` 本地凭据文件或既有 Keychain item；是否删除凭据仍由用户显式决定；
 4. 不删除已采用的本地音频、用户声音包或 manifest 绑定；它们已经是普通本地资产；
 5. 只清理由当前 generation 拥有、尚未采用的私有临时候选，不触碰共享根、兄弟目录或历史资产；
 6. 保留脱敏验收摘要与撤回原因，移除任何公开下载候选，但不伪造旧证据为“从未发生”。

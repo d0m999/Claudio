@@ -20,7 +20,10 @@ allowlisted provider profile. The current registry is:
 A provider may charge your account. Credential storage, retention, and model-improvement use follow
 the per-profile disclosure shown before saving the credential and that provider account's settings
 and terms; one provider's terms are not applied to another. Credentials are stored in the macOS
-Keychain and are not included in copied diagnostics.
+Keychain and are not included in copied diagnostics. The gated SenseAudio profile is the exception:
+its key is stored in an unencrypted, user-private local file outside projects, with a 0700 directory
+and a 0600 file. Other processes with the same user's file access may read it. Claudio does not
+display or export saved keys, and it does not migrate or delete existing SenseAudio Keychain items.
 
 The About page's safe diagnostic summary contains only app version/build, architecture, macOS
 versions, published Surface semantic states, and whether fixed app resources exist. It excludes path
@@ -43,7 +46,10 @@ AI 声音生成是 claudi0 GUI 中可选且必须由用户明确触发的动作�
 
 供应商可能向你的账户收费。凭据存储、数据留存及是否用于模型改进，以保存凭据前显示的逐 profile
 披露、对应供应商账户设置和条款为准，不会把一个供应商的条款套用于另一个供应商。凭据保存在
-macOS 钥匙串中，不会进入可复制的诊断摘要。
+macOS 钥匙串中，不会进入可复制的诊断摘要。受门禁的 SenseAudio profile 是例外：Key 保存在项目
+之外、未经加密的用户私有本地文件中，目录权限为 0700、文件权限为 0600。同用户且具备相应文件
+访问权限的程序仍可能读取它。claudi0 不显示或导出已保存的 Key，也不迁移或删除既有 SenseAudio
+Keychain 项。
 
 “关于”页的安全诊断只包含应用版本/构建、架构、macOS 版本、已发布 Surface 的语义状态，以及
 固定应用资源是否存在。它排除路径值、回执内容、凭据、声音描述、供应商响应、日历或专注模式数据、

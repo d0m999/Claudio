@@ -3336,13 +3336,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Keychain unavailable"
+            "value": "Credential storage unavailable"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "钥匙串不可用"
+            "value": "凭据存储不可用"
           }
         }
       }
@@ -3603,6 +3603,38 @@
         }
       }
     },
+    "ai-cue.credential.local-file": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The key is saved in a local file and remains available after restarting Claudio. The file is not encrypted; permissions restrict access to your Mac user account. Claudio does not display, copy, or include it in exports."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Key 保存在本机文件中，重启 claudi0 后仍可使用。文件未加密，访问权限限于当前 Mac 用户；claudi0 不会显示、复制或将它包含在导出内容中。"
+          }
+        }
+      }
+    },
+    "ai-cue.error.local-credential-unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The local API Key file could not be accessed. Check this Mac user's file permissions and available storage."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法访问本机 API Key 文件；请检查当前 Mac 用户的文件权限和可用存储空间。"
+          }
+        }
+      }
+    },
     "ai-cue.credential.probing": {
       "localizations": {
         "en": {
@@ -3624,13 +3656,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Saving to Keychain…"
+            "value": "Saving API Key…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在保存到钥匙串…"
+            "value": "正在保存 API Key…"
           }
         }
       }
@@ -3656,13 +3688,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Deleting from Keychain…"
+            "value": "Deleting API Key…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在从钥匙串删除…"
+            "value": "正在删除 API Key…"
           }
         }
       }

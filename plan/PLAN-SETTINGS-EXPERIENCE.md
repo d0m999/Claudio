@@ -159,7 +159,7 @@ enum SettingsRoute {
 |---|---|---|
 | 语言、界面文字、面板宽度、状态点、通知偏好、快捷键、上次目的页 | UserDefaults | typed key；非法值回落；有迁移测试 |
 | pack、事件、主音量、Surface 覆盖 | `~/.claudio/config.json` | 继续使用锁与外科式 JSON 更新，保留未知字段 |
-| AI provider key | macOS Keychain | UI 只见状态，明文不进入页面状态或日志 |
+| AI provider key | SenseAudio 使用 ADR 0015 的私有本地文件；其他 Provider 使用 macOS Keychain | 掩码表单录入，UI 只投影保存状态，如实披露未加密的本地文件存储；Key 不进入日志或导出 |
 | 动态静默 | 私有、带 schema/revision/expiry 的原子 snapshot | 只包含布尔原因和时间，不包含 Focus 名称、日历标题、参与人或位置 |
 | 回执与日志 | 现有 0600 私有文件 | 不扩大字段；不保存提示词、响应、项目路径或音频绝对路径 |
 

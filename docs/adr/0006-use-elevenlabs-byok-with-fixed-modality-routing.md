@@ -6,6 +6,9 @@ status: accepted
 
 ## 决策
 
+SenseAudio 的本地凭据存储由 [ADR 0015](0015-use-local-file-credentials-for-senseaudio.md) 取代下文
+Keychain-only 要求；其他 Provider 仍沿用本 ADR。
+
 AI 提示音只允许用户从应用内注册的 Provider profile 中显式选择；首批 allowlist 固定为
 `elevenlabs-global`、`minimax-global`、`qwen-singapore` 和 `qwen-beijing`。Claudio 本机使用用户
 自备 API Key 直连对应固定 HTTPS origin/path。凭据只存 macOS Keychain；不内置共享 key，不接受

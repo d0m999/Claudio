@@ -588,6 +588,11 @@ profile 编译为 provider-neutral 的 A/B/C 请求，adapter 再将其映射到
 私有实现中临时借用 Keychain 值并构造认证请求；公共生成请求、view model、错误和 provenance
 都不能携带明文 key。
 
+**2026-09-15 凭据存储覆盖**：ADR 0015 将 `senseaudio-cn` 改为应用自有的本地凭据文件，具体路径、
+权限、风险和旧 Keychain 不迁移边界由该 ADR 拥有。本文其余 Keychain-only、Keychain slot 与 mock
+Keychain 的表述对 SenseAudio 均改指这一本地 vault；其他 Provider 不变。界面继续使用掩码输入和
+验证并保存，文件故障必须显示本地存储错误，不能要求用户解锁 Keychain。测试使用临时目录和假 Key。
+
 `AICueCredentialManager` 必须按 profile 从 registry 解析验证策略和可选 probe，不能继续注入一个
 只会验证 ElevenLabs 的全局 validator：
 

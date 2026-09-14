@@ -579,6 +579,12 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     "gui/Sources/ClaudioGUICore/AICueGenerationEngine.swift": [
         ".write(", "fchmod(", "open(", "write(",
     ],
+    // SenseAudio credential replacement uses a 0600 O_EXCL staging fd in its pinned private
+    // directory, then fsync + renameat. GUI runtime tests cover persistence and rejected nodes;
+    // the dedicated credential-writer audit below keeps this exception scoped to that writer.
+    "gui/Sources/ClaudioGUICore/AICueLocalCredentials.swift": [
+        ".write(", "fchmod(", "mkdirat(", "open(", "unlinkat(", "write(",
+    ],
     // DEBUG Settings gallery candidates are synthesized into a process-unique private root.
     // Each immutable WAV is atomically published before the fixture exposes it, and the retained
     // fixture removes only that exact root at the end of its lifetime.
@@ -635,10 +641,15 @@ private let rawWriteFileDescriptorHolders: Set<String> = [
     "helper/Sources/ClaudioCore/Log.swift",
     "helper/Sources/ClaudioCore/FileLock.swift",
     "gui/Sources/ClaudioGUICore/AICueGenerationEngine.swift",
+    "gui/Sources/ClaudioGUICore/AICueLocalCredentials.swift",
 ]
 
 private func isAuditedPrivateInitialWrite(path: String, arguments: String) -> Bool {
-    path == "gui/Sources/ClaudioGUICore/AICueGenerationEngine.swift"
+    if path == "gui/Sources/ClaudioGUICore/AICueLocalCredentials.swift" {
+        return arguments.filter { !$0.isWhitespace }
+            == "item,bytes.baseAddress!.advanced(by:offset),bytes.count-offset"
+    }
+    return path == "gui/Sources/ClaudioGUICore/AICueGenerationEngine.swift"
         && arguments.trimmingCharacters(in: .whitespacesAndNewlines)
             == "descriptor, pointer, remaining"
 }
@@ -1014,6 +1025,30 @@ func runAtomicWriteSuites() {
             !rawWriteFileDescriptorHolders.isEmpty && holders.count >= 3,
             "裸写名单空了 —— 两个空集相等，上面那条断言于是恒真。Log、FileLock 与 AI 候选写者"
                 + "都真的在裸写，它们必须被这条绊线看见")
+    }
+
+    suite("写盘绊线：SenseAudio 凭据仅经私有 staging 完整写入后原子替换") {
+        let path = "gui/Sources/ClaudioGUICore/AICueLocalCredentials.swift"
+        guard let source = scanned[path]?.codeWithoutStringLiterals,
+            let actorRange = source.range(of: "actor SenseAudioFileCredentialVault"),
+            let body = functionBody(
+                named: "replaceCredential", in: String(source[actorRange.lowerBound...]))
+        else {
+            expect(false, "缺失 SenseAudio 本地凭据写入接缝")
+            return
+        }
+        let compact = body.filter { !$0.isWhitespace }
+        for shape in [
+            "O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0o600",
+            "fchmod(item,0o600)==0", "whileoffset<bytes.count", "offset+=count",
+            "count<0&&errno==EINTR", "fsync(item)==0",
+            "renameat(root,temporaryName,root,filename)==0", "unlinkat(root,temporaryName,0)",
+        ] {
+            expect(compact.contains(shape), "本地凭据写入缺少原子发布/私有权限约束：\(shape)")
+        }
+        expect(
+            rawPOSIXWriteCallArguments(in: source).count == 1,
+            "凭据 vault 只允许这一个受审计的裸 fd 写调用；新写者须重新审计")
     }
 
     suite("写盘绊线⑤：AI 提示音临时候选只做私有、不可覆盖、失败即删除的首次创建") {

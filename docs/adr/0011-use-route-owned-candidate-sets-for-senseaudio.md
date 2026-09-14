@@ -7,6 +7,8 @@ status: accepted
 本 ADR 中要求 SenseAudio 官方确认资源合同后才能构造 asset policy 的门禁，已由
 [ADR 0014](0014-accept-observed-senseaudio-asset-contract.md) 部分取代；route-owned 候选集合、
 固定 profile、非分发候选、真实 smoke、人工验收与单独 activation 的其余决定继续有效。
+SenseAudio 的 Keychain-only 存储要求另由 [ADR 0015](0015-use-local-file-credentials-for-senseaudio.md)
+取代；只读 probe、失败保留旧 Key 和生成授权语义不变。
 
 ## 决策
 

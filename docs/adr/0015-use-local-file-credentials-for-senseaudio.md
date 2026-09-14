@@ -1,0 +1,29 @@
+---
+status: accepted
+---
+
+# 在应用内录入并本地保存 SenseAudio API Key
+
+为实现“在 claudi0 内填入 Key、保存后即可使用，重启后仍保留配置”，`senseaudio-cn` 改为使用应用
+自有的本地凭据文件。现有 ad-hoc 本地构建不具备 Data Protection Keychain 所需的签名权限；凭据录入
+不再要求用户另开录入器、手动操作 Keychain 或配置开发证书。此决定仅取代 ADR 0006、0011、0014
+对 SenseAudio 的 Keychain-only 要求，其他 Provider 的存储、active/pending slot 与替换行为保持原样。
+
+唯一文件为当前用户的 `~/Library/Application Support/Claudio/Credentials/senseaudio-cn.key`，只存
+规范化的 Key 字节。目录权限为 `0700`、文件权限为 `0600`；拒绝符号链接、非普通文件、硬链接、
+错误所有者、过宽权限、空内容和超过 512 字节的内容。更新以同目录私有临时文件原子替换，失败保留
+旧值，正常退出写操作时移除临时文件。文件不加密，不提供同用户进程之间的隔离；有该用户文件访问
+权限的程序仍可能读取它。界面必须如实说明这一点，不能声称加密或只有 Claudio 能读取。
+
+仍复用应用内掩码输入框、`AICueCredentialManager` 和现有 SenseAudio 只读音色 probe。验证成功后
+保存，验证或文件写入失败保留旧 Key；保存不会自动生成音频。应用启动、状态查询与缺失项删除不创建
+凭据文件。普通设置、日志、诊断导出、声音包、仓库和证据附件均不包含该文件或其内容。
+
+本地文件是显式存储策略，不是 Keychain 失败后的静默 fallback。已有 SenseAudio 的传统 Keychain
+和 Data Protection Keychain 项均不查询、不迁移、不复制、不覆盖、不删除；用户在应用内重新录入。
+删除当前 SenseAudio 凭据只删除这个本地文件，不删除已采用音频。应用回滚和 Provider 隐藏也不自动
+删除凭据文件。
+
+固定 Provider、voice、资源 policy、匿名 GET、零 redirect 和生成 POST 零重试保持不变。生产启用仍
+由 T8/T9 单独记录；本地凭据可用不等于真实生成或完整人工验收通过。旧候选的凭据失败证据保留历史
+事实，新实现的保存、重启读取、生成取用和删除须在新候选上复验。

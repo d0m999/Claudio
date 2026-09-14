@@ -246,7 +246,9 @@ struct EventSettingsAICueComposerView: View {
             stageIndicator
 
             if let failure = viewModel.failure {
-                errorNotice(aiCueFailureText(failure, l10n: l10n))
+                errorNotice(
+                    aiCueFailureText(
+                        failure, providerProfileID: viewModel.providerProfileID, l10n: l10n))
             }
 
             switch viewModel.phase {
@@ -625,7 +627,7 @@ struct EventSettingsAICueCredentialSheet: View {
                 .font(ClaudioTheme.font(.body))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
-            Text(l10n.text(.aiCueCredentialKeychain))
+            Text(l10n.text(viewModel.providerProfile.credentialStorageDisclosureKey))
                 .font(ClaudioTheme.font(.caption))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
@@ -829,12 +831,15 @@ package func aiCueCredentialFailureText(
     case .provider:
         return l10n.text(.aiCueErrorCredentialValidationFailed)
     case .storageUnavailable:
-        return l10n.text(.aiCueErrorCredentialUnavailable)
+        return l10n.text(
+            providerProfileID == .senseAudioChina
+                ? .aiCueErrorLocalCredentialUnavailable : .aiCueErrorCredentialUnavailable)
     }
 }
 
 private func aiCueFailureText(
     _ failure: AICueComposerFailure,
+    providerProfileID: AICueProviderProfileID,
     l10n: ClaudioL10n
 ) -> String {
     switch failure {
@@ -854,7 +859,9 @@ private func aiCueFailureText(
     case .generation(.credentialRequired):
         return l10n.text(.aiCueErrorCredentialRequired)
     case .generation(.credentialUnavailable):
-        return l10n.text(.aiCueErrorCredentialUnavailable)
+        return aiCueCredentialFailureText(
+            .storageUnavailable, providerProfileID: providerProfileID, credentialStatus: nil,
+            l10n: l10n)
     case .generation(.provider(.invalidCredential)),
         .generation(.provider(.forbidden)):
         return l10n.text(.aiCueErrorCredentialInvalid)

@@ -4,6 +4,9 @@ status: accepted
 
 # 接受实测资源合同并固定 SenseAudio SFX 下载边界
 
+本文保留的 SenseAudio Keychain-only 条款后由 [ADR 0015](0015-use-local-file-credentials-for-senseaudio.md)
+取代；资源下载合同不受该存储变更影响。
+
 本决定部分取代 ADR 0011 中“必须先取得 SenseAudio 官方资源合同才能构造 policy”的生产暴露门禁。
 SenseAudio [官方音效生成接口](https://docs.senseaudio.cn/api-reference/endpoint/sfx/create)返回
 `audio_url`，但没有正式承诺生产资源 hostname、MIME、免认证 GET、redirect、URL 有效期或 host 轮换；
