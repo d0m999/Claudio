@@ -109,6 +109,7 @@ private enum AICueControlledAssetProtocolStep {
     case nonHTTP(data: Data)
     case redirect(target: URL)
     case failure(URLError.Code)
+    case failureAtDeadline(URLError.Code, UInt64)
     case hold
     case delayedHTTP(
         headers: [String: String],
@@ -276,6 +277,18 @@ private final class AICueControlledAssetURLProtocol: URLProtocol, @unchecked Sen
                 wasRedirectedTo: URLRequest(url: target),
                 redirectResponse: response)
         case .failure(let code):
+            client?.urlProtocol(self, didFailWithError: URLError(code))
+            finishAttempt(stopped: false)
+        case .failureAtDeadline(let code, let uptimeNanoseconds):
+            // Deliver a Foundation-style timeout at the caller's absolute boundary, independent
+            // of how promptly the loader's utility-queue deadline work item gets scheduled.
+            let now = DispatchTime.now().uptimeNanoseconds
+            if now < uptimeNanoseconds, uptimeNanoseconds - now > 500_000 {
+                Thread.sleep(
+                    forTimeInterval: Double(uptimeNanoseconds - now - 500_000) / 1_000_000_000)
+            }
+            while DispatchTime.now().uptimeNanoseconds < uptimeNanoseconds {}
+            guard stateLock.withLock({ !attemptFinished }) else { return }
             client?.urlProtocol(self, didFailWithError: URLError(code))
             finishAttempt(stopped: false)
         case .hold:
@@ -688,6 +701,8 @@ func runAICueAssetFetchSuites() async {
             .deadlineExceeded,
             .cancelled,
             .transportFailure,
+            .infrastructureFailure,
+            .retryBackoffFailure,
         ]
         for failure in failures {
             let loader = AICueAssetLoaderFixture([
@@ -711,6 +726,23 @@ func runAICueAssetFetchSuites() async {
         }
     }
 
+    await suite("AI 提示音 asset fetch：未知 loader 错误归一为基础设施失败且不重试") {
+        let loader = AICueAssetLoaderFixture(rawResults: [
+            .failure(NSError(domain: "ClaudioFixtureInfrastructure", code: 1)),
+            .success(AICueFetchedAsset(data: validMP3ID3Data(), mediaType: "audio/mpeg")),
+        ])
+        let sleeper = AICueAssetSleeperFixture()
+        let fetcher = AICueURLSessionAssetFetcher(loader: loader, retrySleeper: sleeper)
+        let error = await observedAssetFetchError {
+            try await fetcher.fetch(
+                URL(string: "https://assets.fixture.invalid/infrastructure.mp3")!,
+                policy: fixtureAssetPolicy(), deadline: .startingNow())
+        }
+        expect(error == .infrastructureFailure, "未知 loader 错误不可降级为普通 transportFailure")
+        let requests = await loader.facts()
+        let delays = await sleeper.facts()
+        expect(requests.count == 1 && delays.isEmpty, "未知错误不重试或等待 backoff")
+    }
     await suite("AI 提示音 URLSession asset loader：拒绝 redirect/MIME/wire overflow") {
         let configuration = URLSessionConfiguration.default
         configuration.protocolClasses = [AICueAssetURLProtocol.self]
@@ -1044,19 +1076,32 @@ func runAICueAssetFetchSuites() async {
             AICueControlledAssetURLProtocol.control.facts().stoppedAttempts == 1,
             "connection timeout 必须取消真实 URLSession task")
 
-        AICueControlledAssetURLProtocol.control.reset([.hold])
-        let deadlineError = await observedAssetFetchError {
-            try await controlledAssetLoader(connectionSeconds: 1).load(
-                request,
-                acceptedMediaTypes: ["audio/mpeg"],
-                maximumWireBytes: 8,
-                deadline: assetDeadline(durationNanoseconds: 20_000_000))
+        for _ in 0..<20 {
+            AICueControlledAssetURLProtocol.control.reset([.hold])
+            let deadline = assetDeadline(durationNanoseconds: 20_000_000)
+            let deadlineError = await observedAssetFetchError {
+                try await controlledAssetLoader(connectionSeconds: 1).load(
+                    request,
+                    acceptedMediaTypes: ["audio/mpeg"],
+                    maximumWireBytes: 8,
+                    deadline: deadline)
+            }
+            let stopWatchdog = DispatchTime.now().uptimeNanoseconds + 1_000_000_000
+            while DispatchTime.now().uptimeNanoseconds < stopWatchdog {
+                let facts = AICueControlledAssetURLProtocol.control.facts()
+                if facts.stoppedAttempts == facts.requests.count { break }
+                try? await Task.sleep(nanoseconds: 1_000_000)
+            }
+            expect(
+                deadlineError == .deadlineExceeded,
+                "absolute deadline 必须优先返回 deadlineExceeded；实际 \(String(describing: deadlineError))；"
+                    + "已过期 \(deadline.remainingNanoseconds(at: DispatchTime.now().uptimeNanoseconds) == nil)"
+            )
+            let facts = AICueControlledAssetURLProtocol.control.facts()
+            expect(
+                facts.requests.count <= 1 && facts.stoppedAttempts == facts.requests.count,
+                "absolute deadline 必须停止已开始 request；启动前过期可以零请求，不无限等待 stopLoading")
         }
-        await AICueControlledAssetURLProtocol.control.waitForStoppedAttempt()
-        expect(deadlineError == .deadlineExceeded, "absolute deadline 必须优先返回 deadlineExceeded")
-        expect(
-            AICueControlledAssetURLProtocol.control.facts().stoppedAttempts == 1,
-            "absolute deadline 必须停止唯一真实 request")
 
         AICueControlledAssetURLProtocol.control.reset([
             .delayedHTTP(
@@ -1080,6 +1125,26 @@ func runAICueAssetFetchSuites() async {
             "inactivity 后的迟到 chunk 必须被已停止的 URLProtocol 丢弃")
     }
 
+    await suite("AI 提示音 URLSession asset loader：绝对边界的 Foundation timeout 不降级为 transient") {
+        for _ in 0..<20 {
+            let deadline = assetDeadline(durationNanoseconds: 20_000_000)
+            AICueControlledAssetURLProtocol.control.reset([
+                .failureAtDeadline(
+                    .timedOut, deadline.expiresAtUptimeNanoseconds)
+            ])
+            let request = try! AICueURLSessionAssetFetcher.request(
+                url: URL(string: "https://assets.fixture.invalid/deadline-race.mp3")!,
+                policy: fixtureAssetPolicy(), deadline: .startingNow())
+            let error = await observedAssetFetchError {
+                try await controlledAssetLoader().load(
+                    request, acceptedMediaTypes: ["audio/mpeg"], maximumWireBytes: 8,
+                    deadline: deadline)
+            }
+            expect(
+                error == .deadlineExceeded,
+                "边界 timeout 必须为 deadlineExceeded；实际 \(String(describing: error))")
+        }
+    }
     await suite("AI 提示音 asset fetch：过期 deadline 在 loader 前失败") {
         let loader = AICueAssetLoaderFixture([
             .success(AICueFetchedAsset(data: Data(), mediaType: "audio/mpeg"))

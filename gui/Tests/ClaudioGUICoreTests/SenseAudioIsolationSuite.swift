@@ -11,6 +11,8 @@ private enum IsolationAssetViolation: Sendable, Equatable {
     case redirect
     case finalURL
     case authentication(Int)
+    case infrastructure
+    case unknownTransport
 }
 
 /// Injected unary/asset URLSessions intercept every origin. SSE uses a separate rejecting fixture;
@@ -136,6 +138,17 @@ private final class IsolationNetwork: @unchecked Sendable {
         return request.url!
     }
 
+    func infrastructureError(for request: URLRequest) -> NSError? {
+        lock.lock(); defer { lock.unlock() }
+        guard request.httpMethod == "GET", request.url?.path == "/isolated-1.mp3"
+        else { return nil }
+        switch violations[1] {
+        case .infrastructure: return NSError(domain: "ClaudioFixtureInfrastructure", code: 1)
+        case .unknownTransport: return URLError(.unknown) as NSError
+        default: return nil
+        }
+    }
+
     static func audio(index: Int) -> Data {
         validMP3ID3Data() + Data([UInt8(index)])
     }
@@ -150,6 +163,10 @@ private final class IsolationURLProtocol: URLProtocol, @unchecked Sendable {
 
     override func startLoading() {
         guard let (status, mime, body) = Self.network.response(for: request, delivery: self) else {
+            return
+        }
+        if let error = Self.network.infrastructureError(for: request) {
+            client?.urlProtocol(self, didFailWithError: error)
             return
         }
         deliver(status: status, mime: mime, body: body)
@@ -445,6 +462,54 @@ func runSenseAudioIsolationSuites() async {
                     await isolationWait { fixture.viewModel.phase == .candidatesReady }, "下次显式生成可恢复"
                 )
                 expect(fixture.viewModel.generation?.completion == .complete, "恢复后恰好三个有效候选")
+                fixture.viewModel.returnToDescription()
+                expect(
+                    await isolationWait { isolationGenerationIsEmpty(fixture.generations) },
+                    "恢复候选也清理")
+            }
+        }
+    }
+    await suite("SenseAudio 隔离串联：未知资源基础设施错误整批失败，不发布 sibling partial") {
+        for violation in [IsolationAssetViolation.infrastructure, .unknownTransport] {
+            await withTempDirectory { root in
+                IsolationURLProtocol.network.reset(failedAssets: [], violations: [1: violation])
+                let fixture = await IsolationRuntime.make(root: root)
+                defer { fixture.defaults.removePersistentDomain(forName: fixture.defaultsName) }
+                fixture.viewModel.startGeneration(locale: "zh-Hans")
+                expect(
+                    await isolationWait { fixture.viewModel.phase != .generating },
+                    "未知下载错误必须终止本次生成")
+                expect(
+                    fixture.viewModel.phase == .editing
+                        && fixture.viewModel.failure == .generation(.provider(.transportFailure))
+                        && fixture.viewModel.generation == nil,
+                    "首项成功也不能发布未知基础设施错误的 partial")
+                let requests = IsolationURLProtocol.network.requests()
+                expect(requests.filter { $0.httpMethod == "POST" }.count == 1, "故障不追加生成 POST")
+                expect(
+                    requests.filter { $0.httpMethod == "GET" }.map { $0.url?.path }
+                        == ["/isolated-0.mp3", "/isolated-1.mp3"],
+                    "未知错误不重试、不下载第三项")
+                expect(
+                    requests.filter { $0.httpMethod == "GET" }.allSatisfy {
+                        $0.value(forHTTPHeaderField: "Authorization") == nil
+                            && $0.value(forHTTPHeaderField: "Cookie") == nil
+                            && $0.value(forHTTPHeaderField: "Referer") == nil
+                    }, "未知错误路径 GET 仍匿名")
+                expect(
+                    await fixture.runtime.credentialManager.status(for: .senseAudioChina)
+                        == .stored(verification: .verified, hasPendingReplacement: false),
+                    "资源基础设施失败不拒绝已有 API Key")
+                expect(
+                    await isolationWait { isolationGenerationIsEmpty(fixture.generations) },
+                    "未知错误不留下临时候选")
+                expect(fixture.viewModel.soundDescription == "短促 木琴 音效", "失败保留描述")
+                IsolationURLProtocol.network.reset(failedAssets: [])
+                fixture.viewModel.startGeneration(locale: "zh-Hans")
+                expect(
+                    await isolationWait { fixture.viewModel.phase == .candidatesReady },
+                    "下一次显式生成可恢复")
+                expect(fixture.viewModel.generation?.completion == .complete, "恢复仍要求三个有效候选")
                 fixture.viewModel.returnToDescription()
                 expect(
                     await isolationWait { isolationGenerationIsEmpty(fixture.generations) },

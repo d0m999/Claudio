@@ -275,7 +275,7 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
                     throw AICueProviderError.cancelled
                 case .deadlineExceeded:
                     throw AICueProviderError.deadlineExceeded
-                case .retryBackoffFailure:
+                case .retryBackoffFailure, .infrastructureFailure:
                     throw AICueProviderError.transportFailure
                 case .httpStatus, .responseTooLarge, .transientNetwork, .transportFailure:
                     // Ordinary availability/audio failures may discard one stable ordinal.
