@@ -63,13 +63,30 @@ Cookie 或 Referer，禁止 redirect 与 final-URL 漂移，并只在当前显�
 
 1. 上述固定 policy 绑定到非分发候选，并计算规范化内容与 digest；
 2. 经单独付费调用授权完成真实 TTS 与 SFX smoke，确认全部 SFX URL、GET、MIME 与音频均符合该 policy；
-3. 完成三候选语音、SFX partial、真实听感、键盘和 VoiceOver 人工验收。
+3. 完成三候选语音、真实听感和键盘人工验收；VoiceOver、SFX partial 实际展示与动物音效意图
+   匹配适用下述本轮有边界的风险接受，不得把豁免项记为实测通过。
+
+2026-09-15，项目所有者明确决定“放弃VoiceOver验证，暂时不考虑这部分用户”。本轮 SenseAudio
+接入验收暂不以 VoiceOver 人工验证作为阻塞项，记录为 `RISK ACCEPTED`（所有者豁免、未验证），
+不记为 `PASSED`，不宣称已支持旁白完整操作。保留已有无障碍实现、标签及自动回归；不削减其他
+Provider 的验收要求，也不豁免普通键盘、听感、partial、凭据、采用与回滚门禁。豁免记录和范围见
+生产验收台账第 22 节；它本身不授权 activation、发布或关闭 Issue。
+
+2026-09-15，项目所有者进一步明确接受当前动物音效不符合描述意图的质量风险，以及难以复现
+SFX partial 1/3、2/3 导致实际展示未验证的风险。两项均记录为 `RISK ACCEPTED`，而非 `PASSED`；
+保留动物听感失败和根因未确定的事实，不据此断言问题来自模型、排除本地代码问题或承诺音效质量。
+partial 的隔离串联回归继续作为工程证据，现有数量提示、稳定编号、取消和清理实现不删除。
+所有者同时人工确认完整键盘焦点与异常恢复/失败保旧绑定/回滚通过。当前候选的最终收口见台账
+第 23 节。三项风险接受仅适用于本轮 SenseAudio 验收及 unchanged 相关实现的最终 Bundle 复验，
+不自动扩展到其他 Provider，不放宽资源、凭据、音频、采用或网络安全门禁，也不授权 T9。
 
 真实 Provider 与原生验收必须使用非分发验收候选。候选须绑定唯一的完整 source commit、精确 asset
 policy 的规范化摘要与 digest，以及实际被测试 app 的 Bundle identifier、版本、架构、签名身份和可执行
 文件 digest。验收候选可以在隔离分支中注入 ADR 0014 固定的精确 policy，但不得合入可分发分支、上传或
-交付；它也不能把生产 policy 的 `nil` 门禁视为已经解除。只有上述证据全部通过后，才能在单独评审的
-activation 变更中固化 policy 并加入 allowlist。activation 或最终 Bundle 身份与验收候选不一致时，
+交付；它也不能把生产 policy 的 `nil` 门禁视为已经解除。只有上述未豁免门禁全部通过，且本轮
+VoiceOver、partial 实际展示和动物意图质量风险接受均有明确记录后，才能在单独评审的 activation
+变更中固化 policy 并加入 allowlist。
+activation 或最终 Bundle 身份与验收候选不一致时，
 必须对受影响的合同重新验收，不能沿用旧候选结论。
 
 如果任一资源 URL、MIME、认证要求或 redirect 行为偏离 ADR 0014 的固定 policy，SFX 验收失败；不得

@@ -1169,6 +1169,17 @@ SenseAudio 的实际执行记录必须写入 `docs/senseaudio-production-accepta
 候选、首次最多 3 次 TTS POST + 1 次 SFX POST、证据 allowlist/禁区和 commit/policy/Bundle 身份绑定。
 本计划不把风险接受或资源发现预填为正式付费 smoke、真实音频、键盘、VoiceOver 或 Release 结果。
 
+2026-09-15，项目所有者明确暂时放弃本轮 SenseAudio 的 VoiceOver 人工验证。ADR 0011 与生产验收
+台账第 22 节记录为 `RISK ACCEPTED`（所有者豁免、未验证）：本计划中本轮 SenseAudio T8 及对应
+最终 Bundle 复验的 VoiceOver 必验项适用此例外，不记为 `PASSED`。已有无障碍实现与自动回归保留；
+其他 Provider、普通键盘、可见 partial、听感、凭据、采用与回滚不豁免，T9 仍须单独授权。
+
+随后所有者明确接受本轮动物音效意图不匹配的质量风险和 SFX partial 1/3、2/3 实际展示未验证的
+风险，并人工确认完整键盘与异常恢复/失败保旧绑定/回滚通过。ADR 0011 与台账第 23 节记录最终
+收口；此决定在本轮 SenseAudio 中部分取代上一段的 partial/听感必验规则，不记为实测 `PASSED`，
+不认定模型是失败根因。现有 partial 与无障碍实现、隔离回归均保留；资源、凭据、采用与网络安全
+门禁不放宽，其他 Provider 不继承。T8 可在这一明确风险接受口径下闭合，不自动实施 T9。
+
 ## 9. 失败模式
 
 | 路径 | 失败 | 防线 | 用户可见结果 |
@@ -1254,14 +1265,15 @@ allowlist 并被表述为真实集成完成：
   profile switch 的迟到结果不能污染新状态。
 - 项目所有者已接受 ADR 0014 的精确实测资源 policy 与剩余可用性风险；经单独授权、绑定非分发候选的
   真实 TTS/SFX smoke 证明 `female_0033_b` 可用、全部 SFX URL/GET 符合该 policy 且音频合同成立；
-  人工听感、键盘和 VoiceOver 通过。
+  中文 TTS/木琴听感和键盘通过；本轮 SenseAudio 的 VoiceOver 暂豁免，动物意图质量及 partial
+  实际展示风险按第 8 节和台账第 22–23 节明确接受，未验证/失败事实不改写为通过。
 - 上一项完成前，production `allowlistedProfiles` 仍只有既有四项，默认 Provider 仍为
   `elevenlabs-global`，`productionSenseAudioAssetPolicy` 仍为 `nil`；不得以 fixture 或 TTS 单路线证据
   暴露 SenseAudio。
 - `docs/senseaudio-production-acceptance.md` 已把真实证据绑定到完整 source commit、精确 policy digest
   和实际被测 Bundle identity；非分发候选没有上传、发布或冒充 RC。
-- 只有前述 T8 门禁全部通过，才由 #189 单独评审 production policy 与 allowlist activation；最终
-  Bundle 身份或相关 source/policy 漂移时，对受影响路线重新验收。
+- 只有前述 T8 未豁免门禁通过且本轮风险接受明确记录，才由 #189 单独评审 production policy 与
+  allowlist activation；最终 Bundle 身份或相关 source/policy 漂移时，对受影响路线重新验收。
 - 选中候选完整走现有 `AudioImport` 和 manifest bind，任何失败保留旧声音。
 - helper/GUI test harness、显式 GUI debug build、xcstrings 校验和 `git diff --check` 全绿。
 - 自动、GUI/VoiceOver/音频、真实 provider + 人工音质 rubric 和未完成发布证据分别报告。
