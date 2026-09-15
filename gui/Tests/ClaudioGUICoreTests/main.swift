@@ -96,6 +96,12 @@ if CommandLine.arguments.contains("--ai-cue-generation") {
     exit(failures == 0 ? 0 : 1)
 }
 
+if CommandLine.arguments.contains("--senseaudio-isolation") {
+    await runSenseAudioIsolationSuites()
+    print("SenseAudio isolation: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
 runOnboardingStateSuites()
 runLocalizationSuites()
 runAboutInformationSuites()
@@ -139,6 +145,7 @@ await runAICueGenerationEngineSuites()
 await runAICueGenerationDispatcherSuites()
 await runAICueAdoptionSuites()
 await runAICueGenerationViewModelSuites()
+await runSenseAudioIsolationSuites()
 runAudioImportSuites()
 runAudioImportBatchSuites()
 await runAudioImportViewModelSuites()

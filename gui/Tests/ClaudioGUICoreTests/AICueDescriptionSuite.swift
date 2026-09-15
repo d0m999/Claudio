@@ -35,12 +35,16 @@ func runAICueDescriptionSuites() {
 @MainActor
 func runAICueDescriptionFocusSuites() async {
     await suite("AI 提示音原生描述焦点：初次挂载与取消后可直接编辑") {
-        let scenarios: [(PreviewFixtures.AICueGalleryScenario, UInt16?, String)] = [
+        let allScenarios: [(PreviewFixtures.AICueGalleryScenario, UInt16?, String)] = [
             (.editing, nil, ""),
             (.generating, 49, " "),
             (.generating, 36, "\r"),
         ]
-        for (scenario, keyCode, characters) in scenarios {
+        let scenarios =
+            CommandLine.arguments.contains("--ai-cue-native-focus-return-only")
+            ? [allScenarios[2]] : allScenarios
+        let rounds = CommandLine.arguments.contains("--ai-cue-native-focus-stress") ? 10 : 1
+        for (scenario, keyCode, characters) in (0..<rounds).flatMap({ _ in scenarios }) {
             let fixture = SettingsPresentationFixtures.generalLogin(aiCueScenario: scenario)
             let hostingView = NSHostingView(rootView: SettingsRootView(session: fixture.session))
             let window = NSWindow(
@@ -55,7 +59,12 @@ func runAICueDescriptionFocusSuites() async {
             defer { window.orderOut(nil); window.close() }
             hostingView.layoutSubtreeIfNeeded()
             try? await Task.sleep(nanoseconds: 100_000_000)
-            expect(window.isKeyWindow, "焦点门禁必须在真正的 key window 上执行")
+            let isKeyWindow = await aiCueWaitForKeyWindow(window)
+            // Focus tasks mutate SwiftUI state after the initial native layout. Flush that
+            // pending layout before synchronous sendEvent; a timed sleep alone is not a barrier.
+            hostingView.layoutSubtreeIfNeeded()
+            expect(isKeyWindow, "焦点门禁必须在真正的 key window 上执行")
+            guard isKeyWindow else { continue }
             let originalDescription = fixture.aiCueViewModel.soundDescription
             if let keyCode {
                 expect(aiCueNativeTextInputs(in: hostingView).isEmpty, "生成态没有可写输入器")
@@ -111,6 +120,15 @@ func runAICueDescriptionFocusSuites() async {
             }
         }
     }
+}
+
+@MainActor
+private func aiCueWaitForKeyWindow(_ window: NSWindow) async -> Bool {
+    let deadline = Date(timeIntervalSinceNow: 2)
+    while Date() < deadline, !(NSApp.isActive && window.isKeyWindow) {
+        try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+    return NSApp.isActive && window.isKeyWindow
 }
 
 @MainActor
