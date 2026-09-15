@@ -1089,3 +1089,72 @@ tree 冒充构建源码 tree，也不要求自引用 commit SHA。
 
 本轮工程修复、两轴复审与 inspection 身份绑定完成，production 仍关闭；受影响真实/原生验收、
 新验收候选身份与 T9 授权继续独立。
+
+## 25. PR #194 未知资源错误与 deadline 竞态修复
+
+2026-09-15，项目所有者授权修复 PR #194 的两项合并阻塞、补回归并更新同一 PR，待新 head
+CI 全绿后继续合并。基线为 `4466eab6bef13777e51fe1291cfb89a3c9f47097`；本节不重写历史
+T8 风险接受，不启用 production，也不把本地结果记为远端 CI 通过。
+
+### 两项修复与因果验证
+
+- 未知 loader/URLSession 基础设施错误（非 `URLError` 的错误及 `URLError.unknown`）归一为
+  不可重试的 `infrastructureFailure`；SenseAudio 将其整批映射为脱敏 `transportFailure`，停止
+  后续 GET，不发布成功 sibling 的 partial。已分类的普通不可用、限定重试耗尽和音频淘汰仍可
+  partial；安全/MIME/redirect/401/403 门禁、匿名 GET 与凭据状态合同不变。
+- Foundation completion 与既有绝对计时器可能竞争。completion 在锁内先检查 `finished` 和
+  调用方的 monotonic deadline：已过期时优先返回 `deadlineExceeded`，不误分类为可重试的
+  瞬态故障或发布音频。没有新增 deadline owner、延长预算或改变取消/迟到完成的幂等保护。
+- 真实 URLSession → fetcher → adapter → engine/ViewModel 的隔离串联在首个 asset 成功、
+  第二个未知错误时验证整批失败、无第三个 GET、无重试、无候选、保假 Key/原描述及显式重试
+  恢复。原始 NSError 用例红 **240 checks / 3 failures** → 绿 **240 / 0**；扩展覆盖
+  `URLError.unknown` 后最终 **251 / 0**。
+- 受控 URLProtocol 在绝对边界交付 Foundation timeout，旧实现红 **186 / 8**，实际错误为
+  `transientNetwork`；修复后绿 **190 / 0**，补齐 raw-loader 归一回归后最终 **192 / 0**。
+  边界测试重复 20 次，timer 也可能先完成，不声称每轮确定经过同一 callback 路径。原 20ms
+  hold 用例的停止等待改为 1 秒 watchdog，允许启动前已过期的零 request，但仍强断言
+  `deadlineExceeded`，避免等待一个从未启动的 URLProtocol。测试等待有界，未扩大生产超时。
+
+上述专项使用假凭据、受控响应和临时目录，最终专项执行阻断系统级 IP 出站；无真实 Provider
+请求、真实凭据读取、剪贴板或 Keychain 操作。完整 harness 使用项目标准入口，不冒充真实 smoke。
+
+### 远端失败历史与本地工程结果
+
+旧 head 的 [PR CI run 34965744867](https://github.com/d0m999/Claudio/actions/runs/34965744867)
+为 **9760 / 1**，失败于原 absolute-deadline 断言。旧 head 的
+[push CI run 34965530225](https://github.com/d0m999/Claudio/actions/runs/34965530225)
+在 15 分钟 job 上限后取消，最后 harness 输出位于同一 connection/inactivity/absolute suite；
+日志不能证明卡住的具体线程位置，不把该推断写成已确认根因。新 head CI 结果另从 GitHub 读回。
+
+- GUI full harness：**9846 checks / 0 failures**。
+- helper 首轮：**3272 / 1**，仍为未改动的 `HostIntegrationModelSuite.swift:68` NVM shim
+  version 用例；GUI 完成后的串行复跑 **3272 / 0**。同一历史间歇失败已见第 24 节，本轮
+  未复现根因、未修改 helper，保留首轮失败，不声称修复了 NVM。
+- Debug GUI build、Release GUI/helper/LoginItem build、四个改动 Swift 文件的 strict format lint、
+  localization JSON、`git diff --check` 与 selector executable seam 均通过；candidates Python
+  suite **11 tests / 0 failures**。Release 保留既有 deprecated API 警告，不声明零警告。
+- 两项修复的只读覆盖映射与 scope 复核未发现新增实质缺陷；8 条关键修复路径映射齐备是 AI
+  评估，不是 instrumented coverage，也不消除第 24 节之外的历史定向回归缺口。
+
+### 修复源码与 inspection 身份
+
+源码修复仅四个 Swift 路径；下表 Bundle 在该干净 source commit 上重建，前后 source/index
+没有偏差。后续台账提交仅改变本文件，不冒充构建源码 tree，也不写自引用 commit。
+
+| 字段 | 本轮工程绑定值 |
+|---|---|
+| 修复 source commit | `75ec9df9a38012f1d61338926f84b8f0df54e4f8` |
+| 修复 source tree | `7e38d2e84ad897b84e353e767f812d8c3873fddc` |
+| Bundle identity | `com.claudio.app` / `0.0.0-dev` / arm64 / ad-hoc；仅 inspection，未启动 |
+| 签名后 app executable SHA-256 | `32153e4a44dabeae24a3053542bbfb62a7f0096a2f66a9bace5fc067c199c45a` |
+| 签名后 helper SHA-256 | `c9aa849b3ecf814d5cbe771d61325e26a362f5a58118748ae82b9b3b04fdbe08` |
+| 签名后 LoginItem SHA-256 | `1895380c84b9e9c550dcce0c52069322404f49ee91fd7a7fc3fe676074e43214` |
+| Bundle gates | `scripts/dev-bundle.sh`、签名后 `scripts/check-release-size.sh`、ad-hoc signature verify 均通过 |
+| 签名后 size | GUI `5628016 B`；helper `2862896 B`；LoginItem `72192 B`；非可执行 `689983 B`；正规文件合计 `9253087 B`（预算 `11250000 B`） |
+| production gate | policy `nil`、默认四 profiles、默认 ElevenLabs；无 NON-DISTRIBUTION activation patch |
+
+固定 policy digest 仍为 `6f570cf99d8fc8bfcf040c49ac4182afa1ab16d0baca74eb072a7f083e5d200d`。
+180/60 秒预算、POST 零重试、GET 限定瞬态重试、采用与 orphan 所有权不变。新验收候选身份、
+受影响真实 SFX smoke/凭据链及原生验收仍是 `NOT VERIFIED`，按第 24 节边界独立重验；VoiceOver、
+实际 partial 和动物意图质量风险接受不扩展。macOS 12–13 原生、Intel、正式签名/公证与分发未验证。
+本节只完成两项工程修复与 inspection 绑定，不实施 T9、release 或 Issue 状态修改。
