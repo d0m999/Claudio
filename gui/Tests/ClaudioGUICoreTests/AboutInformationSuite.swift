@@ -360,6 +360,7 @@ func runAboutInformationSuites() {
             .elevenLabs: "ElevenLabs",
             .miniMax: "MiniMax",
             .qwen: "Qwen / DashScope",
+            .senseAudio: "SenseAudio",
         ]
         let profiles = AICueProviderRegistry().profiles()
         let expectedEnglishProfiles = profiles.compactMap { profile -> String? in

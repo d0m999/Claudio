@@ -53,11 +53,13 @@ func runAICueGenerationDispatcherSuites() async {
         let miniMax = DispatcherGeneratorFixture(returnedProfileID: .miniMaxGlobal)
         let qwenSingapore = DispatcherGeneratorFixture(returnedProfileID: .qwenSingapore)
         let qwenBeijing = DispatcherGeneratorFixture(returnedProfileID: .qwenBeijing)
+        let senseAudio = DispatcherGeneratorFixture(returnedProfileID: .senseAudioChina)
         let dispatcher = try! AICueGenerationDispatcher(generators: [
             .elevenLabsGlobal: elevenLabs,
             .miniMaxGlobal: miniMax,
             .qwenSingapore: qwenSingapore,
             .qwenBeijing: qwenBeijing,
+            .senseAudioChina: senseAudio,
         ])
 
         let generation = try! await dispatcher.generate(
@@ -71,10 +73,12 @@ func runAICueGenerationDispatcherSuites() async {
         let elevenLabsFacts = await elevenLabs.facts()
         let miniMaxFacts = await miniMax.facts()
         let qwenSingaporeFacts = await qwenSingapore.facts()
+        let senseAudioFacts = await senseAudio.facts()
         expect(
             elevenLabsFacts.requests.isEmpty
                 && miniMaxFacts.requests.isEmpty
-                && qwenSingaporeFacts.requests.isEmpty,
+                && qwenSingaporeFacts.requests.isEmpty
+                && senseAudioFacts.requests.isEmpty,
             "dispatcher 不得 fallback、跨区或复用其他 Provider engine")
 
         await dispatcher.discard(generationID: generation.id)
@@ -104,6 +108,7 @@ func runAICueGenerationDispatcherSuites() async {
             .miniMaxGlobal: DispatcherGeneratorFixture(returnedProfileID: .miniMaxGlobal),
             .qwenSingapore: DispatcherGeneratorFixture(returnedProfileID: .qwenSingapore),
             .qwenBeijing: DispatcherGeneratorFixture(returnedProfileID: .qwenBeijing),
+            .senseAudioChina: DispatcherGeneratorFixture(returnedProfileID: .senseAudioChina),
         ])
         do {
             _ = try await dispatcher.generate(

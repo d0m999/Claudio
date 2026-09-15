@@ -16,9 +16,10 @@ allowlisted provider profile. The current registry is:
 - Profile `minimax-global`: provider `MiniMax`; region `global`.
 - Profile `qwen-singapore`: provider `Qwen / DashScope`; region `singapore`.
 - Profile `qwen-beijing`: provider `Qwen / DashScope`; region `beijing`.
-- Profile `senseaudio-cn`: provider `SenseAudio`; fixed `.cn` route, without a data-residency promise.
+- Profile `senseaudio-cn`: provider `SenseAudio`; region `china`.
 
-The default remains ElevenLabs. SenseAudio provides Chinese speech and sound effects, with no mixed
+The fixed SenseAudio `.cn` route does not promise data residency. The default remains ElevenLabs.
+SenseAudio provides Chinese speech and sound effects, with no mixed
 audio or automatic fallback. Sound-effect assets are downloaded immediately by anonymous GET only
 from `https://dynamic.senseaudio.cn:443`, with `audio/mpeg`, no redirects, and no persisted asset URLs.
 
@@ -48,9 +49,10 @@ AI 声音生成是 claudi0 GUI 中可选且必须由用户明确触发的动作�
 - 配置 `minimax-global`：Provider `MiniMax`；region `global`。
 - 配置 `qwen-singapore`：Provider `Qwen / DashScope`；region `singapore`。
 - 配置 `qwen-beijing`：Provider `Qwen / DashScope`；region `beijing`。
-- 配置 `senseaudio-cn`：Provider `SenseAudio`；固定 `.cn` 路线，不承诺数据驻留。
+- 配置 `senseaudio-cn`：Provider `SenseAudio`；region `china`。
 
-默认 Provider 仍为 ElevenLabs。SenseAudio 提供中文语音与音效，不支持 mixed，不自动 fallback。
+固定 SenseAudio `.cn` 路线不承诺数据驻留。默认 Provider 仍为 ElevenLabs。
+SenseAudio 提供中文语音与音效，不支持 mixed，不自动 fallback。
 音效资源只从 `https://dynamic.senseaudio.cn:443` 立即匿名 GET 下载，仅接受 `audio/mpeg`，
 禁止 redirect，不持久化资源 URL。
 
