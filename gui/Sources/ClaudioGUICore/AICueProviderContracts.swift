@@ -149,6 +149,18 @@ public enum AICueProviderAuthentication: String, Sendable, Equatable {
     case bearerAPIKey
 }
 
+public enum AICueGenerationBudget: Sendable, Equatable {
+    case standard
+    case longRunningSFX
+
+    package var durationNanoseconds: UInt64 {
+        switch self {
+        case .standard: 60 * 1_000_000_000
+        case .longRunningSFX: 180 * 1_000_000_000
+        }
+    }
+}
+
 public struct AICueProviderRoute: Sendable, Equatable {
     public let modality: AICueModality
     public let endpoint: URL
@@ -158,6 +170,7 @@ public struct AICueProviderRoute: Sendable, Equatable {
     public let authentication: AICueProviderAuthentication
     public let transport: AICueProviderAudioTransport
     public let candidateSetPolicy: AICueCandidateSetPolicy
+    public let generationBudget: AICueGenerationBudget
 
     public init(
         modality: AICueModality,
@@ -167,7 +180,8 @@ public struct AICueProviderRoute: Sendable, Equatable {
         supportedLanguageTags: Set<String>,
         authentication: AICueProviderAuthentication,
         transport: AICueProviderAudioTransport,
-        candidateSetPolicy: AICueCandidateSetPolicy
+        candidateSetPolicy: AICueCandidateSetPolicy,
+        generationBudget: AICueGenerationBudget = .standard
     ) {
         self.modality = modality
         self.endpoint = endpoint
@@ -177,6 +191,7 @@ public struct AICueProviderRoute: Sendable, Equatable {
         self.authentication = authentication
         self.transport = transport
         self.candidateSetPolicy = candidateSetPolicy
+        self.generationBudget = generationBudget
     }
 }
 

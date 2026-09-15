@@ -37,7 +37,8 @@ invalid-credential 时才丢弃 pending 并保留旧 active。删除只影响当
 留存/模型改进规则、潜在费用与配额；不得把 ElevenLabs 条款推广到 MiniMax/Qwen，也不得统一承诺
 zero retention。保存凭据不自动生成；任何可能计费的生成都由用户再次显式触发。
 
-Provider 响应是不可信输入。所有候选仍须满足同一 3 候选、3 秒、5 MB、60 秒 generation deadline，
+Provider 响应是不可信输入。所有候选仍须满足同一 3 候选、3 秒、5 MB 和默认 60 秒 generation deadline
+（仅 SenseAudio SFX 由 [ADR 0011](0011-use-route-owned-candidate-sets-for-senseaudio.md) 改为 180 秒），
 并经过固定 origin/redirect、wire/decoded 上限、编码和 magic bytes 校验，再进入现有 `AudioImport` 与
 manifest bind。MiniMax 只接受成功 JSON 的 hex MP3；Qwen 只消费 SSE Base64 PCM 并本地封装 WAV，
 末包 URL 不跟随。任一失败保留旧绑定。

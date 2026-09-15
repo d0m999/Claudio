@@ -160,6 +160,42 @@ private actor SuspendedComposerAdoptionFixture {
 
 @MainActor
 func runAICueGenerationViewModelSuites() async {
+    await suite("AI 提示音状态层：只有 SenseAudio SFX 在点击入口冻结 180 秒 route budget") {
+        let policy = try! AICueAssetPolicy(
+            allowedOrigins: [try! AICueAssetOrigin("https://assets.fixture.invalid")],
+            acceptedMediaTypes: ["audio/mpeg"])
+        let registry = AICueProviderRegistry(evidenceGatedSenseAudioAssetPolicy: policy)
+        let cases: [(AICueProviderProfileID, String, UInt64)] = [
+            (.senseAudioChina, "短促木琴音效，不要人声", 180),
+            (.senseAudioChina, "小猫短促叫两声，不要背景音乐", 180),
+            (.senseAudioChina, "清晰地说“任务完成”", 60),
+            (.elevenLabsGlobal, "短促木琴音效", 60),
+            (.miniMaxGlobal, "清晰地说“任务完成”", 60),
+            (.qwenSingapore, "清晰地说“任务完成”", 60),
+            (.qwenBeijing, "清晰地说“任务完成”", 60),
+            (.senseAudioChina, "先响一声木琴，然后说“任务完成”", 60),
+            (.senseAudioChina, "", 60),
+        ]
+        for (profileID, description, seconds) in cases {
+            let generator = ComposerGeneratorFixture(mode: .failure(.credentialRequired))
+            let viewModel = AICueGenerationViewModel(
+                credentialManager: ComposerCredentialManagerFixture(status: .missing),
+                generator: generator,
+                providerProfileID: profileID,
+                registry: registry)
+            viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+            viewModel.updateDescription(description)
+            viewModel.startGeneration(locale: "zh-Hans")
+            await waitForAICueViewModel { viewModel.phase != .generating }
+            let deadlines = await generator.facts().deadlines
+            expect(
+                deadlines.count == 1
+                    && deadlines[0].expiresAtUptimeNanoseconds
+                        - deadlines[0].startedAtUptimeNanoseconds == seconds * 1_000_000_000,
+                "点击入口必须按固定 route 冻结预算，不得把其他路线扩大到 180 秒")
+        }
+    }
+
     await suite("AI 提示音状态层：迟到的同 profile 状态读取不得覆盖新凭据 mutation") {
         let credentialManager = SuspendedCredentialStatusManagerFixture()
         let viewModel = AICueGenerationViewModel(

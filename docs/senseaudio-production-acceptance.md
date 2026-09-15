@@ -41,8 +41,8 @@ activation。默认 registry 仍只有既有四个 profile，`productionSenseAud
 | 本地实现聚合与自动门禁 | `PREPARED LOCAL` | 2026-09-15 修复 SFX 响应头误超时后，新聚合 base 与非分发候选已绑定并复验；完整结果见第 9 节 |
 | production 暴露 | `CLOSED` | `productionSenseAudioAssetPolicy == nil`；`senseaudio-cn` 不在默认 allowlist |
 | 实测资源合同决策 | `RISK ACCEPTED` | exact origin/MIME/匿名 GET/零 redirect 已固定；URL 有效期与 host 轮换未知作为可用性风险接受 |
-| 首次正式付费 smoke | `NOT AUTHORIZED` | 被取代候选完成 3 次 TTS，但唯一一次 SFX 在响应头前被客户端 10 秒计时器误取消；修复后的新候选需新授权重跑，见第 9 节 |
-| 非分发候选原生启动 | `NOT RUN` | 被取代候选最终可启动；修复后的新 Bundle 尚未启动，旧启动证据不跨候选继承 |
+| 正式付费 smoke | `FAILED` | `62faf8ae` 候选完成 3 次 TTS，但唯一一次 SFX 在 60.643 秒零响应字节时超时；下一候选改用 route-owned 180 秒并须重验，见第 10 节 |
+| 非分发候选原生启动 | `PASSED` | `62faf8ae` 已在原生设置窗口完成执行；新 deadline 候选尚待重新绑定与启动，旧证据不跨候选继承 |
 | 原生听感、键盘、VoiceOver | `NOT RUN` | fixture、SwiftUI harness 或 build 不能替代 |
 | production activation | `NOT VERIFIED` | 严格依赖 T8 其余层全部通过；由 #189 单独实施，本 ticket 不修改 policy/allowlist |
 | Release / distribution | `NOT RUN` | 没有签名 universal RC、notarization、双架构或正式批准 |
@@ -187,7 +187,8 @@ Key、最大生成请求数、预计费用上限、候选身份和执行窗口�
 
 `POST /v1/get_voice` 是保存 Key 所需的只读 probe，但必须另记网络尝试次数，不能把它称为已确认免费。
 SFX asset GET 也要记录尝试数；它不是增加生成 POST 预算的理由。SenseAudio 生成 POST 一律不自动 retry。
-任何失败后的第二轮生成、扩大预算或更换账户，都需要新的明确授权。asset GET 只能按既有合同执行同一
+任何失败后的第二轮生成、扩大预算或更换账户，都必须处于明确授权范围；授权可以预先覆盖本 session
+后续付费调用，不必逐轮重复索取，但仍记录每轮次数、零 POST 自动 retry 与真实结果。asset GET 只能按既有合同执行同一
 URL 最多一次限定瞬态 retry。
 
 执行结果按路线独立记录：
@@ -362,9 +363,29 @@ activation patch、后 cherry-pick 修复，故使用共同祖先 `7640166`。�
 
 ### 当前未完成项
 
-新候选 voice probe = **0**、TTS POST = **0**、SFX POST = **0**、asset GET = **0**，尚未启动。
-第一次授权的 3 TTS + 1 SFX 预算已经用尽；新候选必须取得新授权后重跑 3 TTS + 1 SFX、资源下载、
-播放与同候选人工验收。听感、键盘、VoiceOver、partial、采用与回滚仍未完成。
+`62faf8ae` 候选现已启动并执行第二轮正式 smoke，结果见第 10 节；听感、键盘、VoiceOver、partial、
+采用与回滚仍未完成。
 
-结论：根因已修复且新候选自动门禁通过，但新候选真实 smoke 与人工门禁尚未执行，T8 **未闭合**。
+结论：10 秒响应头误超时已修复，但该候选 SFX 又在 60 秒总预算内超时，T8 **未闭合**。
 未 push、未修改 Issue、未启用 production；T9 仍保持阻塞。
+
+## 10. 2026-09-15 60 秒正式 smoke 与 180 秒路线预算
+
+`senseaudio-t8-20260915-62faf8ae-arm64` 于 `2026-09-15T03:37:20Z` 开始正式窗口。凭据文件执行前后
+为普通文件、0600、67 bytes，inode/mtime 不变；执行方未回读、打印、导出或修改 Key，未访问旧
+Keychain。恰好 3 次 TTS POST、零 retry、均 HTTP 200；得到 3 个 0600 MP3，分别为 26825 / 29129 /
+32009 bytes，时长 1.656 / 1.800 / 1.980 秒，均满足 5 MiB / 3 秒，三个 numbered 候选各播放一次。
+技术检查通过，听感结论仍待验收人给出。
+
+唯一一次 SFX batch POST 已发送请求体、TLS/h2 成功，但 60643 ms 后以 `NSURLErrorDomain Code=-1001`
+结束；响应状态 -1、首字节与响应 bytes 均为 0，没有 JSON 或 `audio_url`，asset GET = 0。因此这是
+原 60 秒预算内无响应，不是资源 policy 拒绝；不能断言供应商或本机代理是唯一原因。未自动 retry、
+未采用候选、未修改凭据、Issue 或 production。脱敏详情保存在 Git 外的 `run.md`，不保存音频、
+台词、描述、响应正文或完整资源 URL。
+
+项目所有者随后授权仅将 SenseAudio `animal` / `soundEffect` 改为 **180 秒 route-owned deadline**，
+其他 Provider、SenseAudio speech 与 voice probe 保持 **60 秒**；同一点击起点贯穿 POST、顺序 GET、
+限定 GET retry 与本地校验，headers 后 20 秒 inactivity 和 ADR 0014 全部下载边界不变。
+本 session 后续付费调用已整体授权，执行方无需每轮重新请求付费批准；这不授权凭据导出/修改、
+候选采用、production activation、push、发布或 Issue 关闭。新实现必须绑定新候选并记录真实结果，
+不得把本节历史 TTS 成功当作新 Bundle 的 smoke 通过。

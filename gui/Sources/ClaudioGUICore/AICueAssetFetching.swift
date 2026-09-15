@@ -275,6 +275,11 @@ package struct AICueURLSessionAssetFetcher: AICueAssetFetching, Sendable {
             throw AICueAssetFetchError.invalidURL
         }
         var request = URLRequest(url: url)
+        do {
+            request.timeoutInterval = try deadline.remainingSeconds()
+        } catch {
+            throw AICueAssetFetchError.deadlineExceeded
+        }
         request.httpMethod = AICueHTTPMethod.get.rawValue
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.httpShouldHandleCookies = false
@@ -352,6 +357,12 @@ package actor AICueURLSessionAssetLoader: AICueAssetLoading {
             timeouts: timeouts)
         let sessionConfiguration =
             (configuration.copy() as? URLSessionConfiguration) ?? configuration
+        do {
+            try AICueTransportSessionConfiguration.apply(
+                deadline: deadline, to: sessionConfiguration)
+        } catch {
+            throw AICueAssetFetchError.deadlineExceeded
+        }
         return try await task.perform(request: request, configuration: sessionConfiguration)
     }
 }

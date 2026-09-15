@@ -38,6 +38,17 @@ HTTPS origin、443 和 MIME，拒绝 IP、userinfo、fragment、redirect 与 fin
 至少一个有效 numbered 候选即可按路线政策以 `partial` 展示；取消、deadline、本地存储失败或零个有效
 候选使整次生成失败并清理。`.mixed` 明确不支持。
 
+2026-09-15，项目所有者将 SenseAudio `animal` / `soundEffect` 的 generation absolute deadline
+改为路线拥有的 **180 秒**。正式候选曾在 60.643 秒、零响应字节时超时；该证据只能证明原预算不足以
+等到这次响应，不能保证 180 秒一定成功。其他 Provider、SenseAudio speech 与 voice probe 保持
+**60 秒**。点击时先冻结单调时钟起点，再通过同一纯本地 planner/compiler 和固定 registry route
+选择预算；无效输入不扩大预算，仍由 engine 在读取凭据或联网前拒绝。SFX POST、最多三项顺序
+asset GET、允许的一次限定 GET retry、校验与落盘共享该起点和截止时刻；任何步骤不得重新起算。
+Foundation 的 request/resource timeout 使用本次剩余预算，避免其默认 60 秒再次截断长计算路线。
+SFX 响应头前仅受总 deadline；headers 后仍执行 20 秒 inactivity。生成 POST 零自动 retry、匿名 GET、
+exact origin/MIME、零 redirect、3 秒/5 MiB 和取消后整批清理均不变。更长等待是可用性取舍，不是
+放宽下载政策；实现与 Bundle 身份变化后必须重建候选并重验受影响证据。
+
 生成完成度只描述临时候选集合，不放宽采用链：用户仍只能显式采用一个完整通过校验的候选，且
 `AudioImport`、pack lock 和 manifest bind 仍必须完整成功，任何失败保留旧绑定。默认 Provider 仍为
 `elevenlabs-global`，不做跨 Provider、跨区域或跨路线 fallback。

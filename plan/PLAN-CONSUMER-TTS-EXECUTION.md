@@ -78,7 +78,7 @@
 | 旧 Keychain 兼容 | `elevenlabs-global` 继续映射现有 account `elevenlabs`；不复制、不改名、不双写、不删除旧 item |
 | 候选约束 | route policy 唯一决定 styled/numbered、请求数和最少可接受数；complete 恰好 3 个，partial 只能是 1–2 个；每项不超过 3 秒、5 MB且不自动播放 |
 | 网络重试 | 既有逐候选 Provider 保留明确 429 至多一次的兼容行为；SenseAudio TTS/SFX POST 零自动 retry；SFX asset GET 仅对限定瞬态失败最多重试一次 |
-| 时间预算 | 单次 generation 从点击开始最多 60 秒；每个子请求和 429 retry 都必须消耗同一剩余预算 |
+| 时间预算 | 单次 generation 从点击开始默认最多 60 秒；仅 SenseAudio animal/soundEffect 为 route-owned 180 秒；每个子请求和允许的 GET retry 都消耗同一剩余预算 |
 | 采用边界 | 明确 `surface + event + packID`；独立用户包内完整 `AudioImport` + manifest bind 成功后才替换旧绑定 |
 
 ### 0.2 Provider 目录与能力契约
@@ -118,8 +118,10 @@ profile。用户只选择 profile 并输入对应的 key；实现前必须重新
   SenseAudio animal/SFX 为 numbered、native batch 请求 3、最少 1。不得由 UI 或 engine 维护另一份
   styled/numbered 或 partial 规则。
 - 既有 Provider 继续通过顺序 compatibility adapter 发出三个子请求；SenseAudio speech 顺序发三次，
-  SenseAudio SFX 只发一次 `variants_count=3` 的 native batch。所有请求与后续资源 GET 共用 60 秒
-  generation deadline，每个有效音频仍受 3 秒和 5 MiB 上限约束。
+  SenseAudio SFX 只发一次 `variants_count=3` 的 native batch。所有请求与后续资源 GET 共用点击时
+  冻结的 route-owned generation deadline：SenseAudio SFX 为 180 秒，其他路线与 voice probe 保持
+  60 秒；每个有效音频仍受 3 秒和 5 MiB 上限约束。Foundation request/resource timeout 同步为剩余
+  预算，不得重置起点或被默认 60 秒截断；SFX headers 后仍执行 20 秒 inactivity。
 - SenseAudio `regionID = "china"` 只标识固定 `.cn` API 路由，不构成数据驻留承诺。`.mixed` 在读取
   Keychain 前失败；`animal` 与 `soundEffect` 不得自动降级为 speech。
 
@@ -694,7 +696,7 @@ package-only `AICueAssetFetching`，其任何方法都不接受 `SensitiveCreden
 - 允许签名 query，但完整 URL/query 不得进入 `CustomReflectable`、错误、日志、fixture 或 UI；
 - 请求不设置 `Authorization`、Cookie、Referer，使用无 cookie/cache/credential storage 的 ephemeral
   `URLSession`，拒绝所有 redirect，并要求 final URL 与请求 URL 完全相同；
-- 每项 wire 上限 5 MiB，最多三项顺序下载，共享 generation 的 60 秒 absolute deadline；
+- 每项 wire 上限 5 MiB，最多三项顺序下载，共享 SenseAudio SFX generation 的 180 秒 absolute deadline；
 - 普通单项下载失败后继续下一项；cancel、deadline 或本地存储错误立即终止整批；
 - 同一 GET 最多重试一次，且只限明确瞬态网络错误、HTTP 408/5xx，或带 1...5 秒 `Retry-After` 的
   HTTP 429。SenseAudio TTS/SFX 生成 POST 始终零自动 retry。
@@ -817,7 +819,8 @@ fail closed，不得改成任意 HTTPS、通配 host 或运行时学习 policy�
    的 route、语言和 spoken-content invariant，再读取对应 credential；不显示独立确认表单。
 5. 如果 modality 不在 `routes.keys`、locale 不在 route allowlist，或 speech/mixed 缺少明确引号台词，
    直接显示可修正的本地错误，不读 key、不发网络；保留描述并允许修改或切换 profile。
-6. 以点击时冻结的 `generationID + profileID + 60 秒 absolute deadline` 请求选定 provider，并按 route
+6. 以点击时冻结的 `generationID + profileID + route-owned absolute deadline` 请求选定 provider（仅
+   SenseAudio SFX 为 180 秒，其他路线保持 60 秒），并按 route
    policy 一次性发布候选集合；`.complete` 必须恰好 3 个，`.partial` 只能有 1–2 个并显示“仅生成
    N/3 个可用候选”。不自动播放，同一时刻最多播放一个。Qwen deferred key 只在这一步被真实验证，
    且绝不自动 fallback 到旧 key、其他 region 或其他 Provider。
@@ -882,7 +885,8 @@ editing → generating → candidatesReady → adopting → applied
 
 provider 输出不得绕过现有 `AudioImport`：
 
-- 网络层设置连接/请求 inactivity timeout、60 秒 generation absolute deadline、按操作类型限制的重试、
+- 网络层设置连接/请求 inactivity timeout、route-owned generation absolute deadline（仅 SenseAudio
+  SFX 为 180 秒，其余 60 秒）、按操作类型限制的重试、
   exact-origin redirect rejection 和流式大小上限；取消与任何允许的 retry 不能重置 generation deadline；
 - 只接收现有 allowlist：WAV、MP3、AIFF、M4A；最大 5 MB、最大 3 秒；
 - provider 状态码、MIME、响应体和声明格式均不可信，必须检查状态码、流式字节上限、magic bytes、
@@ -1060,7 +1064,8 @@ production policy 恢复为 nil 并从 registry 移除 `senseaudio-cn`；`eleven
 - candidate-set suite 覆盖 styled/numbered identity、每条 route 的 requested/minimum、恰好三个的
   complete、只含一至两个的 allowed partial、低于 minimum 清理，以及旧 Provider 一次 429 retry 回归。
   切换 profile 后旧 generation 的成功/失败迟到结果均不能改变新状态或留下临时文件。
-- 60 秒 generation deadline 覆盖顺序子请求、native batch、asset GET 与允许的 retry；任一步结束、
+- route-owned generation deadline（仅 SenseAudio SFX 180 秒，其余 60 秒）覆盖顺序子请求、native
+  batch、asset GET 与允许的 retry；任一步结束、
   retry 或网络 callback 都不能重置预算。deadline/cancel 不发布 partial candidates。
 - 候选替换、symlink、格式伪装、超时长、超大小和下载中断时采用 fail closed。
 - Qwen SSE 覆盖 byte-by-byte 分片、JSON/Base64 跨 callback、LF/CRLF、空行、重复/缺失 terminal、
@@ -1185,7 +1190,7 @@ SenseAudio 的实际执行记录必须写入 `docs/senseaudio-production-accepta
 | provider 输出 | MIME/响应体/声明格式伪装 | 私有 temp acquisition + sniff + AudioImport | 候选拒绝，旧声音不变 |
 | 自动计费 | 保存 key 后自动生成或 POST 自动重试 | 二次显式 Generate + SenseAudio POST 零 retry | 用户掌握每次可能计费请求的时机 |
 | 迟到结果 | 切换 profile 后旧请求覆盖新状态 | generationID/profileID snapshot + cancel/discard | 新选择和候选不被污染 |
-| 总耗时 | 子请求与资源下载各自重置时间预算 | 共享 60 秒 generation absolute deadline | 超时统一失败，不展示 partial |
+| 总耗时 | 子请求与资源下载各自重置时间预算 | 共享 route-owned generation absolute deadline：仅 SenseAudio SFX 180 秒，其余 60 秒 | 超时统一失败，不展示 partial |
 | candidate set | UI/engine 自行接受不够数或身份错误的候选 | route-owned policy + unique identity + minimum 校验 | complete 恰好 3；只在允许时显示 1–2 个 partial |
 | partial publish | 导入或 bind 只完成一半 | 事务、回滚和真实磁盘状态投影 | 旧绑定保持，显示实际阶段 |
 
@@ -1240,7 +1245,8 @@ allowlist 并被表述为真实集成完成：
   read-only/deferred 状态诚实，Qwen pending replacement 可取消，保存 key 后不自动生成。
 - adapter 按 route policy 返回候选集合：complete 恰好 3 个，只有 SenseAudio SFX 可返回 1–2 个
   partial；无自动播放；每次生成由用户显式触发；不支持 modality 不会发送请求或自动 fallback；全部
-  子请求与资源 GET 共享 60 秒 generation deadline，profile switch 的迟到结果不能污染新状态。
+  子请求与资源 GET 共享 route-owned generation deadline（仅 SenseAudio SFX 180 秒，其余 60 秒），
+  profile switch 的迟到结果不能污染新状态。
 - 项目所有者已接受 ADR 0014 的精确实测资源 policy 与剩余可用性风险；经单独授权、绑定非分发候选的
   真实 TTS/SFX smoke 证明 `female_0033_b` 可用、全部 SFX URL/GET 符合该 policy 且音频合同成立；
   人工听感、键盘和 VoiceOver 通过。

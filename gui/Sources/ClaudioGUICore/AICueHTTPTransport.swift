@@ -47,6 +47,8 @@ package actor AICueURLSessionUnaryTransport: AICueUnaryTransport {
             timeouts: timeouts)
         let sessionConfiguration =
             (configuration.copy() as? URLSessionConfiguration) ?? configuration
+        try AICueTransportSessionConfiguration.apply(
+            deadline: request.deadline, to: sessionConfiguration)
         do {
             return try await runner.perform(
                 request: urlRequest,

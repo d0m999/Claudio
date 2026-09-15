@@ -311,7 +311,8 @@ public struct AICueProviderRegistry: Sendable {
             supportedLanguageTags: ["zh*"],
             authentication: .bearerAPIKey,
             transport: .remoteAssets,
-            candidateSetPolicy: numberedPartial)
+            candidateSetPolicy: numberedPartial,
+            generationBudget: .longRunningSFX)
         let soundEffect = AICueProviderRoute(
             modality: .soundEffect,
             endpoint: sfxEndpoint,
@@ -320,7 +321,8 @@ public struct AICueProviderRegistry: Sendable {
             supportedLanguageTags: ["zh*"],
             authentication: .bearerAPIKey,
             transport: .remoteAssets,
-            candidateSetPolicy: numberedPartial)
+            candidateSetPolicy: numberedPartial,
+            generationBudget: .longRunningSFX)
         return AICueProviderProfile(
             id: .senseAudioChina,
             providerID: .senseAudio,

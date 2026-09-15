@@ -608,7 +608,7 @@ func runSenseAudioAICueProviderSuites() async {
         expect(requests[0].url == senseAudioSFXURL, "SFX route 必须固定")
         expect(
             requests[0].responseStartPolicy == .generationDeadline,
-            "SFX 长计算 POST 的响应头等待必须共享 60 秒 generation deadline")
+            "SFX 长计算 POST 的响应头等待必须共享调用方冻结的 route generation deadline")
         expect(body["model"] as? String == "senseaudio-sfx-1.0-260626", "SFX model 必须固定")
         expect(body["variants_count"] as? Int == 3, "SFX 必须原生请求三个 variants")
         expect(body["duration_seconds"] as? Int == 2, "1500ms target 必须 ceil 为 2 秒")
