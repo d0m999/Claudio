@@ -40,7 +40,7 @@ func runAICueProviderContractsSuites() {
         expect(
             (try? registry.profile(for: .senseAudioChina)) == nil
                 && AICueProviderRegistry.productionSenseAudioAssetPolicy == nil,
-            "真实资源 origin 与付费 smoke 前 production registry 不得暴露 SenseAudio")
+            "固定资源 policy 的正式 smoke 与 T8 人工验收前 production registry 不得暴露 SenseAudio")
         expect(
             try! registry.profile(for: .elevenLabsGlobal).supportedModalities
                 == Set(AICueModality.allCases),
@@ -100,6 +100,10 @@ func runAICueProviderContractsSuites() {
             replacingRoute(
                 in: elevenLabs,
                 key: .speech,
+                with: copying(speechRoute, generationBudget: .longRunningSFX)),
+            replacingRoute(
+                in: elevenLabs,
+                key: .speech,
                 with: copying(
                     speechRoute,
                     candidateSetPolicy: AICueCandidateSetPolicy(
@@ -128,6 +132,16 @@ func runAICueProviderContractsSuites() {
             acceptedMediaTypes: ["audio/mpeg"])
         let registry = AICueProviderRegistry(evidenceGatedSenseAudioAssetPolicy: policy)
         let profile = try! registry.profile(for: .senseAudioChina)
+        expect(
+            registry.profiles().allSatisfy { profile in
+                profile.routes.values.allSatisfy { route in
+                    route.generationBudget
+                        == (profile.id == .senseAudioChina
+                            && (route.modality == .animal || route.modality == .soundEffect)
+                            ? .longRunningSFX : .standard)
+                }
+            },
+            "180 秒预算必须只属于 SenseAudio animal/soundEffect；所有其他 route 保持 60 秒")
         expect(
             registry.profiles().count == 5, "evidence fixture registry 必须包含唯一 SenseAudio profile")
         expect(
@@ -165,7 +179,8 @@ func runAICueProviderContractsSuites() {
                             supportedLanguageTags: $0.supportedLanguageTags,
                             authentication: $0.authentication,
                             transport: $0.transport,
-                            candidateSetPolicy: $0.candidateSetPolicy)
+                            candidateSetPolicy: $0.candidateSetPolicy,
+                            generationBudget: $0.generationBudget)
                     }
                 && profile.routes[.soundEffect]?.candidateSetPolicy.minimumAcceptedCount == 1,
             "animal/soundEffect 必须共享 fixed native-batch SFX route 并允许 1 个本地有效候选")
@@ -509,7 +524,8 @@ private func copying(
     supportedLanguageTags: Set<String>? = nil,
     authentication: AICueProviderAuthentication? = nil,
     transport: AICueProviderAudioTransport? = nil,
-    candidateSetPolicy: AICueCandidateSetPolicy? = nil
+    candidateSetPolicy: AICueCandidateSetPolicy? = nil,
+    generationBudget: AICueGenerationBudget? = nil
 ) -> AICueProviderRoute {
     AICueProviderRoute(
         modality: modality ?? route.modality,
@@ -519,7 +535,8 @@ private func copying(
         supportedLanguageTags: supportedLanguageTags ?? route.supportedLanguageTags,
         authentication: authentication ?? route.authentication,
         transport: transport ?? route.transport,
-        candidateSetPolicy: candidateSetPolicy ?? route.candidateSetPolicy)
+        candidateSetPolicy: candidateSetPolicy ?? route.candidateSetPolicy,
+        generationBudget: generationBudget ?? route.generationBudget)
 }
 
 private func throwsCompilationError(

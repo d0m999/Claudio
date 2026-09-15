@@ -22,11 +22,12 @@ endpoint/model/输出格式、费用、留存、候选集合语义和真实听�
 
 **修复方式:** 作为独立里程碑核对官方合同，固定不可由用户编辑的 route，补齐请求/响应/错误 fixture、
 三秒和 5 MiB 本地校验、凭据与 retry 语义，并在单独授权的付费 smoke 和人工听感验收通过后再决定
-是否加入 `senseaudio-cn`。不得用该路线绕过 SenseAudio SFX 资源 origin 门禁，也不得自动 fallback。
+是否加入 `senseaudio-cn`。不得用该路线绕过 ADR 0014 固定的 SenseAudio SFX 资源 policy，也不得自动
+fallback。
 
 **Effort:** L
 **Priority:** P3
-**Depends on:** `senseaudio-cn` TTS + SFX 完整合同、官方资源 origin 与真实 Provider 验收
+**Depends on:** `senseaudio-cn` TTS + SFX 完整合同、ADR 0014 固定资源 policy 与真实 Provider 验收
 
 ## Ship / CI
 

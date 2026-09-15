@@ -135,6 +135,8 @@ package enum AICueAssetFetchError: Error, Sendable, Equatable {
     case cancelled
     case transientNetwork
     case transportFailure
+    /// An unclassified infrastructure error cannot authorize per-item partial success.
+    case infrastructureFailure
     case retryBackoffFailure
 }
 
@@ -256,7 +258,7 @@ package struct AICueURLSessionAssetFetcher: AICueAssetFetching, Sendable {
         } catch is CancellationError {
             throw AICueAssetFetchError.cancelled
         } catch {
-            throw AICueAssetFetchError.transportFailure
+            throw AICueAssetFetchError.infrastructureFailure
         }
     }
 
@@ -275,6 +277,11 @@ package struct AICueURLSessionAssetFetcher: AICueAssetFetching, Sendable {
             throw AICueAssetFetchError.invalidURL
         }
         var request = URLRequest(url: url)
+        do {
+            request.timeoutInterval = try deadline.remainingSeconds()
+        } catch {
+            throw AICueAssetFetchError.deadlineExceeded
+        }
         request.httpMethod = AICueHTTPMethod.get.rawValue
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.httpShouldHandleCookies = false
@@ -292,7 +299,8 @@ package struct AICueURLSessionAssetFetcher: AICueAssetFetching, Sendable {
             if code == 408 || (500...599).contains(code) { return true }
             return code == 429 && retryAfter.map { (1...5).contains($0) } == true
         case .invalidURL, .redirectRejected, .unexpectedMediaType, .responseTooLarge,
-            .deadlineExceeded, .cancelled, .transportFailure, .retryBackoffFailure:
+            .deadlineExceeded, .cancelled, .transportFailure, .infrastructureFailure,
+            .retryBackoffFailure:
             return false
         }
     }
@@ -352,6 +360,12 @@ package actor AICueURLSessionAssetLoader: AICueAssetLoading {
             timeouts: timeouts)
         let sessionConfiguration =
             (configuration.copy() as? URLSessionConfiguration) ?? configuration
+        do {
+            try AICueTransportSessionConfiguration.apply(
+                deadline: deadline, to: sessionConfiguration)
+        } catch {
+            throw AICueAssetFetchError.deadlineExceeded
+        }
         return try await task.perform(request: request, configuration: sessionConfiguration)
     }
 }
@@ -408,7 +422,7 @@ private final class AICueAssetDataTask: NSObject, URLSessionDataDelegate, @unche
         } catch is CancellationError {
             throw AICueAssetFetchError.cancelled
         } catch {
-            throw AICueAssetFetchError.transportFailure
+            throw AICueAssetFetchError.infrastructureFailure
         }
     }
 
@@ -533,7 +547,16 @@ private final class AICueAssetDataTask: NSObject, URLSessionDataDelegate, @unche
         didCompleteWithError error: Error?
     ) {
         lock.lock()
-        let storedError = terminalError
+        guard !finished else {
+            lock.unlock()
+            return
+        }
+        // Foundation's fallback and our utility-queue work item share the same ceiling. The
+        // completion callback may win that scheduling race, so consult the caller's monotonic
+        // deadline before classifying a timeout as retryable availability or publishing audio.
+        let storedError: AICueAssetFetchError? =
+            deadline.remainingNanoseconds(at: DispatchTime.now().uptimeNanoseconds) == nil
+            ? .deadlineExceeded : terminalError
         let body = self.body
         let mediaType = self.mediaType
         lock.unlock()
@@ -547,13 +570,15 @@ private final class AICueAssetDataTask: NSObject, URLSessionDataDelegate, @unche
                 finish(.failure(.cancelled))
             } else if Self.isTransient(urlError.code) {
                 finish(.failure(.transientNetwork))
+            } else if urlError.code == .unknown {
+                finish(.failure(.infrastructureFailure))
             } else {
                 finish(.failure(.transportFailure))
             }
             return
         }
         if error != nil {
-            finish(.failure(.transportFailure))
+            finish(.failure(.infrastructureFailure))
             return
         }
         guard !mediaType.isEmpty else {

@@ -159,7 +159,7 @@ enum SettingsRoute {
 |---|---|---|
 | 语言、界面文字、面板宽度、状态点、通知偏好、快捷键、上次目的页 | UserDefaults | typed key；非法值回落；有迁移测试 |
 | pack、事件、主音量、Surface 覆盖 | `~/.claudio/config.json` | 继续使用锁与外科式 JSON 更新，保留未知字段 |
-| AI provider key | macOS Keychain | UI 只见状态，明文不进入页面状态或日志 |
+| AI provider key | SenseAudio 使用 ADR 0015 的私有本地文件；其他 Provider 使用 macOS Keychain | 掩码表单录入，UI 只投影保存状态，如实披露未加密的本地文件存储；Key 不进入日志或导出 |
 | 动态静默 | 私有、带 schema/revision/expiry 的原子 snapshot | 只包含布尔原因和时间，不包含 Focus 名称、日历标题、参与人或位置 |
 | 回执与日志 | 现有 0600 私有文件 | 不扩大字段；不保存提示词、响应、项目路径或音频绝对路径 |
 
@@ -280,6 +280,9 @@ AI 可见流程固定为：
 2. 第一阶段只输入声音描述，不输入名称；保存或替换 API Key 后不自动生成；
 3. 本地隐藏的 `AICueSoundPlan` 按当前 profile 的固定 route 与 candidate-set policy 编译；既有 Provider
    继续顺序请求三个候选，SenseAudio SFX 使用一次 native batch；
+   生成中移除描述编辑器，以同外观的只读区域展示原描述；状态层同时拒绝描述修改，不能因输入变动
+   取消或重发请求。“取消”是面板内主动取消操作，焦点随生成移到该按钮；取消或失败恢复编辑和原描述。
+   关闭、切换来源/profile、超时及网络失败的终止与清理保护保持不变；
 4. 候选逐项通过校验后一起显示，不自动播放；complete 恰好 3 个，只有路线明确允许时才显示 1–2 个
    partial 候选并说明实际数量；
 5. 候选阶段建议并允许修改一个最终名称；
@@ -301,7 +304,7 @@ endpoint、model、voice、region 或资源服务器输入，不自动 fallback�
 | `minimax-global` | `https://api.minimax.io`；probe `POST /v1/get_voice`；生成 `POST /v1/t2a_v2` | Bearer；`minimax-global` | `speech-2.8-hd` + `Chinese (Mandarin)_Reliable_Executive`；32 kHz / 128 kbps / mono MP3；JSON hex | 仅 `speech`；`zh` / `zh-Hans` | `readOnlyProbe` |
 | `qwen-singapore` | `https://dashscope-intl.aliyuncs.com`；生成 `POST /api/v1/services/aigc/multimodal-generation/generation`；`X-DashScope-SSE: enable` | Bearer；`qwen-singapore` | `qwen3-tts-instruct-flash` + `Cherry`；SSE Base64 PCM，24 kHz / 16-bit / mono / little-endian，封装 WAV | 仅 `speech`；`zh* -> Chinese`、`en* -> English` | `deferredUntilExplicitGeneration` |
 | `qwen-beijing` | `https://dashscope.aliyuncs.com`；path/header 同 Singapore | Bearer；`qwen-beijing` | 与 Singapore 相同 | 仅 `speech`；与 Singapore 相同 | `deferredUntilExplicitGeneration` |
-| `senseaudio-cn`（gated） | `https://api.senseaudio.cn`；probe `POST /v1/get_voice`；TTS `POST /v1/t2a_v2`；SFX `POST /v1/sound-effects/generations` | Bearer；`senseaudio-cn` | `sensenova-tts-2.0` + `female_0033_b`；`senseaudio-sfx-1.0-260626`；MP3 | `speech`、`animal`、`soundEffect`；`zh*`；不支持 `.mixed` | `readOnlyProbe`；真实资源 origin/MIME 与人工验收前 production 隐藏 |
+| `senseaudio-cn`（gated） | `https://api.senseaudio.cn`；probe `POST /v1/get_voice`；TTS `POST /v1/t2a_v2`；SFX `POST /v1/sound-effects/generations` | Bearer；`senseaudio-cn` | `sensenova-tts-2.0` + `female_0033_b`；`senseaudio-sfx-1.0-260626`；MP3 | `speech`、`animal`、`soundEffect`；`zh*`；不支持 `.mixed` | `readOnlyProbe`；ADR 0014 固定资源 policy 的正式 smoke 与人工验收前 production 隐藏 |
 
 MiniMax/Qwen 不显示 animal、soundEffect 或 mixed 为可生成；SenseAudio 只显示 speech、animal 与
 soundEffect。不支持 modality/locale 时保留描述，在读取 credential 或发网络前显示可修正错误。Qwen
@@ -337,7 +340,7 @@ Singapore/Beijing 是两个独立 region profile 和 Keychain slot，不能交�
 | `minimax-global` | 本机直连 MiniMax global origin；首批 Mandarin speech；供应商数据处理规则独立适用 | T2A 可能消耗 MiniMax 配额；get-voice probe 不生成音频，不能用 ElevenLabs 状态代替 |
 | `qwen-singapore` | 本机直连新加坡 DashScope origin；只使用此 region 的独立 key；供应商新加坡地区处理规则适用 | 保存 key 不发模型请求、生成费用为零；下一次显式生成才验证并可能计费 |
 | `qwen-beijing` | 本机直连北京 DashScope origin；不复用 Singapore key；供应商北京地区处理规则适用 | 与 Singapore 相同的 deferred 语义，但两地配额、权限和 smoke 证据互不替代 |
-| `senseaudio-cn`（gated） | 本机通过固定 `.cn` API route 直连 SenseAudio；该 route 不构成数据驻留承诺；SFX 资源只允许 registry 固定的精确 origin | 保存前只查询可用音色且不生成音频；TTS/SFX 可能计费；真实资源 origin/MIME、无凭据 GET 与无 redirect 证据完成前 production 隐藏 |
+| `senseaudio-cn`（gated） | 本机通过固定 `.cn` API route 直连 SenseAudio；该 route 不构成数据驻留承诺；SFX 资源只允许 ADR 0014 固定的精确 origin/MIME、匿名 GET 与零 redirect | 保存前只查询可用音色且不生成音频；TTS/SFX 可能计费；项目所有者已接受 TTL/host 轮换未知的可用性风险，但正式 smoke 与人工验收完成前 production 隐藏 |
 
 Claudio 不承诺任何供应商 zero retention，不展示统一账单或推算费用。API Key 只存 macOS Keychain；
 不得进入设置、日志、receipt、manifest、截图或仓库。描述、隐藏声音计划、provider 响应和候选音频也
@@ -779,7 +782,7 @@ git diff --check
 - Integrations、Events、Sounds 复用原 owner，独立旧窗口不再进入 production composition；
 - General、Notifications、Display、Usage、Shortcuts、About 的真实模型、权限、失败和持久化均落地；
 - AI 提示音维持描述 → route-owned 候选集合与命名 → 显式采用，内部声音方案隐藏，BYOK 边界不退化；
-  SenseAudio production profile 在资源 origin、真实 TTS/SFX 与人工验收前保持隐藏；
+  SenseAudio production profile 在 ADR 0014 固定资源 policy 的正式 TTS/SFX smoke 与人工验收前保持隐藏；
 - 所有自动命令全绿，`git diff --check` 通过且无新增 format diagnostics；
 - 真机视觉、键盘、VoiceOver、登录项、Focus、Calendar、快捷键和音频分别有证据；
 - 真实 Provider/key/付费请求、双架构、签名、公证、发布和正式验收继续单独报告与授权。

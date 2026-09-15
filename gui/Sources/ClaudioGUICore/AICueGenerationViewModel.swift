@@ -159,7 +159,7 @@ public final class AICueGenerationViewModel: ObservableObject {
     }
 
     public func updateDescription(_ value: String) {
-        guard phase != .adopting, value != soundDescription else { return }
+        guard phase != .generating, phase != .adopting, value != soundDescription else { return }
         soundDescription = value
         guard phase != .editing || generation != nil || adoptionOutcome != nil else {
             failure = nil
@@ -285,7 +285,11 @@ public final class AICueGenerationViewModel: ObservableObject {
 
     public func startGeneration(locale: String) {
         guard session != nil, phase != .generating, phase != .adopting else { return }
-        let deadline = AICueGenerationDeadline.startingNow()
+        let deadline = AICueGenerationDeadline.startingNow(
+            description: soundDescription,
+            locale: locale,
+            profileID: providerProfileID,
+            registry: registry)
 
         generationTask?.cancel()
         if let previous = generation {

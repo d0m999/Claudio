@@ -34,7 +34,7 @@ public struct AICueProviderRegistry: Sendable {
 
     /// Deterministic fixtures can exercise the complete SenseAudio contract while production
     /// remains on the four-profile allowlist. A real build may use this initializer only after an
-    /// official, smoke-verified exact asset origin has replaced the nil evidence gate.
+    /// accepted exact asset policy is bound to a non-distribution candidate for formal T8 smoke.
     package init(evidenceGatedSenseAudioAssetPolicy assetPolicy: AICueAssetPolicy?) {
         let contract = Self.builtInContract(senseAudioAssetPolicy: assetPolicy)
         do {
@@ -127,8 +127,8 @@ public struct AICueProviderRegistry: Sendable {
         qwenBeijing,
     ]
 
-    /// Intentionally nil until SenseAudio confirms a stable production asset origin and a paid
-    /// smoke proves exact origin, MIME, no-auth GET and no-redirect behavior.
+    /// Intentionally nil until ADR 0014's exact policy passes bound real smoke and the remaining
+    /// T8 manual gates. Risk acceptance alone never activates the profile.
     package static let productionSenseAudioAssetPolicy: AICueAssetPolicy? = nil
 
     private static func builtInContract(
@@ -311,7 +311,8 @@ public struct AICueProviderRegistry: Sendable {
             supportedLanguageTags: ["zh*"],
             authentication: .bearerAPIKey,
             transport: .remoteAssets,
-            candidateSetPolicy: numberedPartial)
+            candidateSetPolicy: numberedPartial,
+            generationBudget: .longRunningSFX)
         let soundEffect = AICueProviderRoute(
             modality: .soundEffect,
             endpoint: sfxEndpoint,
@@ -320,7 +321,8 @@ public struct AICueProviderRegistry: Sendable {
             supportedLanguageTags: ["zh*"],
             authentication: .bearerAPIKey,
             transport: .remoteAssets,
-            candidateSetPolicy: numberedPartial)
+            candidateSetPolicy: numberedPartial,
+            generationBudget: .longRunningSFX)
         return AICueProviderProfile(
             id: .senseAudioChina,
             providerID: .senseAudio,

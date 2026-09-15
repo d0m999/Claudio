@@ -9,7 +9,8 @@ silently introducing a second model.
 
 - Sound-pack scanning, snapshots, refresh, or concurrency: read ADRs 0001–0004.
 - Sound scopes, defaults, or Surface overrides: read ADR 0005.
-- AI Cue providers, credentials, generation, candidates, or adoption: read ADRs 0006–0007.
+- AI Cue providers, credentials, generation, candidates, or adoption: read ADRs 0006–0007;
+  SenseAudio additionally uses ADRs 0011, 0014–0015.
 - Settings navigation, window ownership, or dynamic quiet state: read ADRs 0008–0009; for a
   settings destination, also read `plan/PLAN-SETTINGS-EXPERIENCE.md`.
 - Native UI or visual changes: read the current sections of `DESIGN.md`. Dated historical sections
@@ -41,8 +42,9 @@ Preserve one owner for every fact:
 
 Preserve established module names, event IDs, hook command formats, data paths, unknown JSON
 fields, future Surface entries, third-party hooks, backups, receipts, and user sound packs unless an
-explicit migration owns the change. Keep AI-provider credentials in Keychain and sensitive values
-out of config, defaults, logs, manifests, error text, fixtures, and commits.
+explicit migration owns the change. Keep AI-provider credentials in Keychain except for SenseAudio's
+private local credential file defined by ADR 0015. Keep sensitive values out of ordinary config,
+defaults, logs, manifests, error text, fixtures, and commits.
 
 ## Change Workflow
 

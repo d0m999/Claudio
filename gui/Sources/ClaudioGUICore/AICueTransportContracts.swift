@@ -2,7 +2,8 @@ import Dispatch
 import Foundation
 
 public struct AICueGenerationDeadline: Sendable, Hashable, CustomReflectable {
-    public static let durationNanoseconds: UInt64 = 60 * 1_000_000_000
+    public static let durationNanoseconds: UInt64 = AICueGenerationBudget.standard
+        .durationNanoseconds
 
     package let startedAtUptimeNanoseconds: UInt64
     package let expiresAtUptimeNanoseconds: UInt64
@@ -17,6 +18,42 @@ public struct AICueGenerationDeadline: Sendable, Hashable, CustomReflectable {
         AICueGenerationDeadline(
             startedAtUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds,
             durationNanoseconds: durationNanoseconds)
+    }
+
+    /// Freeze the click's start before local planning. The immutable registry route, not the UI
+    /// or provider response, owns the budget. Invalid input retains the standard deadline and is
+    /// rejected by the generation engine before credential access or network activity.
+    package static func startingNow(
+        description: String,
+        locale: String,
+        profileID: AICueProviderProfileID,
+        registry: AICueProviderRegistry
+    ) -> AICueGenerationDeadline {
+        let started = DispatchTime.now().uptimeNanoseconds
+        let budget: AICueGenerationBudget
+        do {
+            let request = try AICueGenerationRequest(
+                description: description, locale: locale, providerProfileID: profileID)
+            let plan = try AICueSoundPlanner().makePlan(for: request)
+            _ = try AICueProviderRequestCompiler(registry: registry).compile(
+                plan: plan, profileID: profileID, variant: .clear)
+            guard let route = try registry.profile(for: profileID).routes[plan.modality] else {
+                throw AICueProviderRequestCompilationError.unsupportedModality
+            }
+            budget = route.generationBudget
+        } catch {
+            budget = .standard
+        }
+        return AICueGenerationDeadline(
+            startedAtUptimeNanoseconds: started,
+            durationNanoseconds: budget.durationNanoseconds)
+    }
+
+    package func remainingSeconds() throws -> TimeInterval {
+        guard let remaining = remainingNanoseconds(at: DispatchTime.now().uptimeNanoseconds) else {
+            throw AICueTransportError.deadlineExceeded
+        }
+        return TimeInterval(remaining) / 1_000_000_000
     }
 
     package func remainingNanoseconds(at now: UInt64) -> UInt64? {
@@ -86,6 +123,14 @@ package struct AICueOrigin: Hashable, Sendable {
     }
 }
 
+/// Controls only the wait for the first HTTP response. All requests still share the same absolute
+/// generation deadline, and response bytes remain subject to the transport inactivity budget
+/// after response headers arrive.
+package enum AICueResponseStartPolicy: Sendable, Equatable {
+    case connectionBudget
+    case generationDeadline
+}
+
 package struct AICueTransportRequest: Sendable, CustomReflectable {
     package let method: AICueHTTPMethod
     package let url: URL
@@ -96,6 +141,7 @@ package struct AICueTransportRequest: Sendable, CustomReflectable {
     package let acceptedMediaTypes: Set<String>
     package let maximumWireBytes: Int
     package let deadline: AICueGenerationDeadline
+    package let responseStartPolicy: AICueResponseStartPolicy
 
     package init(
         method: AICueHTTPMethod,
@@ -106,7 +152,8 @@ package struct AICueTransportRequest: Sendable, CustomReflectable {
         body: Data?,
         acceptedMediaTypes: Set<String>,
         maximumWireBytes: Int,
-        deadline: AICueGenerationDeadline
+        deadline: AICueGenerationDeadline,
+        responseStartPolicy: AICueResponseStartPolicy = .connectionBudget
     ) {
         self.method = method
         self.url = url
@@ -117,6 +164,7 @@ package struct AICueTransportRequest: Sendable, CustomReflectable {
         self.acceptedMediaTypes = Set(acceptedMediaTypes.map { $0.lowercased() })
         self.maximumWireBytes = maximumWireBytes
         self.deadline = deadline
+        self.responseStartPolicy = responseStartPolicy
     }
 
     package var customMirror: Mirror {
@@ -226,6 +274,7 @@ package enum AICueTransportRequestBuilder {
         }
 
         var result = URLRequest(url: request.url)
+        result.timeoutInterval = try request.deadline.remainingSeconds()
         result.httpMethod = request.method.rawValue
         result.httpBody = request.body
         result.cachePolicy = .reloadIgnoringLocalCacheData
@@ -308,6 +357,17 @@ package enum AICueTransportResponseValidator {
 }
 
 package enum AICueTransportSessionConfiguration {
+    /// Foundation must not terminate a long-computing route before its runner's absolute timer.
+    /// Every child request consumes the original generation budget rather than starting a new one.
+    package static func apply(
+        deadline: AICueGenerationDeadline,
+        to configuration: URLSessionConfiguration
+    ) throws {
+        let seconds = try deadline.remainingSeconds()
+        configuration.timeoutIntervalForRequest = seconds
+        configuration.timeoutIntervalForResource = seconds
+    }
+
     package static func hardened(
         from configuration: URLSessionConfiguration?,
         timeouts: AICueTransportTimeouts
@@ -322,11 +382,12 @@ package enum AICueTransportSessionConfiguration {
         hardened.httpCookieStorage = nil
         hardened.httpShouldSetCookies = false
         hardened.urlCredentialStorage = nil
-        // Explicit runner timers distinguish connection from post-response inactivity. Keep the
-        // Foundation fallback no shorter than either budget so it cannot collapse them together.
-        hardened.timeoutIntervalForRequest = max(
-            timeouts.connectionSeconds,
-            timeouts.inactivitySeconds)
+        // Explicit runner timers distinguish response-start policy from post-response inactivity.
+        // Keep Foundation's fallback at the absolute generation ceiling so it cannot collapse a
+        // provider's intentional pre-response computation into the shorter connection budget.
+        hardened.timeoutIntervalForRequest =
+            TimeInterval(
+                AICueGenerationDeadline.durationNanoseconds) / 1_000_000_000
         hardened.timeoutIntervalForResource = 60
         hardened.httpMaximumConnectionsPerHost = 1
         hardened.waitsForConnectivity = false

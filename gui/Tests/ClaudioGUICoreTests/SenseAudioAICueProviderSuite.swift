@@ -363,6 +363,36 @@ private func senseAudioProvider(
 
 @MainActor
 func runSenseAudioAICueProviderSuites() async {
+    await suite("SenseAudio SFX：资源合同违约立即整批失败，成功首项不得授权 partial") {
+        let violations: [AICueAssetFetchError] = [
+            .invalidURL, .unexpectedMediaType, .redirectRejected,
+            .httpStatus(code: 401, retryAfterSeconds: nil),
+            .httpStatus(code: 403, retryAfterSeconds: nil),
+        ]
+        for violation in violations {
+            let response = senseAudioSFXResponse(
+                status: "completed",
+                items: (0...2).map {
+                    senseAudioSFXItem(index: $0, url: "\(senseAudioAssetOrigin)/contract-\($0).mp3")
+                })
+            let transport = SenseAudioUnaryTransportFixture([.success(response)])
+            let fetcher = SenseAudioAssetFetcherFixture([
+                .success(validMP3ID3Data(), "audio/mpeg"), .failure(violation),
+                .success(validMP3ID3Data(), "audio/mpeg"),
+            ])
+            let provider = senseAudioProvider(transport: transport, assetFetcher: fetcher)
+            var observed: AICueProviderError?
+            do {
+                _ = try await provider.generateCandidateSet(
+                    plan: senseAudioEffectPlan(),
+                    credential: try SensitiveCredentialInput("fixture-only-contract-key"),
+                    deadline: .startingNow())
+            } catch let error as AICueProviderError { observed = error } catch {}
+            expect(observed == .invalidAudioResponse, "违约不能发布已成功的 sibling")
+            expect(await fetcher.urls().count == 2, "第二项违约后不得发出第三项 GET 或重试")
+            expect(await transport.requests().count == 1, "违约不追加付费 POST")
+        }
+    }
     await suite("SenseAudio probe：固定 Bearer POST /v1/get_voice 并要求 system voice") {
         let transport = SenseAudioUnaryTransportFixture([.success(senseAudioProbeResponse())])
         let provider = senseAudioProvider(transport: transport)
@@ -606,6 +636,9 @@ func runSenseAudioAICueProviderSuites() async {
         let body = try! JSONSerialization.jsonObject(with: requests[0].body!) as! [String: Any]
         expect(requests.count == 1, "SFX 必须只发送一次 native batch POST")
         expect(requests[0].url == senseAudioSFXURL, "SFX route 必须固定")
+        expect(
+            requests[0].responseStartPolicy == .generationDeadline,
+            "SFX 长计算 POST 的响应头等待必须共享调用方冻结的 route generation deadline")
         expect(body["model"] as? String == "senseaudio-sfx-1.0-260626", "SFX model 必须固定")
         expect(body["variants_count"] as? Int == 3, "SFX 必须原生请求三个 variants")
         expect(body["duration_seconds"] as? Int == 2, "1500ms target 必须 ceil 为 2 秒")
@@ -759,7 +792,7 @@ func runSenseAudioAICueProviderSuites() async {
             ])
         let transport = SenseAudioUnaryTransportFixture([.success(response)])
         let fetcher = SenseAudioAssetFetcherFixture([
-            .failure(.unexpectedMediaType),
+            .failure(.httpStatus(code: 404, retryAfterSeconds: nil)),
             .success(validMP3ID3Data(), "audio/mpeg"),
         ])
         let provider = senseAudioProvider(transport: transport, assetFetcher: fetcher)
@@ -942,7 +975,7 @@ func runSenseAudioAICueProviderSuites() async {
         }
     }
 
-    await suite("SenseAudio→Engine：asset 401 只导致零候选，不污染 active credential") {
+    await suite("SenseAudio→Engine：asset 401 整批失败，不污染 active credential") {
         await withTempDirectory { root in
             let urls = (0...2).map {
                 "\(senseAudioAssetOrigin)/generated/unauthorized-\($0).mp3?signature=secret-\($0)"
@@ -997,10 +1030,10 @@ func runSenseAudioAICueProviderSuites() async {
                 (try? FileManager.default.contentsOfDirectory(
                     at: temporaryRoot,
                     includingPropertiesForKeys: nil)) ?? []
-            expect(observed == .insufficientValidCandidates, "三个 asset 401 必须表现为零个本地有效候选")
+            expect(observed == .provider(.invalidAudioResponse), "asset 401 必须终止本次生成")
             expect(
-                postCount == 1 && assetCount == 3,
-                "asset 401 后应继续普通 sibling，但不得追加生成 POST")
+                postCount == 1 && assetCount == 1,
+                "首项 asset 401 后不继续 sibling，不追加生成 POST")
             expect(
                 vaultFacts.reads == 1 && vaultFacts.replacements == 0
                     && vaultFacts.deletions == 0

@@ -91,6 +91,37 @@ private final class AICueDelayedBodyTransportURLProtocol: URLProtocol, @unchecke
     }
 }
 
+private final class AICueDelayedResponseTransportURLProtocol: URLProtocol, @unchecked Sendable {
+    private var delivery: DispatchWorkItem?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let delivery = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let response = HTTPURLResponse(
+                url: self.request.url!,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["content-type": "application/json"])!
+            self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            self.client?.urlProtocol(self, didLoad: Data("{}".utf8))
+            self.client?.urlProtocolDidFinishLoading(self)
+        }
+        self.delivery = delivery
+        DispatchQueue.global(qos: .utility).asyncAfter(
+            deadline: .now() + 0.05,
+            execute: delivery)
+    }
+
+    override func stopLoading() {
+        delivery?.cancel()
+        delivery = nil
+    }
+}
+
 private final class AICueRedirectRequestRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var requestedURLs: [URL] = []
@@ -149,6 +180,54 @@ private final class AICueRedirectTransportURLProtocol: URLProtocol, @unchecked S
 
 @MainActor
 func runAICueHTTPTransportSuites() async {
+    await suite("AI 提示音 transport：Foundation fallback 跟随剩余 route deadline，不重置预算") {
+        let started = DispatchTime.now().uptimeNanoseconds
+        for seconds: UInt64 in [60, 180] {
+            let deadline = AICueGenerationDeadline(
+                startedAtUptimeNanoseconds: started - 5_000_000_000,
+                durationNanoseconds: seconds * 1_000_000_000)
+            let configuration = URLSessionConfiguration.ephemeral
+            try! AICueTransportSessionConfiguration.apply(deadline: deadline, to: configuration)
+            expect(
+                configuration.timeoutIntervalForResource > Double(seconds - 6)
+                    && configuration.timeoutIntervalForResource <= Double(seconds - 5)
+                    && configuration.timeoutIntervalForRequest
+                        == configuration.timeoutIntervalForResource,
+                "Foundation request/resource timeout 必须使用剩余预算，180 秒路线不得仍被 60 秒截断")
+        }
+        let expired = AICueGenerationDeadline(
+            startedAtUptimeNanoseconds: started - 2_000_000_000,
+            durationNanoseconds: 1_000_000_000)
+        var rejected = false
+        do {
+            try AICueTransportSessionConfiguration.apply(
+                deadline: expired, to: .ephemeral)
+        } catch AICueTransportError.deadlineExceeded {
+            rejected = true
+        } catch {}
+        expect(rejected, "过期预算不得创建新的 Foundation 超时窗口")
+        expect(
+            AICueGenerationDeadline.durationNanoseconds == 60 * 1_000_000_000,
+            "不带生成 route 的 voice probe 等操作仍须保留默认 60 秒预算")
+        let deadline = AICueGenerationDeadline(
+            startedAtUptimeNanoseconds: started - 5_000_000_000,
+            durationNanoseconds: 180 * 1_000_000_000)
+        let request = AICueTransportRequest(
+            method: .post,
+            url: URL(string: "https://fixture.transport/long-computation")!,
+            expectedOrigin: try! AICueOrigin(scheme: "https", host: "fixture.transport", port: nil),
+            expectedPath: "/long-computation",
+            headers: [:], body: nil,
+            acceptedMediaTypes: ["application/json"], maximumWireBytes: 64,
+            deadline: deadline, responseStartPolicy: .generationDeadline)
+        let native = try! AICueTransportRequestBuilder.authenticatedURLRequest(
+            from: request, authentication: .bearerAPIKey,
+            credential: try! SensitiveCredentialInput("fixture-secret"))
+        expect(
+            native.timeoutInterval > 174 && native.timeoutInterval <= 175,
+            "URLRequest 不得保留默认 60 秒或重置为完整 180 秒")
+    }
+
     await suite("AI 提示音 unary transport：exact origin/path 后按 auth enum 注入且 request 不含 secret") {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [AICueUnaryTransportURLProtocol.self]
@@ -413,6 +492,39 @@ func runAICueHTTPTransportSuites() async {
             cancelError = error
         } catch {}
         expect(cancelError == .cancelled, "调用方取消必须同步取消 URLSession task")
+    }
+
+    await suite("AI 提示音 unary transport：长计算 POST 在响应头前只受 generation deadline") {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AICueDelayedResponseTransportURLProtocol.self]
+        let transport = AICueURLSessionUnaryTransport(
+            configuration: configuration,
+            timeouts: AICueTransportTimeouts(
+                connectionSeconds: 0.02,
+                inactivitySeconds: 0.2))
+        let request = AICueTransportRequest(
+            method: .post,
+            url: URL(string: "https://fixture.transport/long-computation")!,
+            expectedOrigin: try! AICueOrigin(
+                scheme: "https", host: "fixture.transport", port: nil),
+            expectedPath: "/long-computation",
+            headers: ["content-type": "application/json"],
+            body: Data("{}".utf8),
+            acceptedMediaTypes: ["application/json"],
+            maximumWireBytes: 64,
+            deadline: AICueGenerationDeadline(
+                startedAtUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds,
+                durationNanoseconds: 500_000_000),
+            responseStartPolicy: .generationDeadline)
+
+        let response = try? await transport.send(
+            request,
+            authentication: .bearerAPIKey,
+            credential: try! SensitiveCredentialInput("fixture-secret"))
+
+        expect(
+            response?.body == Data("{}".utf8),
+            "允许长计算的 POST 不得被较短 connectionSeconds 当成首字节超时")
     }
 
     await suite("AI 提示音 unary transport：scheme/port/path 逐项 exact，远端下载 URL 无法扩权") {

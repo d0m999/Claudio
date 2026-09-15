@@ -4,6 +4,9 @@
 # macOS
 .DS_Store
 
+# Local-only environment file; never commit credentials
+/.env
+
 # Xcode / Swift (for when helper/ and gui/ land)
 .build/
 DerivedData/
