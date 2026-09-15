@@ -38,10 +38,11 @@ activation。默认 registry 仍只有既有四个 profile，`productionSenseAud
 
 | 层级 | 当前状态 | 当前事实 |
 |---|---|---|
-| 本地实现聚合与自动门禁 | `NOT RUN` | 已有 gated SenseAudio 实现与 deterministic fixtures；#183 hardening 子任务尚需在聚合 commit 上复验 |
+| 本地实现聚合与自动门禁 | `PREPARED LOCAL` | 2026-09-15 修复 SFX 响应头误超时后，新聚合 base 与非分发候选已绑定并复验；完整结果见第 9 节 |
 | production 暴露 | `CLOSED` | `productionSenseAudioAssetPolicy == nil`；`senseaudio-cn` 不在默认 allowlist |
 | 实测资源合同决策 | `RISK ACCEPTED` | exact origin/MIME/匿名 GET/零 redirect 已固定；URL 有效期与 host 轮换未知作为可用性风险接受 |
-| 首次正式付费 smoke | `NOT RUN` | 尚未在绑定的非分发候选上完成；此前资源发现不计入本层 |
+| 首次正式付费 smoke | `NOT AUTHORIZED` | 被取代候选完成 3 次 TTS，但唯一一次 SFX 在响应头前被客户端 10 秒计时器误取消；修复后的新候选需新授权重跑，见第 9 节 |
+| 非分发候选原生启动 | `NOT RUN` | 被取代候选最终可启动；修复后的新 Bundle 尚未启动，旧启动证据不跨候选继承 |
 | 原生听感、键盘、VoiceOver | `NOT RUN` | fixture、SwiftUI harness 或 build 不能替代 |
 | production activation | `NOT VERIFIED` | 严格依赖 T8 其余层全部通过；由 #189 单独实施，本 ticket 不修改 policy/allowlist |
 | Release / distribution | `NOT RUN` | 没有签名 universal RC、notarization、双架构或正式批准 |
@@ -136,19 +137,19 @@ shasum -a 256 "$candidate_evidence_dir/claudi0-NON-DISTRIBUTION.zip"
 
 | 字段 | 值 |
 |---|---|
-| Candidate ID | 待填（`NOT VERIFIED`） |
-| 聚合 base commit / tree | 待填（完整 SHA） |
-| 候选 commit / tree | 待填（完整 SHA） |
-| base→candidate 精确 diff | 待填（仅 policy/activation patch） |
-| Policy 规范化 JSON / SHA-256 | 待填 |
-| `CFBundleIdentifier` | 待填 |
-| `CFBundleShortVersionString` / `CFBundleVersion` | 待填 |
-| CPU / macOS | 待填 |
-| signing identity / Team ID / CDHash | 待填；ad-hoc 必须明确写 ad-hoc |
-| 主 app executable SHA-256 | 待填 |
-| helper / LoginItem executable SHA-256 | 待填 |
-| 非分发 archive SHA-256 | 待填；archive 保持在 Git 外 |
-| 自动门禁结果引用 | 待填 |
+| Candidate ID | `senseaudio-t8-20260915-62faf8ae-arm64` |
+| 聚合 base commit / tree | `187c3f9b1153ec30d290e87ddb1184595781f2b3` / `179d733db88c1e78e9d6ff8dd7cc32abe9c58f5a` |
+| 候选 commit / tree | `62faf8ae7d3ce6202a2310272e40a85bf27b612e` / `e2f0d8fc8ce868ac345c5d2c47400c1b7cdf9d8d` |
+| base→candidate 精确 diff | 仅 policy/activation、相应 registry 测试与非分发标记；8 文件，+63/-26；diff SHA-256 `b692a106ce5ddc786907fc46ae5e0f89bf485cc73ba7fb99de61d3c9e28e97cb` |
+| Policy 规范化 JSON / SHA-256 | 第 1.2 节固定 JSON；`6f570cf99d8fc8bfcf040c49ac4182afa1ab16d0baca74eb072a7f083e5d200d` |
+| `CFBundleIdentifier` | `com.claudio.app` |
+| `CFBundleShortVersionString` / `CFBundleVersion` | `0.0.0-dev` / `0.0.0-dev` |
+| CPU / macOS | arm64 / macOS 26.6.2 (25G83) |
+| signing identity / Team ID / CDHash | ad-hoc / 未设置 / `3beda6becb079914b63b00133952044a493e0b3e` |
+| 主 app executable SHA-256 | `44cde0c6e90c8eabdc6b96baa68b33a59812aea7b45e3f699bcb48aa85e887f3` |
+| helper / LoginItem executable SHA-256 | `d36e4f751cdd006215878efb3a325407728bc9ca7458b8060e5a127c0f36affe` / `0e9e4167b9ea4d881f96523bd7b6d227b4f0b6f5b6c87f1d5fab9357f9dde1c6` |
+| 非分发 archive SHA-256 | `fcfedb576c99db39ebd1119f78a08ed4a54ba0d96cbf61eb9160e3e547baf30d`；archive 保持在 Git 外 |
+| 自动门禁结果引用 | 第 9 节；同一干净候选的完整设置集成门禁退出 0 |
 
 不得用 `dist/` 路径、分支名、窗口截图或“刚刚构建”替代这些身份字段。
 
@@ -308,3 +309,62 @@ Gatekeeper、DMG checksum、双架构真机与正式批准继续走独立 releas
 | Activation commit / Bundle | `NOT VERIFIED`；严格依赖 T8 |
 | Release | `NOT RUN` |
 | 验收人 / 日期 / 结论 | 待填；当前不得写通过 |
+
+## 9. 2026-09-15 本地凭据候选执行记录
+
+本节是第 1.3 节候选的脱敏执行摘要，不授权 activation 或 Issue 关闭。两个无关 mockup 未进入
+任何提交；可分发分支的 production policy 仍为 `nil`。验收摘要只更新在可分发分支的台账中，
+不改变被测候选身份。
+
+### 第一次正式 smoke 与根因
+
+被取代候选 `senseaudio-t8-20260915-7588095e-arm64` 在重启后显示 SenseAudio 凭据“已保存 · 已验证”。
+执行方没有读取、打印、导出或修改 Key，也没有访问旧 Keychain。候选在隔离的非全局声音作用域中
+发出恰好 3 次 TTS POST，零 retry，并返回 3 个可播放 MP3；文件均为 0600、`audio/mpeg`、ID3 MP3，
+字节数为 26825、26825、34313，探测时长为 1.656、1.656、2.124 秒。三个候选各播放一次；听感结论
+仍需验收人确认，不能由文件检查替代。
+
+同一候选随后发出唯一一次 SFX batch POST，零 retry。TLS 成功且 165-byte 请求体已发送，但
+10.671 秒内没有收到响应头或响应字节，随后客户端返回 `NSURLErrorDomain Code=-999`；asset GET 为 0，
+因此没有进入 `audio_url`、origin、MIME、redirect 或 MP3 校验。界面按设计未保存任何候选，也未执行
+第二次生成。
+
+脱敏系统网络记录与源码共同确认根因：通用 unary transport 从 `task.resume()` 起将
+`connectionSeconds = 10` 误作“首个 HTTP 响应”计时器；SenseAudio SFX 是服务端先计算、后返回 JSON 的
+长计算 POST，已完成 TLS 与请求发送仍会被该计时器取消。修复提交
+`187c3f9b1153ec30d290e87ddb1184595781f2b3` 增加 route-owned `responseStartPolicy`：只有 SenseAudio SFX
+在响应头前共享 60 秒 generation absolute deadline；voice probe、TTS 和其他路线保持原 connection
+budget，所有响应在 headers 后仍执行 20 秒 inactivity、wire ceiling、redirect 和总 deadline 门禁。
+回归用例先因接口不存在失败，修复后完整 GUI harness 通过 `9445/9445`。
+
+该修复改变源码与 app executable，因此第一次正式候选的 TTS、启动和人工结果不能继承给新候选。
+
+### 修复后正式候选自动证据
+
+修复后聚合 base 为 `187c3f9b1153ec30d290e87ddb1184595781f2b3`，新 NON-DISTRIBUTION 候选为
+`senseaudio-t8-20260915-62faf8ae-arm64`。候选 worktree/index 干净；base→candidate 仍只包含 8 个
+policy/activation、相应 registry 测试和非分发标记文件。
+
+| 检查 | 结果 |
+|---|---|
+| 完整设置门禁 | `PASSED`：helper 3272 / GUI 9446；`bash scripts/verify-settings-experience.sh 7640166bc1d04d084db0baee40434d297a16951c` 退出 0 |
+| Debug/Release presentation 与 ClaudioGUI、Release helper/LoginItem | `PASSED` |
+| localization JSON、diff check | `PASSED` |
+| strict format baseline 比较 | `PASSED`：baseline/HEAD 均为 1315 条，无新增诊断 |
+| 最终签名后 app executable / helper / LoginItem | `PASSED`：5608768 / 2862896 / 72192 B，均在各自上限内 |
+| 最终签名后非可执行资源 / Bundle 正规文件合计 | `PASSED`：689969 / 9233825 B，上限分别为 1500000 / 11250000 B |
+| dev-bundle、ad-hoc 签名验证、archive 身份 | `PASSED`；仍非 universal、Developer ID 或 notarized release |
+| Node selector / Python candidate 回归 | `PASSED`：selector executable seam；11 项 Python 测试 |
+
+门禁脚本的 format baseline 必须是候选历史祖先；候选为保留独立 NON-DISTRIBUTION 审计提交而先叠加
+activation patch、后 cherry-pick 修复，故使用共同祖先 `7640166`。第 1.3 节另以修复后聚合 base
+`187c3f9` 对候选做精确 tree diff，确认只有原 8 个候选文件。
+
+### 当前未完成项
+
+新候选 voice probe = **0**、TTS POST = **0**、SFX POST = **0**、asset GET = **0**，尚未启动。
+第一次授权的 3 TTS + 1 SFX 预算已经用尽；新候选必须取得新授权后重跑 3 TTS + 1 SFX、资源下载、
+播放与同候选人工验收。听感、键盘、VoiceOver、partial、采用与回滚仍未完成。
+
+结论：根因已修复且新候选自动门禁通过，但新候选真实 smoke 与人工门禁尚未执行，T8 **未闭合**。
+未 push、未修改 Issue、未启用 production；T9 仍保持阻塞。
