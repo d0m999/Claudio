@@ -1,26 +1,46 @@
 # Issue #189 更新草案
 
-状态：本地草案，尚未发布或修改 GitHub Issue。相关修复与验收边界见
-`senseaudio-production-acceptance.md` 第 24 节。
+状态：本地草案，尚未发布或修改 GitHub Issue。T9 已按用户直接授权完成本地实现及最终 Bundle
+技术复验；实际听感反馈待确认，完整闭合仍为 `NOT VERIFIED`。证据见
+`senseaudio-production-acceptance.md` 第 26 节；第 24–25 节修复历史保留。
 
 ## Scope
 
 Part of #183。历史 T8 #187 已按台账第 23 节的所有者有边界风险接受口径闭合，不能描述为全部实测
 通过。资源合同来源是 ADR 0014 的所有者接受实测合同，不再等待供应商正式承诺 hostname/MIME。
 
-只有审查后 ACL 与 SFX 资源失败分类修复的受影响证据按第 1.4、24 节重验，且获得独立 activation
-授权后，才能固化 `productionSenseAudioAssetPolicy`、精确注册第五个 profile，并同步
-privacy/Gallery/ADR/台账。对最终 commit 运行完整 harness、Release/bundle/size 与适用原生 smoke。
+从 main `8330a3cae95110858b1440eaa530904cc8c1d8cc` 创建隔离分支
+`feat/senseaudio-production-activation`，不合并 T8 候选分支，不修改原目录的未提交工作。
+最终受测源码为 `e9ff628438d6d6443bc86a41f33a6ce39a3ba4f0`，tree
+`0ee80a2d31d94aa723d92f7d9d162eea83da5c4d`。源码提交与证据提交分开，受测 Bundle 没有 fixture
+policy 注入；NON-DISTRIBUTION 仅在外部归档名称/台账标记。
 
 ## Acceptance
 
-- production 恰好五 profiles，默认 ElevenLabs，完整 TTS+SFX 同时暴露；无自动 fallback。
-- exact origin/MIME、匿名 GET、零 redirect 和共享 deadline 不放宽。
-- URL/origin、MIME、redirect、final URL 违约及 asset 401/403 立即整批失败；资源认证拒绝不损坏 Key。
-- 候选从全部修复的开发基线创建，独立 activation patch 不夹带功能或证据文件；testing override 与
-  NON-DISTRIBUTION 标记不进入发布构建。
-- 新凭据链和受影响 SFX 生成/下载须在新候选上重验。policy digest 相同不代表实现证据可继承。
-- 最终 commit/tree/policy/Bundle 与证据一致；每项继承有 source-delta 依据，行为变化重验受影响项。
+- 默认 registry 五 profiles，默认 ElevenLabs，已有 Provider 选择不改；完整 SenseAudio TTS+SFX，
+  不支持 mixed、无自动 fallback。显式 nil 回滚 registry 四项，保留凭据和已采用资产。
+- 唯一 `https://dynamic.senseaudio.cn:443` / `audio/mpeg`、匿名 GET、零 redirect、立即下载、
+  URL 不持久化；digest `6f570cf99d8fc8bfcf040c49ac4182afa1ab16d0baca74eb072a7f083e5d200d`。
+  SFX 180 秒、其他 60 秒，以及资源安全/401/403/未知基础设施整批失败合同不放宽。
+- 默认合同回归旧实现 63 / 5；扩展字段/map 正控旧实现 75 / 25 → 最终 75 / 0。
+  默认 runtime 五 generator/三 validator，构造零凭据/网络/文件写入；mixed/非中文 speech 网络前拒绝。
+- 最终完整设置集成门禁通过：helper 3272 / 0、GUI 9869 / 0；Debug/Release、localization、selector、
+  candidates 11 / 0、bundle、ad-hoc 签名与 size 通过；strict format 新增诊断 0。首轮 fixture/隐私名称
+  合同失败及修复记录保留在台账，不能宣称首轮全绿。
+- 最终 arm64 本地 Bundle 真实重验 3 TTS POST + 1 SFX POST + 3 asset GET，七次 HTTP 200，
+  零 probe/零 retry；三 TTS/三 SFX 均通过 MP3 大小/时长校验并触发原生播放。
+- WorkBuddy × stop 在独立 CC0 测试包一次采用成功；重启原生/manifest/音频读回通过。
+  完成后仅恢复原包选择，其他覆盖/原包 manifest/真实凭据元数据不变；测试包及已采用音频保留。
+- 源码/policy/Bundle/executable/archive 摘要完整绑定；继承输入法/键盘证据有精确 source delta。
+  ACL 与资源错误/deadline 改动通过隔离回归和新真实链路重验，不能由相同 digest 自动继承。
+- 真实再次原生保存仍未验证，用户本轮计划明确豁免；假 Key 保存/重启/ACL/权限异常、替换失败保旧值
+  与删除通过工程验证，不读取或重新录入真实 Key。
 - VoiceOver 未验证、partial 实际展示未验证、动物意图质量沿用已明确的有限风险接受，不能写 PASSED，
   不能扩展为凭据或网络安全豁免。
-- 未满足上述前置条件时保持 production policy nil。T9 本地实现、activation 与 release 验收分别记录。
+
+## Remaining
+
+六个新候选已依次触发播放，实际出声与 TTS/木琴意图匹配仍等待所有者反馈；播放状态不代替听感。
+反馈前只记录本地实现/技术复验 PASSED，不记录 T9 完整闭合 PASSED。
+macOS 12–13、Intel、universal/Developer ID、公证及正式分发未验证；不声明生产就绪。
+未 push、创建 PR、合并、发布或修改 Issue；main production 仍为 policy nil/四 profiles。
