@@ -28,6 +28,14 @@ redirect 或 final URL 任一漂移都 fail closed：activation 前保持 `produ
 且 profile 隐藏；activation 后本次生成失败，并进入 ADR 0011 的显式回滚流程，不自动放宽 policy、
 切换 host、fallback 到其他 Provider 或删除 Keychain/已采用音频。
 
+2026-09-15 审查后修订，消除与执行合同单项失败条款的冲突：origin/URL 违约、MIME、redirect、
+final URL 违约和 asset HTTP 401/403 都终止整批，不继续后续 GET、不发布 partial，并清理本次临时
+候选。401/403 只证明当前匿名资源访问不满足合同，不据此断言供应商改变认证要求，更不把 API Key
+标记无效。普通资源不可用、限定 GET 重试耗尽，以及 MP3 magic/大小/时长校验失败仍可淘汰单项，
+剩余有效项按 ADR 0011 发布稳定编号的 partial。取消、共享 deadline、本地存储或 retry-backoff
+基础设施故障仍整批失败。整批失败不会自动修改 production policy；activation 后的安全回滚仍是
+单独、显式操作。此修订不改变第 1.2 节的 policy JSON/digest，但受影响实现与候选证据必须重验。
+
 项目所有者明确接受 URL 有效期与 host 轮换未知造成的可用性风险：未来供应商更换资源域名、缩短有效期
 或改变下载行为时，合法生成也可能被 Claudio 拒绝。该风险接受只替代“官方确认”这一证据来源，不替代
 绑定同一非分发候选的真实 TTS/SFX smoke、音频校验、听感、键盘、VoiceOver、采用/回滚验收，也不授权

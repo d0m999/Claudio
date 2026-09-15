@@ -263,18 +263,29 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
                             mediaType: fetched.mediaType,
                             modelID: route.modelID,
                             requestID: batch.requestID)))
-            } catch AICueAssetFetchError.cancelled {
-                throw AICueProviderError.cancelled
-            } catch AICueAssetFetchError.deadlineExceeded {
-                throw AICueProviderError.deadlineExceeded
-            } catch AICueAssetFetchError.retryBackoffFailure {
-                throw AICueProviderError.transportFailure
+            } catch let error as AICueAssetFetchError {
+                switch error {
+                case .invalidURL, .redirectRejected, .unexpectedMediaType:
+                    throw AICueProviderError.invalidAudioResponse
+                case .httpStatus(let code, _) where code == 401 || code == 403:
+                    // Resource access is not API credential validation. Stop this batch without
+                    // rejecting the existing key or authorizing a sibling partial generation.
+                    throw AICueProviderError.invalidAudioResponse
+                case .cancelled:
+                    throw AICueProviderError.cancelled
+                case .deadlineExceeded:
+                    throw AICueProviderError.deadlineExceeded
+                case .retryBackoffFailure:
+                    throw AICueProviderError.transportFailure
+                case .httpStatus, .responseTooLarge, .transientNetwork, .transportFailure:
+                    // Ordinary availability/audio failures may discard one stable ordinal.
+                    continue
+                }
             } catch is CancellationError {
                 throw AICueProviderError.cancelled
             } catch {
-                // An individual resource failure cannot authorize a different host and does not
-                // invalidate siblings. The engine applies the route's minimum accepted count.
-                continue
+                // Unclassified infrastructure errors cannot silently authorize partial success.
+                throw AICueProviderError.transportFailure
             }
         }
         return candidates

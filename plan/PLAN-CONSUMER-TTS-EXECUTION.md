@@ -929,12 +929,12 @@ provider 输出不得绕过现有 `AudioImport`：
 | TTS-MP-4 | MiniMax `speech-2.8-hd` unary T2A adapter | TTS-MP-1T | 已完成（#108） | Bearer、`get_voice` probe、固定 voice、JSON/hex、MP3、语言门禁、错误与 3 候选 fixture 全覆盖；只开放 `speech` |
 | TTS-MP-5 | Qwen `qwen3-tts-instruct-flash` SSE adapter 与 region profiles | TTS-MP-1T | 已完成（#109） | 固定 host/path/header/model/voice、SSE/Base64 PCM、合法 WAV、取消/大小/终态校验；只开放 `speech`，地区 smoke 分开 |
 | TTS-SA-0 | ADR 0011、candidate-set policy/identity/completion 与 legacy sequential adapter | TTS-MP-1 | gated 基线已落地；#183 聚合门禁待复验 | 旧 Provider 行为不变；MiniMax 显示 numbered；complete/partial 与 cleanup 合同有确定性覆盖 |
-| TTS-SA-1 | `senseaudio-cn` read-only voice probe 与三次顺序 TTS | TTS-SA-0、TTS-MP-1T | deterministic 基线已落地；真实调用 `NOT VERIFIED` | 固定 endpoint/model/voice/body；仅 zh；无 POST retry；三候选全有或全无 |
-| TTS-SA-2 | SenseAudio native-batch SFX 与 credential-free asset fetcher | TTS-SA-0、TTS-MP-1T | deterministic fixture 基线已落地；ADR 0014 已固定 policy，正式 smoke `NOT RUN` | exact batch parser、URL 全量 preflight、无 credential GET、实际 MP3 验证、1–3 候选与 partial |
-| TTS-SA-3 | optional-policy registry、`AICueRuntime`、清理 ownership、披露/partial UI 与 deterministic suites | TTS-SA-1–TTS-SA-2 | #183 hardening 实施中；默认 allowlist 继续关闭 | production policy 为 nil；真模块装配和异步失败矩阵在聚合 commit 复验；T8 未通过时用户不可见 |
+| TTS-SA-1 | `senseaudio-cn` read-only voice probe 与三次顺序 TTS | TTS-SA-0、TTS-MP-1T | 历史真实 smoke 通过，台账 §12/17/23；审查后凭据链待新候选重验 | 固定 endpoint/model/voice/body；仅 zh；无 POST retry；三候选全有或全无 |
+| TTS-SA-2 | SenseAudio native-batch SFX 与 credential-free asset fetcher | TTS-SA-0、TTS-MP-1T | 历史真实 smoke 通过；审查后资源失败分类须按台账 §24 重验 | exact batch parser、URL 全量 preflight、无 credential GET、实际 MP3 验证、1–3 候选与 partial |
+| TTS-SA-3 | optional-policy registry、`AICueRuntime`、清理 ownership、披露/partial UI 与 deterministic suites | TTS-SA-1–TTS-SA-2 | 基线已实现；审查后修复与回归见台账 §24；默认 allowlist 继续关闭 | production policy 为 nil；同一 runtime 装配与清理所有权不变 |
 | TTS-SA-4P | 非分发候选、证据身份、首次预算、activation 与回滚协议（#188） | TTS-SA-3 | 台账已按 ADR 0014 修订；绑定候选的正式/原生证据未完成 | `docs/senseaudio-production-acceptance.md` 区分各层证据并绑定 commit/policy/Bundle |
-| TTS-SA-4E | 实测资源 policy、真实 TTS/SFX、听感、键盘与 VoiceOver 验收（#187） | TTS-SA-3、TTS-SA-4P、单独付费授权 | 资源风险 `RISK ACCEPTED`；正式验收 `NOT RUN` | 使用绑定的非分发候选完成全部路线；不得以资源发现、TTS-only、fixture 或 build 代替 |
-| TTS-SA-4A | 固化 production policy、加入 allowlist 并复验最终 Bundle（#189） | TTS-SA-4E 全部通过 | `NOT VERIFIED`；等待 T8 | 单独评审 activation；默认仍 ElevenLabs；相关身份漂移时重验 |
+| TTS-SA-4E | 实测资源 policy、真实 TTS/SFX、听感、键盘与 VoiceOver 验收（#187） | TTS-SA-3、TTS-SA-4P、单独付费授权 | 历史 T8 按台账 §23 `RISK ACCEPTED` 闭合；新实现受影响项见 §24 | 不把三项风险接受写成 PASSED；新凭据/SFX 实现不自动继承旧 smoke |
+| TTS-SA-4A | 固化 production policy、加入 allowlist 并复验最终 Bundle（#189） | TTS-SA-4E 未豁免项通过、有边界风险接受明确、§24 受影响项重验 | `NOT AUTHORIZED` / `NOT VERIFIED` | 单独评审 activation；默认仍 ElevenLabs；相关身份漂移时重验 |
 | TTS-3 | 事件页 Provider/profile 选择、逐 profile 配置/管理 key、能力不支持提示、候选试听/采用 | TTS-MP-2–TTS-MP-5 | 多 Provider production UI 与自动 fixture 已完成；真机 AX `NOT VERIFIED` | 默认 ElevenLabs；切换不自动生成；不支持 modality 在网络前阻止；改名不重新生成；键盘/VoiceOver 可用 |
 | TTS-4 | 临时候选 acquisition、`AudioImport`、manifest bind、名称投影和清理 | TTS-1–TTS-MP-1 | 已完成 fixture 验证 | 所有 adapter 输出走同一安全导入链；坏音频 fail closed；失败保留旧绑定；仅采用一个 |
 | TTS-5 | 文档、按 Provider 的隐私/费用披露、自动/手工/真实 provider 分层验收 | TTS-MP-0–TTS-4 | 多 Provider 文档与自动交接已完成；原生/真实 Provider/发布层 `NOT VERIFIED` | 不含 key/内容；每个 profile 的能力/地区/费用证据清楚；所有对应门禁通过 |
@@ -1200,7 +1200,8 @@ SenseAudio 的实际执行记录必须写入 `docs/senseaudio-production-accepta
 | provider 编码 | MiniMax/SenseAudio hex 或 Qwen Base64 PCM 被当作普通音频 | adapter 专属解码、容器封装与 magic bytes 校验 | 候选拒绝，旧声音不变 |
 | SenseAudio TTS | 429/5xx/超时/畸形 JSON 或单项坏音频 | 生成 POST 零 retry + 三候选全有或全无 + 全部临时文件清理 | 显示可重试的脱敏错误，不展示 TTS partial |
 | SenseAudio SFX | batch 状态、index、URL 结构冲突 | 首次 GET 前整批结构验证 | 服务响应无效，零资源下载 |
-| SFX 单项资源 | 下载、MIME、magic 或 duration 淘汰一至两项 | 继续其他项；route minimum 为 1 | 显示“仅生成 N/3 个可用候选” |
+| SFX 资源合同 | URL/origin、MIME、redirect、final URL 违约或 asset 401/403 | 立即整批失败、停止后续 GET、清理候选；不废弃 API Key | 脱敏生成错误；activation 后按台账显式回滚 |
+| SFX 单项资源 | 普通资源不可用、限定重试耗尽、magic、大小或 duration 淘汰一至两项 | 继续其他项；route minimum 为 1 | 显示“仅生成 N/3 个可用候选” |
 | SFX 全部资源 | 零个本地有效候选 | `insufficientValidCandidates` + 整批清理 | 明确无可用候选 |
 | provider fallback | 一个 provider 失败后暗中改用另一 provider | provider selection 固定到 generation；无自动 fallback | 显示当前 provider 错误，由用户重新选择 |
 | provider 输出 | MIME/响应体/声明格式伪装 | 私有 temp acquisition + sniff + AudioImport | 候选拒绝，旧声音不变 |

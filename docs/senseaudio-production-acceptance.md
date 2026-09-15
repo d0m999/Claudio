@@ -38,10 +38,10 @@ activation。默认 registry 仍只有既有四个 profile，`productionSenseAud
 
 | 层级 | 当前状态 | 当前事实 |
 |---|---|---|
-| 本地实现聚合与自动门禁 | `PASSED`（工程窄项） | 第 19 节定位并修正原生测试宿主的布局/焦点同步；独立 320/0 与默认 32/0、GUI 9626、helper 3272、Debug 与静态检查通过；第 18 节失败及本轮 key-window 前置条件失败保留，不覆盖固定 app 完整原生验收 |
+| 本地实现聚合与自动门禁 | 历史 `PASSED`；修复后结果见第 24 节 | 第 19 节测试宿主同步及 GUI 9626/helper 3272 属于旧基线；审查后 ACL 与资源失败分类不沿用旧自动门禁 |
 | production 暴露 | `CLOSED` | `productionSenseAudioAssetPolicy == nil`；`senseaudio-cn` 不在默认 allowlist |
 | 实测资源合同决策 | `RISK ACCEPTED` | exact origin/MIME/匿名 GET/零 redirect 已固定；URL 有效期与 host 轮换未知作为可用性风险接受 |
-| 正式付费 smoke | `PASSED` | 按第 1.4、17 节显式继承 `1ef3c5d1` 的 3 TTS + 1 SFX 与下载；Provider/transport/asset/音频校验无 source delta，非新调用，不代表新生成交互已验收 |
+| 正式付费 smoke | 历史 `PASSED`；修复后受影响项 `NOT VERIFIED` | 第 12/17/23 节的 3 TTS + 1 SFX 保留历史；第 24 节改变凭据校验和 SFX 失败语义，不能继续用旧 no-source-delta 理由覆盖新实现 |
 | 非分发候选原生启动 | `PASSED`（窄项） | `e4b2b39` PID 42542 的实际设置窗口与历史三个编号候选已取得；第 20 节再次确认同一 app 的设置窗口，不覆盖完整键盘/VoiceOver |
 | 原生听感 | `RISK ACCEPTED`（动物意图质量） | 中文 TTS/木琴听感通过；第 23 节所有者明确接受当前 animal 意图不匹配的质量风险，历史失败与根因未知保留，不认定模型为根因 |
 | 原生键盘与生成冻结 | `PASSED`（所有者人工确认） | 第 21 节冻结、输入法及 Space/Return 取消恢复；第 23 节完整键盘焦点顺序人工确认通过，不冒充执行方观察 |
@@ -49,7 +49,7 @@ activation。默认 registry 仍只有既有四个 profile，`productionSenseAud
 | 异常恢复、失败保旧绑定与回滚 | `PASSED`（所有者人工确认） | 第 23 节所有者确认通过，结合第 18 节隔离串联证据；本轮执行方未操作真实凭据、绑定或 production |
 | VoiceOver 人工验收 | `RISK ACCEPTED`（所有者豁免、未验证） | 第 22 节明确暂不纳入本轮 SenseAudio 必验门禁；不记为通过，不宣称完整旁白支持，已有实现保留 |
 | T8 整体验收 | `RISK ACCEPTED`（本轮验收闭合） | 第 23 节绑定固定 e4 候选，未豁免项已有工程/真实 smoke/所有者人工通过证据；动物质量、partial 实际展示与 VoiceOver 风险明确接受，不宣称全部实测通过 |
-| production activation | `NOT VERIFIED` | T8 按第 23 节有边界的风险接受口径闭合；#189 仍需单独授权实施及最终 Bundle 复验，本轮不修改 policy/allowlist |
+| production activation | `NOT AUTHORIZED` / `NOT VERIFIED` | 历史 T8 按第 23 节闭合；第 24 节新实现的受影响证据、单独授权及最终 Bundle 复验仍是 #189 前置条件 |
 | Release / distribution | `NOT RUN` | 没有签名 universal RC、notarization、双架构或正式批准 |
 
 ## 不可跳过的门禁顺序
@@ -114,9 +114,11 @@ HTTPS、通配 host、自定义资源服务器或 TTS-only。
 
 ### 1.3 构造非分发 app
 
-真实 Provider 与原生验收需要一个显式标记为 `NON-DISTRIBUTION` 的隔离候选。它从 1.1 的聚合 commit
-建立，只允许加入 ADR 0014 固定的精确 asset policy 与让该固定 profile 可达所必需的 activation patch；
-该 patch 必须形成独立本地 commit，不能夹带其他功能或证据文件。可分发分支中的
+真实 Provider 与原生验收需要一个显式标记为 `NON-DISTRIBUTION` 的隔离候选。2026-09-15 审查后，
+后续候选从包含全部功能修复、合同与回归测试的干净聚合 commit 建立；再叠加 ADR 0014 固定的精确
+asset policy、必要 activation/非分发标记及其门禁测试。该 patch 必须形成独立本地 commit，不夹带
+其他功能或验收证据文件。证据文档另行提交并引用实际受测 candidate commit/tree，不将证据提交冒充
+受测源码。第 9–23 节历史候选保持原记录，不按新构造规则重写历史。可分发分支中的
 `productionSenseAudioAssetPolicy` 在 T8 全部门禁完成前仍必须为 `nil`。
 
 验收候选不得上传 release、公开下载、发给未授权测试者或合入可分发分支。构建前再次确认工作树为空，
@@ -1004,3 +1006,56 @@ mockup 与现有 tests-only overlay，不 commit/push。Issue 关闭结果在实
 随后实时读回 #187 为 `CLOSED`，`closedAt=2026-09-15T10:16:26Z`。闭合评论见
 [GitHub #187 验收记录](https://github.com/d0m999/Claudio/issues/187#issuecomment-5678487568)。
 仅关闭 #187；未修改 #189、production、凭据、候选、Git 提交或远端分支。
+
+## 24. 审查后 ACL 与资源失败分类修复
+
+2026-09-15，项目所有者要求执行审查后的修复计划。实现基线为
+`8fef4aa5e88397eb80da7844b55b4c3754bca3a3`；本节是修复后工程与重验记录，不重写第 9–23 节历史
+候选或 T8 闭合，不实施 production activation。实际修复源码 commit/tree 与最终门禁另行绑定。
+
+### 合同与实现
+
+- ADR 0015 明确私有目录和文件没有扩展 ACL 条目，查询故障 fail closed；已有不安全目标不修权限。
+  staging 在写入 Key 字节前检查，故障清理自有 staging、保留旧值；同用户进程读取的已接受风险不变。
+- ADR 0011/0014 与执行合同明确：URL/origin、MIME、redirect、final URL 违约和 asset 401/403
+  立即整批失败、停止后续 GET，不发布 partial、不损坏 API Key。普通不可用、限定重试耗尽和音频
+  校验淘汰仍可 partial。未知基础设施错误不能默许 partial。失败使用脱敏 `invalidAudioResponse`
+  或 `transportFailure`，不含完整 URL/query/Key；安全回滚仍是显式操作。
+- 隔离 runtime 显式注入拒绝请求的 SSE transport；带假 Qwen Key 实际到达该接缝，不能用缺凭据
+  掩盖遗漏。unary/asset 使用全 origin URLProtocol；另有真实 Provider/engine/VM 的迟到成功丢弃用例。
+- 默认 Provider、production policy、180/60 秒预算、POST 零重试、GET 窄重试、采用与 orphan 所有权不变。
+
+### 工程验证与受影响证据
+
+专项红绿结果：目录 ACL 58 checks/6 failures → 58/0；文件 ACL 72/10 → 72/0；staging/query
+87/5 → 87/0；Provider 合同分类 164/12 → 164/0。最终隔离串联 229/0，包含资源违约停止后续 GET、
+清理、保 Key、显式重新生成，以及取消后的 transport 实际成功交付。全部使用假 Key、隔离临时目录；
+本轮没有读取真实凭据/剪贴板、操作 Keychain 或发起真实 Provider 请求。系统级 IP 出站阻断保留，本地
+UNIX socket 可用；SwiftPM 在外层沙箱内使用 `--disable-sandbox`，依赖只从缓存解析。
+
+最终 GUI full harness 为 **9761 checks / 0 failures**；helper 首轮 **3272 / 1**，失败是未改动的
+`HostIntegrationModelSuite.swift:68` NVM shim version 用例。同一已构建 harness、相同 IP 出站阻断
+与 PATH 的串行复跑为 **3272 / 0**。首轮失败未复现、根因未确认，不掩盖失败记录或新增域外修复。
+Debug / Release GUI build、六个改动 Swift 文件的 strict format lint、localization JSON 与 `git diff --check`
+均通过；selector executable seam 与 candidates Python suite（11 tests）通过。本机为 macOS 26.6.2
+arm64，不由这些结果推定旧系统原生行为。inspection Bundle/size、源码 commit/tree 与
+artifact 摘要完成后另行绑定。
+inspection 构建不是新 SenseAudio 非分发验收候选，不继承旧 Bundle 摘要。duration stub 与假 MP3
+仍只证明工程行为。
+
+`code-review` 的 Standards / Spec 两轴只读复审未发现新增实质缺陷；Darwin 无 ACL 的已打开假 fd
+raw probe 为 `fstat=0`、`acl_get_fd_np=nil/ENOENT`，实际 ACL 回归通过。未把 generic man page
+未列出的这个平台特例当作仅凭文档完成的验证。
+
+| 项目 | 修复后状态与要求 |
+|---|---|
+| 固定 policy | JSON 与 SHA-256 `6f570cf99d8fc8bfcf040c49ac4182afa1ab16d0baca74eb072a7f083e5d200d` 不变；实现变化仍重验 |
+| 凭据链 | `NOT VERIFIED`：新候选上的保存、重启取用、权限异常保旧值及恢复需授权后人工验证 |
+| SFX 生成/下载 | `NOT VERIFIED`：Provider 失败语义变化，按 §1.4 在新候选上执行受影响真实 smoke |
+| 新验收候选身份 | `NOT RUN`：按 §1.3 从全部修复的干净开发 commit 创建独立 activation patch，重新绑定 Bundle |
+| 既有 TTS/键盘/听感 | 历史结果保留；逐项证明影响边界后继承，新凭据链不由旧 smoke 自动覆盖 |
+| 三项风险接受 | VoiceOver、partial 实际展示、动物意图质量保留原有限范围；不写 PASSED、不扩展安全豁免 |
+| macOS 12–13 取消键 | `NOT VERIFIED`：本轮没有旧系统原生复现，不据此新增兼容性修复 |
+| T9 | `NOT AUTHORIZED` / `NOT VERIFIED`：本地 Issue 更新草案见 `senseaudio-t9-issue-update-draft.md`，尚未发布 |
+
+新实现的工程修复完成后，production 仍关闭；受影响真实/原生验收、最终身份绑定与 T9 授权继续独立。

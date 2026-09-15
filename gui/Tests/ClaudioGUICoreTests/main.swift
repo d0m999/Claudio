@@ -102,6 +102,18 @@ if CommandLine.arguments.contains("--senseaudio-isolation") {
     exit(failures == 0 ? 0 : 1)
 }
 
+if CommandLine.arguments.contains("--ai-cue-local-credentials") {
+    await runAICueLocalCredentialSuites()
+    print("AI cue local credentials: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
+if CommandLine.arguments.contains("--senseaudio-provider") {
+    await runSenseAudioAICueProviderSuites()
+    print("SenseAudio provider: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
 runOnboardingStateSuites()
 runLocalizationSuites()
 runAboutInformationSuites()

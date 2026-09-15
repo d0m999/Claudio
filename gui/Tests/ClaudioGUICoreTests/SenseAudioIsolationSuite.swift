@@ -5,11 +5,20 @@ import ClaudioLocalization
 import ClaudioSettingsPresentation
 import Foundation
 
-/// All URLSession requests are intercepted, including unexpected origins. No test can fall
-/// through to a real Provider or asset server, and the vault is rooted under withTempDirectory.
+private enum IsolationAssetViolation: Sendable, Equatable {
+    case origin
+    case mime
+    case redirect
+    case finalURL
+    case authentication(Int)
+}
+
+/// Injected unary/asset URLSessions intercept every origin. SSE uses a separate rejecting fixture;
+/// all credentials are fake and the file vault is rooted under withTempDirectory.
 private final class IsolationNetwork: @unchecked Sendable {
     private let lock = NSLock()
     private var failures: Set<Int> = []
+    private var violations: [Int: IsolationAssetViolation] = [:]
     private var recorded: [URLRequest] = []
     private var postStatus = 200
     private var holdsPost = false
@@ -17,10 +26,14 @@ private final class IsolationNetwork: @unchecked Sendable {
     private var body: Data?
     private var stops = 0
 
-    func reset(failedAssets: Set<Int>, postStatus: Int = 200, holdPost: Bool = false) {
+    func reset(
+        failedAssets: Set<Int>, postStatus: Int = 200, holdPost: Bool = false,
+        violations: [Int: IsolationAssetViolation] = [:]
+    ) {
         lock.lock()
         defer { lock.unlock() }
         failures = failedAssets
+        self.violations = violations
         recorded = []
         self.postStatus = postStatus
         holdsPost = holdPost
@@ -38,12 +51,21 @@ private final class IsolationNetwork: @unchecked Sendable {
         {
             body = isolationRequestBody(request)
             if holdsPost { held.append(delivery); return nil }
-            return (postStatus, "application/json", Self.batchBody())
+            return (
+                postStatus, "application/json",
+                Self.batchBody(invalidOrigin: violations.values.contains(.origin))
+            )
         }
         for index in 0...2
         where request.url?.host == "dynamic.senseaudio.cn"
             && request.url?.path == "/isolated-\(index).mp3" && request.httpMethod == "GET"
         {
+            switch violations[index] {
+            case .mime: return (200, "audio/wav", Self.audio(index: index))
+            case .redirect: return (302, "audio/mpeg", Data())
+            case .authentication(let code): return (code, "audio/mpeg", Data())
+            default: break
+            }
             if failures.contains(index) { return (404, "audio/mpeg", Data()) }
             return (200, "audio/mpeg", Self.audio(index: index))
         }
@@ -54,11 +76,14 @@ private final class IsolationNetwork: @unchecked Sendable {
         lock.lock()
         let deliveries = held
         let status = postStatus
+        let invalidOrigin = violations.values.contains(.origin)
         held = []
         holdsPost = false
         lock.unlock()
         for delivery in deliveries {
-            delivery.deliver(status: status, mime: "application/json", body: Self.batchBody())
+            delivery.deliver(
+                status: status, mime: "application/json",
+                body: Self.batchBody(invalidOrigin: invalidOrigin))
         }
     }
 
@@ -82,12 +107,14 @@ private final class IsolationNetwork: @unchecked Sendable {
         return body
     }
 
-    private static func batchBody() -> Data {
+    fileprivate static func batchBody(invalidOrigin: Bool = false) -> Data {
         let items: [[String: Any]] = [2, 0, 1].map { index in
             [
                 "variant_index": index, "status": "completed", "output_format": "mp3",
                 "duration_seconds": 2,
-                "audio_url": "https://dynamic.senseaudio.cn/isolated-\(index).mp3",
+                "audio_url": invalidOrigin && index == 1
+                    ? "https://unexpected.invalid/isolated-1.mp3"
+                    : "https://dynamic.senseaudio.cn/isolated-\(index).mp3",
             ]
         }
         return try! JSONSerialization.data(withJSONObject: [
@@ -99,6 +126,14 @@ private final class IsolationNetwork: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return recorded
+    }
+
+    func finalURL(for request: URLRequest) -> URL {
+        lock.lock(); defer { lock.unlock() }
+        if violations[1] == .finalURL, request.url?.path == "/isolated-1.mp3" {
+            return URL(string: "https://dynamic.senseaudio.cn/isolated-final-mismatch.mp3")!
+        }
+        return request.url!
     }
 
     static func audio(index: Int) -> Data {
@@ -126,7 +161,7 @@ private final class IsolationURLProtocol: URLProtocol, @unchecked Sendable {
         deliveryLock.unlock()
         guard canDeliver else { return }
         let response = HTTPURLResponse(
-            url: request.url!, statusCode: status, httpVersion: "HTTP/1.1",
+            url: Self.network.finalURL(for: request), statusCode: status, httpVersion: "HTTP/1.1",
             headerFields: ["Content-Type": mime])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: body)
@@ -169,6 +204,66 @@ private actor IsolationMetadata: AICueCredentialMetadataStoring {
     }
 }
 
+private actor IsolationOtherCredentialVault: AICueCredentialVault {
+    private var values: [AICueCredentialSlotID: SensitiveCredentialInput]
+    init(_ values: [AICueCredentialSlotID: SensitiveCredentialInput]) { self.values = values }
+    func containsCredential(in slotID: AICueCredentialSlotID) -> Bool { values[slotID] != nil }
+    func credential(in slotID: AICueCredentialSlotID) -> SensitiveCredentialInput? {
+        values[slotID]
+    }
+    func replaceCredential(_ value: SensitiveCredentialInput, in slotID: AICueCredentialSlotID) {
+        values[slotID] = value
+    }
+    func deleteCredential(in slotID: AICueCredentialSlotID) { values.removeValue(forKey: slotID) }
+}
+
+private final class IsolationRejectingSSETransport: AICueSSETransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var captured: [AICueTransportRequest] = []
+    func events(
+        for request: AICueTransportRequest, authentication: AICueProviderAuthentication,
+        credential: SensitiveCredentialInput
+    ) -> AsyncThrowingStream<AICueSSEEvent, Error> {
+        lock.withLock { captured.append(request) }
+        return AsyncThrowingStream { $0.finish(throwing: AICueTransportError.transportFailure) }
+    }
+    func requests() -> [AICueTransportRequest] { lock.withLock { captured } }
+}
+
+private actor IsolationLateUnaryTransport: AICueUnaryTransport {
+    private var started = false
+    private var released = false
+    private var delivered = false
+    private var cancellationObserved = false
+    private var calls = 0
+
+    func send(
+        _ request: AICueTransportRequest, authentication: AICueProviderAuthentication,
+        credential: SensitiveCredentialInput
+    ) async throws -> AICueHTTPResponse {
+        calls += 1
+        started = true
+        let expires = DispatchTime.now().uptimeNanoseconds + 3_000_000_000
+        while !released, DispatchTime.now().uptimeNanoseconds < expires {
+            cancellationObserved = cancellationObserved || Task.isCancelled
+            // A bounded external response can ignore caller cancellation. No continuation is
+            // left hanging, and the detached delay performs no network or credential operation.
+            await Task.detached { try? await Task.sleep(nanoseconds: 5_000_000) }.value
+        }
+        guard released else { throw AICueTransportError.transportFailure }
+        cancellationObserved = cancellationObserved || Task.isCancelled
+        delivered = true
+        return AICueHTTPResponse(
+            statusCode: 200, headers: ["content-type": "application/json"],
+            body: IsolationNetwork.batchBody(), finalURL: request.url)
+    }
+
+    func release() { released = true }
+    func facts() -> (started: Bool, delivered: Bool, cancelled: Bool, calls: Int) {
+        (started, delivered, cancellationObserved, calls)
+    }
+}
+
 @MainActor
 private struct IsolationRuntime {
     let runtime: AICueRuntime
@@ -177,8 +272,12 @@ private struct IsolationRuntime {
     let defaults: UserDefaults
     let defaultsName: String
     let generations: URL
+    let sseTransport: IsolationRejectingSSETransport
 
-    static func make(root: URL) async -> Self {
+    static func make(
+        root: URL, otherCredentials: [AICueCredentialSlotID: SensitiveCredentialInput] = [:],
+        unaryTransport: (any AICueUnaryTransport)? = nil
+    ) async -> Self {
         let directory = root.resolvingSymlinksInPath().appendingPathComponent("Credentials")
         let vault = SenseAudioFileCredentialVault(directory: directory)
         try! await vault.replaceCredential(
@@ -193,10 +292,15 @@ private struct IsolationRuntime {
         let defaultsName = "com.claudio.tests.senseaudio-isolation.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: defaultsName)!
         let generations = root.appendingPathComponent("generations")
+        let sseTransport = IsolationRejectingSSETransport()
+        let appVault = AICueAppCredentialVault(
+            keychain: IsolationOtherCredentialVault(otherCredentials), senseAudio: vault)
         let runtime = try! AICueRuntime(
-            registry: registry, vault: vault, temporaryRoot: generations,
+            registry: registry, vault: appVault, temporaryRoot: generations,
             durationProbe: StubDurationProbe(fixedDuration: 1),
-            unaryTransport: AICueURLSessionUnaryTransport(configuration: configuration),
+            unaryTransport: unaryTransport
+                ?? AICueURLSessionUnaryTransport(configuration: configuration),
+            sseTransport: sseTransport,
             assetFetcher: AICueURLSessionAssetFetcher(
                 loader: AICueURLSessionAssetLoader(configuration: configuration),
                 retrySleeper: IsolationRetrySleeper()),
@@ -210,7 +314,7 @@ private struct IsolationRuntime {
         viewModel.updateDescription("短促 木琴 音效")
         return Self(
             runtime: runtime, viewModel: viewModel, vault: vault, defaults: defaults,
-            defaultsName: defaultsName, generations: generations)
+            defaultsName: defaultsName, generations: generations, sseTransport: sseTransport)
     }
 }
 
@@ -230,7 +334,124 @@ private func isolationWait(_ condition: @MainActor () -> Bool) async -> Bool {
 }
 
 @MainActor
+private func isolationWaitAsync(_ condition: @MainActor () async -> Bool) async -> Bool {
+    let deadline = DispatchTime.now().uptimeNanoseconds + 3_000_000_000
+    while DispatchTime.now().uptimeNanoseconds < deadline {
+        if await condition() { return true }
+        try? await Task.sleep(nanoseconds: 5_000_000)
+    }
+    return await condition()
+}
+
+@MainActor
 func runSenseAudioIsolationSuites() async {
+    await suite("SenseAudio 隔离串联：transport 实际交付取消后的成功，真实 engine/VM 丢弃") {
+        await withTempDirectory { root in
+            IsolationURLProtocol.network.reset(failedAssets: [])
+            let late = IsolationLateUnaryTransport()
+            let fixture = await IsolationRuntime.make(root: root, unaryTransport: late)
+            defer { fixture.defaults.removePersistentDomain(forName: fixture.defaultsName) }
+            fixture.viewModel.startGeneration(locale: "zh-Hans")
+            guard await isolationWaitAsync({ await late.facts().started }) else {
+                fixture.viewModel.returnToDescription()
+                await late.release()
+                expect(false, "真实 Provider 必须到达受控 transport")
+                return
+            }
+            fixture.viewModel.returnToDescription()
+            fixture.viewModel.updateDescription("取消后的新描述")
+            expect(
+                await isolationWaitAsync { await late.facts().cancelled },
+                "取消必须传播到正在处理的真实 Provider transport")
+            await late.release()
+            expect(await isolationWaitAsync { await late.facts().delivered }, "必须真的交付迟到 200 成功")
+            expect(
+                await isolationWait { isolationGenerationIsEmpty(fixture.generations) },
+                "取消清理 generation")
+            for _ in 0..<100 { await Task.yield() }
+            expect(
+                fixture.viewModel.phase == .editing && fixture.viewModel.generation == nil
+                    && fixture.viewModel.failure == nil
+                    && fixture.viewModel.soundDescription == "取消后的新描述",
+                "迟到成功不得复活候选、错误或覆盖新描述")
+            expect(await late.facts().calls == 1, "取消和迟到成功不重发 POST")
+            expect(IsolationURLProtocol.network.requests().isEmpty, "取消后的 batch 不开始 GET")
+        }
+    }
+    await suite("SenseAudio 隔离装配：有假 Qwen Key 时必须到达拒绝 SSE 接缝，不能真实联网") {
+        await withTempDirectory { root in
+            IsolationURLProtocol.network.reset(failedAssets: [])
+            let fixture = await IsolationRuntime.make(
+                root: root,
+                otherCredentials: [
+                    .qwenSingapore: try! SensitiveCredentialInput("fixture-only-qwen")
+                ])
+            defer { fixture.defaults.removePersistentDomain(forName: fixture.defaultsName) }
+            var observed: AICueGenerationError?
+            do {
+                _ = try await fixture.runtime.dispatcher.generate(
+                    description: "请说“完成”", locale: "zh-Hans", providerProfileID: .qwenSingapore,
+                    deadline: .startingNow())
+            } catch let error as AICueGenerationError { observed = error } catch {}
+            expect(observed == .provider(.transportFailure), "显式 Qwen 生成从受控 SSE 失败返回")
+            expect(fixture.sseTransport.requests().count == 1, "有假 Key 不能由缺凭据先挡住 SSE 接缝")
+            expect(
+                IsolationURLProtocol.network.requests().isEmpty, "Qwen 不走 unary/asset，也不 fallback")
+            expect(isolationGenerationIsEmpty(fixture.generations), "受控 SSE 失败清理真实 generation")
+        }
+    }
+    await suite("SenseAudio 隔离串联：安全违约整批失败、保凭据、清理并可重新生成") {
+        let violations: [IsolationAssetViolation] = [
+            .origin, .mime, .redirect, .finalURL, .authentication(401), .authentication(403),
+        ]
+        for violation in violations {
+            await withTempDirectory { root in
+                IsolationURLProtocol.network.reset(failedAssets: [], violations: [1: violation])
+                let fixture = await IsolationRuntime.make(root: root)
+                defer { fixture.defaults.removePersistentDomain(forName: fixture.defaultsName) }
+                fixture.viewModel.startGeneration(locale: "zh-Hans")
+                expect(await isolationWait { fixture.viewModel.phase == .editing }, "违约必须恢复编辑")
+                expect(
+                    fixture.viewModel.failure == .generation(.provider(.invalidAudioResponse))
+                        && fixture.viewModel.generation == nil,
+                    "首项成功也不能发布安全违约 partial")
+                expect(fixture.viewModel.soundDescription == "短促 木琴 音效", "整批失败保留描述")
+                expect(
+                    await isolationWait { isolationGenerationIsEmpty(fixture.generations) },
+                    "违约清理临时候选")
+                let requests = IsolationURLProtocol.network.requests()
+                expect(requests.filter { $0.httpMethod == "POST" }.count == 1, "违约不追加 POST")
+                expect(
+                    requests.filter { $0.httpMethod == "GET" }.count
+                        == (violation == .origin ? 0 : 2),
+                    "origin 预检失败零 GET；第二项违约不下载第三项")
+                expect(
+                    requests.filter { $0.httpMethod == "GET" }.allSatisfy {
+                        $0.value(forHTTPHeaderField: "Authorization") == nil
+                            && $0.value(forHTTPHeaderField: "Cookie") == nil
+                            && $0.value(forHTTPHeaderField: "Referer") == nil
+                    }, "故障路径 GET 仍匿名")
+                expect(
+                    await fixture.runtime.credentialManager.status(for: .senseAudioChina)
+                        == .stored(verification: .verified, hasPendingReplacement: false),
+                    "资源违约不拒绝 API Key")
+                let key = root.appendingPathComponent("Credentials/senseaudio-cn.key")
+                expect(
+                    (try? Data(contentsOf: key)) == Data("fixture-only-isolated-senseaudio".utf8),
+                    "资源违约不删除或替换假 Key")
+                IsolationURLProtocol.network.reset(failedAssets: [])
+                fixture.viewModel.startGeneration(locale: "zh-Hans")
+                expect(
+                    await isolationWait { fixture.viewModel.phase == .candidatesReady }, "下次显式生成可恢复"
+                )
+                expect(fixture.viewModel.generation?.completion == .complete, "恢复后恰好三个有效候选")
+                fixture.viewModel.returnToDescription()
+                expect(
+                    await isolationWait { isolationGenerationIsEmpty(fixture.generations) },
+                    "恢复候选也清理")
+            }
+        }
+    }
     await suite("SenseAudio 隔离串联：URLSession→runtime→VM 的 1/3 保留候选 3 与原始字节") {
         await withTempDirectory { root in
             IsolationURLProtocol.network.reset(failedAssets: [0, 1])
@@ -527,6 +748,7 @@ func runSenseAudioIsolationSuites() async {
                 registry: closedRegistry, vault: fixture.vault, temporaryRoot: fixture.generations,
                 durationProbe: StubDurationProbe(fixedDuration: 1),
                 unaryTransport: AICueURLSessionUnaryTransport(configuration: configuration),
+                sseTransport: IsolationRejectingSSETransport(),
                 assetFetcher: AICueURLSessionAssetFetcher(
                     loader: AICueURLSessionAssetLoader(configuration: configuration),
                     retrySleeper: IsolationRetrySleeper()),

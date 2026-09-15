@@ -52,20 +52,49 @@ package enum AICueLocalCredentialError: Error, Sendable, Equatable {
     case unavailable
 }
 
-/// Local plaintext storage protected by POSIX permissions (0700 directory, 0600 file).
+/// The filesystem ACL boundary. Tests can model query faults without touching user credentials.
+package protocol AICueLocalCredentialACLReading: Sendable {
+    func hasEntries(on descriptor: Int32) throws -> Bool
+}
+
+package struct AICueLocalCredentialSystemACLReader: AICueLocalCredentialACLReading {
+    package init() {}
+
+    package func hasEntries(on descriptor: Int32) throws -> Bool {
+        // Darwin reports ENOENT when this already-open object has no extended ACL.
+        guard let acl = acl_get_fd_np(descriptor, ACL_TYPE_EXTENDED) else {
+            guard errno == ENOENT else { throw AICueLocalCredentialError.unavailable }
+            return false
+        }
+        defer { acl_free(UnsafeMutableRawPointer(acl)) }
+        guard acl_valid(acl) == 0 else { throw AICueLocalCredentialError.unavailable }
+        var entry: acl_entry_t?
+        errno = 0
+        let result = acl_get_entry(acl, Int32(ACL_FIRST_ENTRY.rawValue), &entry)
+        if result == 0 { return true }
+        // macOS returns -1/EINVAL for the end of a valid empty ACL.
+        guard result == -1, errno == EINVAL else { throw AICueLocalCredentialError.unavailable }
+        return false
+    }
+}
+
+/// Local plaintext storage protected by POSIX permissions and absence of extended ACL entries.
 /// It does not provide encryption or isolation from other processes running as the same user.
 /// Construction and missing-item checks never create directories. Only an explicit save writes.
 package actor SenseAudioFileCredentialVault: AICueCredentialVault {
     private let directory: URL
     private let filename = "senseaudio-cn.key"
     private let maximumBytes = 512
+    private let aclReader: any AICueLocalCredentialACLReading
 
     package init(
         directory: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(
-                "Library/Application Support/Claudio/Credentials", isDirectory: true)
+                "Library/Application Support/Claudio/Credentials", isDirectory: true),
+        aclReader: any AICueLocalCredentialACLReading = AICueLocalCredentialSystemACLReader()
     ) {
         self.directory = directory.standardizedFileURL
+        self.aclReader = aclReader
     }
 
     package func containsCredential(in slotID: AICueCredentialSlotID) throws -> Bool {
@@ -122,6 +151,9 @@ package actor SenseAudioFileCredentialVault: AICueCredentialVault {
             unlinkat(root, temporaryName, 0)
         }
         guard fchmod(item, 0o600) == 0 else { throw AICueLocalCredentialError.unavailable }
+        var stagingInfo = stat()
+        guard fstat(item, &stagingInfo) == 0 else { throw AICueLocalCredentialError.unavailable }
+        try requirePrivatePermissions(stagingInfo, descriptor: item, mode: 0o600)
         let data = credential.withUTF8String { Data($0.utf8) }
         try data.withUnsafeBytes { bytes in
             var offset = 0
@@ -149,6 +181,21 @@ package actor SenseAudioFileCredentialVault: AICueCredentialVault {
 
     private func requireSenseAudio(_ slotID: AICueCredentialSlotID) throws {
         guard slotID == .senseAudioChina else { throw AICueLocalCredentialError.unavailable }
+    }
+
+    private func requirePrivatePermissions(
+        _ info: stat, descriptor: Int32, mode: mode_t
+    ) throws {
+        guard info.st_uid == geteuid(), info.st_mode & 0o7777 == mode else {
+            throw AICueLocalCredentialError.unavailable
+        }
+        do {
+            guard try !aclReader.hasEntries(on: descriptor) else {
+                throw AICueLocalCredentialError.unavailable
+            }
+        } catch {
+            throw AICueLocalCredentialError.unavailable
+        }
     }
 
     /// Traverse with directory-relative descriptors so user-controlled links are never followed.
@@ -184,9 +231,8 @@ package actor SenseAudioFileCredentialVault: AICueCredentialVault {
             descriptor = next
         }
         var info = stat()
-        guard fstat(descriptor, &info) == 0, info.st_uid == geteuid(),
-            info.st_mode & 0o7777 == 0o700
-        else { throw AICueLocalCredentialError.unavailable }
+        guard fstat(descriptor, &info) == 0 else { throw AICueLocalCredentialError.unavailable }
+        try requirePrivatePermissions(info, descriptor: descriptor, mode: 0o700)
         transferred = true
         return descriptor
     }
@@ -197,10 +243,15 @@ package actor SenseAudioFileCredentialVault: AICueCredentialVault {
         guard descriptor >= 0 else { throw AICueLocalCredentialError.unavailable }
         var info = stat()
         guard fstat(descriptor, &info) == 0,
-            info.st_mode & S_IFMT == S_IFREG, info.st_uid == geteuid(),
-            info.st_mode & 0o7777 == 0o600, info.st_nlink == 1,
+            info.st_mode & S_IFMT == S_IFREG, info.st_nlink == 1,
             info.st_size > 0, info.st_size <= maximumBytes
         else {
+            close(descriptor)
+            throw AICueLocalCredentialError.unavailable
+        }
+        do {
+            try requirePrivatePermissions(info, descriptor: descriptor, mode: 0o600)
+        } catch {
             close(descriptor)
             throw AICueLocalCredentialError.unavailable
         }

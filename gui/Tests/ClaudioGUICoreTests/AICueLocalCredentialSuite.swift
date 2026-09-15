@@ -45,8 +45,186 @@ private actor LocalCredentialMetadata: AICueCredentialMetadataStoring {
     }
 }
 
+private struct LocalCredentialFailingACLReader: AICueLocalCredentialACLReading {
+    let onlyWritableFiles: Bool
+    func hasEntries(on descriptor: Int32) throws -> Bool {
+        if !onlyWritableFiles || fcntl(descriptor, F_GETFL) & O_ACCMODE == O_WRONLY {
+            throw AICueLocalCredentialError.unavailable
+        }
+        return try AICueLocalCredentialSystemACLReader().hasEntries(on: descriptor)
+    }
+}
+
+private final class LocalCredentialStagingObservation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sizes: [Int64] = []
+    func record(_ size: Int64) { lock.withLock { sizes.append(size) } }
+    func snapshot() -> [Int64] { lock.withLock { sizes } }
+}
+
+private struct LocalCredentialInheritingACLReader: AICueLocalCredentialACLReading {
+    let directory: URL
+    let observation: LocalCredentialStagingObservation
+    func hasEntries(on descriptor: Int32) throws -> Bool {
+        let result = try AICueLocalCredentialSystemACLReader().hasEntries(on: descriptor)
+        var info = stat()
+        guard fstat(descriptor, &info) == 0 else { throw AICueLocalCredentialError.unavailable }
+        if fcntl(descriptor, F_GETFL) & O_ACCMODE == O_WRONLY {
+            observation.record(info.st_size)
+        }
+        if info.st_mode & S_IFMT == S_IFDIR {
+            // Model an inherited ACL appearing after directory validation, before O_EXCL create.
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/chmod")
+            process.arguments = [
+                "+a", "user:nobody allow list,search,file_inherit,directory_inherit",
+                directory.path,
+            ]
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                throw AICueLocalCredentialError.unavailable
+            }
+        }
+        return result
+    }
+}
+
 @MainActor
 func runAICueLocalCredentialSuites() async {
+    await suite("SenseAudio 本地凭据：ACL 查询和 staging 查询故障保旧值并清理") {
+        for onlyWritableFiles in [false, true] {
+            await withTempDirectory { temporary in
+                let root = temporary.resolvingSymlinksInPath().appendingPathComponent("Credentials")
+                let original = SenseAudioFileCredentialVault(directory: root)
+                try! await original.replaceCredential(
+                    try! SensitiveCredentialInput("fixture-only-query-old"), in: .senseAudioChina)
+                let faulting = SenseAudioFileCredentialVault(
+                    directory: root,
+                    aclReader: LocalCredentialFailingACLReader(onlyWritableFiles: onlyWritableFiles)
+                )
+                if !onlyWritableFiles {
+                    await expectLocalCredentialFailure {
+                        _ = try await faulting.containsCredential(in: .senseAudioChina)
+                    }
+                    await expectLocalCredentialFailure {
+                        _ = try await faulting.credential(in: .senseAudioChina)
+                    }
+                    await expectLocalCredentialFailure {
+                        try await faulting.deleteCredential(in: .senseAudioChina)
+                    }
+                }
+                await expectLocalCredentialFailure {
+                    try await faulting.replaceCredential(
+                        try SensitiveCredentialInput("fixture-only-query-new"), in: .senseAudioChina
+                    )
+                }
+                expect(
+                    (try? Data(contentsOf: root.appendingPathComponent("senseaudio-cn.key")))
+                        == Data("fixture-only-query-old".utf8), "查询故障不得发布新值")
+                expect(
+                    try! FileManager.default.contentsOfDirectory(atPath: root.path) == [
+                        "senseaudio-cn.key"
+                    ],
+                    "staging 查询失败只清理自有临时文件")
+                expect(try! await original.credential(in: .senseAudioChina) != nil, "故障后仍可取用旧值")
+            }
+        }
+    }
+    await suite("SenseAudio 本地凭据：staging 继承 ACL 时在写入字节前拒绝") {
+        await withTempDirectory { temporary in
+            let root = temporary.resolvingSymlinksInPath().appendingPathComponent("Credentials")
+            let original = SenseAudioFileCredentialVault(directory: root)
+            try! await original.replaceCredential(
+                try! SensitiveCredentialInput("fixture-only-inherited-old"), in: .senseAudioChina)
+            let observation = LocalCredentialStagingObservation()
+            let racing = SenseAudioFileCredentialVault(
+                directory: root,
+                aclReader: LocalCredentialInheritingACLReader(
+                    directory: root, observation: observation))
+            await expectLocalCredentialFailure {
+                try await racing.replaceCredential(
+                    try SensitiveCredentialInput("fixture-only-inherited-new"), in: .senseAudioChina
+                )
+            }
+            expect(
+                (try? Data(contentsOf: root.appendingPathComponent("senseaudio-cn.key")))
+                    == Data("fixture-only-inherited-old".utf8), "继承 ACL 不得覆盖旧文件")
+            expect(
+                try! FileManager.default.contentsOfDirectory(atPath: root.path) == [
+                    "senseaudio-cn.key"
+                ],
+                "ACL staging 清理不删除旧文件")
+            expect(observation.snapshot() == [0], "实际 staging ACL 查询必须发生在零字节时")
+        }
+    }
+    await suite("SenseAudio 本地凭据：0600 文件拒绝 allow 与 deny 扩展 ACL，不改已有文件") {
+        for entry in ["user:nobody allow read", "user:nobody deny read"] {
+            await withTempDirectory { temporary in
+                let root = temporary.resolvingSymlinksInPath().appendingPathComponent("Credentials")
+                let vault = SenseAudioFileCredentialVault(directory: root)
+                try! await vault.replaceCredential(
+                    try! SensitiveCredentialInput("fixture-only-file-acl-old"), in: .senseAudioChina
+                )
+                let file = root.appendingPathComponent("senseaudio-cn.key")
+                guard localCredentialAddACL(entry, to: file) else { return }
+                let attrs = try! FileManager.default.attributesOfItem(atPath: file.path)
+                expect(attrs[.posixPermissions] as? Int == 0o600, "0600 文件仍可能拥有扩展 ACL")
+                await expectLocalCredentialFailure {
+                    _ = try await vault.containsCredential(in: .senseAudioChina)
+                }
+                await expectLocalCredentialFailure {
+                    _ = try await vault.credential(in: .senseAudioChina)
+                }
+                await expectLocalCredentialFailure {
+                    try await vault.replaceCredential(
+                        try SensitiveCredentialInput("fixture-only-file-acl-new"),
+                        in: .senseAudioChina)
+                }
+                await expectLocalCredentialFailure {
+                    try await vault.deleteCredential(in: .senseAudioChina)
+                }
+                expect(
+                    (try? Data(contentsOf: file)) == Data("fixture-only-file-acl-old".utf8),
+                    "即使拒绝无害或 deny ACL，也不能修改假旧 Key")
+            }
+        }
+    }
+    await suite("SenseAudio 本地凭据：0700 目录上的扩展 ACL 必须拒绝且保留旧值") {
+        await withTempDirectory { temporary in
+            let root = temporary.resolvingSymlinksInPath().appendingPathComponent("Credentials")
+            let vault = SenseAudioFileCredentialVault(directory: root)
+            let oldValue = Data("fixture-only-acl-old".utf8)
+            try! await vault.replaceCredential(
+                try! SensitiveCredentialInput("fixture-only-acl-old"), in: .senseAudioChina)
+            let file = root.appendingPathComponent("senseaudio-cn.key")
+            guard
+                localCredentialAddACL(
+                    "user:nobody allow list,search,file_inherit,directory_inherit", to: root)
+            else { return }
+            let attrs = try! FileManager.default.attributesOfItem(atPath: root.path)
+            expect(attrs[.posixPermissions] as? Int == 0o700, "ACL 不会改变 0700；不能只检查 mode")
+            await expectLocalCredentialFailure {
+                _ = try await vault.containsCredential(in: .senseAudioChina)
+            }
+            await expectLocalCredentialFailure {
+                _ = try await vault.credential(in: .senseAudioChina)
+            }
+            await expectLocalCredentialFailure {
+                try await vault.replaceCredential(
+                    try SensitiveCredentialInput("fixture-only-acl-new"), in: .senseAudioChina)
+            }
+            await expectLocalCredentialFailure {
+                try await vault.deleteCredential(in: .senseAudioChina)
+            }
+            expect((try? Data(contentsOf: file)) == oldValue, "拒绝操作不改变假旧 Key")
+            expect(
+                try! FileManager.default.contentsOfDirectory(atPath: root.path) == [
+                    "senseaudio-cn.key"
+                ],
+                "拒绝保存不创建或遗留 staging")
+        }
+    }
     await suite("SenseAudio 本地凭据：缺失查询不写盘，重建实例可读取，替换与删除仅影响自身") {
         await withTempDirectory { temporary in
             let root = temporary.resolvingSymlinksInPath().appendingPathComponent("Credentials")
@@ -263,6 +441,22 @@ func runAICueLocalCredentialSuites() async {
                 profile.credentialStorageDisclosureKey == .aiCueCredentialKeychain,
                 "其他 Provider 保持 Keychain 说明")
         }
+    }
+}
+
+@MainActor
+private func localCredentialAddACL(_ entry: String, to url: URL) -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/chmod")
+    process.arguments = ["+a", entry, url.path]
+    do {
+        try process.run()
+        process.waitUntilExit()
+        expect(process.terminationStatus == 0, "假凭据 ACL fixture 必须真正建立")
+        return process.terminationStatus == 0
+    } catch {
+        expect(false, "无法建立 ACL fixture")
+        return false
     }
 }
 

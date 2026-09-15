@@ -38,6 +38,11 @@ HTTPS origin、443 和 MIME，拒绝 IP、userinfo、fragment、redirect 与 fin
 至少一个有效 numbered 候选即可按路线政策以 `partial` 展示；取消、deadline、本地存储失败或零个有效
 候选使整次生成失败并清理。`.mixed` 明确不支持。
 
+2026-09-15 审查后明确“普通”单项失败的边界：URL/origin、MIME、redirect、final URL 违约及
+asset HTTP 401/403 按 ADR 0014 立即终止整批，不能降为 partial；普通资源不可用、限定重试耗尽和
+MP3 magic/大小/时长淘汰可以继续。asset 401/403 不损坏现有 API Key 验证状态。取消、deadline、
+本地存储与 retry-backoff 基础设施故障仍终止整批。这是实现与合同修订，旧 smoke 不自动证明新实现。
+
 2026-09-15，项目所有者将 SenseAudio `animal` / `soundEffect` 的 generation absolute deadline
 改为路线拥有的 **180 秒**。正式候选曾在 60.643 秒、零响应字节时超时；该证据只能证明原预算不足以
 等到这次响应，不能保证 180 秒一定成功。其他 Provider、SenseAudio speech 与 voice probe 保持
