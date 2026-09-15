@@ -650,7 +650,10 @@ func runAICueGenerationViewModelSuites() async {
             "profile/region 非敏感偏好必须跨实例持久化")
         expect(
             viewModel.availableProviderProfiles.map(\.id)
-                == [.elevenLabsGlobal, .miniMaxGlobal, .qwenSingapore, .qwenBeijing],
+                == [
+                    .elevenLabsGlobal, .miniMaxGlobal, .qwenSingapore, .qwenBeijing,
+                    .senseAudioChina,
+                ],
             "production UI 的 profile 选择必须直接投影 registry 的完整稳定顺序")
         await waitForAICueViewModel { viewModel.phase != .generating }
     }

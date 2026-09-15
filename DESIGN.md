@@ -91,10 +91,11 @@
 SenseAudio SFX 路线显示一至两个可播放候选，并在候选区顶部和 VoiceOver 摘要中共同说明“仅生成
 N/3 个可用候选”。partial 不改变单候选试听、命名、采用或失败回滚的视觉顺序。
 
-Provider 选择器只呈现具备生产资格的 profile。`senseaudio-cn` 的确定性 fixture 可进入 DEBUG
-State Gallery，但在官方精确资源合同、经授权的真实 TTS/SFX smoke、听感、键盘、VoiceOver 与最终
-Bundle 身份全部验收前，不得进入可分发应用的选择器。非分发验收候选必须以外部台账明确标记，不能
-依靠原型、fixture、build 成功或 TTS 单路线制造“已可用”的产品状态。SenseAudio 凭据说明同时公开
+2026-09-15 T9 本地启用：默认 Provider 选择器按 registry 稳定顺序提供五个 profile，完整暴露
+`senseaudio-cn` 的中文 TTS 与 SFX，默认仍为 ElevenLabs；显式 nil policy 保留隐藏 SenseAudio 的
+回滚接缝。DEBUG State Gallery 继续使用独立 fixture policy。资源合同来源是 ADR 0014 的所有者
+接受实测合同；最终 Bundle 的真实/原生复验、有限风险接受和分发状态见生产验收台账第 26 节。
+本地候选以外部台账和归档名称标记 `NON-DISTRIBUTION`。SenseAudio 凭据说明同时公开
 固定 `female_0033_b` 音色资格、`.cn` 路线不构成数据驻留承诺，以及保存只执行不生成音频的只读探针。
 
 ### 顶部事件来源提示（现行 · 瞬时提示与「需要你」）

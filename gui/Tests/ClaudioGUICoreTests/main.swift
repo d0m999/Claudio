@@ -108,6 +108,12 @@ if CommandLine.arguments.contains("--ai-cue-local-credentials") {
     exit(failures == 0 ? 0 : 1)
 }
 
+if CommandLine.arguments.contains("--ai-cue-provider-contracts") {
+    runAICueProviderContractsSuites()
+    print("AI cue provider contracts: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
 if CommandLine.arguments.contains("--senseaudio-provider") {
     await runSenseAudioAICueProviderSuites()
     print("SenseAudio provider: \(totalChecks) checks, \(failures) failures")
