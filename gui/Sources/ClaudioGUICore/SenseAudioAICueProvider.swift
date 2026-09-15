@@ -218,7 +218,8 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
             url: route.endpoint,
             body: body,
             maximumWireBytes: Self.maximumJSONResponseBytes,
-            deadline: deadline)
+            deadline: deadline,
+            responseStartPolicy: .generationDeadline)
         let response: AICueHTTPResponse
         do {
             // Native batch creation is one billable POST and has no automatic retry.
@@ -481,7 +482,8 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
         url: URL,
         body: Data,
         maximumWireBytes: Int,
-        deadline: AICueGenerationDeadline
+        deadline: AICueGenerationDeadline,
+        responseStartPolicy: AICueResponseStartPolicy = .connectionBudget
     ) throws -> AICueTransportRequest {
         guard let origin = try? AICueOrigin(url: url) else {
             throw AICueProviderError.invalidRequest
@@ -495,7 +497,8 @@ public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
             body: body,
             acceptedMediaTypes: Self.acceptedJSONMediaTypes,
             maximumWireBytes: maximumWireBytes,
-            deadline: deadline)
+            deadline: deadline,
+            responseStartPolicy: responseStartPolicy)
     }
 
     private func statusError(

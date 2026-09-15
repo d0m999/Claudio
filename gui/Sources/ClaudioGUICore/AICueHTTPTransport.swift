@@ -113,7 +113,12 @@ private final class AICueUnaryDataTask: NSObject, URLSessionDataDelegate, @unche
         armDeadlineLocked()
         let deadlineAlreadyExpired = terminalError == .deadlineExceeded
         if !deadlineAlreadyExpired {
-            armInactivityLocked(seconds: timeouts.connectionSeconds)
+            switch transportRequest.responseStartPolicy {
+            case .connectionBudget:
+                armInactivityLocked(seconds: timeouts.connectionSeconds)
+            case .generationDeadline:
+                break
+            }
         }
         lock.unlock()
         if deadlineAlreadyExpired {

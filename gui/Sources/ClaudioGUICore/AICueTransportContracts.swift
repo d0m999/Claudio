@@ -86,6 +86,14 @@ package struct AICueOrigin: Hashable, Sendable {
     }
 }
 
+/// Controls only the wait for the first HTTP response. All requests still share the same absolute
+/// generation deadline, and response bytes remain subject to the transport inactivity budget
+/// after response headers arrive.
+package enum AICueResponseStartPolicy: Sendable, Equatable {
+    case connectionBudget
+    case generationDeadline
+}
+
 package struct AICueTransportRequest: Sendable, CustomReflectable {
     package let method: AICueHTTPMethod
     package let url: URL
@@ -96,6 +104,7 @@ package struct AICueTransportRequest: Sendable, CustomReflectable {
     package let acceptedMediaTypes: Set<String>
     package let maximumWireBytes: Int
     package let deadline: AICueGenerationDeadline
+    package let responseStartPolicy: AICueResponseStartPolicy
 
     package init(
         method: AICueHTTPMethod,
@@ -106,7 +115,8 @@ package struct AICueTransportRequest: Sendable, CustomReflectable {
         body: Data?,
         acceptedMediaTypes: Set<String>,
         maximumWireBytes: Int,
-        deadline: AICueGenerationDeadline
+        deadline: AICueGenerationDeadline,
+        responseStartPolicy: AICueResponseStartPolicy = .connectionBudget
     ) {
         self.method = method
         self.url = url
@@ -117,6 +127,7 @@ package struct AICueTransportRequest: Sendable, CustomReflectable {
         self.acceptedMediaTypes = Set(acceptedMediaTypes.map { $0.lowercased() })
         self.maximumWireBytes = maximumWireBytes
         self.deadline = deadline
+        self.responseStartPolicy = responseStartPolicy
     }
 
     package var customMirror: Mirror {
@@ -322,11 +333,12 @@ package enum AICueTransportSessionConfiguration {
         hardened.httpCookieStorage = nil
         hardened.httpShouldSetCookies = false
         hardened.urlCredentialStorage = nil
-        // Explicit runner timers distinguish connection from post-response inactivity. Keep the
-        // Foundation fallback no shorter than either budget so it cannot collapse them together.
-        hardened.timeoutIntervalForRequest = max(
-            timeouts.connectionSeconds,
-            timeouts.inactivitySeconds)
+        // Explicit runner timers distinguish response-start policy from post-response inactivity.
+        // Keep Foundation's fallback at the absolute generation ceiling so it cannot collapse a
+        // provider's intentional pre-response computation into the shorter connection budget.
+        hardened.timeoutIntervalForRequest =
+            TimeInterval(
+                AICueGenerationDeadline.durationNanoseconds) / 1_000_000_000
         hardened.timeoutIntervalForResource = 60
         hardened.httpMaximumConnectionsPerHost = 1
         hardened.waitsForConnectivity = false
