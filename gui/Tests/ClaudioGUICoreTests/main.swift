@@ -1,3 +1,4 @@
+import AppKit
 import ClaudioGUICore
 import ClaudioLocalization
 import ClaudioSettingsPresentation
@@ -64,6 +65,18 @@ func suite(_ name: String, _ body: @MainActor () async -> Void) async {
     await body()
 }
 
+if CommandLine.arguments.contains("--ai-cue-native-focus") {
+    let application = NSApplication.shared
+    application.setActivationPolicy(.regular)
+    Task { @MainActor in
+        await runAICueDescriptionFocusSuites()
+        print("AI cue native focus: \(totalChecks) checks, \(failures) failures")
+        exit(failures == 0 ? 0 : 1)
+    }
+    application.run()
+    exit(1)
+}
+
 if CommandLine.arguments.contains("--event-attention") {
     runEventNoticeModelSuites()
     await runSessionNavigationSuites()
@@ -72,6 +85,14 @@ if CommandLine.arguments.contains("--event-attention") {
     // Swift's async-main drain queue after synthetic window tracking can end the harness early.
     runEventNoticePresentationSuites()
     print("Event attention: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
+if CommandLine.arguments.contains("--ai-cue-generation") {
+    await runAICueGenerationViewModelSuites()
+    await runAICueRuntimeSuites()
+    runAICueDescriptionSuites()
+    print("AI cue generation: \(totalChecks) checks, \(failures) failures")
     exit(failures == 0 ? 0 : 1)
 }
 
@@ -187,6 +208,7 @@ runMultiProviderPrototypeContractSuites()
 runVolumeDragSessionSuites()
 runPanelWriteFailuresSuites()
 runActivityOverviewSuites()
+runAICueDescriptionSuites()
 // Keep the native AppKit suite after every async suite; see the targeted ordering above.
 runEventNoticePresentationSuites()
 

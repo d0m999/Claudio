@@ -386,6 +386,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let aiCueStageCandidates: Self = "ai-cue.stage.candidates"
     public static let aiCueDescriptionLabel: Self = "ai-cue.description.label"
     public static let aiCueDescriptionHelp: Self = "ai-cue.description.help"
+    public static let aiCueDescriptionLocked: Self = "ai-cue.description.locked"
     public static let aiCueDescriptionPlaceholder: Self = "ai-cue.description.placeholder"
     public static let aiCueGenerateCandidates: Self = "ai-cue.generate-candidates"
     public static let aiCueGenerating: Self = "ai-cue.generating"
@@ -1219,7 +1220,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .aiCueCredentialDeleteMessage, .aiCueEligibilityGlobal, .aiCueEligibilityBuiltin,
         .aiCueEligibilityShared, .aiCueEligibilityUnavailable, .aiCueComposerTitle,
         .aiCueStageDescription, .aiCueStageCandidates, .aiCueDescriptionLabel,
-        .aiCueDescriptionHelp, .aiCueDescriptionPlaceholder, .aiCueGenerateCandidates,
+        .aiCueDescriptionHelp, .aiCueDescriptionLocked, .aiCueDescriptionPlaceholder,
+        .aiCueGenerateCandidates,
         .aiCueGenerating, .aiCueDescriptionSummary, .aiCueModifyDescription, .aiCueNameLabel,
         .aiCueNameHelp, .aiCueCandidateClear, .aiCueCandidateBrisk, .aiCueCandidateRestrained,
         .aiCueCandidateNumbered, .aiCueCandidatePartial,

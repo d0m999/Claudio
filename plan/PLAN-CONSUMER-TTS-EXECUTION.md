@@ -817,6 +817,10 @@ fail closed，不得改成任意 HTTPS、通配 host 或运行时学习 policy�
    时显示引号台词示例，但不新增“声音方案”表单。
 4. 点击“生成 3 个候选”后，后台用版本化隐藏指令解释并规范化 `AICueSoundPlan`；先检查所选 profile
    的 route、语言和 spoken-content invariant，再读取对应 credential；不显示独立确认表单。
+   生成期间描述区域保持原外观并改为可滚动只读展示，不挂载 `TextEditor`；状态层也拒绝任何描述修改，
+   不改点击快照、不取消任务、不增加请求。焦点移到“取消”，取消或失败后恢复编辑并保留原描述。
+   面板内主动取消仅由“取消”操作触发；关闭窗口、切换来源/profile、deadline 和网络失败的终止保护
+   保持不变。取消只保证本地停止和迟到结果丢弃，不承诺远端停止计费。
 5. 如果 modality 不在 `routes.keys`、locale 不在 route allowlist，或 speech/mixed 缺少明确引号台词，
    直接显示可修正的本地错误，不读 key、不发网络；保留描述并允许修改或切换 profile。
 6. 以点击时冻结的 `generationID + profileID + route-owned absolute deadline` 请求选定 provider（仅
@@ -845,14 +849,15 @@ missing / stored(verified | deferred | rejected) / unavailable
 GenerationState:
 editing → generating → candidatesReady → adopting → applied
    ↑          └── failed / cancelled ──┘       └── failed → candidatesReady
-   └── 修改描述 / 切换 profile / 重新生成会使旧候选失效；迟到结果按 generation identity 丢弃
+   └── 候选态修改描述 / 切换 profile / 重新生成会使旧候选失效；迟到结果按 generation identity 丢弃
 ~~~
 
 `candidatesReady` 同时携带 `complete | partial`，但采用状态机不区分两者：每个可见候选都已逐项通过
 完整校验，采用仍是单候选的全事务。cancel、deadline、本地存储错误和低于 route minimum 的结果不会
 进入 `candidatesReady`。
 
-关闭窗口、修改描述或重新生成时清理未采用的临时候选；仅重命名不能清理或重新请求候选。已导入
+关闭窗口、允许编辑时修改描述或重新生成时清理未采用的临时候选；生成和采用期间拒绝描述修改。
+仅重命名不能清理或重新请求候选。已导入
 声音由现有包目录和 manifest 接管，不能被临时清理删除。
 
 ## 4. BYOK 网络、隐私与凭据边界

@@ -3971,6 +3971,22 @@
         }
       }
     },
+    "ai-cue.description.locked": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Description locked while generating. Cancel first to edit."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "生成中，描述已锁定；如需修改，请先取消。"
+          }
+        }
+      }
+    },
     "ai-cue.generating": {
       "localizations": {
         "en": {

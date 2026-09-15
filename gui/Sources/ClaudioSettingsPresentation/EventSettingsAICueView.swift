@@ -190,6 +190,11 @@ struct EventSettingsAICueServiceCard: View {
 
 @MainActor
 struct EventSettingsAICueComposerView: View {
+    private enum DescriptionFocus: Hashable {
+        case editor
+        case cancel
+    }
+
     @ObservedObject var viewModel: AICueGenerationViewModel
     @ObservedObject var languageStore: ClaudioPreferences
     let eventTitle: String
@@ -202,6 +207,7 @@ struct EventSettingsAICueComposerView: View {
     let onClose: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    @FocusState private var descriptionFocus: DescriptionFocus?
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
 
@@ -270,6 +276,11 @@ struct EventSettingsAICueComposerView: View {
         .tint(ClaudioTheme.clay(colorScheme))
         .accessibilityElement(children: .contain)
         .settingsMountIdentity("event-settings.ai-cue.composer")
+        .onChange(of: viewModel.phase) { _ in
+            // Clear outgoing focus first; replacement tasks yield so this cannot overwrite
+            // their focus request while SwiftUI reconciles the native hosts.
+            descriptionFocus = nil
+        }
     }
 
     private var stageIndicator: some View {
@@ -318,11 +329,31 @@ struct EventSettingsAICueComposerView: View {
                         .padding(.vertical, 9)
                         .allowsHitTesting(false)
                 }
-                TextEditor(
-                    text: Binding(
-                        get: { viewModel.soundDescription },
-                        set: { viewModel.updateDescription($0) })
-                )
+                Group {
+                    if viewModel.phase == .generating {
+                        ScrollView(.vertical) {
+                            Text(viewModel.soundDescription)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 9)
+                        }
+                        .frame(height: 92)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityValue(viewModel.soundDescription)
+                    } else {
+                        TextEditor(
+                            text: Binding(
+                                get: { viewModel.soundDescription },
+                                set: { viewModel.updateDescription($0) })
+                        )
+                        .focused($descriptionFocus, equals: .editor)
+                        .task {
+                            await Task.yield()
+                            guard viewModel.phase == .editing, !Task.isCancelled else { return }
+                            descriptionFocus = .editor
+                        }
+                    }
+                }
                 .font(ClaudioTheme.font(.body))
                 .frame(minHeight: 92)
                 .padding(4)
@@ -332,10 +363,19 @@ struct EventSettingsAICueComposerView: View {
                     RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
                         .stroke(ClaudioTheme.hairline(colorScheme), lineWidth: 1)
                 )
-                .disabled(viewModel.phase == .generating)
                 .accessibilityLabel(l10n.text(.aiCueDescriptionLabel))
-                .accessibilityHint(l10n.text(.aiCueDescriptionHelp))
+                .accessibilityHint(
+                    l10n.text(
+                        viewModel.phase == .generating
+                            ? .aiCueDescriptionLocked : .aiCueDescriptionHelp)
+                )
                 .accessibilityIdentifier("event-settings.ai-cue.description")
+            }
+
+            if viewModel.phase == .generating {
+                Text(l10n.text(.aiCueDescriptionLocked))
+                    .font(ClaudioTheme.font(.caption))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
             }
 
             HStack(spacing: 10) {
@@ -347,11 +387,15 @@ struct EventSettingsAICueComposerView: View {
                     Text(l10n.text(.aiCueGenerating))
                         .font(ClaudioTheme.font(.caption))
                         .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                    Button(l10n.text(.commonCancel)) {
-                        viewModel.returnToDescription()
-                    }
-                    .accessibilityLabel(l10n.text(.commonCancel))
-                    .accessibilityIdentifier("event-settings.ai-cue.cancel-generation")
+                    cancelGenerationButton
+                        .focused($descriptionFocus, equals: .cancel)
+                        .task {
+                            await Task.yield()
+                            guard viewModel.phase == .generating, !Task.isCancelled else { return }
+                            descriptionFocus = .cancel
+                        }
+                        .accessibilityLabel(l10n.text(.commonCancel))
+                        .accessibilityIdentifier("event-settings.ai-cue.cancel-generation")
                 } else {
                     Button(l10n.text(.aiCueGenerateCandidates)) {
                         viewModel.startGeneration(locale: languageStore.language.rawValue)
@@ -369,6 +413,26 @@ struct EventSettingsAICueComposerView: View {
                     .accessibilityLabel(l10n.text(.aiCueConfigureKey))
                     .accessibilityIdentifier("event-settings.ai-cue.configure-required")
             }
+        }
+    }
+
+    @ViewBuilder
+    private var cancelGenerationButton: some View {
+        let button = Button(l10n.text(.commonCancel)) {
+            viewModel.returnToDescription()
+        }
+        .focusable()
+        if #available(macOS 14.0, *) {
+            // The focus proxy needs its own activation handler when keyboard navigation is off.
+            button.onKeyPress(keys: [.space, .return], phases: .down) { press in
+                guard descriptionFocus == .cancel, viewModel.phase == .generating,
+                    press.modifiers.intersection([.command, .control, .option, .shift]).isEmpty
+                else { return .ignored }
+                viewModel.returnToDescription()
+                return .handled
+            }
+        } else {
+            button
         }
     }
 

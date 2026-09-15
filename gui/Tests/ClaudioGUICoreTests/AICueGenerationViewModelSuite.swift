@@ -88,6 +88,7 @@ private actor SuspendedCredentialStatusManagerFixture: AICueCredentialManaging {
 private actor ComposerGeneratorFixture: AICueGenerating {
     enum Mode: Sendable {
         case success(AICueGeneration)
+        case lateSuccess(AICueGeneration)
         case failure(AICueGenerationError)
         case waitForCancellation
     }
@@ -97,6 +98,7 @@ private actor ComposerGeneratorFixture: AICueGenerating {
     private(set) var discardedGenerationIDs: [UUID] = []
     private(set) var requestedProfileIDs: [AICueProviderProfileID] = []
     private(set) var requestedDeadlines: [AICueGenerationDeadline] = []
+    private(set) var requestedDescriptions: [String] = []
 
     init(mode: Mode) { self.mode = mode }
 
@@ -111,8 +113,13 @@ private actor ComposerGeneratorFixture: AICueGenerating {
         generateCount += 1
         requestedProfileIDs.append(providerProfileID)
         requestedDeadlines.append(deadline)
+        requestedDescriptions.append(description)
         switch mode {
         case .success(let generation): return generation
+        case .lateSuccess(let generation):
+            // Bounded stand-in for an external provider that completes despite cancellation.
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            return generation
         case .failure(let error): throw error
         case .waitForCancellation:
             do {
@@ -134,9 +141,13 @@ private actor ComposerGeneratorFixture: AICueGenerating {
         generations: Int,
         discarded: [UUID],
         profileIDs: [AICueProviderProfileID],
-        deadlines: [AICueGenerationDeadline]
+        deadlines: [AICueGenerationDeadline],
+        descriptions: [String]
     ) {
-        (generateCount, discardedGenerationIDs, requestedProfileIDs, requestedDeadlines)
+        (
+            generateCount, discardedGenerationIDs, requestedProfileIDs, requestedDeadlines,
+            requestedDescriptions
+        )
     }
 }
 
@@ -160,6 +171,69 @@ private actor SuspendedComposerAdoptionFixture {
 
 @MainActor
 func runAICueGenerationViewModelSuites() async {
+    await suite("AI 提示音状态层：生成中拒绝描述变动且原请求仍能完成") {
+        let generation = aiCueComposerGeneration()
+        let generator = ComposerGeneratorFixture(mode: .lateSuccess(generation))
+        let viewModel = AICueGenerationViewModel(
+            credentialManager: ComposerCredentialManagerFixture(status: .missing),
+            generator: generator,
+            providerProfileID: .elevenLabsGlobal)
+        viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+        viewModel.updateDescription("短促木琴完成音效")
+        viewModel.startGeneration(locale: "zh-Hans")
+        for _ in 0..<1_000 {
+            if await generator.facts().generations == 1 { break }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+
+        viewModel.updateDescription("不应提交的新描述")
+        viewModel.updateDescription("")
+        viewModel.startGeneration(locale: "zh-Hans")
+        expect(viewModel.soundDescription == "短促木琴完成音效", "生成中描述必须保持点击时的值")
+        expect(viewModel.phase == .generating, "描述变动不能取消正在生成的请求")
+        for _ in 0..<1_000 {
+            let facts = await generator.facts()
+            if viewModel.generation != nil || !facts.discarded.isEmpty { break }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        expect(viewModel.generation == generation, "拒绝描述修改后原请求仍必须发布其候选")
+        let facts = await generator.facts()
+        expect(facts.descriptions == ["短促木琴完成音效"], "冻结期间不能修改请求或增加生成次数")
+        expect(facts.discarded.isEmpty, "未取消的请求不得因输入变动被清理")
+        viewModel.endSession()
+    }
+
+    await suite("AI 提示音状态层：显式取消保留描述且迟到成功只能清理") {
+        let generation = aiCueComposerGeneration()
+        let generator = ComposerGeneratorFixture(mode: .lateSuccess(generation))
+        let viewModel = AICueGenerationViewModel(
+            credentialManager: ComposerCredentialManagerFixture(status: .missing),
+            generator: generator,
+            providerProfileID: .elevenLabsGlobal)
+        viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+        viewModel.updateDescription("短促木琴完成音效")
+        viewModel.startGeneration(locale: "zh-Hans")
+        for _ in 0..<1_000 {
+            if await generator.facts().generations == 1 { break }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+
+        viewModel.returnToDescription()
+        expect(viewModel.phase == .editing, "取消必须立即恢复编辑态")
+        expect(viewModel.soundDescription == "短促木琴完成音效", "取消不得清空原始描述")
+        for _ in 0..<1_000 {
+            if await generator.facts().discarded.contains(generation.id) { break }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        let facts = await generator.facts()
+        expect(viewModel.generation == nil && viewModel.phase == .editing, "迟到结果不得复活候选")
+        expect(facts.discarded == [generation.id], "迟到成功必须交还原 generation 清理")
+        expect(facts.descriptions == ["短促木琴完成音效"], "取消不得偷偷重发生成请求")
+        viewModel.updateDescription("取消后允许编辑")
+        expect(viewModel.soundDescription == "取消后允许编辑", "取消后必须重新允许修改描述")
+        viewModel.endSession()
+    }
+
     await suite("AI 提示音状态层：只有 SenseAudio SFX 在点击入口冻结 180 秒 route budget") {
         let policy = try! AICueAssetPolicy(
             allowedOrigins: [try! AICueAssetOrigin("https://assets.fixture.invalid")],
@@ -509,6 +583,9 @@ func runAICueGenerationViewModelSuites() async {
                 _, _, _ in await gate.run()
             }
             await waitForSuspendedComposerAdoption(gate)
+            viewModel.updateDescription("采用期间不得提交新描述")
+            expect(viewModel.soundDescription == "短促木琴", "采用期间描述修改必须被拒绝")
+            expect(viewModel.phase == .adopting, "描述修改不得取消采用事务")
             viewModel.endSession()
             await gate.resume(with: .rejected(.targetChanged))
             await waitForAICueDiscard(generator: generator, generationID: generation.id)

@@ -159,7 +159,7 @@ public final class AICueGenerationViewModel: ObservableObject {
     }
 
     public func updateDescription(_ value: String) {
-        guard phase != .adopting, value != soundDescription else { return }
+        guard phase != .generating, phase != .adopting, value != soundDescription else { return }
         soundDescription = value
         guard phase != .editing || generation != nil || adoptionOutcome != nil else {
             failure = nil
