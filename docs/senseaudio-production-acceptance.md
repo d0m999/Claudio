@@ -38,11 +38,11 @@ activation。默认 registry 仍只有既有四个 profile，`productionSenseAud
 
 | 层级 | 当前状态 | 当前事实 |
 |---|---|---|
-| 本地实现聚合与自动门禁 | `PREPARED LOCAL` | 2026-09-15 修复 SFX 响应头误超时后，新聚合 base 与非分发候选已绑定并复验；完整结果见第 9 节 |
+| 本地实现聚合与自动门禁 | `PREPARED LOCAL` | 2026-09-15 route-owned 180 秒实现与新非分发候选已绑定并通过完整门禁；见第 11 节 |
 | production 暴露 | `CLOSED` | `productionSenseAudioAssetPolicy == nil`；`senseaudio-cn` 不在默认 allowlist |
 | 实测资源合同决策 | `RISK ACCEPTED` | exact origin/MIME/匿名 GET/零 redirect 已固定；URL 有效期与 host 轮换未知作为可用性风险接受 |
-| 正式付费 smoke | `FAILED` | `62faf8ae` 候选完成 3 次 TTS，但唯一一次 SFX 在 60.643 秒零响应字节时超时；下一候选改用 route-owned 180 秒并须重验，见第 10 节 |
-| 非分发候选原生启动 | `PASSED` | `62faf8ae` 已在原生设置窗口完成执行；新 deadline 候选尚待重新绑定与启动，旧证据不跨候选继承 |
+| 正式付费 smoke | `NOT RUN` | 新 `1ef3c5d1` 候选已获本 session 付费授权，但尚未执行；旧 `62faf8ae` 的 60 秒失败见第 10 节，不跨候选继承 |
+| 非分发候选原生启动 | `NOT VERIFIED` | 新候选进程路径已确认，但原生控制在无可见窗口时 timeout；待打开设置窗口，不等同于 app 启动崩溃 |
 | 原生听感、键盘、VoiceOver | `NOT RUN` | fixture、SwiftUI harness 或 build 不能替代 |
 | production activation | `NOT VERIFIED` | 严格依赖 T8 其余层全部通过；由 #189 单独实施，本 ticket 不修改 policy/allowlist |
 | Release / distribution | `NOT RUN` | 没有签名 universal RC、notarization、双架构或正式批准 |
@@ -137,19 +137,19 @@ shasum -a 256 "$candidate_evidence_dir/claudi0-NON-DISTRIBUTION.zip"
 
 | 字段 | 值 |
 |---|---|
-| Candidate ID | `senseaudio-t8-20260915-62faf8ae-arm64` |
-| 聚合 base commit / tree | `187c3f9b1153ec30d290e87ddb1184595781f2b3` / `179d733db88c1e78e9d6ff8dd7cc32abe9c58f5a` |
-| 候选 commit / tree | `62faf8ae7d3ce6202a2310272e40a85bf27b612e` / `e2f0d8fc8ce868ac345c5d2c47400c1b7cdf9d8d` |
-| base→candidate 精确 diff | 仅 policy/activation、相应 registry 测试与非分发标记；8 文件，+63/-26；diff SHA-256 `b692a106ce5ddc786907fc46ae5e0f89bf485cc73ba7fb99de61d3c9e28e97cb` |
+| Candidate ID | `senseaudio-t8-20260915-1ef3c5d1-arm64` |
+| 聚合 base commit / tree | `77b1513bf4b09e08912ef4c87c132bb9a06fcf2d` / `17a044b101a905ead173919c7a38352f15f5b1e2` |
+| 候选 commit / tree | `1ef3c5d1838eaa889d83a2a1c117436d73834361` / `d9ef9c64971c2f81d9034cfaa67a3d83e07e0027` |
+| base→candidate 精确 diff | 仅原 policy/activation、相应 registry 测试与非分发标记；8 文件，+63/-26；diff SHA-256 `71794f07e52a01a6c6cfbecf7b42b4cc1c442454f7070949695f63964b59a75d` |
 | Policy 规范化 JSON / SHA-256 | 第 1.2 节固定 JSON；`6f570cf99d8fc8bfcf040c49ac4182afa1ab16d0baca74eb072a7f083e5d200d` |
 | `CFBundleIdentifier` | `com.claudio.app` |
 | `CFBundleShortVersionString` / `CFBundleVersion` | `0.0.0-dev` / `0.0.0-dev` |
 | CPU / macOS | arm64 / macOS 26.6.2 (25G83) |
-| signing identity / Team ID / CDHash | ad-hoc / 未设置 / `3beda6becb079914b63b00133952044a493e0b3e` |
-| 主 app executable SHA-256 | `44cde0c6e90c8eabdc6b96baa68b33a59812aea7b45e3f699bcb48aa85e887f3` |
-| helper / LoginItem executable SHA-256 | `d36e4f751cdd006215878efb3a325407728bc9ca7458b8060e5a127c0f36affe` / `0e9e4167b9ea4d881f96523bd7b6d227b4f0b6f5b6c87f1d5fab9357f9dde1c6` |
-| 非分发 archive SHA-256 | `fcfedb576c99db39ebd1119f78a08ed4a54ba0d96cbf61eb9160e3e547baf30d`；archive 保持在 Git 外 |
-| 自动门禁结果引用 | 第 9 节；同一干净候选的完整设置集成门禁退出 0 |
+| signing identity / Team ID / CDHash | ad-hoc / 未设置 / `2e17679f9d0dd388a3cd115704bc1269589876f8` |
+| 主 app executable SHA-256 | `25fd84ff3003c614f61de3f6e268d4da6430507fb0f44453bc00badd421cc97a` |
+| helper / LoginItem executable SHA-256 | `1160b35d08ac163404196de7f0e863fea026db1ba97342ff65888582f1fba921` / `13f2ac6cff8ce1d2d97b5445626b7d22acb05c5335b570dfdb3372868bb5d28d` |
+| 非分发 archive SHA-256 | `4cc4b0aa2ce77d055464d348919b50fdaf106676b1b270496e2c18b3ca967d0a`；archive 保持在 Git 外 |
+| 自动门禁结果引用 | 第 11 节；同一干净候选的完整设置集成门禁退出 0 |
 
 不得用 `dist/` 路径、分支名、窗口截图或“刚刚构建”替代这些身份字段。
 
@@ -389,3 +389,21 @@ Keychain。恰好 3 次 TTS POST、零 retry、均 HTTP 200；得到 3 个 0600 
 本 session 后续付费调用已整体授权，执行方无需每轮重新请求付费批准；这不授权凭据导出/修改、
 候选采用、production activation、push、发布或 Issue 关闭。新实现必须绑定新候选并记录真实结果，
 不得把本节历史 TTS 成功当作新 Bundle 的 smoke 通过。
+
+## 11. 180 秒候选准备证据
+
+新聚合 base 为 `77b1513`，非分发候选 `senseaudio-t8-20260915-1ef3c5d1-arm64` 的完整身份已写入
+第 1.3 节。base→candidate 仍仅原 8 个候选文件，未夹带实现或证据编辑；候选 worktree/index 干净，
+main 的两个无关 mockup 未进入提交。production policy 仍为 `nil`。
+
+`bash scripts/verify-settings-experience.sh 4e03a87` 在同一干净候选退出 0：helper 3272/3272，
+GUI 9462/9462，Debug/Release presentation 与 ClaudioGUI、Release helper/LoginItem、bundle、
+ad-hoc 签名、localization、diff 和 size 全通过；strict format baseline/HEAD 均 1315，无新增。
+Node selector executable seam 与 Python candidate 11 项通过。最终签名后 app/helper/LoginItem 为
+5608912 / 2862896 / 72192 bytes，非可执行资源 689969，Bundle 正规文件合计 9233969，全部在预算内。
+archive 压缩校验通过；仍非 universal、Developer ID 或 notarized release。
+
+新候选进程路径已确认；原生控制在没有可见窗口时返回 `timeoutReached`，正在等待手动打开
+「设置 → 事件与提示音」。当前新候选 voice probe/TTS/SFX/asset GET 均 0；本 session 付费调用
+已获整体授权，此等待不是付费授权门禁。未修改或导出凭据；未采用候选、push、启用 production 或
+更改 Issue。完整脱敏 `run.md` 与 archive 保持在 Git 外。真实 smoke 与人工门禁尚未通过，T8 未闭合。
