@@ -1011,7 +1011,7 @@ mockup 与现有 tests-only overlay，不 commit/push。Issue 关闭结果在实
 
 2026-09-15，项目所有者要求执行审查后的修复计划。实现基线为
 `8fef4aa5e88397eb80da7844b55b4c3754bca3a3`；本节是修复后工程与重验记录，不重写第 9–23 节历史
-候选或 T8 闭合，不实施 production activation。实际修复源码 commit/tree 与最终门禁另行绑定。
+候选或 T8 闭合，不实施 production activation。修复源码 commit/tree 与最终门禁绑定如下。
 
 ### 合同与实现
 
@@ -1038,14 +1038,43 @@ UNIX socket 可用；SwiftPM 在外层沙箱内使用 `--disable-sandbox`，依�
 与 PATH 的串行复跑为 **3272 / 0**。首轮失败未复现、根因未确认，不掩盖失败记录或新增域外修复。
 Debug / Release GUI build、六个改动 Swift 文件的 strict format lint、localization JSON 与 `git diff --check`
 均通过；selector executable seam 与 candidates Python suite（11 tests）通过。本机为 macOS 26.6.2
-arm64，不由这些结果推定旧系统原生行为。inspection Bundle/size、源码 commit/tree 与
-artifact 摘要完成后另行绑定。
+arm64，不由这些结果推定旧系统原生行为。
 inspection 构建不是新 SenseAudio 非分发验收候选，不继承旧 Bundle 摘要。duration stub 与假 MP3
 仍只证明工程行为。
 
 `code-review` 的 Standards / Spec 两轴只读复审未发现新增实质缺陷；Darwin 无 ACL 的已打开假 fd
 raw probe 为 `fstat=0`、`acl_get_fd_np=nil/ENOENT`，实际 ACL 回归通过。未把 generic man page
 未列出的这个平台特例当作仅凭文档完成的验证。
+
+专项复核入口如下；外层阻断 IP 出站，依赖使用本地缓存，不调用真实凭据或 Provider：
+
+```bash
+sandbox-exec -p '(version 1)(allow default)(deny network-outbound (remote ip "*:*"))' swift run --disable-sandbox --skip-update --package-path gui claudio-gui-tests --ai-cue-local-credentials
+sandbox-exec -p '(version 1)(allow default)(deny network-outbound (remote ip "*:*"))' swift run --disable-sandbox --skip-update --package-path gui claudio-gui-tests --senseaudio-provider
+sandbox-exec -p '(version 1)(allow default)(deny network-outbound (remote ip "*:*"))' swift run --disable-sandbox --skip-update --package-path gui claudio-gui-tests --senseaudio-isolation
+```
+
+### 源码与 inspection Bundle 身份
+
+full harness 在提交前执行；提交后复核 GUI/helper 源码没有偏差。`scripts/dev-bundle.sh` 从以下
+完整源码 commit 构建，构建前后 source/index 干净；临时 Swift wrapper 只在外层 IP 阻断内追加
+`--disable-sandbox` / `--skip-update`，不改仓库脚本。后续证据提交只改本台账，不把证据提交的
+tree 冒充构建源码 tree，也不要求自引用 commit SHA。
+
+| 字段 | 本轮工程绑定值 |
+|---|---|
+| 修复 source commit | `4e10a1d6a79dbd6f748bb34d37de98182d9c5566` |
+| 修复 source tree | `8fb0a725d679f942972a18e18d7adcc3efd9ad88` |
+| Bundle identity | `com.claudio.app` / `0.0.0-dev` / arm64 / ad-hoc；普通 inspection，不是 SenseAudio 验收候选 |
+| 签名后 app executable SHA-256 | `6753354fd22298c5208b6f942e088bba283bdd85cef1570f930006f8bb5dabe8` |
+| 签名后 helper SHA-256 | `c9aa849b3ecf814d5cbe771d61325e26a362f5a58118748ae82b9b3b04fdbe08` |
+| 签名后 LoginItem SHA-256 | `1895380c84b9e9c550dcce0c52069322404f49ee91fd7a7fc3fe676074e43214` |
+| Bundle gates | Release GUI/helper/LoginItem build、签名后 size/export gate、ad-hoc signature verify 均通过 |
+| 签名后 size | GUI `5627904 B`；helper `2862896 B`；LoginItem `72192 B`；非可执行 `689983 B`；正规文件合计 `9252975 B`（预算 `11250000 B`） |
+| production gate | 默认四 profiles、默认 ElevenLabs、policy `nil`；没有独立 activation patch 或 testing override |
+
+本轮没有启动 Bundle 或验证原生布局/焦点/真实音频，不证明 x86_64、Developer ID 签名、公证、
+分发或正式验收。Bundle 不入 Git；新验收候选仍须按 §1.3 另建并绑定自己的身份。
 
 | 项目 | 修复后状态与要求 |
 |---|---|
@@ -1058,4 +1087,5 @@ raw probe 为 `fstat=0`、`acl_get_fd_np=nil/ENOENT`，实际 ACL 回归通过�
 | macOS 12–13 取消键 | `NOT VERIFIED`：本轮没有旧系统原生复现，不据此新增兼容性修复 |
 | T9 | `NOT AUTHORIZED` / `NOT VERIFIED`：本地 Issue 更新草案见 `senseaudio-t9-issue-update-draft.md`，尚未发布 |
 
-新实现的工程修复完成后，production 仍关闭；受影响真实/原生验收、最终身份绑定与 T9 授权继续独立。
+本轮工程修复、两轴复审与 inspection 身份绑定完成，production 仍关闭；受影响真实/原生验收、
+新验收候选身份与 T9 授权继续独立。
