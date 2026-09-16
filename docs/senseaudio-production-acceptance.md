@@ -34,24 +34,25 @@ activation。当时默认 registry 只有既有四个 profile，`productionSense
 - `PASSED` / `FAILED`：对应门禁在绑定身份上有完整、脱敏且可复核的记录；
 - `ACTIVATED`：单独评审的 production policy 与 allowlist 变更已完成，且后续 Bundle 复验通过。
 
-当前本地 T9 结果见第 26 节。下表区分隔离分支与 main；第 9–25 节保留各自当时的历史状态，
-不能把历史 `NOT AUTHORIZED` 当作本轮授权缺失，或把本地 activation 当作 main 已启用。
+当前本地 T9 结果见第 26 节。下表描述 T9 变更合并后的目标状态；第 9–25 节保留各自当时的历史
+状态，不能把历史 `NOT AUTHORIZED` 当作本轮授权缺失，也不能把 main activation 扩大为 Release
+或正式分发。
 
 | 层级 | 当前状态 | 当前事实 |
 |---|---|---|
 | 本地实现与自动门禁 | `PASSED` | 第 26 节最终源码 `e9ff628`：helper 3272 / GUI 9869，完整设置集成门禁通过 |
-| main production 暴露 | `CLOSED` | main `8330a3c` 仍为 policy `nil`、默认四 profiles；未合并本地 T9 |
-| 本地默认组装 | `PREPARED LOCAL` | 第 26 节生产 builder 默认五 profiles、完整 SenseAudio TTS/SFX，默认 ElevenLabs；最终听感待反馈 |
+| main production 暴露 | `ACTIVATED`（本变更合并后） | production policy 固定为 ADR 0014 exact policy；默认五 profiles、默认 ElevenLabs；不代表 Release / distribution |
+| 本地默认组装 | `PASSED` | 第 26 节生产 builder 默认五 profiles、完整 SenseAudio TTS/SFX，默认 ElevenLabs；最终技术与人工听感复验通过 |
 | 实测资源合同决策 | `RISK ACCEPTED` | exact origin/MIME/匿名 GET/零 redirect 已固定；URL 有效期与 host 轮换未知作为可用性风险接受 |
 | 最终 Bundle 真实技术 smoke | `PASSED`（技术链） | 第 26 节重验 3 TTS POST + 1 SFX POST + 3 GET / HTTP 200；三个 TTS、三个 SFX MP3 均通过校验，零 probe、零 retry |
 | 最终 Bundle 原生启动、重启与采用 | `PASSED`（窄项） | 第 26 节真实设置窗口、已保存已验证、五项选择器、WorkBuddy × stop 采用及重启读回；原包选择已恢复 |
-| 最终 Bundle 原生听感 | `NOT VERIFIED` | 第 26 节六个候选已依次触发播放，等待所有者实际听到及意图反馈；第 23 节 animal 质量仍为有限 `RISK ACCEPTED` |
+| 最终 Bundle 原生听感 | `PASSED`（所有者人工确认） | 第 26 节三个 TTS 均完整说出预期台词且无额外内容；三个 SFX 均为短促木琴且无人声；第 23 节 animal 质量仍为有限 `RISK ACCEPTED` |
 | 原生键盘与生成冻结 | `PASSED`（所有者人工确认） | 第 21 节冻结、输入法及 Space/Return 取消恢复；第 23 节完整键盘焦点顺序人工确认通过，不冒充执行方观察 |
 | partial 实际展示 | `RISK ACCEPTED`（未实测） | 第 23 节所有者因难以复现明确接受 1/3、2/3 可见面板未验证的风险；第 18 节隔离串联 147 checks 的工程证据保留，不等同实际 app 展示通过 |
 | 异常恢复、失败保旧绑定与回滚 | `PASSED`（所有者人工确认） | 第 23 节所有者确认通过，结合第 18 节隔离串联证据；本轮执行方未操作真实凭据、绑定或 production |
 | VoiceOver 人工验收 | `RISK ACCEPTED`（所有者豁免、未验证） | 第 22 节明确暂不纳入本轮 SenseAudio 必验门禁；不记为通过，不宣称完整旁白支持，已有实现保留 |
 | T8 整体验收 | `RISK ACCEPTED`（本轮验收闭合） | 第 23 节绑定固定 e4 候选，未豁免项已有工程/真实 smoke/所有者人工通过证据；动物质量、partial 实际展示与 VoiceOver 风险明确接受，不宣称全部实测通过 |
-| T9 本地完整闭合 | `NOT VERIFIED`（听感待反馈） | 本轮用户计划已授权实现及 3+1 正式 smoke；真实再次原生保存豁免、三项有限风险不扩展；未修改 #189 |
+| T9 本地完整闭合 | `PASSED` | 第 26 节实现、最终 Bundle、真实技术链、采用/重启读回及 TTS/SFX 人工听感闭合；真实再次原生保存豁免、三项有限风险不扩展；未修改 #189 |
 | Release / distribution | `NOT RUN` | 没有签名 universal RC、notarization、双架构或正式批准 |
 
 ## 不可跳过的门禁顺序
@@ -1312,5 +1313,6 @@ composer、采用/播放服务、helper 与依赖没有源码变化。
 - macOS 12–13 原生、Intel、双架构、Developer ID/universal、notarization、正式分发与生产就绪
   未验证。main 与 Issue 状态保持不变。
 
-当前结论：**T9 本地实现与最终 Bundle 复验 PASSED，未合并、未发布。** 结论限于上述 arm64
-NON-DISTRIBUTION 本地候选及已列风险接受/未验证边界，不扩展为正式分发或生产就绪。
+当前结论：**T9 本地实现与最终 Bundle 复验 PASSED；本变更合并后启用 main 默认五 profiles，
+未发布。** 结论限于上述 arm64 NON-DISTRIBUTION 本地候选及已列风险接受/未验证边界，不扩展为
+正式分发或生产就绪。

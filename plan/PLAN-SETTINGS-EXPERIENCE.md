@@ -1,6 +1,6 @@
 # PLAN — 统一设置体验完整实施计划
 
-> 状态：**统一设置与自动合同已落地；T9 本地默认五 profiles，完整 SenseAudio TTS/SFX，默认 ElevenLabs。最终 Bundle 复验与历史有限风险接受见 SenseAudio 台账 §26；未合并、未发布，双架构与正式签名/公证未验证。**
+> 状态：**统一设置与自动合同已落地；T9 完整 SenseAudio TTS/SFX 已通过本地与最终 Bundle 复验，本变更合并后默认五 profiles、默认 ElevenLabs。历史有限风险接受见 SenseAudio 台账 §26；未发布，双架构与正式签名/公证未验证。**
 >
 > 日期：2026-09-06
 >

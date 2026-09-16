@@ -47,4 +47,5 @@ policy 注入；NON-DISTRIBUTION 仅在外部归档名称/台账标记。
 取得反馈。临时候选随后由正常生命周期清理；既有采用音频保留，WorkBuddy 原声音包与 Codex 界面
 作用域均恢复，重启读回通过。
 macOS 12–13、Intel、universal/Developer ID、公证及正式分发未验证；不声明生产就绪。
-未 push、创建 PR、合并、发布或修改 Issue；main production 仍为 policy nil/四 profiles。
+本草案不发布到 Issue。本变更合并后 main production 使用固定 policy 与默认五 profiles；未执行
+Release、正式分发或 Issue 状态修改。

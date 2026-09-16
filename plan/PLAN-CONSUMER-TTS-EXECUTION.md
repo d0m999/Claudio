@@ -1,6 +1,6 @@
 # PLAN — 描述式 AI 提示音（BYOK、多 Provider）执行计划
 
-> 状态：**T9 已授权本地启用完整 SenseAudio TTS/SFX；本分支默认五 profiles、默认 ElevenLabs。最终 Bundle 复验结果见台账第 26 节；未合并、未发布。历史 T8 与有限风险接受保持原记录。**
+> 状态：**T9 完整 SenseAudio TTS/SFX 已通过本地与最终 Bundle 复验；本变更合并后默认五 profiles、默认 ElevenLabs。结果见台账第 26 节；未发布。历史 T8 与有限风险接受保持原记录。**
 >
 > 日期：2026-09-14
 >
@@ -102,7 +102,7 @@ profile。用户只选择 profile 并输入对应的 key；实现前必须重新
 | `minimax-global` | `readOnlyProbe`：`POST https://api.minimax.io/v1/get_voice`，body 固定为 `{"voice_type":"all"}`；生成使用 Bearer + `POST https://api.minimax.io/v1/t2a_v2` | `speech-2.8-hd` + voice `Chinese (Mandarin)_Reliable_Executive`；`output_format: hex`；32 kHz / 128 kbps / mono MP3；响应 `data.audio` 解 hex | 首批只开放 `speech` 和 `zh` / `zh-Hans`；sound tags / voice effects 不等价于纯音效生成 | unary adapter 已实现；MiniMax 候选改为真实 numbered 语义 |
 | `qwen-singapore` | `deferredUntilExplicitGeneration`；Bearer + `POST https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`；credential slot `qwen-singapore`；`X-DashScope-SSE: enable` | `qwen3-tts-instruct-flash` + voice `Cherry`；SSE Base64 PCM，24 kHz / 16-bit / mono / little-endian，封装 WAV | 首批只开放 `speech`；locale 仅映射 `zh* → Chinese`、`en* → English` | SSE adapter 已实现；保存 key 时不发可计费请求 |
 | `qwen-beijing` | `deferredUntilExplicitGeneration`；Bearer + `POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`；credential slot `qwen-beijing`；独立 region key | 与 Singapore 相同的 model、voice、SSE 和 PCM 合同 | 与 `qwen-singapore` 相同，必须单独做地区 smoke | 独立 profile 已实现；不得隐式自动切换 |
-| `senseaudio-cn` | `readOnlyProbe`：Bearer + `POST https://api.senseaudio.cn/v1/get_voice`，body 固定为 `{"voice_type":"all"}`；TTS `POST /v1/t2a_v2`；SFX `POST /v1/sound-effects/generations`；credential slot `senseaudio-cn` | speech：`sensenova-tts-2.0` + `female_0033_b`，32 kHz / 128 kbps / mono hex MP3；animal/soundEffect：`senseaudio-sfx-1.0-260626`、一次 native batch 返回资源 URL | `speech` 仅 `zh*`；`animal` / `soundEffect`；`.mixed` 明确不支持 | **T9 本地默认启用**；ADR 0014 固定 policy，最终 Bundle 复验见台账 §26；未合并、未发布 |
+| `senseaudio-cn` | `readOnlyProbe`：Bearer + `POST https://api.senseaudio.cn/v1/get_voice`，body 固定为 `{"voice_type":"all"}`；TTS `POST /v1/t2a_v2`；SFX `POST /v1/sound-effects/generations`；credential slot `senseaudio-cn` | speech：`sensenova-tts-2.0` + `female_0033_b`，32 kHz / 128 kbps / mono hex MP3；animal/soundEffect：`senseaudio-sfx-1.0-260626`、一次 native batch 返回资源 URL | `speech` 仅 `zh*`；`animal` / `soundEffect`；`.mixed` 明确不支持 | **T9 默认启用**；ADR 0014 固定 policy，最终 Bundle 复验见台账 §26；未发布 |
 
 能力规则：
 
