@@ -547,7 +547,7 @@ func runPreviewFixturesSuites() {
                     .elevenLabsGlobal, .miniMaxGlobal, .qwenSingapore, .qwenBeijing,
                     .senseAudioChina,
                 ],
-            "AI Cue gallery 必须区分四个 production profile 与 gated SenseAudio fixture")
+            "AI Cue gallery 必须覆盖全部五个 profile 的隔离状态")
         expect(
             Set(scenarios.map(\.rawValue)).isSuperset(
                 of: [
@@ -576,11 +576,13 @@ func runPreviewFixturesSuites() {
                     == [1, 3].map {
                         .numbered(AICueCandidateOrdinal(rawValue: $0)!)
                     },
-            "SenseAudio preview 必须用真实 1/3 identity 呈现 gated partial")
+            "SenseAudio preview 必须用稳定 1/3 identity 呈现隔离 partial")
         expect(
-            AICueProviderRegistry().profiles().count == 4
-                && PreviewFixtures.aiCueEvidenceRegistry.profiles().count == 5,
-            "DEBUG fixture 不得把 SenseAudio 反向加入 production registry")
+            AICueProviderRegistry().profiles().count == 5
+                && PreviewFixtures.aiCueEvidenceRegistry.profiles().count == 5
+                && AICueProviderRegistry().assetPolicy(for: .senseAudioChina)
+                    != PreviewFixtures.aiCueEvidenceRegistry.assetPolicy(for: .senseAudioChina),
+            "Gallery 必须保留独立 fixture policy，不得污染生产 policy")
         expect(
             PreviewFixtures.AICueGalleryScenario.playing.playingCandidateID != nil
                 && PreviewFixtures.AICueGalleryScenario.senseAudioPartialPlaying

@@ -6,8 +6,8 @@
 
 发布这份文档不会完成任何门禁。本文创建时没有使用真实 API Key、没有执行付费调用、没有联系
 SenseAudio、没有构造非分发 app、没有完成原生键盘或 VoiceOver 验收，也没有授权 production
-activation。默认 registry 仍只有既有四个 profile，`productionSenseAudioAssetPolicy` 必须保持
-`nil`，默认 Provider 仍为 `elevenlabs-global`。
+activation。当时默认 registry 只有既有四个 profile，`productionSenseAudioAssetPolicy` 保持
+`nil`，默认 Provider 为 `elevenlabs-global`。后续授权和执行结果按日期记录；当前本地 T9 以第 26 节为准。
 
 2026-09-15，ADR 0015 将 SenseAudio 凭据录入收口到 Claudio 内的掩码输入框和私有本地文件。
 该路径不再依赖 Data Protection Keychain 签名权限。旧 Keychain 项保持原样；新候选须验证保存、
@@ -34,22 +34,25 @@ activation。默认 registry 仍只有既有四个 profile，`productionSenseAud
 - `PASSED` / `FAILED`：对应门禁在绑定身份上有完整、脱敏且可复核的记录；
 - `ACTIVATED`：单独评审的 production policy 与 allowlist 变更已完成，且后续 Bundle 复验通过。
 
-当前基线如下；后续只能在实际执行并填写证据引用后更新：
+当前本地 T9 结果见第 26 节。下表描述 T9 变更合并后的目标状态；第 9–25 节保留各自当时的历史
+状态，不能把历史 `NOT AUTHORIZED` 当作本轮授权缺失，也不能把 main activation 扩大为 Release
+或正式分发。
 
 | 层级 | 当前状态 | 当前事实 |
 |---|---|---|
-| 本地实现聚合与自动门禁 | 历史 `PASSED`；修复后结果见第 24 节 | 第 19 节测试宿主同步及 GUI 9626/helper 3272 属于旧基线；审查后 ACL 与资源失败分类不沿用旧自动门禁 |
-| production 暴露 | `CLOSED` | `productionSenseAudioAssetPolicy == nil`；`senseaudio-cn` 不在默认 allowlist |
+| 本地实现与自动门禁 | `PASSED` | 第 26 节最终源码 `e9ff628`：helper 3272 / GUI 9869，完整设置集成门禁通过 |
+| main production 暴露 | `ACTIVATED`（本变更合并后） | production policy 固定为 ADR 0014 exact policy；默认五 profiles、默认 ElevenLabs；不代表 Release / distribution |
+| 本地默认组装 | `PASSED` | 第 26 节生产 builder 默认五 profiles、完整 SenseAudio TTS/SFX，默认 ElevenLabs；最终技术与人工听感复验通过 |
 | 实测资源合同决策 | `RISK ACCEPTED` | exact origin/MIME/匿名 GET/零 redirect 已固定；URL 有效期与 host 轮换未知作为可用性风险接受 |
-| 正式付费 smoke | 历史 `PASSED`；修复后受影响项 `NOT VERIFIED` | 第 12/17/23 节的 3 TTS + 1 SFX 保留历史；第 24 节改变凭据校验和 SFX 失败语义，不能继续用旧 no-source-delta 理由覆盖新实现 |
-| 非分发候选原生启动 | `PASSED`（窄项） | `e4b2b39` PID 42542 的实际设置窗口与历史三个编号候选已取得；第 20 节再次确认同一 app 的设置窗口，不覆盖完整键盘/VoiceOver |
-| 原生听感 | `RISK ACCEPTED`（动物意图质量） | 中文 TTS/木琴听感通过；第 23 节所有者明确接受当前 animal 意图不匹配的质量风险，历史失败与根因未知保留，不认定模型为根因 |
+| 最终 Bundle 真实技术 smoke | `PASSED`（技术链） | 第 26 节重验 3 TTS POST + 1 SFX POST + 3 GET / HTTP 200；三个 TTS、三个 SFX MP3 均通过校验，零 probe、零 retry |
+| 最终 Bundle 原生启动、重启与采用 | `PASSED`（窄项） | 第 26 节真实设置窗口、已保存已验证、五项选择器、WorkBuddy × stop 采用及重启读回；原包选择已恢复 |
+| 最终 Bundle 原生听感 | `PASSED`（所有者人工确认） | 第 26 节三个 TTS 均完整说出预期台词且无额外内容；三个 SFX 均为短促木琴且无人声；第 23 节 animal 质量仍为有限 `RISK ACCEPTED` |
 | 原生键盘与生成冻结 | `PASSED`（所有者人工确认） | 第 21 节冻结、输入法及 Space/Return 取消恢复；第 23 节完整键盘焦点顺序人工确认通过，不冒充执行方观察 |
 | partial 实际展示 | `RISK ACCEPTED`（未实测） | 第 23 节所有者因难以复现明确接受 1/3、2/3 可见面板未验证的风险；第 18 节隔离串联 147 checks 的工程证据保留，不等同实际 app 展示通过 |
 | 异常恢复、失败保旧绑定与回滚 | `PASSED`（所有者人工确认） | 第 23 节所有者确认通过，结合第 18 节隔离串联证据；本轮执行方未操作真实凭据、绑定或 production |
 | VoiceOver 人工验收 | `RISK ACCEPTED`（所有者豁免、未验证） | 第 22 节明确暂不纳入本轮 SenseAudio 必验门禁；不记为通过，不宣称完整旁白支持，已有实现保留 |
 | T8 整体验收 | `RISK ACCEPTED`（本轮验收闭合） | 第 23 节绑定固定 e4 候选，未豁免项已有工程/真实 smoke/所有者人工通过证据；动物质量、partial 实际展示与 VoiceOver 风险明确接受，不宣称全部实测通过 |
-| production activation | `NOT AUTHORIZED` / `NOT VERIFIED` | 历史 T8 按第 23 节闭合；第 24 节新实现的受影响证据、单独授权及最终 Bundle 复验仍是 #189 前置条件 |
+| T9 本地完整闭合 | `PASSED` | 第 26 节实现、最终 Bundle、真实技术链、采用/重启读回及 TTS/SFX 人工听感闭合；真实再次原生保存豁免、三项有限风险不扩展；未修改 #189 |
 | Release / distribution | `NOT RUN` | 没有签名 universal RC、notarization、双架构或正式批准 |
 
 ## 不可跳过的门禁顺序
@@ -1158,3 +1161,158 @@ T8 风险接受，不启用 production，也不把本地结果记为远端 CI �
 受影响真实 SFX smoke/凭据链及原生验收仍是 `NOT VERIFIED`，按第 24 节边界独立重验；VoiceOver、
 实际 partial 和动物意图质量风险接受不扩展。macOS 12–13 原生、Intel、正式签名/公证与分发未验证。
 本节只完成两项工程修复与 inspection 绑定，不实施 T9、release 或 Issue 状态修改。
+
+## 26. T9 本地默认启用与最终 Bundle 复验
+
+执行日期：2026-09-15 至 2026-09-16（Asia/Singapore；正式 smoke 为 2026-09-16 00:06–00:13，
+听感闭合轮次为 11:41–11:52）。
+本轮用户直接要求实施 T9 计划，授权本地默认启用、正式 smoke、独立测试包的一次采用与原选择恢复。
+交付终点为本地实现与验收；不 push、不创建 PR、不合并、不修改 Issue、不发布。
+
+### 基线、实现与隔离
+
+- 远端 main 基线 `8330a3cae95110858b1440eaa530904cc8c1d8cc`，tree
+  `eae977ae29ad2ad749f0c3fbf928a3b5234d5b0c`；实时核实
+  [main CI run 34985102218](https://github.com/d0m999/Claudio/actions/runs/34985102218)
+  的 head SHA 相同、conclusion 为 success。
+- 隔离 worktree `Claudio-t9-activation-20260915`，分支 `feat/senseaudio-production-activation`；
+  从该 main 基线创建，未合并四个 T8 非分发候选分支。原目录的 DESIGN 改动、两个 mockup 与
+  原分支保持不动。
+- 实现提交 `773e96ebeb6b60b7ec0c0f1e6e8777e9c589cc12` 固化唯一 optional-policy builder；
+  默认五 profiles，顺序为 ElevenLabs、MiniMax、Qwen Singapore、Qwen Beijing、SenseAudio。
+  默认 ElevenLabs，已有选择不改；显式 nil 的隔离 registry 仍只有四项，保留凭据与已采用资产。
+- 唯一 policy 为 `https://dynamic.senseaudio.cn:443` / `audio/mpeg` / 匿名 GET / 零 redirect；
+  收到后立即下载，不持久化 URL。没有新增 Provider 接口、服务或配置 schema。完整 TTS + SFX、
+  不支持 mixed、无自动 fallback；SenseAudio SFX 180 秒、其余路线 60 秒预算保持不变。
+- 合同验证先取得对应 builder 的合法五项合同，错误 policy map 检查精确值；合法五项正控通过，
+  字段篡改按 `invalidProfileContract` 失败，缺失或重复按 `invalidProfileSet` 失败。
+  Gallery 使用独立 fixture policy，不能改变 production policy。
+- privacy、Gallery、当前 DESIGN、ADR 0011/0014/0015 及执行/设置合同已同步。
+
+### 回归与完整工程门禁
+
+默认 registry 回归先在旧实现得到 **63 checks / 5 failures**；扩展五项合同正控与精确字段/map
+回归旧实现 **75 / 25**，启用后 **75 / 0**。没有以数量违约掩盖合法五项合同中的字段违约。
+
+最终隔离专项使用假 Key、受控网络和临时目录，系统级 IP 出站阻断，不触碰真实凭据：
+
+| 专项 | 最终结果与边界 |
+|---|---|
+| Provider contracts | 75 / 0；五项顺序、默认值、精确 policy、字段篡改、缺失/重复、错误 map |
+| generation/runtime | 112 / 0；默认五 generator / 三 probe validator，构造零凭据、网络、文件写入；已有选择不变；mixed/非中文 speech 取 Key/联网前拒绝；nil 回滚保留 Key/资产 |
+| local credentials | 87 / 0；隔离假 Key 保存、重新装配读回、权限/ACL 查询异常、替换失败保旧值、删除 |
+| SenseAudio provider | 164 / 0；资源安全违约、普通 partial、deadline、取消与迟到清理 |
+| SenseAudio isolation | 251 / 0；真实 URLSession→adapter→engine/VM 隔离串联，未知基础设施错误整批失败、无第三 GET/重试；保描述/假 Key及显式恢复 |
+
+首个源码提交的完整设置门禁失败：About 隐私名称表遗漏 SenseAudio，dispatcher 测试 fixture
+仍只有四个 generator，五项 registry 构造触发合同拒绝。未进入该候选的真实 smoke；修复测试宿主后
+形成最终源码 `e9ff628438d6d6443bc86a41f33a6ce39a3ba4f0`。失败日志保留，不能记为首轮全绿。
+
+在该干净源码提交上运行 `bash scripts/verify-settings-experience.sh 8330a3cae95110858b1440eaa530904cc8c1d8cc`，
+最终退出 0：helper **3272 / 0**、GUI **9869 / 0**；Debug/Release SettingsPresentation、Debug GUI、
+Release GUI/helper/LoginItem、localization JSON、diff、selector seam、bundle、签名及 size 门禁通过。
+selector Node seam 独立复跑通过，candidates Python **11 tests / 0 failures**。
+strict format baseline/HEAD 均 **1315**，新增诊断 **0**；保留既有 deprecated API 警告。
+测试与构建的外部 wrapper 仅阻断 IP 出站并为 Swift run/build 使用 disable-sandbox/skip-update，
+仓库门禁脚本及既有预算未修改。
+
+### 最终受测源码与封存 Bundle
+
+以下 Bundle 在最终干净源码上构建，付费前完成身份绑定及归档。台账提交仅包含验收文档，
+不能冒充构建 source tree。应用使用默认 production 组装，无 fixture policy 注入；
+`NON-DISTRIBUTION` 只在外部台账及归档名称标记，不进入正式 app 名称或 release 构造。
+
+| 字段 | 最终绑定值 |
+|---|---|
+| Candidate ID | `senseaudio-t9-20260915-e9ff6284-arm64` |
+| source commit | `e9ff628438d6d6443bc86a41f33a6ce39a3ba4f0` |
+| source tree | `0ee80a2d31d94aa723d92f7d9d162eea83da5c4d` |
+| policy SHA-256 | `6f570cf99d8fc8bfcf040c49ac4182afa1ab16d0baca74eb072a7f083e5d200d` |
+| identifier / version / build | `com.claudio.app` / `0.0.0-dev` / `0.0.0-dev` |
+| CPU / macOS / class | arm64 / macOS 26.6.2 (25G83) / `NON-DISTRIBUTION` |
+| signing / Team / CDHash | ad-hoc / 未设置 / `1ea11370dd87e70f2ef47ecbe4c7aad7f767ac07` |
+| app executable SHA-256 | `6040cfd63b91868e44798e8379c665c8a33dbeb17c8870fcb52d13ae01c55860` |
+| helper SHA-256 | `11371a4555a0c25905634beb5a613bb53f2ccc1fb3ae8768e4e5776f80cae7c1` |
+| LoginItem SHA-256 | `04b1a32c155a87475047085d39162deb2b966f33fb455be36bebce50f08954cd` |
+| archive SHA-256 | `a43962ff55b378f1fd436692aa741830e941701cf2639d18202a3b28d7f6c428` |
+| 正规文件合计 | `9253979 B` / `11250000 B`；GUI `5628032 B`、helper `2862896 B`、LoginItem `72192 B`、resources `690859 B`，各项预算通过 |
+
+Bundle 路径为隔离 worktree 的 `dist/claudi0.app`；外部证据目录
+`Claudio-t9-local-evidence-20260915` 保存 `bundle-identity.json`、最终/失败门禁日志、脱敏网络
+metadata 与 `claudi0-NON-DISTRIBUTION-senseaudio-t9-e9ff6284-arm64.zip`。不将 Bundle、音频、
+真实 Key、完整 URL、请求/响应正文、描述或台词提交到 Git。
+
+### 正式 smoke、原生采用与恢复
+
+沿用用户计划明确的付费授权，首轮预算 **3 TTS POST + 1 SFX POST、零 probe**；
+POST 零自动 retry，最多三个资源 URL/总计六次 GET。首轮只触发一次 TTS 生成与一次 SFX 生成，
+不发起 animal、partial 或额外 probe。首轮播放后所有者明确当时错过 TTS；临时候选已按正常生命周期
+清理。2026-09-16 11:41 前，所有者明确回复“已准备，可以生成并试听”，单独授权听感闭合轮次；
+该轮严格增加 **3 TTS POST + 1 SFX batch POST + 3 asset GET**，仍为零 probe、零自动 retry。
+
+| 实际路线 | 脱敏技术结果 |
+|---|---|
+| TTS | 3 次 POST，3 次 HTTP 200，零 retry；原生发布编号 1/2/3。MP3 / 32000 Hz / 单声道；时长 1.800 / 1.656 / 1.476 秒，大小 29129 / 26825 / 23945 bytes，均通过项目大小/时长校验 |
+| SFX | 1 次 batch POST，HTTP 200，响应约 69.1 秒，零 retry；3 次 GET 均 HTTP 200，GET retry 0。原生发布编号 1/2/3，MP3 / 44100 Hz / 双声道，均 2.037500 秒 / 32929 bytes / 0600 |
+| HTTP/MIME/安全边界 | CFNetwork 脱敏记录保留 task/time/category/status/字节计数，不保留原消息或 URL/header/body；HTTP 200 为实际记录。JSON 与 audio/mpeg、MP3 magic、整批 exact origin、匿名 GET、零 redirect 由固定源码门禁接受真实成功输出，未保留原始响应 header 抓包 |
+| 真实凭据与重启 | 旧 T8 进程退出，启动最终 Bundle PID 57191；应用显示 SenseAudio 已保存/已验证并内部使用原 Key 完成生成。采用后同一封存 Bundle 重启 PID 65883，状态及绑定读回；恢复后 PID 66538 再次读回已保存/已验证。听感闭合后同一 Bundle 重启 PID 25771，仍读回已保存/已验证 |
+| 原生可控检查 | 实际 retained 设置窗口打开；选择器按稳定顺序显示全部五项，SenseAudio 能力为语音/动物叫声/纯音效；原偏好仍为 SenseAudio，不改写为默认值。六个候选的原生播放动作均已依次触发，不以该动作代替实际听到 |
+| 一次采用与持久化 | GUI 克隆独立 CC0 测试包 `minimal-chime-copy-2`，仅临时选择 WorkBuddy；SFX 候选 1 经既有 adopter 绑定 stop。重启后原生绑定可见，manifest stop/audio_names 与正规 MP3 文件读回一致，重新试听动作成功 |
+| 原选择恢复 | 经既有 ClaudioCore lock/CAS owner 仅移除本轮 selected_pack 稀疏覆盖；原 WorkBuddy 其他覆盖字段、全局选择及原包 manifest 字节均保持不变。恢复后原生 WorkBuddy 有效包读回原包；测试包与已采用 MP3 保留，不删除 |
+| 真实 Key 保护 | 只比较目录/文件 lstat metadata，0700/0600、inode/uid/gid/link/size/mtime/ctime 未变化；未读取、打印、hash、导出或重新录入明文，未触碰其他 Provider 凭据 |
+
+听感闭合轮次的脱敏技术与人工结果如下；外部记录为
+`network-66538-relisten-redacted.ndjson`（SHA-256
+`1e483118eeced8a34c40a3b7da2d9559d9bc3306dbf69af7205f9f291b76f4ad`）与
+`smoke-relisten-result-redacted.json`（SHA-256
+`8b762cc9b8c26e893b85e8e26446a86a2b4fbab63b41d7e69c548a4995299d1f`）；均为 0600，不进入 Git：
+
+| 闭合项 | 结果 |
+|---|---|
+| 网络预算 | 7 个 CFNetwork task，全部 HTTP 200：3 TTS POST、1 SFX batch POST、3 asset GET；零 probe、POST/GET retry 均为 0。SFX POST 约 61.3 秒；未保留完整 URL、header/body 或原消息 |
+| TTS 技术结果 | 三个 MP3 经 production magic/大小/时长门禁接受并原生发布，UI 时长 1.8 / 2.4 / 1.7 秒；系统输出未静音、播放时音量 65%，按 1/2/3 依次播放 |
+| TTS 人工听感 | 所有者确认三个均实际听到，均完整说出预期台词，且没有额外描述或其他内容：`PASSED` |
+| SFX 技术结果 | 三个 MP3 均 44100 Hz / 双声道 / 2.037500 秒 / 32929 bytes / 0600；只读解码 mean 为 -32.2 / -29.4 / -33.0 dB，peak 为 -1.6 / -1.1 / -1.6 dB。系统输出未静音、播放时音量 84%，按 1/2/3 依次播放 |
+| SFX 人工听感 | 所有者确认三个均实际听到，均为短促木琴音效且完全没有人声：`PASSED` |
+| 两轮总计 | 6 TTS POST、2 SFX batch POST、6 asset GET，14 个 HTTP task 均为 200；零 probe、零自动 retry。第二轮只为补齐首轮未完成的实际听感，不把播放状态当作听到 |
+| 清理与恢复 | 关闭 composer 后第二轮临时候选目录已清空；既有采用音频保留。ClaudioCore lock/CAS owner 再次只移除 WorkBuddy 临时 `selected_pack`，重启 PID 25771 后原生读回 WorkBuddy 原“皮卡丘”包、既有 stop 绑定和 SenseAudio 已保存/已验证；界面作用域恢复 Codex |
+
+原生观察通过外部 AX/CGEvent 工具完成，工具不读取 secure/editable text value，不增加生产接口。
+CUA 初始化因 enabled surfaces 缺失失败；AX 对菜单栏 popover 的快照有局限，使用实际窗口 frame
+与截图定位打开设置。OS 同时恢复了一个空 SwiftUI Settings Scene 窗口；不把实际 retained 窗口可用
+扩大为全局窗口所有权或全部原生 UI 均无问题，也不在 T9 中加入域外修复。
+
+### 继承与未验证边界
+
+历史候选 source `e4b2b391d7f08b29e561828d19d7a5a5c2d0319c` / tree
+`b83cc6472b610239247807dc45e8f8ea028ba1b0` 的完整 Bundle 身份及证据见第 17/23 节。
+其 app executable SHA-256 为 `cecf028aa5a5cbf90604053594931b14e7c3749a0176db7ae50008c4e839e32c`。
+历史候选→最终源码的 `.swift-format/helper/gui/scripts` 精确 diff SHA-256 为
+`41738fca12e45c935c1151909fa59a731a4078b0d4fbf1547bdeb5c14938bce7`；
+main 基线→最终源码完整 diff SHA-256 为
+`752940d9085f2048ab43f4c530cebc6cff11c21a1b053917ba93061dda51bf53`。
+
+运行时 source delta 仅 registry、local credentials ACL、asset fetching 未知错误/deadline、
+SenseAudio 失败分类及 Gallery 标题；dev-bundle 去除历史 T8 内置名称标记。输入/焦点生命周期、
+composer、采用/播放服务、helper 与依赖没有源码变化。
+
+- 第 21 节的输入冻结、IME、Space/Return 取消恢复及第 23 节所有者确认的完整键盘交互，
+  按上述无相关源码变化边界继承为历史人工 `PASSED`；本轮没有再消耗付费取消轮次，
+  新增第五项菜单已实际检查顺序，不能声称执行方新增完整键盘/旧系统实测。
+- 凭据 ACL 与资源错误/deadline 行为有变化，不能继承旧无 delta 结论；本轮隔离异常回归与真实
+  原 Key 重启生成/下载/采用已重验。真实“再次原生保存”仍 `NOT VERIFIED`，用户 T9 计划明确
+  同意不阻塞本轮，不要求重新录入或修改真实 Key；不能把 fake Key 测试写成真实保存通过。
+- VoiceOver、实际 partial 展示、animal 意图质量延续第 22–23 节所有者有限 `RISK ACCEPTED`，
+  均不记为实测通过，不增加本轮 animal 调用，也不扩展为网络或凭据安全豁免。
+- 首次播放后的“没”已由所有者澄清为当时错过 TTS，不是已观察到的播放失败；执行方在收到反馈前
+  切换 SFX，导致三个未采用 TTS 临时候选按既有生命周期清理，保留为试听流程缺口。当日上午只读
+  发现的系统静音状态不能回溯凌晨 smoke，也不作为代码根因。
+- 所有者随后明确就位并授权听感闭合轮次。三个新 TTS 均实际听到、预期台词完整且无多余内容；
+  三个新 SFX 均实际听到、均为短促木琴且无人声。实际出声与本轮意图听感现为人工 `PASSED`；
+  结论来自所有者反馈，不由播放按钮、文件非静音信号或 HTTP 200 替代。
+- macOS 12–13 原生、Intel、双架构、Developer ID/universal、notarization、正式分发与生产就绪
+  未验证。main 与 Issue 状态保持不变。
+
+当前结论：**T9 本地实现与最终 Bundle 复验 PASSED；本变更合并后启用 main 默认五 profiles，
+未发布。** 结论限于上述 arm64 NON-DISTRIBUTION 本地候选及已列风险接受/未验证边界，不扩展为
+正式分发或生产就绪。

@@ -60,11 +60,19 @@ exact origin/MIME、零 redirect、3 秒/5 MiB 和取消后整批清理均不变
 
 ## 生产暴露门禁
 
+2026-09-15，项目所有者授权 T9 本地启用与最终 Bundle 复验：正式源码的默认 optional-policy
+builder 固化 ADR 0014 的唯一 policy，并按既有四个 profile 后追加完整 `senseaudio-cn`；默认
+Provider 仍为 `elevenlabs-global`。显式 nil registry 继续返回四个 profile，不删除凭据或已采用
+资产。fixture policy 保持独立；无 mixed、无 fallback、180/60 秒预算和所有安全门禁不变。
+该决定只授权隔离分支的本地实现与验收，不授权 push、PR、合并、Issue 状态修改或分发。
+真实“再次原生保存”未验证，经所有者同意不阻塞本轮；假 Key 隔离验证与重启后的应用内取用
+分别记录。最终身份、受影响重验和历史继承见台账第 26 节。以下保留 T8 启用前的门禁与历史决定。
+
 SenseAudio SFX 使用 ADR 0014 的项目所有者接受实测资源合同：唯一允许的资源 origin 固定为
 `https://dynamic.senseaudio.cn:443`，唯一允许的 MIME 固定为 `audio/mpeg`，GET 不携带 credential、
 Cookie 或 Referer，禁止 redirect 与 final-URL 漂移，并只在当前显式生成中立即下载、不持久化 URL。
-在以下证据全部齐备前，默认 `allowlistedProfiles` 不得注册 `senseaudio-cn`，
-`productionSenseAudioAssetPolicy` 必须保持 `nil`，也不得发布 TTS-only 半成品：
+T8 启用前要求以下证据齐备，期间默认 policy 为 `nil`、profile 隐藏；T9 本地决定见上文。
+不得发布 TTS-only 半成品：
 
 1. 上述固定 policy 绑定到非分发候选，并计算规范化内容与 digest；
 2. 经单独付费调用授权完成真实 TTS 与 SFX smoke，确认全部 SFX URL、GET、MIME 与音频均符合该 policy；
@@ -88,7 +96,7 @@ partial 的隔离串联回归继续作为工程证据，现有数量提示、稳
 真实 Provider 与原生验收必须使用非分发验收候选。候选须绑定唯一的完整 source commit、精确 asset
 policy 的规范化摘要与 digest，以及实际被测试 app 的 Bundle identifier、版本、架构、签名身份和可执行
 文件 digest。验收候选可以在隔离分支中注入 ADR 0014 固定的精确 policy，但不得合入可分发分支、上传或
-交付；它也不能把生产 policy 的 `nil` 门禁视为已经解除。只有上述未豁免门禁全部通过，且本轮
+交付；T8 候选本身不能解除默认 policy 的门禁。只有上述未豁免门禁全部通过，且本轮
 VoiceOver、partial 实际展示和动物意图质量风险接受均有明确记录后，才能在单独评审的 activation
 变更中固化 policy 并加入 allowlist。
 activation 或最终 Bundle 身份与验收候选不一致时，

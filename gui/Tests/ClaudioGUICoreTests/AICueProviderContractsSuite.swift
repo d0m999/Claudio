@@ -4,15 +4,16 @@ import Foundation
 
 @MainActor
 func runAICueProviderContractsSuites() {
-    suite("AI 提示音 Provider registry：只暴露四个固定 profile 与 route-derived capability") {
+    suite("AI 提示音 Provider registry：默认五个固定 profile 与 route-derived capability") {
         let registry = AICueProviderRegistry()
         let profiles = registry.profiles()
 
         expect(
             profiles.map(\.id) == [
                 .elevenLabsGlobal, .miniMaxGlobal, .qwenSingapore, .qwenBeijing,
+                .senseAudioChina,
             ],
-            "registry 必须只按稳定顺序暴露四个 allowlisted profile")
+            "registry 必须按稳定顺序暴露完整五个 allowlisted profile")
         expect(
             profiles.allSatisfy { $0.supportedModalities == Set($0.routes.keys) },
             "supportedModalities 必须只从 routes.keys 派生")
@@ -27,6 +28,7 @@ func runAICueProviderContractsSuites() {
                 .aiCueProviderProfileMiniMaxGlobal,
                 .aiCueProviderProfileQwenSingapore,
                 .aiCueProviderProfileQwenBeijing,
+                .aiCueProviderProfileSenseAudioChina,
             ],
             "profile 的可见名称必须只引用双语 catalog key")
         expect(
@@ -35,12 +37,20 @@ func runAICueProviderContractsSuites() {
                 .aiCueCredentialPrivacyMiniMax,
                 .aiCueCredentialPrivacyQwenSingapore,
                 .aiCueCredentialPrivacyQwenBeijing,
+                .aiCueCredentialPrivacySenseAudioChina,
             ],
             "逐 profile 隐私披露必须由 registry profile 提供")
         expect(
-            (try? registry.profile(for: .senseAudioChina)) == nil
-                && AICueProviderRegistry.productionSenseAudioAssetPolicy == nil,
-            "固定资源 policy 的正式 smoke 与 T8 人工验收前 production registry 不得暴露 SenseAudio")
+            (try? registry.profile(for: .senseAudioChina))?.supportedModalities
+                == [.speech, .animal, .soundEffect],
+            "默认 registry 必须同时提供 SenseAudio TTS 与完整 SFX，mixed 不支持")
+        let exactPolicy = try! AICueAssetPolicy(
+            allowedOrigins: [try! AICueAssetOrigin("https://dynamic.senseaudio.cn:443")],
+            acceptedMediaTypes: ["audio/mpeg"])
+        expect(
+            AICueProviderRegistry.productionSenseAudioAssetPolicy == exactPolicy
+                && registry.assetPolicy(for: .senseAudioChina) == exactPolicy,
+            "生产 policy 必须只接受固定 exact origin:443 与 audio/mpeg")
         expect(
             try! registry.profile(for: .elevenLabsGlobal).supportedModalities
                 == Set(AICueModality.allCases),
@@ -57,6 +67,10 @@ func runAICueProviderContractsSuites() {
     suite("AI 提示音 Provider registry：未知 profile 与被篡改的固定合同 fail closed") {
         let registry = AICueProviderRegistry()
         expect(
+            (try? AICueProviderRegistry(validating: registry.profiles()).profiles())
+                == registry.profiles(),
+            "合法五 profile 必须通过 package 固定合同验证正控")
+        expect(
             throwsRegistryError {
                 _ = try registry.profile(
                     for: AICueProviderProfileID(rawValue: "user-controlled-profile"))
@@ -66,6 +80,9 @@ func runAICueProviderContractsSuites() {
         let elevenLabs = try! registry.profile(for: .elevenLabsGlobal)
         let speechRoute = elevenLabs.routes[.speech]!
         let qwen = try! registry.profile(for: .qwenSingapore)
+        let senseAudio = try! registry.profile(for: .senseAudioChina)
+        let senseAudioSpeech = senseAudio.routes[.speech]!
+        let senseAudioSFX = senseAudio.routes[.soundEffect]!
         let invalidProfiles = [
             replacingRoute(
                 in: elevenLabs,
@@ -113,16 +130,38 @@ func runAICueProviderContractsSuites() {
             copying(elevenLabs, credentialSlotID: .qwenSingapore),
             copying(elevenLabs, privacyDisclosureKey: .aiCueCredentialPrivacyMiniMax),
             copying(qwen, regionID: "user-region"),
+            copying(senseAudio, providerID: .miniMax),
+            copying(senseAudio, credentialValidationPolicy: .deferredUntilExplicitGeneration),
+            copying(senseAudio, displayNameKey: .aiCueProviderProfileMiniMaxGlobal),
+            copying(senseAudio, maximumDurationMilliseconds: 3_001),
+            replacingRoute(
+                in: senseAudio, key: .speech,
+                with: copying(senseAudioSpeech, modelID: "user-model")),
+            replacingRoute(
+                in: senseAudio, key: .speech,
+                with: copying(senseAudioSpeech, voiceID: "user-voice")),
+            replacingRoute(
+                in: senseAudio, key: .speech,
+                with: copying(senseAudioSpeech, supportedLanguageTags: ["en*"])),
+            replacingRoute(
+                in: senseAudio, key: .soundEffect,
+                with: copying(senseAudioSFX, generationBudget: .standard)),
+            replacingRoute(
+                in: senseAudio, key: .soundEffect,
+                with: copying(
+                    senseAudioSFX,
+                    candidateSetPolicy: AICueCandidateSetPolicy(
+                        semantics: .styled, requestedCount: 3, minimumAcceptedCount: 3))),
         ]
         for invalidProfile in invalidProfiles {
             let alteredProfiles = registry.profiles().map {
                 $0.id == invalidProfile.id ? invalidProfile : $0
             }
             expect(
-                throwsRegistryError {
+                throwsRegistryError(.invalidProfileContract) {
                     _ = try AICueProviderRegistry(validating: alteredProfiles)
                 },
-                "route/profile 固定合同任一漂移都必须让 registry 初始化失败")
+                "route/profile 字段漂移必须因 invalidProfileContract 失败，不得由 profile 数量掩盖")
         }
     }
 
@@ -198,12 +237,12 @@ func runAICueProviderContractsSuites() {
             evidenceGatedSenseAudioAssetPolicy: policy)
 
         expect(
-            production.profiles() == AICueProviderRegistry().profiles()
+            production.profiles() == Array(AICueProviderRegistry().profiles().prefix(4))
                 && production.profiles().map(\.id) == [
                     .elevenLabsGlobal, .miniMaxGlobal, .qwenSingapore, .qwenBeijing,
                 ]
                 && production.assetPolicy(for: .senseAudioChina) == nil,
-            "nil policy 必须与 public default 共用同一套四 profile 合同")
+            "显式 nil policy 必须保留既有四 profile 顺序并隐藏 SenseAudio")
         expect(
             evidenceGated.profiles().map(\.id) == [
                 .elevenLabsGlobal, .miniMaxGlobal, .qwenSingapore, .qwenBeijing,
@@ -221,7 +260,7 @@ func runAICueProviderContractsSuites() {
             ).selectedProfileID() == .elevenLabsGlobal,
             "增加 evidence-gated profile 不得改变默认 Provider")
 
-        let productionProfiles = production.profiles()
+        let productionProfiles = AICueProviderRegistry().profiles()
         let invalidProductionSets = [
             Array(productionProfiles.dropLast()),
             productionProfiles + [productionProfiles[0]],
@@ -229,7 +268,7 @@ func runAICueProviderContractsSuites() {
         ]
         for invalidProfiles in invalidProductionSets {
             expect(
-                throwsRegistryError {
+                throwsRegistryError(.invalidProfileSet) {
                     _ = try AICueProviderRegistry(validating: invalidProfiles)
                 },
                 "public default 的 missing、duplicate 或 extra profile 必须失败关闭")
@@ -258,6 +297,23 @@ func runAICueProviderContractsSuites() {
             remoteAssetProfileIDs == [.senseAudioChina]
                 && exactRegistry.assetPolicy(for: .senseAudioChina) == policy,
             "唯一 remote-assets profile 必须拥有且只拥有同 ID policy")
+        let wrongPolicies = [
+            try! AICueAssetPolicy(
+                allowedOrigins: [try! AICueAssetOrigin("https://other.fixture.invalid")],
+                acceptedMediaTypes: ["audio/mpeg"]),
+            try! AICueAssetPolicy(
+                allowedOrigins: policy.allowedOrigins, acceptedMediaTypes: ["audio/wav"]),
+        ]
+        for wrongPolicy in wrongPolicies {
+            expect(
+                throwsRegistryError(.invalidProfileContract) {
+                    _ = try AICueProviderRegistry(
+                        validating: profiles,
+                        evidenceGatedSenseAudioAssetPolicy: policy,
+                        assetPoliciesByProfileID: [.senseAudioChina: wrongPolicy])
+                },
+                "policy map 的 origin/MIME 必须匹配本次 builder 合同，正确 ID 不足以授权漂移")
+        }
         expect(
             throwsRegistryError {
                 _ = try AICueProviderRegistry(
@@ -475,12 +531,15 @@ func runAICueProviderContractsSuites() {
     }
 }
 
-private func throwsRegistryError(_ body: () throws -> Void) -> Bool {
+private func throwsRegistryError(
+    _ expected: AICueProviderRegistryError? = nil,
+    _ body: () throws -> Void
+) -> Bool {
     do {
         try body()
         return false
-    } catch is AICueProviderRegistryError {
-        return true
+    } catch let error as AICueProviderRegistryError {
+        return expected == nil || expected == error
     } catch {
         return false
     }
@@ -498,21 +557,29 @@ private func replacingRoute(
 
 private func copying(
     _ profile: AICueProviderProfile,
+    providerID: AICueProviderID? = nil,
     credentialSlotID: AICueCredentialSlotID? = nil,
+    credentialValidationPolicy: AICueCredentialValidationPolicy? = nil,
     regionID: String? = nil,
+    displayNameKey: ClaudioL10nKey? = nil,
     privacyDisclosureKey: ClaudioL10nKey? = nil,
-    routes: [AICueModality: AICueProviderRoute]? = nil
+    routes: [AICueModality: AICueProviderRoute]? = nil,
+    maximumDurationMilliseconds: Int? = nil
 ) -> AICueProviderProfile {
     AICueProviderProfile(
         id: profile.id,
-        providerID: profile.providerID,
+        providerID: providerID ?? profile.providerID,
         credentialSlotID: credentialSlotID ?? profile.credentialSlotID,
-        credentialValidationPolicy: profile.credentialValidationPolicy,
+        pendingCredentialSlotID: profile.pendingCredentialSlotID,
+        credentialValidationPolicy: credentialValidationPolicy
+            ?? profile.credentialValidationPolicy,
         regionID: regionID ?? profile.regionID,
-        displayNameKey: profile.displayNameKey,
+        displayNameKey: displayNameKey ?? profile.displayNameKey,
         privacyDisclosureKey: privacyDisclosureKey ?? profile.privacyDisclosureKey,
         routes: routes ?? profile.routes,
-        constraints: profile.constraints)
+        constraints: maximumDurationMilliseconds.map {
+            AICueProviderConstraints(maximumDurationMilliseconds: $0)
+        } ?? profile.constraints)
 }
 
 private func copying(

@@ -2,9 +2,8 @@ import CoreFoundation
 import Dispatch
 import Foundation
 
-/// Evidence-gated SenseAudio adapter. The fixed API routes are usable only through a registry that
-/// also owns an exact, verified asset policy; the default production registry intentionally does
-/// not expose this profile until the external origin/MIME contract is confirmed.
+/// SenseAudio adapter for the fixed API routes and registry-owned exact asset policy. Explicit
+/// nil policy hides the complete profile; the default policy follows the owner-accepted contract.
 public struct SenseAudioAICueProvider: AICueCandidateSetProvider, Sendable {
     private static let voiceProbeURL = fixedURL("https://api.senseaudio.cn/v1/get_voice")
     private static let acceptedJSONMediaTypes: Set<String> = ["application/json"]

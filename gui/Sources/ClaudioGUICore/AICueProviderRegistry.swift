@@ -25,16 +25,16 @@ public struct AICueProviderRegistry: Sendable {
     }
 
     package init(validating profiles: [AICueProviderProfile]) throws {
-        let contract = Self.builtInContract(senseAudioAssetPolicy: nil)
+        let contract = Self.builtInContract(
+            senseAudioAssetPolicy: Self.productionSenseAudioAssetPolicy)
         try self.init(
             validating: profiles,
             expectedProfiles: contract.profiles,
             assetPoliciesByProfileID: contract.assetPoliciesByProfileID)
     }
 
-    /// Deterministic fixtures can exercise the complete SenseAudio contract while production
-    /// remains on the four-profile allowlist. A real build may use this initializer only after an
-    /// accepted exact asset policy is bound to a non-distribution candidate for formal T8 smoke.
+    /// Explicit nil preserves the four-profile rollback seam. Deterministic fixtures can supply
+    /// an independent asset policy without changing the default production contract.
     package init(evidenceGatedSenseAudioAssetPolicy assetPolicy: AICueAssetPolicy?) {
         let contract = Self.builtInContract(senseAudioAssetPolicy: assetPolicy)
         do {
@@ -55,6 +55,9 @@ public struct AICueProviderRegistry: Sendable {
         assetPoliciesByProfileID: [AICueProviderProfileID: AICueAssetPolicy]
     ) throws {
         let contract = Self.builtInContract(senseAudioAssetPolicy: assetPolicy)
+        guard assetPoliciesByProfileID == contract.assetPoliciesByProfileID else {
+            throw AICueProviderRegistryError.invalidProfileContract
+        }
         try self.init(
             validating: profiles,
             expectedProfiles: contract.profiles,
@@ -127,9 +130,11 @@ public struct AICueProviderRegistry: Sendable {
         qwenBeijing,
     ]
 
-    /// Intentionally nil until ADR 0014's exact policy passes bound real smoke and the remaining
-    /// T8 manual gates. Risk acceptance alone never activates the profile.
-    package static let productionSenseAudioAssetPolicy: AICueAssetPolicy? = nil
+    /// Owner-accepted observed contract (ADR 0014). T9 enables the complete profile locally;
+    /// distribution and final native/provider evidence remain separate acceptance gates.
+    package static let productionSenseAudioAssetPolicy: AICueAssetPolicy? = try! AICueAssetPolicy(
+        allowedOrigins: [try! AICueAssetOrigin("https://dynamic.senseaudio.cn:443")],
+        acceptedMediaTypes: ["audio/mpeg"])
 
     private static func builtInContract(
         senseAudioAssetPolicy: AICueAssetPolicy?

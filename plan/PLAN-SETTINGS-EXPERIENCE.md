@@ -1,6 +1,6 @@
 # PLAN — 统一设置体验完整实施计划
 
-> 状态：**统一设置迁移、既有 allowlisted 多 Provider、受门禁的 SenseAudio fixture、固定紧凑面板、本地活动摘要与自动合同已落地；原生 UI、VoiceOver、真实 Provider、双架构、签名、公证与发布仍未验证**
+> 状态：**统一设置与自动合同已落地；T9 完整 SenseAudio TTS/SFX 已通过本地与最终 Bundle 复验，本变更合并后默认五 profiles、默认 ElevenLabs。历史有限风险接受见 SenseAudio 台账 §26；未发布，双架构与正式签名/公证未验证。**
 >
 > 日期：2026-09-06
 >
@@ -293,8 +293,8 @@ AI 可见流程固定为：
 
 #### 5.3.1 首批 Provider/profile 目录
 
-production 用户只能选择以下四个已注册 profile；默认 `elevenlabs-global`。`senseaudio-cn` 是已实现但
-尚未进入默认 allowlist 的完整 profile 候选，只在 deterministic fixture 中投影。UI 不提供任意
+T9 本地默认提供以下五个已注册 profile；默认 `elevenlabs-global`。`senseaudio-cn` 完整提供中文
+TTS 与 native-batch SFX，使用 ADR 0014 固定 policy；最终复验见台账第 26 节。UI 不提供任意
 endpoint、model、voice、region 或资源服务器输入，不自动 fallback、跨区或跨 Provider 重试。
 `routes.keys` 与 `candidateSetPolicy` 分别是 capability 与候选集合的唯一真相；界面只从它们投影。
 
@@ -304,7 +304,7 @@ endpoint、model、voice、region 或资源服务器输入，不自动 fallback�
 | `minimax-global` | `https://api.minimax.io`；probe `POST /v1/get_voice`；生成 `POST /v1/t2a_v2` | Bearer；`minimax-global` | `speech-2.8-hd` + `Chinese (Mandarin)_Reliable_Executive`；32 kHz / 128 kbps / mono MP3；JSON hex | 仅 `speech`；`zh` / `zh-Hans` | `readOnlyProbe` |
 | `qwen-singapore` | `https://dashscope-intl.aliyuncs.com`；生成 `POST /api/v1/services/aigc/multimodal-generation/generation`；`X-DashScope-SSE: enable` | Bearer；`qwen-singapore` | `qwen3-tts-instruct-flash` + `Cherry`；SSE Base64 PCM，24 kHz / 16-bit / mono / little-endian，封装 WAV | 仅 `speech`；`zh* -> Chinese`、`en* -> English` | `deferredUntilExplicitGeneration` |
 | `qwen-beijing` | `https://dashscope.aliyuncs.com`；path/header 同 Singapore | Bearer；`qwen-beijing` | 与 Singapore 相同 | 仅 `speech`；与 Singapore 相同 | `deferredUntilExplicitGeneration` |
-| `senseaudio-cn`（gated） | `https://api.senseaudio.cn`；probe `POST /v1/get_voice`；TTS `POST /v1/t2a_v2`；SFX `POST /v1/sound-effects/generations` | Bearer；`senseaudio-cn` | `sensenova-tts-2.0` + `female_0033_b`；`senseaudio-sfx-1.0-260626`；MP3 | `speech`、`animal`、`soundEffect`；`zh*`；不支持 `.mixed` | `readOnlyProbe`；ADR 0014 固定资源 policy 的正式 smoke 与人工验收前 production 隐藏 |
+| `senseaudio-cn` | `https://api.senseaudio.cn`；probe `POST /v1/get_voice`；TTS `POST /v1/t2a_v2`；SFX `POST /v1/sound-effects/generations` | Bearer；`senseaudio-cn` | `sensenova-tts-2.0` + `female_0033_b`；`senseaudio-sfx-1.0-260626`；MP3 | `speech`、`animal`、`soundEffect`；`zh*`；不支持 `.mixed` | `readOnlyProbe`；固定 policy，T9 本地默认提供，最终复验见台账 §26 |
 
 MiniMax/Qwen 不显示 animal、soundEffect 或 mixed 为可生成；SenseAudio 只显示 speech、animal 与
 soundEffect。不支持 modality/locale 时保留描述，在读取 credential 或发网络前显示可修正错误。Qwen
@@ -323,7 +323,7 @@ Singapore/Beijing 是两个独立 region profile 和 Keychain slot，不能交�
 
 | Policy | 首次保存 / 替换 | 成功文案 | 失败与旧 key |
 |---|---|---|---|
-| ElevenLabs/MiniMax/SenseAudio `readOnlyProbe` | “验证并保存”/“验证并替换”；先调用只读 probe，再原子写 Keychain | “已验证并保存” | probe 或写入失败保留旧 active key；SenseAudio 只有 API origin HTTP 401 表示 key 无效，所需 voice 缺失显示独立 capability 错误 |
+| ElevenLabs/MiniMax/SenseAudio `readOnlyProbe` | “验证并保存”/“验证并替换”；先调用只读 probe，再原子写入；SenseAudio 使用 ADR 0015 私有本地文件，其他使用 Keychain | “已验证并保存” | probe 或写入失败保留旧 active key；SenseAudio 只有 API origin HTTP 401 表示 key 无效，所需 voice 缺失显示独立 capability 错误 |
 | Qwen `deferredUntilExplicitGeneration` | “保存 API Key”；首次保存写 stored-unverified active，已有 active 时替换才写 pending；均不发模型请求 | “已保存，待首次生成验证”；显式生成成功后首次 active 标记 verified 或 pending 提升为 active | pending replacement 可取消并恢复原 active 的验证状态；仅 pending 的明确 401 丢弃 pending 并保留旧 active，权限、额度、429/5xx、网络或取消不能伪装成 key 无效，也不自动用旧 key 重试 |
 
 未配置当前 profile 时点击生成，保留描述与 profile 选择并打开凭据界面；保存后返回原表单，用户必须
@@ -340,7 +340,7 @@ Singapore/Beijing 是两个独立 region profile 和 Keychain slot，不能交�
 | `minimax-global` | 本机直连 MiniMax global origin；首批 Mandarin speech；供应商数据处理规则独立适用 | T2A 可能消耗 MiniMax 配额；get-voice probe 不生成音频，不能用 ElevenLabs 状态代替 |
 | `qwen-singapore` | 本机直连新加坡 DashScope origin；只使用此 region 的独立 key；供应商新加坡地区处理规则适用 | 保存 key 不发模型请求、生成费用为零；下一次显式生成才验证并可能计费 |
 | `qwen-beijing` | 本机直连北京 DashScope origin；不复用 Singapore key；供应商北京地区处理规则适用 | 与 Singapore 相同的 deferred 语义，但两地配额、权限和 smoke 证据互不替代 |
-| `senseaudio-cn`（gated） | 本机通过固定 `.cn` API route 直连 SenseAudio；该 route 不构成数据驻留承诺；SFX 资源只允许 ADR 0014 固定的精确 origin/MIME、匿名 GET 与零 redirect | 保存前只查询可用音色且不生成音频；TTS/SFX 可能计费；项目所有者已接受 TTL/host 轮换未知的可用性风险，但正式 smoke 与人工验收完成前 production 隐藏 |
+| `senseaudio-cn` | 本机通过固定 `.cn` API route 直连 SenseAudio；该 route 不构成数据驻留承诺；SFX 资源只允许 ADR 0014 固定的精确 origin/MIME、匿名 GET 与零 redirect | 保存前只查询可用音色且不生成音频；TTS/SFX 可能计费；项目所有者已接受 TTL/host 轮换未知的可用性风险，T9 本地默认提供，最终复验见台账 §26 |
 
 Claudio 不承诺任何供应商 zero retention，不展示统一账单或推算费用。API Key 只存 macOS Keychain；
 不得进入设置、日志、receipt、manifest、截图或仓库。描述、隐藏声音计划、provider 响应和候选音频也
@@ -352,7 +352,7 @@ Claudio 不承诺任何供应商 zero retention，不展示统一账单或推算
 
 `mockups/ai-app-manager-native-macos.html?page=events&app=workbuddy&prototype=tts`
 
-原型同时显示四个 production profile 与一个 `productionEnabled: false` 的 SenseAudio fixture，并允许用
+历史原型保留 T9 前四个 production profile 与一个 `productionEnabled: false` 的 SenseAudio fixture，并允许用
 `profile`、`credential` 和 `scenario` query 演示：
 
 - `profile=elevenlabs-global&credential=verified`
@@ -371,7 +371,7 @@ Claudio 不承诺任何供应商 zero retention，不展示统一账单或推算
 
 验收必须覆盖 prompt、interpreting、generating、candidates、playing、adopting、applied、逐 profile
 credential missing/unavailable/rejected/pending、unsupported modality/locale、provider failure、validation
-failure、target drift 和 adoption rollback。文档与原型中的四个 production profile 及 gated
+failure、target drift 和 adoption rollback。历史原型中的四个 production profile 及 gated
 SenseAudio fixture 必须保持 exact origin/path、auth、model/voice、输出、locale、routes、credential
 slot、validation policy 与 production gate 一致；所有 UI capability 从 `routes.keys` 派生。
 
@@ -625,7 +625,7 @@ S0 文档与契约锁定
 - 把 `EventSettingsWindowView` 重构为 prototype hierarchy；嵌入页面级 BYOK card 和行内 composer；
 - manage sound 使用内部 Sounds route，采用继续走同一个 request；
 - 对齐 Provider/profile 选择、逐 profile 凭据策略、所有 AI 阶段、命名位置、候选、失败与清理；
-- 视觉基准覆盖四个 allowlisted profile、verified/missing/deferred/unavailable/rejected/pending、
+- 视觉基准覆盖五个 allowlisted profile、verified/missing/deferred/unavailable/rejected/pending、
   unsupported modality/locale 以及 generating/candidates/applied/error。
 
 ### S8 — 动态静默领域与跨进程快照
@@ -782,7 +782,7 @@ git diff --check
 - Integrations、Events、Sounds 复用原 owner，独立旧窗口不再进入 production composition；
 - General、Notifications、Display、Usage、Shortcuts、About 的真实模型、权限、失败和持久化均落地；
 - AI 提示音维持描述 → route-owned 候选集合与命名 → 显式采用，内部声音方案隐藏，BYOK 边界不退化；
-  SenseAudio production profile 在 ADR 0014 固定资源 policy 的正式 TTS/SFX smoke 与人工验收前保持隐藏；
+  T9 本地默认提供完整 SenseAudio profile，最终 Bundle 的受影响真实/原生复验与分发状态独立记录；
 - 所有自动命令全绿，`git diff --check` 通过且无新增 format diagnostics；
 - 真机视觉、键盘、VoiceOver、登录项、Focus、Calendar、快捷键和音频分别有证据；
 - 真实 Provider/key/付费请求、双架构、签名、公证、发布和正式验收继续单独报告与授权。

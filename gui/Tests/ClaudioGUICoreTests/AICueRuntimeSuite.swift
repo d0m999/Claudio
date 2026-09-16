@@ -246,6 +246,15 @@ func runAICueRuntimeSuites() async {
                 assetFetcher: assets,
                 credentialMetadata: metadata,
                 providerDefaults: defaults)
+            let enabled = try! AICueRuntime(
+                vault: vault,
+                temporaryRoot: temporaryRoot,
+                durationProbe: duration,
+                unaryTransport: unary,
+                sseTransport: sse,
+                assetFetcher: assets,
+                credentialMetadata: metadata,
+                providerDefaults: defaults)
             let evidence = try! AICueRuntime(
                 registry: evidenceRegistry,
                 vault: vault,
@@ -263,7 +272,16 @@ func runAICueRuntimeSuites() async {
                 "nil policy runtime 必须为四个 production profile 各装配一个 generator")
             expect(
                 production.validatorProfileIDs == [.elevenLabsGlobal, .miniMaxGlobal],
-                "production validators 只能包含 read-only probe profiles")
+                "nil policy validators 只能包含两个 read-only probe profiles")
+            expect(
+                enabled.generatorProfileIDs
+                    == [
+                        .elevenLabsGlobal, .miniMaxGlobal, .qwenSingapore, .qwenBeijing,
+                        .senseAudioChina,
+                    ]
+                    && enabled.validatorProfileIDs
+                        == [.elevenLabsGlobal, .miniMaxGlobal, .senseAudioChina],
+                "默认 runtime 必须装配五个 generator 与三个 probe validator")
             expect(
                 evidence.generatorProfileIDs
                     == Set(evidenceRegistry.profiles().map(\.id))
@@ -299,6 +317,56 @@ func runAICueRuntimeSuites() async {
             expect(
                 !FileManager.default.fileExists(atPath: temporaryRoot.path),
                 "runtime 构造不得创建临时候选目录")
+            let viewModel = AICueGenerationViewModel(
+                credentialManager: enabled.credentialManager,
+                generator: enabled.dispatcher,
+                registry: enabled.registry,
+                providerPreferences: enabled.providerPreferences)
+            expect(
+                viewModel.availableProviderProfiles.map(\.id)
+                    == enabled.registry.profiles().map(\.id)
+                    && viewModel.providerProfileID == .elevenLabsGlobal,
+                "默认选择器必须按 registry 顺序提供五 profiles，并保持默认 ElevenLabs")
+            for profile in productionRegistry.profiles() {
+                defaults.set(profile.id.rawValue, forKey: AICueProviderPreferences.defaultsKey)
+                let restored = AICueGenerationViewModel(
+                    credentialManager: enabled.credentialManager,
+                    generator: enabled.dispatcher,
+                    registry: enabled.registry,
+                    providerPreferences: enabled.providerPreferences)
+                expect(
+                    restored.providerProfileID == profile.id
+                        && defaults.string(forKey: AICueProviderPreferences.defaultsKey)
+                            == profile.id.rawValue,
+                    "启用 SenseAudio 不得改变已有 Provider 选择或覆写偏好")
+            }
+            for (description, locale, expected) in [
+                (
+                    "先响一声木琴，再说“完成”", "zh-Hans",
+                    AICueProviderRequestCompilationError.unsupportedModality
+                ),
+                ("Say \"Complete\"", "en", .unsupportedLocale),
+            ] {
+                do {
+                    _ = try await enabled.dispatcher.generate(
+                        description: description, locale: locale,
+                        providerProfileID: .senseAudioChina,
+                        deadline: .startingNow())
+                    expect(false, "SenseAudio 不支持的输入必须本地拒绝")
+                } catch {
+                    expect(
+                        error as? AICueGenerationError == .requestCompilation(expected),
+                        "mixed/非中文 speech 必须因对应 capability/locale 失败")
+                }
+            }
+            let rejectedFacts = await vault.facts()
+            let rejectedUnaryCalls = await unary.calls()
+            let rejectedAssetCalls = await assets.calls()
+            expect(
+                rejectedFacts.contains == 0 && rejectedFacts.reads == 0
+                    && rejectedUnaryCalls == 0 && sse.calls() == 0 && rejectedAssetCalls == 0
+                    && !FileManager.default.fileExists(atPath: temporaryRoot.path),
+                "默认 SenseAudio 本地拒绝必须先于取 Key、网络和文件写入")
         }
     }
 
@@ -397,8 +465,7 @@ func runAICueRuntimeSuites() async {
 
     await suite("AI 提示音 runtime：真实 dispatcher/engine 覆盖五个 profile 且不 fallback") {
         await withTempDirectory { root in
-            let registry = AICueProviderRegistry(
-                evidenceGatedSenseAudioAssetPolicy: runtimeSenseAudioAssetPolicy())
+            let registry = AICueProviderRegistry()
             let vault = RuntimeVaultFixture()
             let unary = RuntimeUnaryTransportFixture()
             let sse = RuntimeSSETransportFixture()
@@ -464,8 +531,7 @@ func runAICueRuntimeSuites() async {
             writeFixture(validMP3ID3Data(), to: sentinel)
             let temporaryRoot = root.appendingPathComponent("unused", isDirectory: true)
 
-            let evidenceRegistry = AICueProviderRegistry(
-                evidenceGatedSenseAudioAssetPolicy: runtimeSenseAudioAssetPolicy())
+            let evidenceRegistry = AICueProviderRegistry()
             let evidence = try! AICueRuntime(
                 registry: evidenceRegistry,
                 vault: vault,

@@ -23,6 +23,10 @@ SenseAudio [官方音效生成接口](https://docs.senseaudio.cn/api-reference/e
 - `audio_url` 只在当前显式生成内立即下载，不进入配置、defaults、manifest、日志、回执、证据附件或
   其他持久化；完整 path/query 仍属于禁止记录内容。
 
+2026-09-15 T9 授权将本 policy 固化为隔离分支正式代码的默认政策，完整 TTS/SFX 同时提供；
+规范化 digest 不变。最终本地 Bundle 使用默认组装，外部标记 `NON-DISTRIBUTION`，真实复验
+与分发状态独立记录于台账第 26 节。显式 nil 回滚接缝保留，不注入 fixture 或扩大本政策。
+
 每次真实响应中的全部 URL 必须在任何 GET 之前按上述 policy 整批预检。origin、MIME、认证要求、
 redirect 或 final URL 任一漂移都 fail closed：activation 前保持 `productionSenseAudioAssetPolicy == nil`
 且 profile 隐藏；activation 后本次生成失败，并进入 ADR 0011 的显式回滚流程，不自动放宽 policy、

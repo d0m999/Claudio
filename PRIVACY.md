@@ -16,13 +16,19 @@ allowlisted provider profile. The current registry is:
 - Profile `minimax-global`: provider `MiniMax`; region `global`.
 - Profile `qwen-singapore`: provider `Qwen / DashScope`; region `singapore`.
 - Profile `qwen-beijing`: provider `Qwen / DashScope`; region `beijing`.
+- Profile `senseaudio-cn`: provider `SenseAudio`; region `china`.
+
+The fixed SenseAudio `.cn` route does not promise data residency. The default remains ElevenLabs.
+SenseAudio provides Chinese speech and sound effects, with no mixed
+audio or automatic fallback. Sound-effect assets are downloaded immediately by anonymous GET only
+from `https://dynamic.senseaudio.cn:443`, with `audio/mpeg`, no redirects, and no persisted asset URLs.
 
 A provider may charge your account. Credential storage, retention, and model-improvement use follow
 the per-profile disclosure shown before saving the credential and that provider account's settings
 and terms; one provider's terms are not applied to another. Credentials are stored in the macOS
-Keychain and are not included in copied diagnostics. The gated SenseAudio profile is the exception:
+Keychain and are not included in copied diagnostics. The SenseAudio profile is the exception:
 its key is stored in an unencrypted, user-private local file outside projects, with a 0700 directory
-and a 0600 file. Other processes with the same user's file access may read it. Claudio does not
+and a 0600 file, both without extended ACL entries. Other processes with the same user's file access may read it. Claudio does not
 display or export saved keys, and it does not migrate or delete existing SenseAudio Keychain items.
 
 The About page's safe diagnostic summary contains only app version/build, architecture, macOS
@@ -43,11 +49,17 @@ AI 声音生成是 claudi0 GUI 中可选且必须由用户明确触发的动作�
 - 配置 `minimax-global`：Provider `MiniMax`；region `global`。
 - 配置 `qwen-singapore`：Provider `Qwen / DashScope`；region `singapore`。
 - 配置 `qwen-beijing`：Provider `Qwen / DashScope`；region `beijing`。
+- 配置 `senseaudio-cn`：Provider `SenseAudio`；region `china`。
+
+固定 SenseAudio `.cn` 路线不承诺数据驻留。默认 Provider 仍为 ElevenLabs。
+SenseAudio 提供中文语音与音效，不支持 mixed，不自动 fallback。
+音效资源只从 `https://dynamic.senseaudio.cn:443` 立即匿名 GET 下载，仅接受 `audio/mpeg`，
+禁止 redirect，不持久化资源 URL。
 
 供应商可能向你的账户收费。凭据存储、数据留存及是否用于模型改进，以保存凭据前显示的逐 profile
 披露、对应供应商账户设置和条款为准，不会把一个供应商的条款套用于另一个供应商。凭据保存在
-macOS 钥匙串中，不会进入可复制的诊断摘要。受门禁的 SenseAudio profile 是例外：Key 保存在项目
-之外、未经加密的用户私有本地文件中，目录权限为 0700、文件权限为 0600。同用户且具备相应文件
+macOS 钥匙串中，不会进入可复制的诊断摘要。SenseAudio profile 是例外：Key 保存在项目
+之外、未经加密的用户私有本地文件中，目录权限为 0700、文件权限为 0600，均不允许扩展 ACL 条目。同用户且具备相应文件
 访问权限的程序仍可能读取它。claudi0 不显示或导出已保存的 Key，也不迁移或删除既有 SenseAudio
 Keychain 项。
 
