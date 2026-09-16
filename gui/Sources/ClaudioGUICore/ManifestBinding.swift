@@ -169,9 +169,10 @@ private final class LockedManifestTransform {
 /// 是顶层 `id` / `name` / `license` / `author`，一个只开放 `events` 的原语会逼出第二条顶层 JSON
 /// 手术路径，正是这个原语要消灭的重复。`transform` 跑完之后，走
 /// ``encodeJSONObjectForWriting(_:path:)``（数字规范化 + 防 `-inf` 硬崩，与 `config.json` 的读-改-写
-/// 同一份实现）编码，再 `Data.write(to:options:.atomic)` 写回——与原来 `bindEventToManifest` 的最后
-/// 一步完全同构。未知顶层键（`schema` / `version` / 任何未来键）全程只被读进 `[String: Any]`、原样
-/// 透传给编码器，这个原语自己从不检查或丢弃它们。
+/// 同一份实现）编码，再由 `AnchoredFileIO` 写回。未知顶层键（`schema` / `version` / 任何未来键）
+/// 全程只被读进 `[String: Any]`、原样
+/// 透传给编码器，这个原语自己从不检查或丢弃它们。最终通过固定包目录描述符上的 staging
+/// 与 `RENAME_SWAP` 发布；目标删除或目录换位时拒绝继续沿新路径写入。
 @MainActor
 public func mutateManifestJSON(
     at packDirectory: URL,
@@ -216,13 +217,26 @@ private func performManifestMutation(
     expectedManifestID: String?,
     _ transform: LockedManifestTransform
 ) -> Result<Void, ManifestBindError> {
-    let manifestData: Data
-    switch loadPackManifestData(in: packDirectory) {
-    case .success(let data):
-        manifestData = data
-    case .failure(let error):
-        return .failure(.manifestUnreadable(reason: error.reason))
+    let manifestFile = packDirectory.appendingPathComponent("manifest.json")
+    let anchored: AnchoredFileIO
+    let snapshot: AnchoredFileSnapshot
+    do {
+        anchored = try AnchoredFileIO(
+            file: manifestFile, preserveFinalSymlink: true,
+            rootDirectory: packDirectory.deletingLastPathComponent())
+        let packPrefix = packDirectory.standardizedFileURL.path + "/"
+        guard anchored.resolvedFile.standardizedFileURL.path.hasPrefix(packPrefix) else {
+            return .failure(.manifestUnreadable(reason: "manifest.json 链接已离开目标声音包"))
+        }
+        snapshot = try anchored.read(maxBytes: maxPackManifestBytes)
+    } catch {
+        return .failure(.manifestUnreadable(reason: "manifest.json 无法安全读取：\(error)"))
     }
+    let manifestData: Data
+    guard let loaded = snapshot.data else {
+        return .failure(.manifestUnreadable(reason: "manifest.json 不存在或不可读：\(manifestFile.path)"))
+    }
+    manifestData = loaded
 
     guard
         let parsed = try? JSONSerialization.jsonObject(with: manifestData),
@@ -274,8 +288,6 @@ private func performManifestMutation(
     transform(&json)
     if let failure = transform.failure { return .failure(failure) }
 
-    let manifestFile = packDirectory.appendingPathComponent("manifest.json")
-
     // 规范化 + 校验 + 序列化走 ClaudioCore 的 ``encodeJSONObjectForWriting(_:path:)``——与
     // `config.json` 的读-改-写**同一份实现**，两个洞（数字规范化、绝不 abort）一次性同时补给每一个
     // 未来的写者，不必在每个新写者里再抄一遍补丁。
@@ -286,9 +298,9 @@ private func performManifestMutation(
     }
 
     do {
-        try updatedData.write(to: manifestFile, options: .atomic)
+        try anchored.publish(updatedData, expected: snapshot)
     } catch {
-        return .failure(.writeFailed(reason: error.localizedDescription))
+        return .failure(.writeFailed(reason: String(describing: error)))
     }
 
     return .success(())
@@ -352,15 +364,12 @@ private func resolveUserPackDirectory(
 ///   `coverageState`/`doctor`/`play` use, never a bare `FileManager.fileExists` — so a bind
 ///   can never point an event at something that isn't a real, playable file (see
 ///   ``ManifestBindError/fileNotFound(fileName:)``).
-/// - ``mutateManifestJSON(at:_:)`` for everything else: reading `manifest.json`'s raw bytes
-///   (via ``loadPackManifestData(in:)``), the three fail-closed manifest guards, and the final
-///   atomic write through ``encodeJSONObjectForWriting(_:path:)`` — never a second, unaudited
-///   manifest read/write path.
+/// - ``mutateManifestJSON(at:_:)`` for everything else: bounded fd-based manifest read, the
+///   three fail-closed manifest guards, JSON encoding, and anchored publication — never a
+///   second, unaudited manifest read/write path.
 ///
 /// The final write's atomicity/TOCTOU scope is documented on ``mutateManifestJSON(at:_:)`` and
-/// identical to what this function always did — see that function's doc comment (and
-/// `importAudioFile`'s own final write, `AudioImport.swift`'s step 6, which carries the same
-/// intermediate-path-component limitation, a shared v2 item for both call sites).
+/// see that function's doc comment. Audio import uses the same anchored publication layer.
 @MainActor
 public func bindEventToManifest(
     event: Event,

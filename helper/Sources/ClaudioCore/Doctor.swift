@@ -755,21 +755,24 @@ extension PackIntegrityStatus {
         case .packNotFound(let packID):
             return DoctorCheckResult(
                 name: "pack", severity: .warning,
-                message: "⚠ 声音包 `\(packID)` 未找到（用户包与内置包均无）")
+                message: "⚠ 声音包 `\(terminalSafePackID(packID))` 未找到（用户包与内置包均无）")
         case .manifestUnreadable(let packID, let reason):
             return DoctorCheckResult(
                 name: "pack", severity: .warning,
-                message: "⚠ 声音包 `\(packID)` 的 manifest.json 解析失败：\(reason)")
+                message: "⚠ 声音包 `\(terminalSafePackID(packID))` 的 manifest.json 解析失败：\(reason)")
         case .noSupportedEvents(let packID):
             return DoctorCheckResult(
                 name: "pack", severity: .warning,
-                message: "⚠ 声音包 `\(packID)` 没有声明任何当前支持的事件声音")
+                message: "⚠ 声音包 `\(terminalSafePackID(packID))` 没有声明任何当前支持的事件声音")
         case .incomplete(let packID, let missingFiles):
             return DoctorCheckResult(
                 name: "pack", severity: .warning,
-                message: "⚠ 声音包 `\(packID)` 缺少音频文件：\(missingFiles.joined(separator: ", "))")
+                message:
+                    "⚠ 声音包 `\(terminalSafePackID(packID))` 缺少音频文件：\(missingFiles.joined(separator: ", "))"
+            )
         case .complete(let packID, let events):
-            let message = "✓ 声音包 `\(packID)` 完整（\(events.joined(separator: ", "))）"
+            let message =
+                "✓ 声音包 `\(terminalSafePackID(packID))` 完整（\(events.joined(separator: ", "))）"
             return DoctorCheckResult(
                 name: "pack", severity: .ok,
                 message: message)

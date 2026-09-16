@@ -38,7 +38,8 @@ func runConfigFileTransactionSuites() {
                 ((json["trust"] as? [String: Any])?["opaque"] as? String) == "leave-me",
                 "不透明 trust 数据必须保留")
             let groups = ((json["hooks"] as? [String: Any])?["Stop"] as? [[String: Any]]) ?? []
-            expect(groups.compactMap { $0["matcher"] as? String } == ["first", "second"], "数组顺序必须保留")
+            expect(
+                groups.compactMap { $0["matcher"] as? String } == ["first", "second"], "数组顺序必须保留")
 
             let firstBackup = try? Data(contentsOf: backup)
             _ = transaction.update { root in
@@ -62,12 +63,13 @@ func runConfigFileTransactionSuites() {
                     [.posixPermissions: mode], ofItemAtPath: file.path)
                 let transaction = ConfigFileTransaction(
                     file: file, lockFile: lock, backupFile: backup)
-                let result: Result<ConfigFileTransactionReport<String>, ConfigFileTransactionError> =
-                    transaction.update { root in
-                        var next = root
-                        next["changed"] = true
-                        return .replace(next, "typed")
-                    }
+                let result:
+                    Result<ConfigFileTransactionReport<String>, ConfigFileTransactionError> =
+                        transaction.update { root in
+                            var next = root
+                            next["changed"] = true
+                            return .replace(next, "typed")
+                        }
                 guard case .success(let report) = result else {
                     expect(false, "mode \(String(mode, radix: 8)) typed 写入必须成功，got \(result)")
                     continue
@@ -76,8 +78,12 @@ func runConfigFileTransactionSuites() {
                 expect(
                     report.backup == .created(path: backup.path),
                     "首次真实写必须报告 created，got \(report.backup)")
-                expect(transactionPermissions(at: backup) == mode, "备份必须继承 mode \(String(mode, radix: 8))")
-                expect(transactionPermissions(at: file) == mode, "目标也必须保留 mode \(String(mode, radix: 8))")
+                expect(
+                    transactionPermissions(at: backup) == mode,
+                    "备份必须继承 mode \(String(mode, radix: 8))")
+                expect(
+                    transactionPermissions(at: file) == mode,
+                    "目标也必须保留 mode \(String(mode, radix: 8))")
 
                 let preservedBytes = try! Data(contentsOf: backup)
                 let second: Result<ConfigFileTransactionReport<Int>, ConfigFileTransactionError> =
@@ -89,7 +95,8 @@ func runConfigFileTransactionSuites() {
                 expect(
                     second.map(\.backup) == .success(.preservedExisting(path: backup.path)),
                     "已有正规备份必须报告 preservedExisting，got \(second)")
-                expect((try? Data(contentsOf: backup)) == preservedBytes, "preservedExisting 不得覆盖原备份")
+                expect(
+                    (try? Data(contentsOf: backup)) == preservedBytes, "preservedExisting 不得覆盖原备份")
             }
 
             let fresh = directory.appendingPathComponent("fresh.json")
@@ -98,12 +105,13 @@ func runConfigFileTransactionSuites() {
                 file: fresh,
                 lockFile: directory.appendingPathComponent("fresh.lock"),
                 backupFile: freshBackup)
-            let freshResult: Result<ConfigFileTransactionReport<String>, ConfigFileTransactionError> =
-                freshTransaction.update { root in
-                    var next = root
-                    next["fresh"] = true
-                    return .replace(next, "fresh")
-                }
+            let freshResult:
+                Result<ConfigFileTransactionReport<String>, ConfigFileTransactionError> =
+                    freshTransaction.update { root in
+                        var next = root
+                        next["fresh"] = true
+                        return .replace(next, "fresh")
+                    }
             expect(
                 freshResult.map(\.backup) == .success(.notNeeded)
                     && !FileManager.default.fileExists(atPath: freshBackup.path),
@@ -128,7 +136,8 @@ func runConfigFileTransactionSuites() {
                         at: backup,
                         pointingTo: directory.appendingPathComponent("backup-target"))
                 case "directory":
-                    try! FileManager.default.createDirectory(at: backup, withIntermediateDirectories: false)
+                    try! FileManager.default.createDirectory(
+                        at: backup, withIntermediateDirectories: false)
                 default:
                     makeFIFO(at: backup)
                 }
@@ -196,7 +205,8 @@ func runConfigFileTransactionSuites() {
                 } == .success(.written),
                 "允许的 dotfiles symlink 必须能更新")
             let attributes = try! FileManager.default.attributesOfItem(atPath: link.path)
-            expect(attributes[.type] as? FileAttributeType == .typeSymbolicLink, "写后 symlink 节点必须仍在")
+            expect(
+                attributes[.type] as? FileAttributeType == .typeSymbolicLink, "写后 symlink 节点必须仍在")
             let json = readTransactionJSONObject(at: target)
             expect((json["third_party"] as? Bool) == true, "目标中的第三方键必须保留")
             expect((json["claudio"] as? Bool) == true, "更新必须落到 symlink 目标")
@@ -370,7 +380,8 @@ func runConfigFileTransactionSuites() {
                     return .replace(next)
                 },
                 betweenReadAndWrite: {
-                    try! FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+                    try! FileManager.default.createDirectory(
+                        at: file, withIntermediateDirectories: false)
                 })
             expect(
                 resultForConcurrentUnreadable
@@ -381,6 +392,28 @@ func runConfigFileTransactionSuites() {
                 FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory)
                     && isDirectory.boolValue,
                 "CAS 失败后外部创建的目录必须原样存活")
+        }
+    }
+
+    suite("ConfigFileTransaction：备份前冲突不创建一次性备份") {
+        withTempDirectory { directory in
+            let file = directory.appendingPathComponent("hooks.json")
+            let lock = directory.appendingPathComponent("hooks.lock")
+            let backup = directory.appendingPathComponent("hooks.json.claudio.bak")
+            let original = Data("{\"owner\":\"before\"}".utf8)
+            let external = Data("{\"owner\":\"external\"}".utf8)
+            try! original.write(to: file)
+            let transaction = ConfigFileTransaction(file: file, lockFile: lock, backupFile: backup)
+            let result = transaction.update(
+                { root in
+                    var next = root
+                    next["claudio"] = true
+                    return .replace(next)
+                },
+                betweenReadAndWrite: { try! external.write(to: file) })
+            expect(result == .failure(.concurrentModification(path: file.path)), "早期冲突必须拒写")
+            expect((try? Data(contentsOf: file)) == external, "外部内容必须保留")
+            expect(!FileManager.default.fileExists(atPath: backup.path), "早期冲突不得创建备份")
         }
     }
 
@@ -417,6 +450,39 @@ func runConfigFileTransactionSuites() {
             expect(
                 (try? Data(contentsOf: backup)) == original,
                 "一次性备份即使已发布也只能保存事务最初读取的原字节")
+        }
+    }
+
+    suite("ConfigFileTransaction：备份发布后目标被删除，最终交换不能复活旧配置") {
+        withTempDirectory { directory in
+            let file = directory.appendingPathComponent("settings.json")
+            let backup = directory.appendingPathComponent("settings.json.claudio.bak")
+            let original = Data("{\"owner\":\"before\"}".utf8)
+            try! original.write(to: file)
+            let transaction = ConfigFileTransaction(
+                file: file, lockFile: directory.appendingPathComponent("settings.lock"),
+                backupFile: backup)
+            let result = transaction.update(
+                { root in
+                    var next = root
+                    next["claudio"] = true
+                    return .replace(next)
+                }, betweenReadAndWrite: nil,
+                beforeFinalPublish: { try! FileManager.default.removeItem(at: file) })
+            expect(
+                result == .failure(.concurrentModification(path: file.path)),
+                "deleted target must abort after staging, got \(result)")
+            expect(
+                !FileManager.default.fileExists(atPath: file.path),
+                "deleted config must not be resurrected")
+            expect(
+                (try? Data(contentsOf: backup)) == original,
+                "published backup must retain the original content")
+            let entries =
+                (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+            expect(
+                !entries.contains(where: { $0.hasPrefix(".claudio-stage-") }),
+                "failed final publication must clean its own staging file")
         }
     }
 
@@ -571,20 +637,21 @@ private func transactionPermissions(at url: URL) -> Int? {
     return value.intValue
 }
 
-private extension Result where Success == ConfigFileTransactionOutcome, Failure == ConfigFileTransactionError {
-    var failure: ConfigFileTransactionError? {
+extension Result
+where Success == ConfigFileTransactionOutcome, Failure == ConfigFileTransactionError {
+    fileprivate var failure: ConfigFileTransactionError? {
         guard case .failure(let error) = self else { return nil }
         return error
     }
 }
 
-private extension ConfigFileTransactionError {
-    var isParseFailure: Bool {
+extension ConfigFileTransactionError {
+    fileprivate var isParseFailure: Bool {
         if case .parseFailure = self { return true }
         return false
     }
 
-    var isMalformedTopLevel: Bool {
+    fileprivate var isMalformedTopLevel: Bool {
         if case .malformedTopLevel = self { return true }
         return false
     }

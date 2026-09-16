@@ -71,6 +71,11 @@ private func repoRoot(file: StaticString = #filePath) -> URL {
 // memory 里 `fence-polarity-and-self-recurrence` 那条的第八次应验，照例复发在「自称把探针升成围栏」
 // 的那一刀上。改这个文件的人：先读这一段，再决定你要不要相信它挡得住你正在写的东西。
 //
+// 2026-09-16 补充：上面的两条逃逸描述的是旧的**逐文件**判定。下面新增的有限调用图从原语与其
+// 调用者出发，跨文件追踪可解析的函数调用，并拒绝无归属的非 func 原语调用及公开闭包导出私有
+// 写者；对应合成 fixture 已变红。它仍不解析任意 Swift 调用形状、动态派发或间接文件 I/O，
+// 所以整台机器继续按有限源代码探针陈述，不称为完整写入证明。
+//
 // **另一条仍然诚实的限度**：自证覆盖的是这个函数**里面**。消费边（把 findings 变成红）已经下沉进
 // `enforceManifestConcurrencyFence` 并有端到端自证 + 接线自证（`36fce57` 的 P1 之三），但「有人另写一个
 // 阉割过的入口并改接线」这类改法，最终仍然靠 code review 兜。别把这段注释写成绝对的。
@@ -84,6 +89,11 @@ private struct ManifestFenceAudit {
     var enrolledSubpaths: [String] = []
     /// 违规 / 无从判定的诊断。空 = 全部清白。
     var findings: [String] = []
+}
+
+private struct ManifestSourceRecord {
+    let path: String
+    let code: String
 }
 
 /// 一个目录条目的**类型判定**结果。两个字段都是 `Bool?`，而 `nil` 一律读作**「判不出」**，
@@ -165,6 +175,7 @@ private func auditManifestConcurrencyFence(
     readEntryKind: EntryKindReader = realEntryKind
 ) -> ManifestFenceAudit {
     var audit = ManifestFenceAudit()
+    var sourceRecords: [ManifestSourceRecord] = []
     let basePath = root.standardizedFileURL.path
     // 与 ``realEntryKind`` 读的键同一份 —— 见 `fenceResourceKeys` 头上那段（两份会漂移出假红）。
     let resourceKeys = fenceResourceKeys
@@ -300,6 +311,8 @@ private func auditManifestConcurrencyFence(
         }
 
         let scanned = strippingComments(text)
+        sourceRecords.append(
+            ManifestSourceRecord(path: display(relative), code: scanned.codeWithoutStringLiterals))
         // ⚠️ 这条**必须排在纳入闸门之前**，顺序不是随便写的。
         //
         // 纳入闸门读的是 `scanned.code` —— 正是这条检查要去验证其可信度的那个东西。排在闸门之后，
@@ -547,7 +560,199 @@ private func auditManifestConcurrencyFence(
 
     audit.enumeratedSubpaths.sort()
     audit.enrolledSubpaths.sort()
+    audit.findings.append(contentsOf: manifestReferenceFindings(in: sourceRecords))
     return audit
+}
+
+/// A deliberately finite declaration and call model. It follows unqualified calls from every
+/// primitive declaration/caller across the whole scanned target. Unknown ownership of a direct
+/// primitive call is a finding, and an exported closure cannot launder a private writer. This
+/// complements the older per-file checks; it does not claim to understand arbitrary Swift.
+private struct ManifestFunctionBlock {
+    let path: String
+    let name: String
+    let body: String
+    let bodyRange: NSRange
+    let header: String
+
+    var isMainActor: Bool { header.contains("@MainActor") }
+    var isPublic: Bool {
+        header.range(of: #"\b(?:public|open)\b"#, options: .regularExpression) != nil
+    }
+    var isPrivate: Bool {
+        header.range(of: #"\b(?:private|fileprivate)\b"#, options: .regularExpression) != nil
+    }
+}
+
+private func manifestMatches(_ pattern: String, in text: String) -> [NSTextCheckingResult] {
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+    return regex.matches(in: text, range: NSRange(location: 0, length: (text as NSString).length))
+}
+
+private func manifestClosingBrace(in code: NSString, from opening: Int) -> Int? {
+    var depth = 0
+    for index in opening..<code.length {
+        switch code.character(at: index) {
+        case 123: depth += 1  // {
+        case 125:
+            depth -= 1  // }
+            if depth == 0 { return index }
+        default: break
+        }
+    }
+    return nil
+}
+
+private func manifestHeader(in code: NSString, before location: Int) -> String {
+    let start = max(0, location - 240)
+    let prefix = code.substring(with: NSRange(location: start, length: location - start))
+    let tail =
+        prefix.split(whereSeparator: { $0 == "{" || $0 == "}" || $0 == ";" })
+        .last.map(String.init) ?? prefix
+    // Declarations in the production target put attributes next to their declaration. A blank
+    // line ends that run so an attribute on the previous declaration cannot bless this one.
+    return tail.components(separatedBy: "\n\n").last ?? tail
+}
+
+private func manifestFunctionBlocks(in record: ManifestSourceRecord) -> [ManifestFunctionBlock] {
+    let code = record.code as NSString
+    let declarations = manifestMatches(#"\bfunc\s+([A-Za-z_][A-Za-z0-9_]*)\s*\("#, in: record.code)
+    return declarations.compactMap { declaration in
+        let name = code.substring(with: declaration.range(at: 1))
+        var parens = 0
+        var opening: Int?
+        for index in declaration.range.location..<code.length {
+            switch code.character(at: index) {
+            case 40: parens += 1  // (
+            case 41: parens -= 1  // )
+            case 123 where parens == 0:
+                opening = index
+            case 59 where parens == 0:
+                return nil  // protocol requirement without a body
+            default: break
+            }
+            if opening != nil { break }
+        }
+        guard let opening, let closing = manifestClosingBrace(in: code, from: opening) else {
+            return nil
+        }
+        let bodyRange = NSRange(location: opening + 1, length: closing - opening - 1)
+        return ManifestFunctionBlock(
+            path: record.path, name: name, body: code.substring(with: bodyRange),
+            bodyRange: bodyRange,
+            header: manifestHeader(in: code, before: declaration.range.location))
+    }
+}
+
+private func manifestReferenceFindings(in records: [ManifestSourceRecord]) -> [String] {
+    let functions = records.flatMap(manifestFunctionBlocks)
+    let byName = Dictionary(grouping: functions.indices, by: { functions[$0].name })
+    let primitiveCalls = #"\bmutateManifestJSON\s*\("#
+    let callPattern = #"(?<![.\w])([A-Za-z_][A-Za-z0-9_]*)\s*\("#
+    var findings: [String] = []
+    var reachable = Set<Int>()
+    var pending: [Int] = []
+
+    for index in functions.indices {
+        if functions[index].name == "mutateManifestJSON"
+            || !manifestMatches(primitiveCalls, in: functions[index].body).isEmpty
+        {
+            pending.append(index)
+        }
+    }
+    while let index = pending.popLast() {
+        guard reachable.insert(index).inserted else { continue }
+        let function = functions[index]
+        for call in manifestMatches(callPattern, in: function.body) {
+            let name = (function.body as NSString).substring(with: call.range(at: 1))
+            guard let candidates = byName[name] else { continue }
+            if candidates.count != 1 {
+                findings.append(
+                    "\(function.path) 的 manifest 调用链引用 `\(name)`，但 target 内有 "
+                        + "\(candidates.count) 个同名声明；有限模型无法解析目标，须明确消歧")
+                continue
+            }
+            pending.append(candidates[0])
+        }
+    }
+
+    // In the real target the primitive must reach the anchored disk publication before it
+    // returns. A refactor that merely schedules a future write cannot satisfy this witness.
+    if let primitives = byName["mutateManifestJSON"], primitives.count == 1,
+        !reachable.contains(where: {
+            !manifestMatches(#"\.publish\s*\("#, in: functions[$0].body).isEmpty
+        })
+    {
+        findings.append(
+            "manifest 原语的可解析调用链没有到达 AnchoredFileIO.publish；"
+                + "无法证明返回成功前已发布写入")
+    }
+
+    for index in reachable.sorted() {
+        let function = functions[index]
+        let hits = bannedConcurrencyTokens.filter {
+            function.body.contains($0) || function.header.contains($0)
+        }
+        if !hits.isEmpty {
+            findings.append(
+                "\(function.path) 的 manifest 跨文件调用链 `\(function.name)` 含并发构造："
+                    + hits.joined(separator: ", "))
+        }
+        if function.isPublic && !function.isMainActor {
+            findings.append(
+                "\(function.path) 的 manifest 调用链导出函数 `\(function.name)` 缺少 @MainActor")
+        }
+    }
+
+    // Every executable primitive invocation must belong to an indexed function body. A
+    // computed property, subscript, init/deinit, observer, accessor, or top-level closure is
+    // intentionally rejected until its isolation and entry route are explicitly modeled.
+    for record in records {
+        let code = record.code as NSString
+        for call in manifestMatches(primitiveCalls, in: record.code) {
+            let before = manifestHeader(in: code, before: call.range.location)
+            if before.range(of: #"\bfunc\s*$"#, options: .regularExpression) != nil {
+                continue  // declaration, not an executable invocation
+            }
+            let owned = functions.contains {
+                $0.path == record.path && NSLocationInRange(call.range.location, $0.bodyRange)
+            }
+            if !owned {
+                findings.append(
+                    "\(record.path) 的 `mutateManifestJSON` 位于非 func 可执行块；"
+                        + "计算属性、subscript、init/deinit、观察器、访问器或闭包的隔离与归属尚未建模，拒绝放行")
+            }
+        }
+    }
+
+    // A private helper is safe only while it remains file-local in fact. An exported closure
+    // property can carry it out of the file even though the helper's declaration is private.
+    for record in records {
+        let code = record.code as NSString
+        let properties = manifestMatches(
+            #"\bpublic\s+(?:let|var)\s+[A-Za-z_][A-Za-z0-9_]*[^\n{}]*?(?:=\s*)?\{"#,
+            in: record.code)
+        for property in properties {
+            let opening = property.range.location + property.range.length - 1
+            guard let closing = manifestClosingBrace(in: code, from: opening) else {
+                findings.append("\(record.path) 的公开闭包属性无法匹配可执行块，拒绝放行")
+                continue
+            }
+            let body = code.substring(
+                with: NSRange(location: opening + 1, length: closing - opening - 1))
+            let header = manifestHeader(in: code, before: property.range.location)
+            guard !header.contains("@MainActor") else { continue }
+            for index in reachable.sorted() where functions[index].isPrivate {
+                let name = NSRegularExpression.escapedPattern(for: functions[index].name)
+                if !manifestMatches("\\b\(name)\\s*\\(", in: body).isEmpty {
+                    findings.append(
+                        "\(record.path) 的公开闭包属性导出私有 manifest 写者 `\(functions[index].name)`，"
+                            + "但属性未标 @MainActor")
+                }
+            }
+        }
+    }
+    return findings
 }
 
 /// 跑一次围栏，**并且把每一条 finding 变成一次红**。返回审计产物供调用方再做覆盖范围断言。
@@ -1088,7 +1293,8 @@ private func exportedPublicFuncNames(in code: String) -> [String] {
     let pattern = "public\(publicFuncModifierRun)\(funcKeywordLexeme)\\s+([A-Za-z_][A-Za-z0-9_]*)"
     guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
     let text = code as NSString
-    return regex
+    return
+        regex
         .matches(in: code, range: NSRange(location: 0, length: text.length))
         .map { text.substring(with: $0.range(at: 1)) }
 }
@@ -1122,7 +1328,8 @@ private func fileLocalFuncNames(in code: String) -> [String] {
         "\\b(?:fileprivate|private)\\b\(publicFuncModifierRun)\(funcKeywordLexeme)\\s+([A-Za-z_][A-Za-z0-9_]*)"
     guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
     let text = code as NSString
-    return regex
+    return
+        regex
         .matches(in: code, range: NSRange(location: 0, length: text.length))
         .map { text.substring(with: $0.range(at: 1)) }
 }
@@ -1135,7 +1342,8 @@ private func allFuncDeclarationNames(in code: String) -> [String] {
     let pattern = "\(funcKeywordLexeme)\\s+([A-Za-z_][A-Za-z0-9_]*)"
     guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
     let text = code as NSString
-    return regex
+    return
+        regex
         .matches(in: code, range: NSRange(location: 0, length: text.length))
         .map { text.substring(with: $0.range(at: 1)) }
 }
@@ -1291,7 +1499,8 @@ private func mainActorIsolatedFuncNames(in code: String) -> [String] {
         "@MainActor\(publicFuncModifierRun)\(funcKeywordLexeme)\\s+([A-Za-z_][A-Za-z0-9_]*)"
     guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
     let text = code as NSString
-    return regex
+    return
+        regex
         .matches(in: code, range: NSRange(location: 0, length: text.length))
         .map { text.substring(with: $0.range(at: 1)) }
 }
@@ -1316,7 +1525,8 @@ private func missingMainActorIsolation(in scanned: StrippedSwiftSource)
     for name in exportedPublicFuncNames(in: source) { exportedCounts[name, default: 0] += 1 }
     var isolatedCounts: [String: Int] = [:]
     for name in mainActorIsolatedFuncNames(in: source) { isolatedCounts[name, default: 0] += 1 }
-    return exportedCounts
+    return
+        exportedCounts
         .compactMap { name, exported -> (name: String, exported: Int, isolated: Int)? in
             let isolated = isolatedCounts[name] ?? 0
             return isolated < exported ? (name, exported, isolated) : nil
@@ -1326,6 +1536,79 @@ private func missingMainActorIsolation(in scanned: StrippedSwiftSource)
 
 @MainActor
 func runSourceScannerSuites() {
+
+    suite("T3 有限调用图：跨文件调度、非 func 写入及公开闭包逃逸分别报错") {
+        withTempDirectory { root in
+            let scanned = root.appendingPathComponent("Sources")
+            let writer = scanned.appendingPathComponent("Writer.swift")
+            let helper = scanned.appendingPathComponent("Helper.swift")
+            writeFixture(
+                "@MainActor public func writer() { mutateManifestJSON(); pureHelper() }",
+                to: writer)
+            writeFixture("private func pureHelper() { _ = 1 }", to: helper)
+            let clean = auditManifestConcurrencyFence(under: scanned)
+            expect(clean.findings.isEmpty, "纯私有同步辅助函数应合法：\(clean.findings)")
+
+            let primitive = scanned.appendingPathComponent("Primitive.swift")
+            writeFixture("@MainActor public func mutateManifestJSON() { }", to: primitive)
+            let noWrite = auditManifestConcurrencyFence(under: scanned)
+            expect(
+                noWrite.findings.contains { $0.contains("没有到达 AnchoredFileIO.publish") },
+                "原语调用链不能只安排工作却不发布：\(noWrite.findings)")
+            try? FileManager.default.removeItem(at: primitive)
+            expect(!FileManager.default.fileExists(atPath: primitive.path), "fixture 原语必须被移除")
+
+            writeFixture("private func pureHelper() { Task.detached { _ = 1 } }", to: helper)
+            let crossFile = auditManifestConcurrencyFence(under: scanned)
+            expect(
+                crossFile.findings.contains {
+                    $0.contains("Helper.swift") && $0.contains("跨文件调用链")
+                },
+                "另一个文件调度异步工作必须经调用关系报错：\(crossFile.findings)")
+
+            writeFixture("private func pureHelper() { _ = 1 }", to: helper)
+            writeFixture(
+                "@MainActor public func writer() { mutateManifestJSON() }\n"
+                    + "public var trigger: Int { mutateManifestJSON(); return 1 }",
+                to: writer)
+            let property = auditManifestConcurrencyFence(under: scanned)
+            expect(
+                property.findings.contains {
+                    $0.contains("Writer.swift") && $0.contains("非 func 可执行块")
+                },
+                "计算属性写入点不能被 public func 的计数掩盖：\(property.findings)")
+
+            let otherBlocks = [
+                "public struct Probe { public subscript(i: Int) -> Int { mutateManifestJSON(); return 0 } }",
+                "public final class Probe { public init() { mutateManifestJSON() } }",
+                "public final class Probe { deinit { mutateManifestJSON() } }",
+                "public var trigger: Int = 0 { didSet { mutateManifestJSON() } }",
+                "public var trigger: Int { _read { mutateManifestJSON(); yield 0 } }",
+                "public let trigger = { mutateManifestJSON() }",
+            ]
+            for block in otherBlocks {
+                writeFixture(
+                    "@MainActor public func writer() { mutateManifestJSON() }\n" + block,
+                    to: writer)
+                let result = auditManifestConcurrencyFence(under: scanned)
+                expect(
+                    result.findings.contains { $0.contains("非 func 可执行块") },
+                    "非 func 写入形状须拒绝，fixture=\(block)，findings=\(result.findings)")
+            }
+
+            writeFixture(
+                "@MainActor public func writer() { mutateManifestJSON() }\n"
+                    + "private func privateFlush() { mutateManifestJSON() }\n"
+                    + "public let escapeHatch: () -> Void = { privateFlush() }",
+                to: writer)
+            let escaped = auditManifestConcurrencyFence(under: scanned)
+            expect(
+                escaped.findings.contains {
+                    $0.contains("Writer.swift") && $0.contains("公开闭包属性导出私有")
+                },
+                "private 写者经公开闭包导出必须报错：\(escaped.findings)")
+        }
+    }
 
     suite("扫描器：字符串字面量里的 `//` 不是注释起点（be332ff 那条恒真守卫真正想守的东西）") {
         // 这**就是** `be332ff` 的元断言想拦、却因为自身恒真而拦不住的那一行输入。
@@ -1633,6 +1916,21 @@ func runSourceScannerSuites() {
                 + "得到：\(scanned.unmodeledConstructs)")
     }
 
+    suite("扫描器：裸 regex 与除法分开，无法判别时显式记账") {
+        let regex = strippingComments(
+            #"let r = /[a/b]\/c/; _ = write(lockFile: ClaudioPaths.playLockFile)"#)
+        expect(regex.unmodeledConstructs.isEmpty, "可识别裸 regex 不应假红")
+        expect(regex.code.contains("playLockFile"), "regex 后面的代码必须保留")
+        expect(!regex.codeWithoutStringLiterals.contains("[a/b]"), "regex 内容不得伪装成代码")
+        let division = strippingComments("let quotient = numerator / denominator")
+        expect(division.unmodeledConstructs.isEmpty, "普通除法不应假红")
+        expect(division.code.contains("numerator / denominator"), "除法代码必须保留")
+        let ambiguous = strippingComments("let r = /unterminated")
+        expect(
+            ambiguous.unmodeledConstructs.contains("ambiguous bare regex or division"),
+            "无法判别时必须阻断负向结构分析")
+    }
+
     suite("扫描器：`hasPrefix(\"#\")` **不是** raw string（守卫必须位置感知，否则它自己会假红）") {
         // 这条不是洁癖，它挡的是一整类「守卫因为无害改动而红 → 被下一个人删掉 → 洞原样回来」：
         // `ClaudioColorHex.swift` / `ContrastRatio.swift` 里真的有 `hasPrefix("#")`，
@@ -1678,7 +1976,8 @@ func runSourceScannerSuites() {
             "单行字符串里撞见**裸换行**，在合法 Swift 里不可能 —— 出现了就说明状态机已经被带偏。"
                 + "得到：\(unmodeled(unterminatedString))")
 
-        let unterminatedMultiline = "let x = \"\"\"\n没关的多行串\n_ = write(lockFile: ClaudioPaths.playLockFile)\n"
+        let unterminatedMultiline =
+            "let x = \"\"\"\n没关的多行串\n_ = write(lockFile: ClaudioPaths.playLockFile)\n"
         expect(
             !unmodeled(unterminatedMultiline).isEmpty,
             "多行字符串没闭合 = 文件剩下的部分被整份当成字符串内容 —— 那份 `code` 不再可信。"
@@ -1781,35 +2080,47 @@ func runSourceScannerSuites() {
         // 也照样绿 —— 那正是「围栏看起来在，其实只剩一根柱子」的形状。
         let alias = "typealias WidgetAlias = Widget\nlet a = WidgetAlias(lock: x)"
         expect(
-            unmodeledConstructionShapes(of: "Widget", in: alias).contains { $0.contains("typealias") },
+            unmodeledConstructionShapes(of: "Widget", in: alias).contains {
+                $0.contains("typealias")
+            },
             "`typealias` 必须记一笔 —— 别名之后的构造 `callArguments(of: \"Widget\", …)` 永远认不出，"
                 + "而这正是 `/codex review 37745f2` P1 用来让真实构造隐身的那一手。实得 "
                 + "\(unmodeledConstructionShapes(of: "Widget", in: alias))")
 
         let conditional = "#if DEBUG\nlet a = Widget(lock: x)\n#endif"
         expect(
-            unmodeledConstructionShapes(of: "Widget", in: conditional).contains { $0.contains("条件编译") },
+            unmodeledConstructionShapes(of: "Widget", in: conditional).contains {
+                $0.contains("条件编译")
+            },
             "`#if` 必须记一笔 —— 非活跃分支里的构造点与活跃的完全同形，会替真实构造喂饱"
                 + "「正好 N 处」那类断言。实得 \(unmodeledConstructionShapes(of: "Widget", in: conditional))")
 
         let contextual = "let a: Widget = .init(lock: x)"
         expect(
-            unmodeledConstructionShapes(of: "Widget", in: contextual).contains { $0.contains(".init(") },
+            unmodeledConstructionShapes(of: "Widget", in: contextual).contains {
+                $0.contains(".init(")
+            },
             "上下文推断的 `.init(` 必须记一笔 —— 它构造的可能正是 `Widget`，而扫描器无从判定，"
-                + "`callArguments` 会漏掉这一处。实得 \(unmodeledConstructionShapes(of: "Widget", in: contextual))")
+                + "`callArguments` 会漏掉这一处。实得 \(unmodeledConstructionShapes(of: "Widget", in: contextual))"
+        )
 
         let argumentPosition = "perform(environment: .init(lock: x))"
         expect(
-            unmodeledConstructionShapes(of: "Widget", in: argumentPosition).contains { $0.contains(".init(") },
+            unmodeledConstructionShapes(of: "Widget", in: argumentPosition).contains {
+                $0.contains(".init(")
+            },
             "**实参位置**的上下文 `.init(` 也必须记一笔 —— 它与上一条是两种不同的语法位置，"
-                + "只钉「`= .init(`」那一种会漏掉它。实得 \(unmodeledConstructionShapes(of: "Widget", in: argumentPosition))")
+                + "只钉「`= .init(`」那一种会漏掉它。实得 \(unmodeledConstructionShapes(of: "Widget", in: argumentPosition))"
+        )
 
         // ↓ 以下两条是 `/review d7084be` 补的（`/codex review d7084be` P1 + 六路独立命中同一处）。
         //   上一版这里是硬子串 `.init(`，两种形状同时漏网，而 doc 声称残余「只剩 typealias」。
 
         let spacedContextual = "let a: Widget = .init (lock: x)"
         expect(
-            unmodeledConstructionShapes(of: "Widget", in: spacedContextual).contains { $0.contains(".init(") },
+            unmodeledConstructionShapes(of: "Widget", in: spacedContextual).contains {
+                $0.contains(".init(")
+            },
             "`.init` 与 `(` 之间**带空格**的上下文构造必须记一笔 —— `callArguments` 已经认得 "
                 + "`head .init (` 这一形式（上面那条四写法 suite 钉着），围栏却只找逐字 `.init(`："
                 + "**两个读模型不同轴**，`= .init (…)` 正好掉进缝里，两边都不管。"
@@ -1823,7 +2134,8 @@ func runSourceScannerSuites() {
             "**未应用**的初始化器引用必须记一笔 —— 构造真的发生了，只是发生在 `make` 这个名字底下，"
                 + "`callArguments` 认得的四种写法一种都对不上（`Widget.init` 后面没有 `(`）。这是上一版"
                 + "最大的洞：另留一处完全合规的死代码诱饵，就能同时喂饱 `count == 1` 与逐项实参相等，"
-                + "而真实构造一眼都没被看过。实得 \(unmodeledConstructionShapes(of: "Widget", in: unappliedReference))")
+                + "而真实构造一眼都没被看过。实得 \(unmodeledConstructionShapes(of: "Widget", in: unappliedReference))"
+        )
 
         // ↓ 关键字前缀那一类（`/review d7084be` 红队 P1，本轮探针七种形状全实测）。
         //   左轴若只问「末字符是不是标识符字符」，`return` 的 `n`、`try` 的 `y`、`await` 的 `t`、
@@ -1831,12 +2143,17 @@ func runSourceScannerSuites() {
         for keyword in ["return", "try", "await", "throw"] {
             let tight = "\(keyword) .init(lock: x)"
             expect(
-                unmodeledConstructionShapes(of: "Widget", in: tight).contains { $0.contains(".init(") },
+                unmodeledConstructionShapes(of: "Widget", in: tight).contains {
+                    $0.contains(".init(")
+                },
                 "`\(keyword) .init(` 必须记一笔 —— 关键字不是类型名，这一处是**上下文推断**的构造，"
-                    + "`callArguments` 认不出它。实得 \(unmodeledConstructionShapes(of: "Widget", in: tight))")
+                    + "`callArguments` 认不出它。实得 \(unmodeledConstructionShapes(of: "Widget", in: tight))"
+            )
             let spaced = "\(keyword) .init (lock: x)"
             expect(
-                unmodeledConstructionShapes(of: "Widget", in: spaced).contains { $0.contains(".init(") },
+                unmodeledConstructionShapes(of: "Widget", in: spaced).contains {
+                    $0.contains(".init(")
+                },
                 "`\(keyword) .init (`（带空格）同样必须记一笔 —— 与上一条是同一根轴的两种写法。"
                     + "实得 \(unmodeledConstructionShapes(of: "Widget", in: spaced))")
         }
@@ -1846,9 +2163,12 @@ func runSourceScannerSuites() {
         // 这一类才落在记账那一侧。
         let metatypeVariable = "let f = Widget.self\nlet a = f.init(lock: x)"
         expect(
-            unmodeledConstructionShapes(of: "Widget", in: metatypeVariable).contains { $0.contains(".init(") },
+            unmodeledConstructionShapes(of: "Widget", in: metatypeVariable).contains {
+                $0.contains(".init(")
+            },
             "元类型变量上的 `f.init(` 必须记一笔 —— 它构造的正是 `Widget`，而 `callArguments` 认得的"
-                + "四种写法一种都对不上。实得 \(unmodeledConstructionShapes(of: "Widget", in: metatypeVariable))")
+                + "四种写法一种都对不上。实得 \(unmodeledConstructionShapes(of: "Widget", in: metatypeVariable))"
+        )
 
         let referenceAsArgument = "let all = ids.map(Widget.init)"
         expect(
@@ -1954,7 +2274,8 @@ func runSourceScannerSuites() {
         //    ⚠️ 这条断言的分辨力**依赖 `/private/tmp` 真实存在**（macOS 上恒成立）—— 若它不存在，
         //    旧实现两侧都不剥，这条也会绿。如实记在这里，别当成平台无关的判据。
         let existingPrivateRoot = URL(fileURLWithPath: "/private/tmp")
-        let absentDescendant = existingPrivateRoot
+        let absentDescendant =
+            existingPrivateRoot
             .appendingPathComponent("claudio-isinside-absent-\(UUID().uuidString).lock")
         expect(
             isInside(absentDescendant, of: existingPrivateRoot),
@@ -1971,7 +2292,8 @@ func runSourceScannerSuites() {
         //    `resolvingSymlinksInPath()`（那会去碰文件系统，且对不存在的路径行为不一致）。
         let root = URL(fileURLWithPath: "/tmp/claudio-isinside-doc")
         expect(
-            !isInside(URL(fileURLWithPath: "/private/tmp/claudio-isinside-doc/packs.lock"), of: root),
+            !isInside(
+                URL(fileURLWithPath: "/private/tmp/claudio-isinside-doc/packs.lock"), of: root),
             "钉住「不跨 symlink 归一」这个**已知**边界：它今天恒假、方向是 fail-closed。这条不是"
                 + "在背书该行为，而是让「有人改成 resolvingSymlinksInPath」这件事当场可见")
     }
@@ -2006,7 +2328,8 @@ func runSourceScannerSuites() {
 
         // 插值 `\(…)` 里面是**代码**，不是内容 —— 清空字符串绝不能把它一起吃掉
         // （`/codex review 2f107b5` 那个 P1 的形状：一处藏在插值里的写调用永久隐身）。
-        let interp = strippingComments(##"log("wrote \(write(lockFile: ClaudioPaths.playLockFile)) ok")"##)
+        let interp = strippingComments(
+            ##"log("wrote \(write(lockFile: ClaudioPaths.playLockFile)) ok")"##)
         expect(
             interp.codeWithoutStringLiterals.contains("playLockFile"),
             "插值里的代码是代码，必须活着 —— 把它一起清空 = 藏在插值里的写调用永久隐身。"
@@ -2338,13 +2661,13 @@ func runSourceScannerSuites() {
             "`performManifestMutation` 在生产代码里必须恰好出现两次（一次私有声明、一次锁内调用），"
                 + "实得 \(bodyIdentifierCount) 次 —— 多一个调用点可能绕开 packs.lock，少一个说明上面的"
                 + "锁内调用已不再是实际读改写路径")
-        let loadCount = code.components(separatedBy: "loadPackManifestData(").count - 1
+        let loadCount = code.components(separatedBy: "anchored.read(").count - 1
         expect(
             loadCount == 1,
-            "`loadPackManifestData` 在 ManifestBinding.swift 里必须只有读改写本体内那一次，实得 "
+            "目录 fd manifest 读取在 ManifestBinding.swift 里必须只有读改写本体内那一次，实得 "
                 + "\(loadCount) 次 —— 额外读取若落在锁外，两个写者仍能读到同一份旧 JSON")
         if let bodyStart = code.range(of: "private func performManifestMutation("),
-            let load = code.range(of: "loadPackManifestData(")
+            let load = code.range(of: "anchored.read(")
         {
             expect(
                 bodyStart.lowerBound < load.lowerBound,
@@ -2575,9 +2898,11 @@ func runSourceScannerSuites() {
                 + "喊（它们各自都对「清单缩水」恒真）。加向量不受这条限制，删这一根轴才会红。")
 
         var executedVectors: [String] = []
+        var completedVectorCheckDeltas: [Int] = []
         for vector in fenceProofVectors {
             let (vectorLabel, vectorPathPrefix) = (vector.label, vector.pathPrefix)
             withTempDirectory { root in
+                let vectorChecksBefore = totalChecks
                 let scanned = root.appendingPathComponent("scanned")
                 // 三个脏写者、三种不同的违规形态，且分布在三层目录 —— 保证 finding 不止一条，
                 // 「只报第一条」这类变异才有分辨力。
@@ -2625,6 +2950,18 @@ func runSourceScannerSuites() {
                 let landedChecks = totalChecks
                 failures = failuresBefore
                 totalChecks = checksBefore
+                expect(
+                    audit.enumeratedSubpaths.contains("ClaudioGUICore/DirtyTwo.swift")
+                        && audit.enumeratedSubpaths.contains("ClaudioGUI/Deep/DirtyThree.swift"),
+                    "【向量：\(vectorLabel)】消费自证必须覆盖与生产树同形的两个嵌套 target 路径")
+                expect(
+                    audit.findings.contains {
+                        $0.contains("DirtyTwo.swift") && $0.contains("没有 @MainActor 隔离")
+                    }
+                        && audit.findings.contains {
+                            $0.contains("DirtyThree.swift") && $0.contains("命中 token：Task")
+                        },
+                    "【向量：\(vectorLabel)】三个脏 fixture 必须包含隔离缺失和异步调度两种独立威胁")
 
                 expect(
                     landedFailures == failuresBefore && landedChecks == checksBefore,
@@ -2665,6 +3002,7 @@ func runSourceScannerSuites() {
                         + "在数的东西。【向量：\(vectorLabel)】")
 
                 // 这一圈真的跑到底了（必须是块的最后一行）。
+                completedVectorCheckDeltas.append(totalChecks - vectorChecksBefore)
                 executedVectors.append(vector.pathPrefix)
             }
         }
@@ -2674,6 +3012,10 @@ func runSourceScannerSuites() {
             "实际跑过的实参向量与清单对不上（跑过 \(executedVectors)，清单 "
                 + "\(fenceProofVectors.map(\.pathPrefix))）—— 循环被 `.prefix` / `.filter` 掉了，或者"
                 + "循环体在某个向量上提前退出了。少跑一圈 = 那个向量下的消费从没被举证过。")
+        expect(
+            completedVectorCheckDeltas.count == fenceProofVectors.count
+                && completedVectorCheckDeltas.allSatisfy { $0 >= 5 },
+            "每个消费自证向量都必须走过多条关键断言后才算执行完成，实得 \(completedVectorCheckDeltas)")
     }
 
     // 消费边的**接线**自证（同一条 P1 的另一半）。
@@ -2895,7 +3237,8 @@ func runSourceScannerSuites() {
                 //    `.skipsHiddenFiles` 会跳过它 —— 那正是本轮拆掉那个 option 的理由。
                 var hidden = scanned.appendingPathComponent("HiddenFlagWriter.swift")
                 writeFixture(
-                    "@MainActor public func hiddenFlagWriter() async { mutateManifestJSON() }", to: hidden)
+                    "@MainActor public func hiddenFlagWriter() async { mutateManifestJSON() }",
+                    to: hidden)
                 var hiddenValues = URLResourceValues()
                 hiddenValues.isHidden = true
                 let hiddenFlagSet = (try? hidden.setResourceValues(hiddenValues)) != nil
@@ -3212,9 +3555,7 @@ func runSourceScannerSuites() {
                 // 九份不属于任何 shape table 的 fixture 也有承重字节。只断后面的 finding 会允许
                 // fixture 被改成另一种恰好触发同一句诊断的形状，测试仍绿、原来的读模型轴却已消失。
                 // 这里直接回读 production audit 刚扫描过的那份磁盘字节，并逐项钉住威胁本体。
-                let tableExternalFixtureWitnesses: [
-                    (path: String, requiredFragments: [String])
-                ] = [
+                let tableExternalFixtureWitnesses: [(path: String, requiredFragments: [String])] = [
                     (
                         "NoPublicFunc.swift",
                         ["@MainActor func internalWriter()", "mutateManifestJSON()"]
@@ -3306,7 +3647,8 @@ func runSourceScannerSuites() {
                 ) {
                     expect(
                         audit.findings.contains {
-                            $0.hasPrefix("\(vector.pathPrefix)Lock/\(fixture) ") && $0.contains(needle)
+                            $0.hasPrefix("\(vector.pathPrefix)Lock/\(fixture) ")
+                                && $0.contains(needle)
                         },
                         "【向量：\(vector.label)】第四条腿（锁转发）没有对 Lock/\(fixture) 开火，或诊断没有"
                             + "以本向量的 pathPrefix（\"\(vector.pathPrefix)\"）打头。\(why) "
@@ -3809,6 +4151,19 @@ func runSourceScannerSuites() {
                         + "字符串内容的 `code`，散文与真注解同形。姊妹腿 `bannedConcurrencyHits` 早就为同一个"
                         + "理由读 `codeWithoutStringLiterals`，这条腿必须跟上。实际诊断：\(audit.findings)")
 
+                let decoyPath = scanned.appendingPathComponent("DecoyString.swift")
+                let decoySource = (try? String(contentsOf: decoyPath, encoding: .utf8)) ?? ""
+                let decoyScan = strippingComments(decoySource)
+                let byteContaminated = StrippedSwiftSource(
+                    code: decoyScan.code,
+                    codeWithoutStringLiterals: decoyScan.code,
+                    unmodeledConstructs: decoyScan.unmodeledConstructs)
+                expect(
+                    decoySource.contains("@MainActor func decoyWriter")
+                        && !decoySource.contains("@MainActor public func decoyWriter")
+                        && missingMainActorIsolation(in: byteContaminated).isEmpty,
+                    "DecoyString 必须让错误地读取字符串内容的隔离判定漏报，才有分辨 M12 的能力")
+
                 expect(
                     audit.findings.contains {
                         $0.contains("Overload.swift") && $0.contains("`overloaded`")
@@ -3834,7 +4189,12 @@ func runSourceScannerSuites() {
                 }
 
                 expect(
-                    !audit.enumeratedSubpaths.contains(where: { $0.contains(".DottedWriter.swift") }),
+                    FileManager.default.fileExists(
+                        atPath: scanned.appendingPathComponent(".DottedWriter.swift").path),
+                    "前导点负控必须确实存在；改名或写入失败不能让负断言空集通过")
+                expect(
+                    !audit.enumeratedSubpaths.contains(where: { $0.contains(".DottedWriter.swift") }
+                    ),
                     "点开头的文件被纳入了 —— SwiftPM **不**编译它（实测：引用它的符号报 cannot find in "
                         + "scope），纳入它就是纯假红。实际枚举：\(audit.enumeratedSubpaths)")
 
@@ -4165,17 +4525,26 @@ func runSourceScannerSuites() {
                 "DispatchQueue", "DispatchQueue",
                 "@MainActor\npublic func writer() { DispatchQueue.main.async { _ = 1 } }"
             ),
-            ("Thread", "Thread", "@MainActor\npublic func writer() { Thread.detachNewThread { _ = 1 } }"),
+            (
+                "Thread", "Thread",
+                "@MainActor\npublic func writer() { Thread.detachNewThread { _ = 1 } }"
+            ),
             (
                 "OperationQueue", "OperationQueue",
                 "@MainActor\npublic func writer() { OperationQueue.main.addOperation { } }"
             ),
-            (".detached", ".detached", "@MainActor\npublic func writer() { let h = pool.detached; _ = h }"),
+            (
+                ".detached", ".detached",
+                "@MainActor\npublic func writer() { let h = pool.detached; _ = h }"
+            ),
             (
                 "withCheckedContinuation", "withCheckedContinuation",
                 "@MainActor\npublic func writer() { _ = withCheckedContinuation { c in c.resume() } }"
             ),
-            ("pthread", "pthread", "@MainActor\npublic func writer() { var t = pthread_t(); _ = t }"),
+            (
+                "pthread", "pthread",
+                "@MainActor\npublic func writer() { var t = pthread_t(); _ = t }"
+            ),
         ]
         for sample in dirtySamples {
             let scanned = strippingComments(sample.source)
@@ -4201,7 +4570,8 @@ func runSourceScannerSuites() {
             "并发 token 清单与脏 fixture 没配平 —— 每个 token 必须有一条手写 fixture 证明它真的"
                 + "会命中，否则那一项是没有任何控制的白名单条目。\n"
                 + "  只在清单里、没有 fixture：\(Set(bannedConcurrencyTokens).subtracting(dirtySamples.map(\.expected)).sorted())\n"
-                + "  只在 fixture 里、不在清单：\(Set(dirtySamples.map(\.expected)).subtracting(bannedConcurrencyTokens).sorted())")
+                + "  只在 fixture 里、不在清单：\(Set(dirtySamples.map(\.expected)).subtracting(bannedConcurrencyTokens).sorted())"
+        )
 
         // 空集正控（对照 @MainActor 那条腿的 `exported.isEmpty`）：判据不许恒命中。
         // 恒命中 = 真文件永远假红 → 下一个人把整条绊线删掉，洞比现在更大。

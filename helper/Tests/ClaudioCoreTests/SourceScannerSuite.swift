@@ -371,6 +371,21 @@ func runSourceScannerSuites() {
                 + "得到：\(scanned.unmodeledConstructs)")
     }
 
+    suite("扫描器：裸 regex 与除法分开，无法判别时显式记账") {
+        let regex = strippingComments(
+            #"let r = /[a/b]\/c/; _ = write(lockFile: ClaudioPaths.playLockFile)"#)
+        expect(regex.unmodeledConstructs.isEmpty, "可识别裸 regex 不应假红")
+        expect(regex.code.contains("playLockFile"), "regex 后面的代码必须保留")
+        expect(!regex.codeWithoutStringLiterals.contains("[a/b]"), "regex 内容不得伪装成代码")
+        let division = strippingComments("let quotient = numerator / denominator")
+        expect(division.unmodeledConstructs.isEmpty, "普通除法不应假红")
+        expect(division.code.contains("numerator / denominator"), "除法代码必须保留")
+        let ambiguous = strippingComments("let r = /unterminated")
+        expect(
+            ambiguous.unmodeledConstructs.contains("ambiguous bare regex or division"),
+            "无法判别时必须阻断负向结构分析")
+    }
+
     suite("扫描器：`hasPrefix(\"#\")` **不是** raw string（守卫必须位置感知，否则它自己会假红）") {
         // 这条不是洁癖，它挡的是一整类「守卫因为无害改动而红 → 被下一个人删掉 → 洞原样回来」：
         // `ClaudioColorHex.swift` / `ContrastRatio.swift` 里真的有 `hasPrefix("#")`，
@@ -416,7 +431,8 @@ func runSourceScannerSuites() {
             "单行字符串里撞见**裸换行**，在合法 Swift 里不可能 —— 出现了就说明状态机已经被带偏。"
                 + "得到：\(unmodeled(unterminatedString))")
 
-        let unterminatedMultiline = "let x = \"\"\"\n没关的多行串\n_ = write(lockFile: ClaudioPaths.playLockFile)\n"
+        let unterminatedMultiline =
+            "let x = \"\"\"\n没关的多行串\n_ = write(lockFile: ClaudioPaths.playLockFile)\n"
         expect(
             !unmodeled(unterminatedMultiline).isEmpty,
             "多行字符串没闭合 = 文件剩下的部分被整份当成字符串内容 —— 那份 `code` 不再可信。"
@@ -490,7 +506,8 @@ func runSourceScannerSuites() {
 
         // 插值 `\(…)` 里面是**代码**，不是内容 —— 清空字符串绝不能把它一起吃掉
         // （`/codex review 2f107b5` 那个 P1 的形状：一处藏在插值里的写调用永久隐身）。
-        let interp = strippingComments(##"log("wrote \(write(lockFile: ClaudioPaths.playLockFile)) ok")"##)
+        let interp = strippingComments(
+            ##"log("wrote \(write(lockFile: ClaudioPaths.playLockFile)) ok")"##)
         expect(
             interp.codeWithoutStringLiterals.contains("playLockFile"),
             "插值里的代码是代码，必须活着 —— 把它一起清空 = 藏在插值里的写调用永久隐身。"

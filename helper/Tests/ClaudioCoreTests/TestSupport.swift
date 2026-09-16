@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 // Shared fixture helpers for the dependency-free harness (see `main.swift`).
@@ -100,8 +101,9 @@ struct StrippedSwiftSource {
     ///
     /// 两类来源，性质完全不同，必须分清楚：
     ///
-    /// 1. **枚举出来的盲区** —— raw string（`#"…"#`）与扩展 regex 字面量（`#/…/#`）。两者都**能**
-    ///    含有裸 `//`，而扫描器不建模它们。按**词法位置**记：只有**代码位置**的 `#"` 才算，
+    /// 1. **枚举出来的盲区** —— raw string（`#"…"#`）、扩展 regex（`#/…/#`），以及
+    ///    无法可靠区分裸 regex 与除法的 `/`。这些构造能带偏结构扫描；按词法位置记账。
+    ///    只有**代码位置**的 `#"` 才算，
     ///    `hasPrefix("#")` 里的那个不算（`ClaudioColorHex.swift` / `ContrastRatio.swift` 里真有这
     ///    一行 —— 一条纯文本的 `#"` 守卫会在它们身上假红，然后被下一个人删掉，洞原样回来）。
     ///
@@ -158,6 +160,41 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
     }
     func note(_ construct: String) {
         if !unmodeled.contains(construct) { unmodeled.append(construct) }
+    }
+    func bareRegexMayStart() -> Bool {
+        let preceding = blanked.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let last = preceding.last else { return true }
+        if "=([{,:?!|&+-*%^~".contains(last) { return true }
+        let word = String(
+            preceding.reversed().prefix {
+                $0.isLetter || $0.isNumber || $0 == "_"
+            }.reversed())
+        return ["return", "throw", "case", "if", "while", "guard", "in", "try", "await"].contains(
+            word)
+    }
+    /// A conservative single-line bare regex reader. Character classes and escaped slashes
+    /// retain their contents; an unmatched candidate is recorded as unmodeled.
+    func bareRegexEnd() -> String.Index? {
+        var cursor = source.index(after: index)
+        var escaped = false
+        var inCharacterClass = false
+        while cursor < source.endIndex {
+            let scalar = source[cursor]
+            if scalar == "\n" { return nil }
+            if escaped {
+                escaped = false
+            } else if scalar == "\\" {
+                escaped = true
+            } else if scalar == "[" {
+                inCharacterClass = true
+            } else if scalar == "]" {
+                inCharacterClass = false
+            } else if scalar == "/" && !inCharacterClass {
+                return source.index(after: cursor)
+            }
+            cursor = source.index(after: cursor)
+        }
+        return nil
     }
     /// `\(` —— 插值表达式**是代码**，不是字符串内容。
     ///
@@ -234,6 +271,19 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
                 blockDepth = 1
                 advance(2)
                 continue
+            }
+            if character.unicodeScalars.first == "/" {
+                if character.unicodeScalars.count != 1 {
+                    note("ambiguous slash grapheme")
+                } else if bareRegexMayStart() {
+                    if let end = bareRegexEnd() {
+                        code += String(source[index..<end])
+                        blanked += "//"  // retain delimiters, never regex content as code
+                        index = end
+                        continue
+                    }
+                    note("ambiguous bare regex or division")
+                }
             }
             // 开引号是**代码位置**（它界定结构），所以它进 `blanked`；从下一个字符起才是「内容」。
             if character == "\"" { mode = .string }
@@ -799,4 +849,240 @@ func createSymlink(at linkURL: URL, pointingTo targetURL: URL) {
         (try? FileManager.default.destinationOfSymbolicLink(atPath: linkURL.path)) != nil,
         "createSymlink: no real symlink exists at \(linkURL.path) after creation — a test"
             + " relying on this fixture would silently not be testing a symlink escape at all")
+}
+private struct FileIdentity: Equatable {
+    let device: Int64
+    let inode: UInt64
+    let size: Int64
+    let modifiedSeconds: Int64
+    let modifiedNanoseconds: Int64
+    let attributesChangedSeconds: Int64
+    let attributesChangedNanoseconds: Int64
+
+    init(info: stat) {
+        device = Int64(info.st_dev)
+        inode = UInt64(info.st_ino)
+        size = Int64(info.st_size)
+        modifiedSeconds = Int64(info.st_mtimespec.tv_sec)
+        modifiedNanoseconds = Int64(info.st_mtimespec.tv_nsec)
+        attributesChangedSeconds = Int64(info.st_ctimespec.tv_sec)
+        attributesChangedNanoseconds = Int64(info.st_ctimespec.tv_nsec)
+    }
+}
+
+private enum FileInspection: Equatable {
+    case absent
+    case present(FileIdentity)
+    case failed(errno: Int32)
+
+    var isFailure: Bool {
+        if case .failed = self { return true }
+        return false
+    }
+}
+
+private struct FileWatchSnapshot: Equatable {
+    let linkEntry: FileInspection
+    let target: FileInspection
+}
+
+/// 写入观察的三态结果。无法完成必要的观察时必须显式失败，不能把未知当成未写入。
+enum FileWriteObservation: Equatable {
+    case untouched
+    case written
+    case inspectionFailed(String)
+}
+
+/// 从构造那一刻起，`file` 有没有被**写过** —— 哪怕它此刻的字节与构造那一刻逐字相同。
+/// 完整推理（含它不兜什么）见上面那节。
+final class FileWriteWatch {
+    /// 被观测的那条路径保留原始入口，分别用 `lstat(2)` 观察链接目录项、用 `stat(2)` 观察解析后的
+    /// 目标；这样既能捕捉替换链接本身，也能捕捉穿过链接写目标文件。
+    private let file: URL
+    /// 入口目录观察链接本身；目标目录观察解析后的目标节点。二者任一无法武装都必须 fail closed。
+    private let entryDirectory: URL
+    private let directoryDescriptor: Int32
+    private let targetDirectoryDescriptor: Int32
+    private let queue: Int32
+    private let snapshotBefore: FileWatchSnapshot
+    private let initialInspectionFailure: String?
+    private let forcedPollResult: Int32?
+    private var sawDirectoryEvent = false
+    private var observedInspectionFailure: String?
+
+    /// 必要目录 fd 与 kqueue 注册都成功了吗。每个调用点仍必须先断言它；构造或轮询失败时，
+    /// `observedWrite()` 返回 `.inspectionFailed`，不能被当作 `.untouched`。
+    let isArmed: Bool
+
+    init(watching file: URL, forcedPollResult: Int32? = nil) {
+        self.file = file
+        self.forcedPollResult = forcedPollResult
+        entryDirectory = file.deletingLastPathComponent().standardizedFileURL
+        let resolvedFile = file.standardizedFileURL.resolvingSymlinksInPath()
+        let resolvedTargetDirectory = Self.nearestExistingDirectory(
+            from: resolvedFile.deletingLastPathComponent())
+        let before = Self.snapshot(of: file)
+        snapshotBefore = before
+        var failure: String?
+        if resolvedTargetDirectory == nil {
+            failure = "无法找到配置目标目录"
+        } else if before.linkEntry.isFailure || before.target.isFailure {
+            failure = "无法检查配置链接入口或目标"
+        }
+
+        let kernelQueue = kqueue()
+        var entryDescriptor: Int32 = -1
+        var targetDescriptor: Int32 = -1
+        if kernelQueue < 0 {
+            failure = Self.errorMessage("无法创建 kqueue", errno: errno)
+        } else if failure == nil {
+            entryDescriptor = Self.registerDirectory(
+                entryDirectory, in: kernelQueue, failure: &failure)
+            if entryDescriptor >= 0, let resolvedTargetDirectory,
+                resolvedTargetDirectory.path != entryDirectory.path
+            {
+                targetDescriptor = Self.registerDirectory(
+                    resolvedTargetDirectory, in: kernelQueue, failure: &failure)
+            }
+        }
+        if failure != nil {
+            if entryDescriptor >= 0 { close(entryDescriptor) }
+            if targetDescriptor >= 0 { close(targetDescriptor) }
+            if kernelQueue >= 0 { close(kernelQueue) }
+            directoryDescriptor = -1
+            targetDirectoryDescriptor = -1
+            queue = -1
+        } else {
+            directoryDescriptor = entryDescriptor
+            targetDirectoryDescriptor = targetDescriptor
+            queue = kernelQueue
+        }
+        initialInspectionFailure = failure
+        isArmed = failure == nil
+    }
+
+    /// 构造之后，这个文件被写过吗？**幂等**：问几次答案都一样（见下面那段缓存）。
+    /// 任一必要观察失败都返回 `.inspectionFailed`，调用方不能把它当成 `.untouched`。
+    func observedWrite() -> FileWriteObservation {
+        if let initialInspectionFailure {
+            return .inspectionFailed(initialInspectionFailure)
+        }
+        if let observedInspectionFailure {
+            return .inspectionFailed(observedInspectionFailure)
+        }
+        if !sawDirectoryEvent {
+            if let forcedPollResult, forcedPollResult < 0 {
+                let message = Self.errorMessage(
+                    "轮询目录监听失败", errno: errno == 0 ? EIO : errno)
+                observedInspectionFailure = message
+                return .inspectionFailed(message)
+            }
+            var event = kevent()
+            var immediately = timespec(tv_sec: 0, tv_nsec: 0)
+            // `EV_CLEAR`：事件取一次就被内核清掉。**必须缓存**，否则第二次调用会返回 `false` ——
+            // 一条「问第二遍就翻供」的守卫，正是这里最不该出现的东西（今天每个调用点都只问一次，
+            // 所以这段缓存**没有任何断言在钉它** —— 除了「写观测器①」里那条刻意问两遍的断言）。
+            let pollResult: Int32
+            if let forcedPollResult {
+                pollResult = forcedPollResult
+            } else {
+                pollResult = kevent(queue, nil, 0, &event, 1, &immediately)
+            }
+            if pollResult < 0 {
+                let message = Self.errorMessage("轮询目录监听失败", errno: errno)
+                observedInspectionFailure = message
+                return .inspectionFailed(message)
+            }
+            sawDirectoryEvent = pollResult > 0
+        }
+        let snapshotAfter = Self.snapshot(of: file)
+        if snapshotAfter.linkEntry.isFailure || snapshotAfter.target.isFailure {
+            return .inspectionFailed("无法检查配置链接入口或目标")
+        }
+        return sawDirectoryEvent || snapshotAfter != snapshotBefore
+            ? .written
+            : .untouched
+    }
+
+    deinit {
+        if directoryDescriptor >= 0 { close(directoryDescriptor) }
+        if targetDirectoryDescriptor >= 0 { close(targetDirectoryDescriptor) }
+        if queue >= 0 { close(queue) }
+    }
+
+    private static func snapshot(of file: URL) -> FileWatchSnapshot {
+        FileWatchSnapshot(
+            linkEntry: inspect(file, followSymlink: false),
+            target: inspect(file, followSymlink: true))
+    }
+
+    private static func inspect(_ url: URL, followSymlink: Bool) -> FileInspection {
+        var info = stat()
+        let result = url.withUnsafeFileSystemRepresentation { pathPointer -> Int32 in
+            guard let pathPointer else {
+                errno = EINVAL
+                return -1
+            }
+            return followSymlink ? stat(pathPointer, &info) : lstat(pathPointer, &info)
+        }
+        guard result == 0 else {
+            let inspectionErrno = errno
+            return inspectionErrno == ENOENT
+                ? .absent
+                : .failed(errno: inspectionErrno)
+        }
+        return .present(FileIdentity(info: info))
+    }
+
+    private static func nearestExistingDirectory(from start: URL) -> URL? {
+        var candidate = start.standardizedFileURL
+        while true {
+            var info = stat()
+            let result = candidate.withUnsafeFileSystemRepresentation { pathPointer -> Int32 in
+                guard let pathPointer else {
+                    errno = EINVAL
+                    return -1
+                }
+                return stat(pathPointer, &info)
+            }
+            if result == 0 {
+                return (info.st_mode & S_IFMT) == S_IFDIR ? candidate : nil
+            }
+            let statErrno = errno
+            guard statErrno == ENOENT || statErrno == ENOTDIR else { return nil }
+            let parent = candidate.deletingLastPathComponent().standardizedFileURL
+            guard parent.path != candidate.path else { return nil }
+            candidate = parent
+        }
+    }
+
+    private static func registerDirectory(
+        _ directory: URL,
+        in queue: Int32,
+        failure: inout String?
+    ) -> Int32 {
+        let descriptor = open(directory.path, O_EVTONLY)
+        guard descriptor >= 0 else {
+            failure = errorMessage("无法监听目录 \(directory.path)", errno: errno)
+            return -1
+        }
+
+        var change = kevent()
+        change.ident = UInt(descriptor)
+        change.filter = Int16(EVFILT_VNODE)
+        change.flags = UInt16(EV_ADD | EV_ENABLE | EV_CLEAR)
+        change.fflags = UInt32(NOTE_WRITE | NOTE_DELETE | NOTE_RENAME)
+        guard kevent(queue, &change, 1, nil, 0, nil) == 0 else {
+            let registrationErrno = errno
+            close(descriptor)
+            failure = errorMessage(
+                "无法注册目录监听 \(directory.path)", errno: registrationErrno)
+            return -1
+        }
+        return descriptor
+    }
+
+    private static func errorMessage(_ prefix: String, errno errorNumber: Int32) -> String {
+        "\(prefix)：\(String(cString: strerror(errorNumber)))"
+    }
 }

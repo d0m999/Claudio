@@ -57,6 +57,8 @@ public enum ConfigFileTransactionError: Error, Sendable, Equatable, CustomString
     case backupFailure(reason: String)
     case writeFailure(reason: String)
     case concurrentModification(path: String)
+    case postPublishConflict(recoveryPath: String)
+    case postPublishLocationChanged(location: String)
     case symlinkRejected(path: String)
     case danglingSymlink(path: String)
     case lockBusy
@@ -73,6 +75,10 @@ public enum ConfigFileTransactionError: Error, Sendable, Equatable, CustomString
         case .writeFailure(let reason): "配置文件原子写入失败：\(reason)"
         case .concurrentModification(let path):
             "配置文件在读取与写入之间被外部修改，已放弃本次写入：\(path)"
+        case .postPublishConflict(let recoveryPath):
+            "配置已经发布，但在最终交换窗口发现外部替换；外部版本保留于 \(recoveryPath)，请先检查当前配置再手工恢复"
+        case .postPublishLocationChanged(let location):
+            "配置已经发布，但入口或目录位置随后变化；请检查原路径及被移动目录中的条目 \(location)"
         case .symlinkRejected(let path): "该配置事务不允许符号链接：\(path)"
         case .danglingSymlink(let path):
             "配置文件是目标不存在的符号链接，已停止写入以保留 dotfiles 链接：\(path)"
@@ -244,8 +250,9 @@ public struct ConfigFileTransaction {
             // Keep the policy gate under the same lock as the snapshot. Checking only before
             // `flock` leaves a TOCTOU window where the leaf can become a symlink before read.
             if symlinkPolicy == .reject, isSymbolicLink(at: file) {
-                return Result<ConfigFileTransactionReport<Value>, ConfigFileTransactionError>.failure(
-                    .symlinkRejected(path: file.path))
+                return Result<ConfigFileTransactionReport<Value>, ConfigFileTransactionError>
+                    .failure(
+                        .symlinkRejected(path: file.path))
             }
             if symlinkPolicy == .preserveTarget,
                 leafNodeIsSymbolicLink(at: file),
@@ -275,7 +282,6 @@ public struct ConfigFileTransaction {
         case .success(let value): loaded = value
         case .failure(let error): return .failure(error)
         }
-
         let nextRoot: [String: Any]
         let value: Value
         switch mutate(loaded.root) {
@@ -312,8 +318,40 @@ public struct ConfigFileTransaction {
                         + "上限 \(maximumBytes) 字节，未修改文件"))
         }
 
+        let anchored: AnchoredFileIO
+        let anchoredSnapshot: AnchoredFileSnapshot
+        do {
+            anchored = try AnchoredFileIO(
+                file: file, preserveFinalSymlink: symlinkPolicy == .preserveTarget)
+            anchoredSnapshot = try anchored.read(maxBytes: maximumBytes)
+        } catch {
+            return .failure(.readFailure(path: file.path))
+        }
+        let loadedData: Data?
+        switch loaded.snapshot.contents {
+        case .missing: loadedData = nil
+        case .bytes(let bytes): loadedData = bytes
+        case .unreadable: return .failure(.readFailure(path: file.path))
+        }
+        guard loadedData == anchoredSnapshot.data,
+            utf8BytesEqual(
+                loaded.snapshot.resolvedDestinationPath, anchored.resolvedFile.path)
+        else { return .failure(.concurrentModification(path: file.path)) }
+
         betweenReadAndWrite?()
         let loadedDestination = URL(fileURLWithPath: loaded.snapshot.resolvedDestinationPath)
+        // Abort a conflict discovered before backup publication without leaving a backup for
+        // an install that never wrote. The final check beside rename remains necessary because
+        // external editors do not honor our lock and can change the file during staging.
+        if symlinkPolicy == .reject, isSymbolicLink(at: file) {
+            return .failure(.symlinkRejected(path: file.path))
+        }
+        guard currentSnapshot() == loaded.snapshot else {
+            return .failure(.concurrentModification(path: file.path))
+        }
+        guard (try? anchored.read(maxBytes: maximumBytes)) == anchoredSnapshot else {
+            return .failure(.concurrentModification(path: file.path))
+        }
         let backupOutcome: ConfigBackupOutcome
         switch prepareBackup(
             original: loaded.snapshot.contents,
@@ -332,14 +370,13 @@ public struct ConfigFileTransaction {
         guard currentSnapshot() == loaded.snapshot else {
             return .failure(.concurrentModification(path: file.path))
         }
+        guard (try? anchored.read(maxBytes: maximumBytes)) == anchoredSnapshot else {
+            return .failure(.concurrentModification(path: file.path))
+        }
 
         do {
-            try secureAtomicPublish(
-                encoded,
-                to: loadedDestination,
-                permissions: filePermissions(at: loadedDestination),
-                replaceExisting: true,
-                exclusiveRename: exclusiveRename,
+            try anchored.publish(
+                encoded, expected: anchoredSnapshot,
                 beforeRename: {
                     // Staging and the one-time backup can take arbitrarily long. External editors
                     // do not share Claudio's lock, so the CAS that authorizes replacement must run
@@ -359,6 +396,14 @@ public struct ConfigFileTransaction {
                     value: value))
         } catch let error as ConfigFileTransactionError {
             return .failure(error)
+        } catch AnchoredFileError.changed {
+            return .failure(.concurrentModification(path: file.path))
+        } catch AnchoredFileError.destinationExists {
+            return .failure(.concurrentModification(path: file.path))
+        } catch AnchoredFileError.publishedWithConflict(let recoveryPath) {
+            return .failure(.postPublishConflict(recoveryPath: recoveryPath))
+        } catch AnchoredFileError.publishedButPathChanged(let location) {
+            return .failure(.postPublishLocationChanged(location: location))
         } catch {
             return .failure(.writeFailure(reason: error.localizedDescription))
         }
@@ -427,12 +472,14 @@ public struct ConfigFileTransaction {
         let linkDestinationBeforeRead = symbolicLinkDestinationBytes()
         guard FileManager.default.fileExists(atPath: file.path) else {
             return .success(
-                (root: [:],
-                 snapshot: FileSnapshot(
-                    contents: .missing,
-                    resolvedDestinationPath: destinationBeforeRead,
-                    leafIsSymbolicLink: leafWasSymbolicLink,
-                    leafSymbolicLinkDestination: linkDestinationBeforeRead)))
+                (
+                    root: [:],
+                    snapshot: FileSnapshot(
+                        contents: .missing,
+                        resolvedDestinationPath: destinationBeforeRead,
+                        leafIsSymbolicLink: leafWasSymbolicLink,
+                        leafSymbolicLinkDestination: linkDestinationBeforeRead)
+                ))
         }
         let data: Data
         switch readRegularFileBounded(at: file, maxBytes: maximumBytes, followSymlink: true) {
@@ -459,12 +506,14 @@ public struct ConfigFileTransaction {
             return .failure(.concurrentModification(path: file.path))
         }
         return .success(
-            (root: root,
-             snapshot: FileSnapshot(
-                contents: .bytes(data),
-                resolvedDestinationPath: destinationAfterRead,
-                leafIsSymbolicLink: leafIsSymbolicLinkAfterRead,
-                leafSymbolicLinkDestination: linkDestinationAfterRead)))
+            (
+                root: root,
+                snapshot: FileSnapshot(
+                    contents: .bytes(data),
+                    resolvedDestinationPath: destinationAfterRead,
+                    leafIsSymbolicLink: leafIsSymbolicLinkAfterRead,
+                    leafSymbolicLinkDestination: linkDestinationAfterRead)
+            ))
     }
 
     private func currentSnapshot() -> FileSnapshot {
@@ -478,8 +527,9 @@ public struct ConfigFileTransaction {
                 leafIsSymbolicLink: leafWasSymbolicLink,
                 leafSymbolicLinkDestination: linkDestinationBeforeRead)
         }
-        guard case .success(let data) = readRegularFileBounded(
-            at: file, maxBytes: maximumBytes, followSymlink: true)
+        guard
+            case .success(let data) = readRegularFileBounded(
+                at: file, maxBytes: maximumBytes, followSymlink: true)
         else {
             return FileSnapshot(
                 contents: .unreadable,
@@ -525,7 +575,8 @@ public struct ConfigFileTransaction {
             guard let path else { return -1 }
             return buffer.withUnsafeMutableBytes { bytes in
                 guard let baseAddress = bytes.baseAddress else { return -1 }
-                return Darwin.readlink(path, baseAddress.assumingMemoryBound(to: CChar.self), bytes.count)
+                return Darwin.readlink(
+                    path, baseAddress.assumingMemoryBound(to: CChar.self), bytes.count)
             }
         }
         guard count >= 0, count < buffer.count else { return nil }

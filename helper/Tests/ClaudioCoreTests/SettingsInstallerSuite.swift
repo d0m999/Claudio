@@ -33,6 +33,132 @@ private func commands(inGroup group: [String: Any]) -> [String] {
 
 @MainActor
 func runSettingsInstallerSuites() {
+    suite("installClaudioHooks：精确迁移旧未引号命令且第二次无写入") {
+        for home in ["/Users/a b", "/Users/a$b", "/Users/a*b", "/Users/o'b", "/Users/a\u{0301} b"] {
+            withTempDirectory { root in
+                let settingsFile = root.appendingPathComponent("settings.json")
+                let lockFile = root.appendingPathComponent("settings.lock")
+                let binary = home + "/.claudio/bin/claudio"
+                let old = binary + " play stop"
+                let canonical = claudioHookCommand(for: .stop, claudioBinaryPath: binary)
+                let fixture: [String: Any] = [
+                    "hooks": [
+                        "Stop": [
+                            [
+                                "matcher": "scope-a", "future_group": 7,
+                                "hooks": [
+                                    ["type": "command", "command": old, "future_entry": true],
+                                    ["type": "command", "command": canonical],
+                                    ["type": "command", "command": "echo keep"],
+                                ],
+                            ]
+                        ],
+                        "PreToolUse": [
+                            [
+                                "hooks": [["type": "command", "command": old]]
+                            ]
+                        ],
+                    ],
+                    "future_top": "keep",
+                ]
+                try! JSONSerialization.data(withJSONObject: fixture).write(to: settingsFile)
+                let first = installClaudioHooks(
+                    settingsFile: settingsFile, claudioBinaryPath: binary, lockFile: lockFile)
+                guard case .success(.installed) = first else {
+                    expect(false, "旧命令应迁移，got \(first)")
+                    return
+                }
+                let changed = readJSONObject(at: settingsFile)
+                let stop = hooksArray(changed, event: "Stop") ?? []
+                let scoped = stop.first { ($0["matcher"] as? String) == "scope-a" }
+                let entries = scoped?["hooks"] as? [[String: Any]] ?? []
+                expect(
+                    entries.filter { ($0["command"] as? String) == canonical }.count == 1,
+                    "同组等价命令必须保留一份")
+                expect(entries.allSatisfy { ($0["command"] as? String) != old }, "同组旧命令必须消除")
+                expect(
+                    entries.contains { ($0["command"] as? String) == "echo keep" }, "第三方 entry 必须保留"
+                )
+                expect((scoped?["future_group"] as? Int) == 7, "group 未知字段必须保留")
+                expect((changed?["future_top"] as? String) == "keep", "顶层未知字段必须保留")
+                expect(
+                    hooksArray(changed, event: "PreToolUse")?.count == 1,
+                    "其他事件下身份不明的命令不得迁移")
+                let bytes = try! Data(contentsOf: settingsFile)
+                expect(
+                    detectHookInstallStatus(settingsFile: settingsFile, claudioBinaryPath: binary)
+                        == .installed,
+                    "迁移后只读状态须为 installed")
+                let second = installClaudioHooks(
+                    settingsFile: settingsFile, claudioBinaryPath: binary, lockFile: lockFile)
+                expect(second == .success(.alreadyInstalled), "第二次安装应幂等")
+                expect((try? Data(contentsOf: settingsFile)) == bytes, "第二次安装不得写入")
+            }
+        }
+    }
+
+    suite("installClaudioHooks：身份不明的疑似旧命令保留并提示人工检查") {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("settings.lock")
+            let unknown = "/Users/tester/old/bin/claudio play stop"
+            var hooks: [String: Any] = [:]
+            for event in Event.legacyLifecycleCases {
+                hooks[event.settingsName] = [
+                    [
+                        "matcher": "scope-a", "future_group": 7,
+                        "hooks": [
+                            [
+                                "type": "command",
+                                "command": claudioHookCommand(
+                                    for: event, claudioBinaryPath: testClaudioBinaryPath),
+                            ]
+                        ],
+                    ]
+                ]
+            }
+            hooks["Stop"] = [
+                [
+                    "matcher": "scope-a", "future_group": 7,
+                    "hooks": [
+                        [
+                            "type": "command",
+                            "command": claudioHookCommand(
+                                for: .stop, claudioBinaryPath: testClaudioBinaryPath),
+                        ],
+                        ["type": "command", "command": unknown],
+                        ["type": "command", "command": "echo keep"],
+                    ],
+                ]
+            ]
+            let fixture: [String: Any] = ["hooks": hooks]
+            try! JSONSerialization.data(withJSONObject: fixture).write(to: settingsFile)
+            let before = try! Data(contentsOf: settingsFile)
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(
+                result == .failure(.legacyHookNeedsReview(events: ["Stop"])),
+                "身份不明时必须提示人工检查，got \(result)")
+            if case .failure(let error) = result {
+                expect(
+                    error.description.contains("请先检查对应事件的命令"),
+                    "错误须给出可执行的人工检查提示：\(error.description)")
+            }
+            expect(
+                (try? Data(contentsOf: settingsFile)) == before,
+                "拒绝混装时应保留未知命令、第三方 entry 及所有未知字段的原始字节")
+            expect(
+                !FileManager.default.fileExists(atPath: settingsFile.path + ".claudio.bak"),
+                "未发布写入前不得创建备份")
+            expect(
+                detectHookInstallStatus(
+                    settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath)
+                    == .notInstalled,
+                "只读状态不得把疑似重复播放条目报告为已安装")
+        }
+    }
+
     suite("installClaudioHooks：完整现代 Claude 连接按幂等成功处理，不混装 legacy hook") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
@@ -41,18 +167,21 @@ func runSettingsInstallerSuites() {
                 uuidString: "51515151-1111-4111-8111-111111111111")!
             let thirdParty: [String: Any] = [
                 "hooks": [
-                    "Stop": [[
-                        "matcher": "third-party",
-                        "hooks": [["type": "command", "command": "echo keep"]],
-                    ]]
+                    "Stop": [
+                        [
+                            "matcher": "third-party",
+                            "hooks": [["type": "command", "command": "echo keep"]],
+                        ]
+                    ]
                 ],
                 "opaque": ["keep": true],
             ]
-            guard case .success(let modern) = connectClaudeCodeHooks(
-                root: thirdParty,
-                claudioRoot: testClaudioRootPath,
-                claudioBinaryPath: testClaudioBinaryPath,
-                installationID: installationID)
+            guard
+                case .success(let modern) = connectClaudeCodeHooks(
+                    root: thirdParty,
+                    claudioRoot: testClaudioRootPath,
+                    claudioBinaryPath: testClaudioBinaryPath,
+                    installationID: installationID)
             else {
                 expect(false, "测试前提：必须能生成现代 Claude 配置")
                 return
@@ -93,13 +222,17 @@ func runSettingsInstallerSuites() {
                 claudioBinaryPath: testClaudioBinaryPath)!
             let partial: [String: Any] = [
                 "hooks": [
-                    "Stop": [[
-                        "hooks": [["type": "command", "command": stop]]
-                    ]],
-                    "PreToolUse": [[
-                        "matcher": "third-party",
-                        "hooks": [["type": "command", "command": "echo keep"]],
-                    ]],
+                    "Stop": [
+                        [
+                            "hooks": [["type": "command", "command": stop]]
+                        ]
+                    ],
+                    "PreToolUse": [
+                        [
+                            "matcher": "third-party",
+                            "hooks": [["type": "command", "command": "echo keep"]],
+                        ]
+                    ],
                 ],
                 "opaque": "keep",
             ]
@@ -134,11 +267,12 @@ func runSettingsInstallerSuites() {
             let lockFile = root.appendingPathComponent("settings.lock")
             let installationID = UUID(
                 uuidString: "52525252-3333-4333-8333-333333333333")!
-            guard case .success(let modern) = connectClaudeCodeHooks(
-                root: [:],
-                claudioRoot: testClaudioRootPath,
-                claudioBinaryPath: testClaudioBinaryPath,
-                installationID: installationID)
+            guard
+                case .success(let modern) = connectClaudeCodeHooks(
+                    root: [:],
+                    claudioRoot: testClaudioRootPath,
+                    claudioBinaryPath: testClaudioBinaryPath,
+                    installationID: installationID)
             else {
                 expect(false, "测试前提：必须生成完整现代 Claude 配置")
                 return
@@ -179,11 +313,12 @@ func runSettingsInstallerSuites() {
             let lockFile = root.appendingPathComponent("settings.lock")
             let installationID = UUID(
                 uuidString: "54545454-4444-4444-8444-444444444444")!
-            guard case .success(let modern) = connectClaudeCodeHooks(
-                root: [:],
-                claudioRoot: testClaudioRootPath,
-                claudioBinaryPath: testClaudioBinaryPath,
-                installationID: installationID)
+            guard
+                case .success(let modern) = connectClaudeCodeHooks(
+                    root: [:],
+                    claudioRoot: testClaudioRootPath,
+                    claudioBinaryPath: testClaudioBinaryPath,
+                    installationID: installationID)
             else {
                 expect(false, "测试前提：必须生成完整现代 Claude 配置")
                 return
@@ -227,11 +362,12 @@ func runSettingsInstallerSuites() {
             let lockFile = root.appendingPathComponent("settings.lock")
             let installationID = UUID(
                 uuidString: "55555555-5555-4555-8555-555555555555")!
-            guard case .success(let modern) = connectClaudeCodeHooks(
-                root: [:],
-                claudioRoot: testClaudioRootPath,
-                claudioBinaryPath: testClaudioBinaryPath,
-                installationID: installationID)
+            guard
+                case .success(let modern) = connectClaudeCodeHooks(
+                    root: [:],
+                    claudioRoot: testClaudioRootPath,
+                    claudioBinaryPath: testClaudioBinaryPath,
+                    installationID: installationID)
             else {
                 expect(false, "测试前提：必须生成完整现代 Claude 配置")
                 return
@@ -240,11 +376,13 @@ func runSettingsInstallerSuites() {
             var hooks = mixed["hooks"] as! [String: Any]
             var stopGroups = hooks["Stop"] as! [Any]
             stopGroups.append([
-                "hooks": [[
-                    "type": "command",
-                    "command": claudioHookCommand(
-                        for: .stop, claudioBinaryPath: testClaudioBinaryPath),
-                ]]
+                "hooks": [
+                    [
+                        "type": "command",
+                        "command": claudioHookCommand(
+                            for: .stop, claudioBinaryPath: testClaudioBinaryPath),
+                    ]
+                ]
             ])
             hooks["Stop"] = stopGroups
             mixed["hooks"] = hooks
@@ -316,11 +454,12 @@ func runSettingsInstallerSuites() {
 
             let currentID = UUID(
                 uuidString: "53535353-4444-4444-8444-444444444444")!
-            guard case .success(let current) = connectClaudeCodeHooks(
-                root: [:],
-                claudioRoot: testClaudioRootPath,
-                claudioBinaryPath: testClaudioBinaryPath,
-                installationID: currentID)
+            guard
+                case .success(let current) = connectClaudeCodeHooks(
+                    root: [:],
+                    claudioRoot: testClaudioRootPath,
+                    claudioBinaryPath: testClaudioBinaryPath,
+                    installationID: currentID)
             else {
                 expect(false, "测试前提：必须生成完整 current modern 配置")
                 return
@@ -356,7 +495,9 @@ func runSettingsInstallerSuites() {
         }
     }
 
-    suite("installClaudioHooks: fresh settings.json installs all four legacy lifecycle events, no backup") {
+    suite(
+        "installClaudioHooks: fresh settings.json installs all four legacy lifecycle events, no backup"
+    ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
             let lockFile = root.appendingPathComponent("settings.lock")
@@ -364,7 +505,9 @@ func runSettingsInstallerSuites() {
             let result = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(result.map(\.didInstall) == .success(true), "fresh install should report .installed, got \(result)")
+            expect(
+                result.map(\.didInstall) == .success(true),
+                "fresh install should report .installed, got \(result)")
             expect(
                 result.map(\.backupOutcome) == .success(.some(.notNeeded)),
                 "fresh install 必须明确报告原文件不存在、无需备份")
@@ -376,10 +519,14 @@ func runSettingsInstallerSuites() {
             let json = readJSONObject(at: settingsFile)
             for event in Event.legacyLifecycleCases {
                 let groups = hooksArray(json, event: event.settingsName) ?? []
-                expect(groups.count == 1, "\(event.settingsName): expected exactly 1 hook group, got \(groups.count)")
+                expect(
+                    groups.count == 1,
+                    "\(event.settingsName): expected exactly 1 hook group, got \(groups.count)")
                 expect(
                     commands(inGroup: groups.first ?? [:])
-                        == [claudioHookCommand(for: event, claudioBinaryPath: testClaudioBinaryPath)],
+                        == [
+                            claudioHookCommand(for: event, claudioBinaryPath: testClaudioBinaryPath)
+                        ],
                     "\(event.settingsName): command mismatch")
             }
 
@@ -415,7 +562,8 @@ func runSettingsInstallerSuites() {
                 let groups = hooksArray(json, event: event.settingsName) ?? []
                 expect(
                     groups.count == 1,
-                    "\(event.settingsName): idempotent install must not duplicate, got \(groups.count) groups")
+                    "\(event.settingsName): idempotent install must not duplicate, got \(groups.count) groups"
+                )
             }
         }
     }
@@ -433,7 +581,8 @@ func runSettingsInstallerSuites() {
             let result = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(result.map(\.didInstall) == .success(true), "install should succeed, got \(result)")
+            expect(
+                result.map(\.didInstall) == .success(true), "install should succeed, got \(result)")
 
             let json = readJSONObject(at: settingsFile)
             let stopFailureGroups = hooksArray(json, event: "StopFailure") ?? []
@@ -455,7 +604,9 @@ func runSettingsInstallerSuites() {
         }
     }
 
-    suite("installClaudioHooks: appends alongside an existing other-tool hook without overwriting it") {
+    suite(
+        "installClaudioHooks: appends alongside an existing other-tool hook without overwriting it"
+    ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
             let lockFile = root.appendingPathComponent("settings.lock")
@@ -475,19 +626,25 @@ func runSettingsInstallerSuites() {
             let result = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(result.map(\.didInstall) == .success(true), "install alongside other hooks should be .installed")
+            expect(
+                result.map(\.didInstall) == .success(true),
+                "install alongside other hooks should be .installed")
 
             let json = readJSONObject(at: settingsFile)
 
             let stopGroups = hooksArray(json, event: "Stop") ?? []
-            expect(stopGroups.count == 2, "Stop should now have 2 groups (vibe-island + claudio), got \(stopGroups.count)")
+            expect(
+                stopGroups.count == 2,
+                "Stop should now have 2 groups (vibe-island + claudio), got \(stopGroups.count)")
             expect(
                 stopGroups.contains { commands(inGroup: $0) == ["vibe-island stop"] },
                 "vibe-island's Stop group must survive untouched")
             expect(
                 stopGroups.contains {
                     commands(inGroup: $0)
-                        == [claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath)]
+                        == [
+                            claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath)
+                        ]
                 },
                 "claudio's own Stop group must be appended")
 
@@ -503,16 +660,20 @@ func runSettingsInstallerSuites() {
                 "block-no-verify command must survive untouched")
 
             let permissions = json?["permissions"] as? [String: Any]
-            expect(permissions != nil, "unrelated top-level 'permissions' key must survive untouched")
+            expect(
+                permissions != nil, "unrelated top-level 'permissions' key must survive untouched")
         }
     }
 
-    suite("installClaudioHooks: backs up the pre-claudio original exactly once, never overwrites it") {
+    suite(
+        "installClaudioHooks: backs up the pre-claudio original exactly once, never overwrites it"
+    ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
             let lockFile = root.appendingPathComponent("settings.lock")
             let backupFile = root.appendingPathComponent("settings.json.claudio.bak")
-            let originalContent = #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "vibe-island stop" } ] } ] } }"#
+            let originalContent =
+                #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "vibe-island stop" } ] } ] } }"#
             writeFixture(originalContent, to: settingsFile)
 
             let first = installClaudioHooks(
@@ -551,12 +712,15 @@ func runSettingsInstallerSuites() {
         }
     }
 
-    suite("installClaudioHooks: an atomic-publish-blocked parent aborts before backup, settings.json left untouched") {
+    suite(
+        "installClaudioHooks: an atomic-publish-blocked parent aborts before backup, settings.json left untouched"
+    ) {
         withTempDirectory { root in
             let settingsDir = root.appendingPathComponent("settings-dir", isDirectory: true)
             let settingsFile = settingsDir.appendingPathComponent("settings.json")
             let lockFile = root.appendingPathComponent("settings.lock")
-            let originalContent = #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "vibe-island stop" } ] } ] } }"#
+            let originalContent =
+                #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "vibe-island stop" } ] } ] } }"#
             writeFixture(originalContent, to: settingsFile)
 
             // Strip write permission from the directory. Both the one-time backup and the final
@@ -573,7 +737,9 @@ func runSettingsInstallerSuites() {
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
             guard case .failure(.notWritable(let reason)) = result else {
-                expect(false, "expected .notWritable when atomic publication is impossible, got \(result)")
+                expect(
+                    false,
+                    "expected .notWritable when atomic publication is impossible, got \(result)")
                 return
             }
             expect(reason.contains("原子替换"), "错误必须说明真实发布阻塞，got \(reason)")
@@ -605,11 +771,14 @@ func runSettingsInstallerSuites() {
         }
     }
 
-    suite("uninstallClaudioHooks: no claudio hooks present → .notInstalled, file left byte-identical") {
+    suite(
+        "uninstallClaudioHooks: no claudio hooks present → .notInstalled, file left byte-identical"
+    ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
             let lockFile = root.appendingPathComponent("settings.lock")
-            let originalContent = #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "vibe-island stop" } ] } ] } }"#
+            let originalContent =
+                #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "vibe-island stop" } ] } ] } }"#
             writeFixture(originalContent, to: settingsFile)
 
             let result = uninstallClaudioHooks(
@@ -647,12 +816,16 @@ func runSettingsInstallerSuites() {
             let result = uninstallClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(result == .success(.uninstalled(count: 2)), "expected 2 removed (Stop + Notification), got \(result)")
+            expect(
+                result == .success(.uninstalled(count: 2)),
+                "expected 2 removed (Stop + Notification), got \(result)")
 
             let json = readJSONObject(at: settingsFile)
 
             let stopGroups = hooksArray(json, event: "Stop") ?? []
-            expect(stopGroups.count == 1, "Stop should keep only vibe-island's group, got \(stopGroups.count)")
+            expect(
+                stopGroups.count == 1,
+                "Stop should keep only vibe-island's group, got \(stopGroups.count)")
             expect(
                 commands(inGroup: stopGroups.first ?? [:]) == ["vibe-island stop"],
                 "vibe-island's Stop group must survive untouched")
@@ -773,9 +946,10 @@ func runSettingsInstallerSuites() {
                 "expected the quoted entry + the legacy bare one, got \(result)")
 
             let json = readJSONObject(at: settingsFile)
-            let surviving = Set((hooksArray(json, event: "Notification") ?? []).flatMap {
-                commands(inGroup: $0)
-            })
+            let surviving = Set(
+                (hooksArray(json, event: "Notification") ?? []).flatMap {
+                    commands(inGroup: $0)
+                })
             expect(
                 surviving == ["/Users/Jane Doe/.claudio/bin/claudio play notification"],
                 "another user's identically-shaped hook must survive, got \(surviving)")
@@ -827,7 +1001,9 @@ func runSettingsInstallerSuites() {
         }
     }
 
-    suite("uninstallClaudioHooks: removes only claudio's entry from a group shared with another tool") {
+    suite(
+        "uninstallClaudioHooks: removes only claudio's entry from a group shared with another tool"
+    ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
             let lockFile = root.appendingPathComponent("settings.lock")
@@ -850,7 +1026,9 @@ func runSettingsInstallerSuites() {
 
             let json = readJSONObject(at: settingsFile)
             let stopGroups = hooksArray(json, event: "Stop") ?? []
-            expect(stopGroups.count == 1, "the shared group itself must survive (not dropped), got \(stopGroups.count)")
+            expect(
+                stopGroups.count == 1,
+                "the shared group itself must survive (not dropped), got \(stopGroups.count)")
             expect(
                 commands(inGroup: stopGroups.first ?? [:]) == ["vibe-island stop"],
                 "only claudio's entry must be removed from the shared inner hooks array")
@@ -899,7 +1077,9 @@ func runSettingsInstallerSuites() {
         }
     }
 
-    suite("installClaudioHooks: a leftover entry with our command but no \"type\" is not counted as installed — install self-heals with a real command hook") {
+    suite(
+        "installClaudioHooks: a leftover entry with our command but no \"type\" is not counted as installed — install self-heals with a real command hook"
+    ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
             let lockFile = root.appendingPathComponent("settings.lock")
@@ -920,31 +1100,39 @@ func runSettingsInstallerSuites() {
                 lockFile: lockFile)
             expect(
                 result.map(\.didInstall) == .success(true),
-                "install must self-heal past a typeless leftover (a real write, not .alreadyInstalled), got \(result)")
+                "install must self-heal past a typeless leftover (a real write, not .alreadyInstalled), got \(result)"
+            )
 
             let json = readJSONObject(at: settingsFile)
             let stopGroups = hooksArray(json, event: "Stop") ?? []
             expect(
                 stopGroups.count == 2,
-                "Stop should keep the malformed leftover group and gain a freshly-appended proper one, got \(stopGroups.count)")
+                "Stop should keep the malformed leftover group and gain a freshly-appended proper one, got \(stopGroups.count)"
+            )
             let hasRunnableStop = stopGroups.contains { group in
                 guard let inner = group["hooks"] as? [[String: Any]] else { return false }
                 return inner.contains {
                     ($0["type"] as? String) == "command"
                         && ($0["command"] as? String)
-                            == claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath)
+                            == claudioHookCommand(
+                                for: .stop, claudioBinaryPath: testClaudioBinaryPath)
                 }
             }
-            expect(hasRunnableStop, "install must have appended a real { type: command } hook for Stop")
+            expect(
+                hasRunnableStop, "install must have appended a real { type: command } hook for Stop"
+            )
 
             expect(
                 detectHookInstallStatus(
-                    settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath) == .installed,
+                    settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath)
+                    == .installed,
                 "after self-heal, all four legacy lifecycle events must read back as .installed")
         }
     }
 
-    suite("uninstallClaudioHooks: still removes a leftover entry carrying our command even without a \"type\" (loose, command-only match)") {
+    suite(
+        "uninstallClaudioHooks: still removes a leftover entry carrying our command even without a \"type\" (loose, command-only match)"
+    ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
             let lockFile = root.appendingPathComponent("settings.lock")
@@ -988,7 +1176,9 @@ func runSettingsInstallerSuites() {
             } else {
                 expect(false, "expected .parseFailure from install, got \(installResult)")
             }
-            expect(readRawString(at: settingsFile) == corrupt, "install must never touch a corrupt file")
+            expect(
+                readRawString(at: settingsFile) == corrupt,
+                "install must never touch a corrupt file")
             expect(
                 !FileManager.default.fileExists(
                     atPath: root.appendingPathComponent("settings.json.claudio.bak").path),
@@ -1002,7 +1192,9 @@ func runSettingsInstallerSuites() {
             } else {
                 expect(false, "expected .parseFailure from uninstall, got \(uninstallResult)")
             }
-            expect(readRawString(at: settingsFile) == corrupt, "uninstall must never touch a corrupt file")
+            expect(
+                readRawString(at: settingsFile) == corrupt,
+                "uninstall must never touch a corrupt file")
         }
     }
 
@@ -1021,7 +1213,9 @@ func runSettingsInstallerSuites() {
             } else {
                 expect(false, "expected .malformedHooksSection, got \(result)")
             }
-            expect(readRawString(at: settingsFile) == malformed, "malformed-shape file must be left untouched")
+            expect(
+                readRawString(at: settingsFile) == malformed,
+                "malformed-shape file must be left untouched")
         }
     }
 
@@ -1040,11 +1234,15 @@ func runSettingsInstallerSuites() {
             } else {
                 expect(false, "expected .malformedHooksSection, got \(result)")
             }
-            expect(readRawString(at: settingsFile) == malformed, "malformed-shape file must be left untouched")
+            expect(
+                readRawString(at: settingsFile) == malformed,
+                "malformed-shape file must be left untouched")
         }
     }
 
-    suite("installClaudioHooks: unwritable settings.json (read-only) aborts via the writability probe") {
+    suite(
+        "installClaudioHooks: unwritable settings.json (read-only) aborts via the writability probe"
+    ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
             let lockFile = root.appendingPathComponent("settings.lock")
@@ -1065,15 +1263,19 @@ func runSettingsInstallerSuites() {
             } else {
                 expect(false, "expected .notWritable, got \(result)")
             }
-            expect(readRawString(at: settingsFile) == original, "read-only file must be left untouched")
+            expect(
+                readRawString(at: settingsFile) == original, "read-only file must be left untouched"
+            )
         }
     }
 
-    suite("uninstallClaudioHooks: read-only settings.json without Claudio hooks remains idempotent") {
+    suite("uninstallClaudioHooks: read-only settings.json without Claudio hooks remains idempotent")
+    {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
             let lockFile = root.appendingPathComponent("settings.lock")
-            let original = #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "vibe-island stop" } ] } ] } }"#
+            let original =
+                #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "vibe-island stop" } ] } ] } }"#
             writeFixture(original, to: settingsFile)
             try! FileManager.default.setAttributes(
                 [.posixPermissions: 0o400], ofItemAtPath: settingsFile.path)
@@ -1090,7 +1292,9 @@ func runSettingsInstallerSuites() {
         }
     }
 
-    suite("installClaudioHooks: missing parent directory aborts via the writability probe, no crash") {
+    suite(
+        "installClaudioHooks: missing parent directory aborts via the writability probe, no crash"
+    ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("no-such-dir", isDirectory: true)
                 .appendingPathComponent("settings.json")
@@ -1110,7 +1314,9 @@ func runSettingsInstallerSuites() {
         }
     }
 
-    suite("installClaudioHooks: a busy lock is reported as .lockBusy and never writes (non-blocking)") {
+    suite(
+        "installClaudioHooks: a busy lock is reported as .lockBusy and never writes (non-blocking)"
+    ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
             let lockFile = root.appendingPathComponent("settings.lock")
@@ -1120,7 +1326,9 @@ func runSettingsInstallerSuites() {
             let result = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(result == .failure(.lockBusy), "expected .lockBusy while the lock is held, got \(result)")
+            expect(
+                result == .failure(.lockBusy),
+                "expected .lockBusy while the lock is held, got \(result)")
             expect(
                 !FileManager.default.fileExists(atPath: settingsFile.path),
                 "install must not create settings.json when it can't acquire the lock")
@@ -1129,11 +1337,14 @@ func runSettingsInstallerSuites() {
         }
     }
 
-    suite("uninstallClaudioHooks: a busy lock is reported as .lockBusy and never writes (non-blocking)") {
+    suite(
+        "uninstallClaudioHooks: a busy lock is reported as .lockBusy and never writes (non-blocking)"
+    ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
             let lockFile = root.appendingPathComponent("settings.lock")
-            let original = #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "\#(claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath))" } ] } ] } }"#
+            let original =
+                #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "\#(claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath))" } ] } ] } }"#
             writeFixture(original, to: settingsFile)
             let holder = FileLock(path: lockFile.path)
             expect(holder.tryLock(), "holder should acquire the lock first")
@@ -1141,8 +1352,12 @@ func runSettingsInstallerSuites() {
             let result = uninstallClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(result == .failure(.lockBusy), "expected .lockBusy while the lock is held, got \(result)")
-            expect(readRawString(at: settingsFile) == original, "uninstall must not write while the lock is held")
+            expect(
+                result == .failure(.lockBusy),
+                "expected .lockBusy while the lock is held, got \(result)")
+            expect(
+                readRawString(at: settingsFile) == original,
+                "uninstall must not write while the lock is held")
 
             holder.unlock()
         }
@@ -1160,7 +1375,8 @@ func runSettingsInstallerSuites() {
             // sibling roots so the settings.json parent pre-exists while the lock file's
             // parent starts out completely missing.
             let claudeDir = root.appendingPathComponent("dot-claude", isDirectory: true)
-            try? FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+            try? FileManager.default.createDirectory(
+                at: claudeDir, withIntermediateDirectories: true)
             let settingsFile = claudeDir.appendingPathComponent("settings.json")
 
             let claudioDir = root.appendingPathComponent("dot-claudio", isDirectory: true)
@@ -1189,7 +1405,8 @@ func runSettingsInstallerSuites() {
     ) {
         withTempDirectory { root in
             let claudeDir = root.appendingPathComponent("dot-claude", isDirectory: true)
-            try? FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+            try? FileManager.default.createDirectory(
+                at: claudeDir, withIntermediateDirectories: true)
             let settingsFile = claudeDir.appendingPathComponent("settings.json")
 
             let claudioDir = root.appendingPathComponent("dot-claudio", isDirectory: true)
@@ -1209,7 +1426,9 @@ func runSettingsInstallerSuites() {
         }
     }
 
-    suite("install then uninstall round-trips: pre-existing hooks and unrelated keys survive both operations") {
+    suite(
+        "install then uninstall round-trips: pre-existing hooks and unrelated keys survive both operations"
+    ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
             let lockFile = root.appendingPathComponent("settings.lock")
@@ -1227,12 +1446,16 @@ func runSettingsInstallerSuites() {
             let installResult = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(installResult.map(\.didInstall) == .success(true), "install should succeed, got \(installResult)")
+            expect(
+                installResult.map(\.didInstall) == .success(true),
+                "install should succeed, got \(installResult)")
 
             let afterInstall = readJSONObject(at: settingsFile)
             for event in Event.legacyLifecycleCases {
                 let groups = hooksArray(afterInstall, event: event.settingsName) ?? []
-                expect(groups.count == 2, "\(event.settingsName): expected vibe-island + claudio, got \(groups.count)")
+                expect(
+                    groups.count == 2,
+                    "\(event.settingsName): expected vibe-island + claudio, got \(groups.count)")
             }
 
             let uninstallResult = uninstallClaudioHooks(
@@ -1251,8 +1474,10 @@ func runSettingsInstallerSuites() {
             ] {
                 let groups = hooksArray(afterUninstall, event: event.settingsName) ?? []
                 expect(
-                    groups.count == 1 && commands(inGroup: groups.first ?? [:]) == [expectedCommand],
-                    "\(event.settingsName): vibe-island's hook must survive the round trip untouched, got \(groups)")
+                    groups.count == 1
+                        && commands(inGroup: groups.first ?? [:]) == [expectedCommand],
+                    "\(event.settingsName): vibe-island's hook must survive the round trip untouched, got \(groups)"
+                )
             }
 
             let preToolUse = hooksArray(afterUninstall, event: "PreToolUse") ?? []
@@ -1262,7 +1487,9 @@ func runSettingsInstallerSuites() {
                 "PreToolUse matcher must survive the round trip untouched")
 
             let env = afterUninstall?["env"] as? [String: String]
-            expect(env == ["FOO": "bar"], "unrelated top-level 'env' key must survive the round trip untouched")
+            expect(
+                env == ["FOO": "bar"],
+                "unrelated top-level 'env' key must survive the round trip untouched")
         }
     }
 
@@ -1444,7 +1671,8 @@ func runSettingsInstallerSuites() {
             let settingsFile = root.appendingPathComponent("settings.json")
             let lockFile = root.appendingPathComponent("settings.lock")
             let stranded = claudioHookCommand(for: .stop, claudioBinaryPath: traversing)
-            let fixture = #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "\#(stranded)" } ] } ] } }"#
+            let fixture =
+                #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "\#(stranded)" } ] } ] } }"#
             writeFixture(fixture, to: settingsFile)
 
             let result = uninstallClaudioHooks(
@@ -1500,15 +1728,13 @@ func runSettingsInstallerSuites() {
             expect(
                 readRawString(at: settingsFile) == intruder,
                 "the concurrent writer's bytes must survive verbatim — install must not clobber")
-            // The intruder now strikes in the read→backup window (the seam fires before the
-            // backup), so this pins that `.claudio.bak` holds the bytes install READ, not a
-            // fresh re-read of disk that would have captured the intruder's write. Revert the
-            // backup to re-reading the file and this assertion goes RED. Pinned too because a
-            // failed install leaves this artifact behind and the backup is one-shot: a later
-            // successful install will not overwrite it.
+            // An early conflict must not create a permanent one-shot backup for an install
+            // that never published. The late-conflict suite in ConfigFileTransactionSuite
+            // separately pins that a backup already published preserves the original bytes.
             expect(
-                readRawString(at: settingsFile.appendingPathExtension("claudio.bak")) == original,
-                "the backup snapshots what install read, not what the intruder wrote")
+                !FileManager.default.fileExists(
+                    atPath: settingsFile.appendingPathExtension("claudio.bak").path),
+                "a pre-backup conflict must not leave a one-shot backup")
         }
     }
 
@@ -1542,9 +1768,8 @@ func runSettingsInstallerSuites() {
     }
 
     suite(
-        "installClaudioHooks: an unchanged settings.json is NOT a concurrent modification — the"
-            + " guard compares bytes, so a writer that rewrites identical content (or no writer at"
-            + " all) must not turn a normal install into a spurious abort the user has to retry"
+        "installClaudioHooks: a byte-identical atomic replacement changes the target identity"
+            + " and must not be overwritten by the pending install"
     ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
@@ -1564,7 +1789,13 @@ func runSettingsInstallerSuites() {
                     try? original.write(to: settingsFile, atomically: true, encoding: .utf8)
                 })
             expect(ran, "the betweenReadAndWrite seam must have been invoked")
-            expect(result.map(\.didInstall) == .success(true), "a byte-identical rewrite must not abort, got \(result)")
+            guard case .failure(.concurrentModification) = result else {
+                expect(false, "a replaced inode must abort the pending install, got \(result)")
+                return
+            }
+            expect(
+                (try? String(contentsOf: settingsFile, encoding: .utf8)) == original,
+                "the external byte-identical replacement must remain in place")
         }
     }
     #endif  // DEBUG — seam-driven suites
@@ -1652,8 +1883,9 @@ func runSettingsInstallerSuites() {
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
             expect(
-                result == .failure(
-                    .readFailure(reason: "悬空符号链接：\(settingsFile.path)")),
+                result
+                    == .failure(
+                        .readFailure(reason: "悬空符号链接：\(settingsFile.path)")),
                 "dangling symlink 必须显式失败关闭，got \(result)")
             expect(
                 (try? FileManager.default.destinationOfSymbolicLink(atPath: settingsFile.path))

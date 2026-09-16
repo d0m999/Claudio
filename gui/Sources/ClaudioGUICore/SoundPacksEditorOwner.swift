@@ -1490,7 +1490,33 @@ package final class SoundPacksEditorOwner: ObservableObject {
                             .retryRestore,
                             binding: .requestRetryRestore(packID: packID),
                             seed: seed))
-                } : [])
+                } : [],
+            manifestRecoveryActions: seed.windowStatuses.compactMap { status in
+                guard case .manifest(let packID, let path, let issue, let retry)? = status.recovery
+                else { return nil }
+                let retryAction: SoundPackEditorAction?
+                if seed.library.isFresh && seed.writesAllowed && !hasBusyOperation
+                    && seed.selectedPackID == packID
+                {
+                    switch retry {
+                    case .assign(let fileName, let event):
+                        retryAction = makeAction(
+                            .assign,
+                            binding: .assign(packID: packID, fileName: fileName, event: event),
+                            seed: seed)
+                    case .clear(let event):
+                        retryAction = makeAction(
+                            .clear, binding: .clear(packID: packID, event: event), seed: seed)
+                    }
+                } else {
+                    retryAction = nil
+                }
+                return SoundPackEditorManifestRecoveryPresentation(
+                    statusRevision: status.revision, packID: packID, path: path, issue: issue,
+                    revealAction: makeAction(
+                        .reveal, binding: .reveal(fileURL: URL(fileURLWithPath: path)), seed: seed),
+                    retryAction: retryAction)
+            })
     }
 
     private func makeEventsPresentation(
@@ -2302,11 +2328,12 @@ extension SoundPackEditorAction.Kind {
 
     fileprivate var requiresFreshLibrary: Bool {
         switch self {
-        case .use, .toggleStar, .fork, .requestImport, .assign, .clear, .preview, .reveal,
+        case .use, .toggleStar, .fork, .requestImport, .assign, .clear, .preview,
             .deletePack, .deleteOrphan, .restoreFactory, .retryRestore, .restoreAllFactory,
             .confirm:
             true
-        case .inspect, .stopPreview, .retryLibrary, .cancelOperation, .cancelConfirmation:
+        case .inspect, .stopPreview, .reveal, .retryLibrary, .cancelOperation,
+            .cancelConfirmation:
             false
         }
     }

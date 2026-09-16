@@ -199,7 +199,8 @@ public func importAudioFile(
     let duration = environment.durationProbe.probeDuration(of: probeURL)
     guard let duration, duration <= environment.limits.maxDurationSeconds else {
         return .rejected(
-            .overDuration(actualSeconds: duration, maxSeconds: environment.limits.maxDurationSeconds))
+            .overDuration(
+                actualSeconds: duration, maxSeconds: environment.limits.maxDurationSeconds))
     }
 
     // 6. Persist. Deliberately write the exact `data` read in step 3 and content-sniffed in
@@ -215,16 +216,16 @@ public func importAudioFile(
     // consistent with acceptance criterion 1: never reference the original path once
     // it's been read).
     //
-    // The final publish is `link(2)` from a fully-written same-directory staging file, not
-    // Foundation's `.atomic` rename: an ordinary rename replaces an entry created after our
-    // `lstat` check, and `packs.lock` is cooperative so an external writer need not honor it.
-    // `link` makes the kernel reject that race with EEXIST. We then allocate again, so every
+    // The shared anchored transaction stages beside the destination and publishes through
+    // a pinned directory descriptor. An ordinary rename would replace an entry created after
+    // our `lstat` check, and `packs.lock` is cooperative. Exclusive publication makes the
+    // kernel reject that race with EEXIST. We then allocate again, so every
     // occupied name — regular files and both kinds of symlink included — receives `-2`, `-3`,
     // and so on before its extension. This is what keeps a later "选文件…" on one event from
     // silently changing the bytes another event already references.
     //
     // An interrupted/failed write leaves no final candidate in place; the staging entry is
-    // cleaned up and `link` is the only step that makes the newly allocated path visible.
+    // cleaned up and exclusive publication is the only step that makes the new path visible.
     //
     // The create-directory + write pair runs inside `environment.packsLockFile` —
     // `bindEventToManifest`/`clearEventBinding`'s and `performFirstRunSetup`'s critical
@@ -257,19 +258,26 @@ public func importAudioFile(
                     return .rejected(.copyFailed(reason: "无法生成唯一文件名"))
                 }
 
+                let anchored: AnchoredFileIO
+                do {
+                    anchored = try AnchoredFileIO(
+                        file: uniqueDestinationURL, preserveFinalSymlink: false,
+                        rootDirectory: environment.userPacksDirectory)
+                } catch {
+                    return .rejected(.copyFailed(reason: String(describing: error)))
+                }
                 environment.beforeExclusivePublish?(uniqueDestinationURL)
-                switch publishDataWithoutReplacing(data, to: uniqueDestinationURL) {
-                case .published:
+                do {
+                    try anchored.publishNew(data)
                     persistedDestinationURL = uniqueDestinationURL
                     return nil
-                case .destinationExists:
+                } catch AnchoredFileError.destinationExists {
                     // `lstat` and publish are deliberately separate calls. An external
                     // writer may have created this entry after the former; the exclusive
                     // rename did not replace it, so allocate the next name and retry.
                     continue
-                case .failed(let errno):
-                    return .rejected(
-                        .copyFailed(reason: "无法写入唯一目标文件（errno: \(errno)）"))
+                } catch {
+                    return .rejected(.copyFailed(reason: String(describing: error)))
                 }
             }
         } catch {
@@ -314,101 +322,6 @@ private enum UniqueDestinationAllocation {
     case exhausted
 }
 
-/// The outcome of staging bytes in the destination directory and publishing them with an
-/// exclusive link. `destinationExists` is a normal race outcome, not a write failure: the
-/// caller must choose the next collision suffix and try again.
-private enum ExclusiveDestinationPublish {
-    case published
-    case destinationExists
-    case failed(errno: Int32)
-}
-
-/// Writes `data` to a private staging file beside `destinationURL`, then publishes it with
-/// `link(2)`. A normal `rename` (including `Data.WritingOptions.atomic`) would replace an
-/// existing regular file or symlink; `link` instead fails with EEXIST, making the final name
-/// allocation and publication safe even against writers that do not take Claudio's cooperative
-/// `packs.lock`. The staging source and destination share a directory, so the hard link is both
-/// atomic and cannot fail with EXDEV.
-private func publishDataWithoutReplacing(
-    _ data: Data,
-    to destinationURL: URL
-) -> ExclusiveDestinationPublish {
-    let stagingTemplateURL = destinationURL.deletingLastPathComponent().appendingPathComponent(
-        ".claudio-import-XXXXXX")
-    var stagingTemplate = stagingTemplateURL.path.utf8CString
-    let descriptor = stagingTemplate.withUnsafeMutableBufferPointer { buffer in
-        mkstemp(buffer.baseAddress!)
-    }
-    guard descriptor >= 0 else { return .failed(errno: errno) }
-
-    let stagingPath = stagingTemplate.withUnsafeBufferPointer { buffer in
-        String(cString: buffer.baseAddress!)
-    }
-    var descriptorNeedsClosing = true
-    defer {
-        if descriptorNeedsClosing { _ = close(descriptor) }
-        _ = unlink(stagingPath)
-    }
-
-    if let writeErrno = writeAll(data, to: descriptor) {
-        return .failed(errno: writeErrno)
-    }
-    if let syncErrno = synchronize(descriptor) {
-        return .failed(errno: syncErrno)
-    }
-    if close(descriptor) != 0 {
-        descriptorNeedsClosing = false
-        return .failed(errno: errno)
-    }
-    descriptorNeedsClosing = false
-
-    var linkErrno: Int32 = 0
-    let linkResult: Int32 = stagingPath.withCString { sourcePath in
-        destinationURL.withUnsafeFileSystemRepresentation { destinationPath in
-            guard let destinationPath else {
-                linkErrno = EINVAL
-                return Int32(-1)
-            }
-            let result = link(sourcePath, destinationPath)
-            if result != 0 { linkErrno = errno }
-            return result
-        }
-    }
-    if linkResult == 0 { return .published }
-    if linkErrno == EEXIST { return .destinationExists }
-    return .failed(errno: linkErrno)
-}
-
-/// Writes every byte to an already-private staging descriptor. `write(2)` may complete only a
-/// prefix or be interrupted, neither of which may publish a partial destination.
-private func writeAll(_ data: Data, to descriptor: Int32) -> Int32? {
-    data.withUnsafeBytes { rawBuffer in
-        guard !rawBuffer.isEmpty else { return nil }
-        guard var cursor = rawBuffer.baseAddress else { return EINVAL }
-        var remainingByteCount = rawBuffer.count
-        while remainingByteCount > 0 {
-            let writtenByteCount = write(descriptor, cursor, remainingByteCount)
-            if writtenByteCount > 0 {
-                cursor = cursor.advanced(by: writtenByteCount)
-                remainingByteCount -= writtenByteCount
-                continue
-            }
-            if writtenByteCount < 0, errno == EINTR { continue }
-            return errno
-        }
-        return nil
-    }
-}
-
-/// `fsync(2)` catches delayed staging-file write failures before the entry becomes visible.
-private func synchronize(_ descriptor: Int32) -> Int32? {
-    while fsync(descriptor) != 0 {
-        if errno == EINTR { continue }
-        return errno
-    }
-    return nil
-}
-
 /// Allocates the first unoccupied filename for `requestedFileName`: the original name, then
 /// `stem-2.ext`, `stem-3.ext`, and so on. It must run while `packsLockFile` is held so the
 /// existence check and the eventual atomic write are one serial operation with every other
@@ -440,11 +353,12 @@ private func allocateUniqueDestinationURL(
     while true {
         let candidateFileName: String
         if let suffix {
-            guard let collisionFileName = collisionFileName(
-                stem: stem,
-                pathExtension: pathExtension,
-                suffix: suffix,
-                maximumByteCount: maximumComponentByteCount)
+            guard
+                let collisionFileName = collisionFileName(
+                    stem: stem,
+                    pathExtension: pathExtension,
+                    suffix: suffix,
+                    maximumByteCount: maximumComponentByteCount)
             else { return .exhausted }
             candidateFileName = collisionFileName
         } else {

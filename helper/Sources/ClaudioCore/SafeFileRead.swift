@@ -66,7 +66,7 @@ func leafNodeIsSymbolicLink(at url: URL) -> Bool {
 
 /// manifest.json 的大小上限：1 MiB。一份五事件 manifest 实际不到 1 KB，1 MiB 已经宽出三个数量级，
 /// 任何越过它的东西都不是 manifest，是攻击载荷或事故。
-let maxPackManifestBytes = 1 << 20
+public let maxPackManifestBytes = 1 << 20
 
 /// `config.json` 的大小上限：64 KiB。一份真实 config（四个 v1 键 + 用户自定义字段）是几百字节；
 /// 64 KiB 已经宽出两个数量级，任何越过它的东西都不是 config。
@@ -156,7 +156,9 @@ public func loadClaudioConfig(from configFile: URL) -> ClaudioConfig? {
 ///   且与 `followSymlink` 无关——跟随之后落在 FIFO 上，一样立刻返回、一样被闸门拒绝。
 /// - 有界读：内存里最多只持有 `maxBytes + 1` 字节。多读出的那 1 字节足以证明「它超限了」，而不需要把
 ///   一个任意大的（甚至还在增长的）文件整个读进来。
-public func readRegularFileBounded(at url: URL, maxBytes: Int, followSymlink: Bool) -> BoundedFileRead {
+public func readRegularFileBounded(at url: URL, maxBytes: Int, followSymlink: Bool)
+    -> BoundedFileRead
+{
     let openFlags = O_RDONLY | O_NONBLOCK | (followSymlink ? 0 : O_NOFOLLOW)
     let fd: Int32 = url.withUnsafeFileSystemRepresentation { pathPointer in
         guard let pathPointer else { return -1 }

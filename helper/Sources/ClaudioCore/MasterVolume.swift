@@ -135,6 +135,8 @@ private func performSetMasterVolume(
         return .failure(.configMissing)
     case .failure(.writeFailed(let reason)):
         return .failure(.configWriteFailure(reason: reason))
+    case .failure(.postPublishConflict(let recoveryPath)):
+        return .failure(.configWriteFailure(reason: "发布后冲突；外部文件保留在 \(recoveryPath)，请重新读取配置"))
     case .failure(.mutationRejected):
         return .failure(.configWriteFailure(reason: "配置变更被调用方拒绝"))
     }

@@ -209,7 +209,7 @@ private let byteWritingMembers = [
 /// 「能把字节送进一个文件」的自由函数 —— 与成员调用**分开**认：`NSWorkspace.shared.open(` 不是
 /// POSIX `open(2)`，把它们混为一谈只会换来一条没人受得了的假红，而假红最后总是被删掉的那一个。
 private let byteWritingFunctions = [
-    "open", "creat", "fopen", "fdopen", "freopen", "write", "pwrite", "writev",
+    "open", "openat", "creat", "fopen", "fdopen", "freopen", "write", "pwrite", "writev",
     "fwrite", "fputs", "fputc", "fprintf", "truncate", "ftruncate", "mkstemp", "mmap",
     "mkdir", "fchmod",
     // `copyfile(2)` —— `/codex review 3af8d5f` 红队实测：`copyfile(src, dst, nil, COPYFILE_DATA)` 把 src
@@ -228,7 +228,7 @@ private let pathPublishingMembers = [
     "copyItem", "moveItem", "linkItem", "createSymbolicLink", "replaceItem", "trashItem",
 ]
 private let pathPublishingFunctions = [
-    "rename", "renameatx_np", "link", "symlink", "unlink", "mkdirat", "unlinkat",
+    "rename", "renameatx_np", "link", "linkat", "symlink", "unlink", "mkdirat", "unlinkat",
 ]
 /// 一个子进程能写任何东西。它**出现**会被围栏逮住；它**写了什么**这条绊线看不见（台账里写理由）。
 private let subprocessMembers: [String] = []
@@ -498,8 +498,13 @@ private func isSimpleOptionMember(_ element: String) -> Bool {
 /// 而上一版把它原样复发在了 `totalWriteSites >= 9` 上）。
 private let diskWriteSurfaceLedger: [String: Set<String>] = [
     // —— helper ——
-    // `config.json` 的唯一写者。一次原子写。
-    "helper/Sources/ClaudioCore/ConfigMutation.swift": [".write("],
+    // config/manifest 可复用的目录描述符发布层：目标读写与暂存均固定在同一目录 fd；
+    // 已有目标用 RENAME_SWAP 防止外部删除后复活，首次创建用 RENAME_EXCL。
+    // staging 先完整写入、fsync，交换后的外部对象在冲突时保留作恢复文件。
+    "helper/Sources/ClaudioCore/AnchoredFileIO.swift": [
+        ".write(", "open(", "openat(", "fchmod(", "write(", "renameatx_np(", "unlinkat(",
+        "linkat(",
+    ],
     // 事件提示 descriptor 只保存 epoch/path/inode；Data.atomic 写入后再收紧到 0600，
     // 只清理经过 inode/owner 校验的自有 endpoint，不承载来源内容，也不改变既有
     // config/receipt 写路径。
@@ -543,7 +548,8 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     // 再以一次 renameatx_np 发布 `.clear-*` commit marker。commit 后 unlinkat 在 descriptor 下
     // 有界递归回收文件/目录；中断 tombstone 留待下次重试，不再伪报可回滚 failure。
     "helper/Sources/ClaudioCore/HostHookReceipt.swift": [
-        "fchmod(", "mkdirat(", "mkstemp(", "open(", "rename(", "renameatx_np(", "unlink(",
+        "fchmod(", "mkdirat(", "mkstemp(", "open(", "openat(", "rename(", "renameatx_np(",
+        "unlink(",
         "unlinkat(", "write(",
     ],
     // 二进制与内置包的复制。**两处都是 staging + 同卷 rename**（`copyItem` 进暂存 → `moveItem` /
@@ -563,15 +569,11 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     // —— gui ——
     // DEBUG state gallery 的 config、audio 与 manifest fixture 全部位于进程级 UUID 临时 root，
     // 并共用一个 `.atomic` helper；不会解析或替换用户声音包路径。
-    // 导入音频：探测文件走一次 `.atomic`，最终音频走 `mkstemp` 私有 staging fd + 完整 `write(2)`
-    // + `fsync` + `link(2)` 的不可覆盖发布，最后 `unlink(2)` 清 staging。源文件的 `open(O_RDONLY |
-    // O_NOFOLLOW | O_NONBLOCK)` 仍只是有界只读；这里逐字记录的是整个受审计表面，不把低层安全
-    // 发布误算成第二处内容替换式 `.write`。
+    // 导入音频：探测文件走一次 `.atomic`，最终音频转发到 AnchoredFileIO 的目录 fd 排他发布。
+    // 源文件的 `open(O_RDONLY | O_NOFOLLOW | O_NONBLOCK)` 仍只是有界只读。
     "gui/Sources/ClaudioGUICore/AudioImport.swift": [
-        ".write(", "link(", "mkstemp(", "open(", "unlink(", "write(",
+        ".write(", "open(",
     ],
-    // 包 manifest 的原子写。
-    "gui/Sources/ClaudioGUICore/ManifestBinding.swift": [".write("],
     // AI 提示音候选只在随机、私有 generation 目录中首次创建：O_EXCL + O_NOFOLLOW 禁止覆盖，
     // 完整短写循环后把 fd 固定为 0600；任一步失败立即 unlink。`.atomic` 单独会替换已有路径，
     // 与 `.withoutOverwriting` 组合则会 fatalError，不能替代这里的不可覆盖首次创建；具体形状由
@@ -583,7 +585,7 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     // directory, then fsync + renameat. GUI runtime tests cover persistence and rejected nodes;
     // the dedicated credential-writer audit below keeps this exception scoped to that writer.
     "gui/Sources/ClaudioGUICore/AICueLocalCredentials.swift": [
-        ".write(", "fchmod(", "mkdirat(", "open(", "unlinkat(", "write(",
+        ".write(", "fchmod(", "mkdirat(", "open(", "openat(", "unlinkat(", "write(",
     ],
     // DEBUG Settings gallery candidates are synthesized into a process-unique private root.
     // Each immutable WAV is atomically published before the fixture exposes it, and the retained
@@ -608,7 +610,7 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     // 与父目录复验通过后才调用可恢复的 `.trashItem(`；Trash 失败及身份异常用同一 rename 原语
     // 不可覆盖地回滚，`unlinkat(..., AT_REMOVEDIR)` 只清已经为空的隔离目录。
     "gui/Sources/ClaudioGUICore/UserSoundPackDeletion.swift": [
-        ".trashItem(", "mkdirat(", "open(", "renameatx_np(", "unlinkat(",
+        ".trashItem(", "mkdirat(", "open(", "openat(", "renameatx_np(", "unlinkat(",
     ],
 ]
 
@@ -617,13 +619,11 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
 /// 计数**绑调用点**（`/review e7c38ea`：上一版是一个全仓总数 `totalWriteSites >= 9`，它挡的只是
 /// 「检测器整个瞎掉」；一处写盘单独从检测器眼皮底下消失、而别处新增一处，它照样绿）。
 private let contentReplacingWriteSites: [String: Int] = [
-    "helper/Sources/ClaudioCore/ConfigMutation.swift": 1,
     "helper/Sources/ClaudioCore/EventNoticeTransport.swift": 1,
     "helper/Sources/ClaudioCore/Log.swift": 2,
     "helper/Sources/ClaudioCore/Play.swift": 1,
     "helper/Sources/ClaudioCore/ConcreteHostIntegrationAdapters.swift": 1,
     "gui/Sources/ClaudioGUICore/AudioImport.swift": 1,
-    "gui/Sources/ClaudioGUICore/ManifestBinding.swift": 1,
     "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationFixtures.swift": 1,
 ]
 
@@ -637,7 +637,10 @@ private let writeIntentOpenFlags = ["O_WRONLY", "O_RDWR", "O_APPEND"]
 /// - `FileLock.swift` —— 锁文件本身（`flock(2)` 要一个 fd）。
 /// - `AICueGenerationEngine.swift` —— 私有随机目录中的 O_EXCL 首次候选创建；suite ⑤ 审计其
 ///   no-follow、0600、短写循环与失败删除契约。
+/// - `AnchoredFileIO.swift` —— 唯一目录 fd 暂存与交换发布内核；本 suite 的定向断言与
+///   `AnchoredFileIOSuite` 的删除、目录换位及晚期冲突行为测试共同审计。
 private let rawWriteFileDescriptorHolders: Set<String> = [
+    "helper/Sources/ClaudioCore/AnchoredFileIO.swift",
     "helper/Sources/ClaudioCore/Log.swift",
     "helper/Sources/ClaudioCore/FileLock.swift",
     "gui/Sources/ClaudioGUICore/AICueGenerationEngine.swift",
@@ -645,6 +648,10 @@ private let rawWriteFileDescriptorHolders: Set<String> = [
 ]
 
 private func isAuditedPrivateInitialWrite(path: String, arguments: String) -> Bool {
+    if path == "helper/Sources/ClaudioCore/AnchoredFileIO.swift" {
+        return arguments.filter { !$0.isWhitespace }
+            == "descriptor,base.advanced(by:offset),raw.count-offset"
+    }
     if path == "gui/Sources/ClaudioGUICore/AICueLocalCredentials.swift" {
         return arguments.filter { !$0.isWhitespace }
             == "item,bytes.baseAddress!.advanced(by:offset),bytes.count-offset"
@@ -1025,6 +1032,20 @@ func runAtomicWriteSuites() {
             !rawWriteFileDescriptorHolders.isEmpty && holders.count >= 3,
             "裸写名单空了 —— 两个空集相等，上面那条断言于是恒真。Log、FileLock 与 AI 候选写者"
                 + "都真的在裸写，它们必须被这条绊线看见")
+    }
+
+    suite("写盘绊线：目录 fd 发布内核的暂存、交换与冲突保留形状") {
+        let path = "helper/Sources/ClaudioCore/AnchoredFileIO.swift"
+        guard let source = scanned[path]?.codeWithoutStringLiterals else {
+            expect(false, "目录 fd 发布源码必须可读取")
+            return
+        }
+        for required in [
+            "O_CREAT | O_EXCL | O_NOFOLLOW", "fchmod(descriptor", "fsync(descriptor)",
+            "RENAME_SWAP", "RENAME_EXCL", "publishedWithConflict", "unlinkat(targetDirectory.fd",
+        ] {
+            expect(source.contains(required), "目录 fd 发布不能丢失 \(required)")
+        }
     }
 
     suite("写盘绊线：SenseAudio 凭据仅经私有 staging 完整写入后原子替换") {

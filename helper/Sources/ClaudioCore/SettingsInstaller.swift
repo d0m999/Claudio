@@ -99,6 +99,10 @@ public enum SettingsUpdateError: Error, Sendable, Equatable, CustomStringConvert
     /// a complete, healthy connection. Appending `play` hooks would create two independent
     /// playback/debounce chains, so the caller must repair it through the integration adapter.
     case modernConnectionNeedsRepair(reason: String)
+    /// A command resembles a Claudio legacy play hook, but its binary identity is not the
+    /// exact current helper path. Preserve it and ask the user to inspect it before installing
+    /// another playback chain.
+    case legacyHookNeedsReview(events: [String])
     /// `install` was handed a binary path that lives inside a `.claudio` namespace but does not
     /// have a shape that namespace's own `uninstall` sweep recognizes — see
     /// ``binaryPathContradictsItsNamespace(_:)``. Writing the hook would leak an entry no
@@ -115,6 +119,8 @@ public enum SettingsUpdateError: Error, Sendable, Equatable, CustomStringConvert
     /// Rather than clobber that edit in a file `uninstall` keeps no backup of, the
     /// write is aborted so the caller can retry against the fresh contents.
     case concurrentModification(path: String)
+    case postPublishConflict(recoveryPath: String)
+    case postPublishLocationChanged(location: String)
 
     public var description: String {
         switch self {
@@ -130,6 +136,10 @@ public enum SettingsUpdateError: Error, Sendable, Equatable, CustomStringConvert
             "检测到需要修复的现代 Claude Code 连接（\(reason)）；已拒绝追加 legacy hooks，"
                 + "请运行 `~/.claudio/bin/claudi0 integrations connect claude-code` 修复，或先用 "
                 + "`~/.claudio/bin/claudi0 integrations disconnect claude-code` 断开"
+        case .legacyHookNeedsReview(let events):
+            "发现无法确认归属的疑似旧播放 hook（\(events.joined(separator: ", "))）；"
+                + "已保留原件、未修改 settings.json。请先检查对应事件的命令，确认是否应手工移除，"
+                + "再重试 install"
         case .unsweepableBinaryPath(let path):
             "claudio 二进制路径位于自己的 .claudio 命名空间内，却不是 uninstall 能识别并清除的形状"
                 + "（根之下只允许不含 shell 元字符的普通路径段，且文件名必须正好是 claudio）："
@@ -137,6 +147,11 @@ public enum SettingsUpdateError: Error, Sendable, Equatable, CustomStringConvert
         case .concurrentModification(let path):
             "settings.json 在本次读取与写入之间被其他程序修改（Claude Code 自己，或你的编辑器），"
                 + "为避免覆盖对方的改动已中止（未修改文件），请重试：\(path)"
+        case .postPublishConflict(let recoveryPath):
+            "settings.json 已发布，但在最后交换窗口发现外部替换；外部版本保留于 "
+                + "\(recoveryPath)，请先检查当前文件再手工恢复"
+        case .postPublishLocationChanged(let location):
+            "settings.json 已发布，但入口或目录位置随后变化；请检查原路径及被移动目录中的条目 \(location)"
         }
     }
 }
@@ -303,10 +318,20 @@ public func detectHookInstallStatus(
             return .settingsUnreadable(shapeError)
         }
         let hooksSection = (loaded.root[hooksKey] as? [String: Any]) ?? [:]
+        if !unrecognizedLegacyHookEvents(
+            in: loaded.root, claudioBinaryPath: claudioBinaryPath
+        ).isEmpty {
+            return .notInstalled
+        }
         let allEventsInstalled = Event.legacyLifecycleCases.allSatisfy { event in
             let command = claudioHookCommand(for: event, claudioBinaryPath: claudioBinaryPath)
             let eventArray = (hooksSection[claudeNativeEventName(for: event)] as? [Any]) ?? []
+            let oldCommand = claudioBinaryPath + " play " + event.cliName
             return eventArray.contains { groupContainsCommand($0, command: command) }
+                && (oldCommand == command
+                    || !eventArray.contains {
+                        groupContainsCommand($0, command: oldCommand)
+                    })
         }
         return allEventsInstalled ? .installed : .notInstalled
     }
@@ -339,9 +364,9 @@ private func performInstall(
                 claudioBinaryPath: claudioBinaryPath)
             {
                 semanticError = .modernConnectionNeedsRepair(
-                        reason:
-                            "同一 claudi0 root 下仍有旧 helper 路径的 modern callback，"
-                            + "可能与新连接同时执行")
+                    reason:
+                        "同一 claudi0 root 下仍有旧 helper 路径的 modern callback，"
+                        + "可能与新连接同时执行")
                 return .unchanged(.alreadyInstalled)
             }
             switch inspectClaudeCodeHooks(
@@ -352,8 +377,9 @@ private func performInstall(
             case .success(.configured):
                 return .unchanged(.modernConnectionPresent)
             case .success(.partial(_, let missing, let hasLegacyEntries))
-                where missing.count < HostCapabilityCatalog.bindings(for: .claudeCode).count:
-                let detail = hasLegacyEntries
+            where missing.count < HostCapabilityCatalog.bindings(for: .claudeCode).count:
+                let detail =
+                    hasLegacyEntries
                     ? "现代与 legacy hook 同时存在，可能重复播放"
                     : "现代 hook 不完整，缺少 \(missing.joined(separator: ", "))"
                 semanticError = .modernConnectionNeedsRepair(reason: detail)
@@ -370,10 +396,22 @@ private func performInstall(
             }
         }
 
+        let eventsNeedingReview = unrecognizedLegacyHookEvents(
+            in: originalRoot, claudioBinaryPath: claudioBinaryPath)
+        if !eventsNeedingReview.isEmpty {
+            semanticError = .legacyHookNeedsReview(events: eventsNeedingReview)
+            return .unchanged(.alreadyInstalled)
+        }
+
         var root = originalRoot
         var anyChanged = false
         for event in Event.legacyLifecycleCases {
             let command = claudioHookCommand(for: event, claudioBinaryPath: claudioBinaryPath)
+            let (migratedRoot, migrated) = migrateExactLegacyHook(
+                root: root, event: event, claudioBinaryPath: claudioBinaryPath,
+                currentCommand: command)
+            root = migratedRoot
+            anyChanged = anyChanged || migrated
             let (nextRoot, changed) = appendHookEntry(root: root, event: event, command: command)
             root = nextRoot
             anyChanged = anyChanged || changed
@@ -383,7 +421,8 @@ private func performInstall(
         return .replace(root, .installed)
     }
 
-    let updated: Result<ConfigFileTransactionReport<InstallMutationResult>, ConfigFileTransactionError>
+    let updated:
+        Result<ConfigFileTransactionReport<InstallMutationResult>, ConfigFileTransactionError>
     #if DEBUG
     updated = transaction.update(mutate, betweenReadAndWrite: betweenReadAndWrite)
     #else
@@ -399,6 +438,95 @@ private func performInstall(
         case .alreadyInstalled: return .success(.alreadyInstalled)
         case .modernConnectionPresent: return .success(.modernConnectionPresent)
         }
+    }
+}
+
+/// Only the exact current helper path and native event can prove an old unquoted command
+/// belongs to this installer. The enclosing group (matcher/context/unknown fields) remains
+/// in place; an equivalent new entry suppresses the old duplicate only within that group.
+private func migrateExactLegacyHook(
+    root: [String: Any], event: Event, claudioBinaryPath: String,
+    currentCommand: String
+) -> (root: [String: Any], changed: Bool) {
+    let oldCommand = claudioBinaryPath + " play " + event.cliName
+    guard oldCommand != currentCommand else { return (root, false) }
+    let nativeEvent = claudeNativeEventName(for: event)
+    guard var hooksSection = root[hooksKey] as? [String: Any],
+        let groups = hooksSection[nativeEvent] as? [Any]
+    else { return (root, false) }
+    var changed = false
+    var nextGroups: [Any] = []
+    for group in groups {
+        guard var groupDict = group as? [String: Any],
+            let entries = groupDict[hooksKey] as? [Any]
+        else {
+            nextGroups.append(group)
+            continue
+        }
+        var hasNew = groupContainsCommand(group, command: currentCommand)
+        var nextEntries: [Any] = []
+        for entry in entries {
+            guard var entryDict = entry as? [String: Any],
+                (entryDict[hookTypeKey] as? String) == commandHookType,
+                (entryDict[hookCommandKey] as? String) == oldCommand
+            else {
+                nextEntries.append(entry)
+                continue
+            }
+            changed = true
+            if hasNew { continue }
+            entryDict[hookCommandKey] = currentCommand
+            nextEntries.append(entryDict)
+            hasNew = true
+        }
+        groupDict[hooksKey] = nextEntries
+        if !nextEntries.isEmpty || groupDict.count > 1 { nextGroups.append(groupDict) }
+    }
+    guard changed else { return (root, false) }
+    if nextGroups.isEmpty {
+        hooksSection.removeValue(forKey: nativeEvent)
+    } else {
+        hooksSection[nativeEvent] = nextGroups
+    }
+    var updated = root
+    updated[hooksKey] = hooksSection
+    return (updated, true)
+}
+
+/// This is a warning boundary, not an ownership claim. Only the exact current-path unquoted
+/// command is automatically migrated. A command that looks like this helper's legacy `play`
+/// hook but does not match either known spelling keeps its bytes and requires manual review.
+private func unrecognizedLegacyHookEvents(
+    in root: [String: Any], claudioBinaryPath: String
+) -> [String] {
+    guard let hooksSection = root[hooksKey] as? [String: Any] else { return [] }
+    let binaryName = URL(fileURLWithPath: claudioBinaryPath).lastPathComponent
+    let binaryPattern =
+        "(?<![A-Za-z0-9_])"
+        + NSRegularExpression.escapedPattern(for: binaryName) + "(?![A-Za-z0-9_])"
+    return Event.legacyLifecycleCases.compactMap { event in
+        let nativeEvent = claudeNativeEventName(for: event)
+        let groups = (hooksSection[nativeEvent] as? [Any]) ?? []
+        let exact = claudioHookCommand(for: event, claudioBinaryPath: claudioBinaryPath)
+        let old = claudioBinaryPath + " play " + event.cliName
+        let playPattern =
+            "\\bplay\\s+"
+            + NSRegularExpression.escapedPattern(for: event.cliName) + "\\b"
+        let needsReview = groups.contains { group in
+            guard let entries = (group as? [String: Any])?[hooksKey] as? [Any] else {
+                return false
+            }
+            return entries.contains { entry in
+                guard let hook = entry as? [String: Any],
+                    (hook[hookTypeKey] as? String) == commandHookType,
+                    let command = hook[hookCommandKey] as? String,
+                    command != exact, command != old
+                else { return false }
+                return command.range(of: binaryPattern, options: .regularExpression) != nil
+                    && command.range(of: playPattern, options: .regularExpression) != nil
+            }
+        }
+        return needsReview ? nativeEvent : nil
     }
 }
 
@@ -444,7 +572,8 @@ private func performUninstall(
     updated = transaction.update(mutate)
     #endif
     if let semanticError { return .failure(semanticError) }
-    return updated
+    return
+        updated
         .map(\.value)
         .mapError(mapTransactionError)
 }
@@ -460,6 +589,10 @@ private func mapTransactionError(_ error: ConfigFileTransactionError) -> Setting
     case .backupFailure(let reason): return .backupFailure(reason: reason)
     case .writeFailure(let reason): return .writeFailure(reason: reason)
     case .concurrentModification(let path): return .concurrentModification(path: path)
+    case .postPublishConflict(let recoveryPath):
+        return .postPublishConflict(recoveryPath: recoveryPath)
+    case .postPublishLocationChanged(let location):
+        return .postPublishLocationChanged(location: location)
     case .symlinkRejected(let path): return .readFailure(reason: "拒绝符号链接：\(path)")
     case .danglingSymlink(let path): return .readFailure(reason: "悬空符号链接：\(path)")
     case .lockBusy: return .lockBusy

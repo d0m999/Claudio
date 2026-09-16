@@ -65,6 +65,7 @@ package struct SoundsEditorPresentation: Equatable {
     /// slice; recovery capabilities are projected separately and re-signed on each publication.
     package let windowStatuses: [SoundPacksWindowStatus]
     package let recoveryActions: [SoundPackEditorRecoveryPresentation]
+    package let manifestRecoveryActions: [SoundPackEditorManifestRecoveryPresentation]
 }
 
 /// Empty-state recovery is explicit so a view cannot infer filesystem or factory facts. The
@@ -171,6 +172,16 @@ package struct SoundPackEditorRecoveryPresentation: Identifiable, Equatable, Sen
     package var id: String { packID }
     package let packID: String
     package let retryAction: SoundPackEditorAction
+}
+
+package struct SoundPackEditorManifestRecoveryPresentation: Identifiable, Equatable, Sendable {
+    package var id: Int { statusRevision }
+    package let statusRevision: Int
+    package let packID: String
+    package let path: String
+    package let issue: ManifestRecoveryIssue
+    package let revealAction: SoundPackEditorAction
+    package let retryAction: SoundPackEditorAction?
 }
 
 package struct SoundPackEditorAction: Hashable, Sendable {

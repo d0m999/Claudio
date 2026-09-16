@@ -236,7 +236,8 @@ func runManifestBindingSuites() async {
                 expect(false, "rewritten manifest.json must still be valid JSON")
                 return
             }
-            expect(rewritten["name"] as? String == "极简铃音", "unknown key `name` must survive the RMW")
+            expect(
+                rewritten["name"] as? String == "极简铃音", "unknown key `name` must survive the RMW")
             expect(
                 rewritten["author"] as? String == "Test Author",
                 "unknown key `author` must survive the RMW")
@@ -298,18 +299,29 @@ func runManifestBindingSuites() async {
             writeFixture(originalRawJSON, to: manifestFile)
             writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
             let environment = makeEnvironment(userPacksDirectory: userPacks)
+            let writeWatch = FileWriteWatch(watching: manifestFile)
+            expect(writeWatch.isArmed, "malformed manifest watch must be armed")
 
             let result = bindEventToManifest(
                 event: .stop, fileName: "stop.mp3", packID: "my-pack", environment: environment)
 
             expect(
-                { if case .manifestUnreadable = failureError(result) { return true } else { return false } }(),
+                {
+                    if case .manifestUnreadable = failureError(result) {
+                        return true
+                    } else {
+                        return false
+                    }
+                }(),
                 "a non-object `events` field (a JSON array here) must fail CLOSED as"
                     + " .manifestUnreadable, never be silently coerced into a fresh {}, got \(result)"
             )
             expect(
                 (try? String(contentsOf: manifestFile, encoding: .utf8)) == originalRawJSON,
                 "a rejected bind must leave manifest.json completely untouched on disk")
+            expect(
+                writeWatch.observedWrite() == .untouched,
+                "malformed manifest rejection must not write and restore the original")
         }
     }
 
@@ -353,7 +365,8 @@ func runManifestBindingSuites() async {
         }
     }
 
-    suite("bindEventToManifest: binding into a pack that exists ONLY as a bundled pack is refused") {
+    suite("bindEventToManifest: binding into a pack that exists ONLY as a bundled pack is refused")
+    {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
             let bundledPacks = root.appendingPathComponent("bundled")
@@ -366,7 +379,8 @@ func runManifestBindingSuites() async {
                 userPacksDirectory: userPacks, bundledPacksDirectory: bundledPacks)
 
             let result = bindEventToManifest(
-                event: .stop, fileName: "stop.mp3", packID: "minimal-chime", environment: environment)
+                event: .stop, fileName: "stop.mp3", packID: "minimal-chime",
+                environment: environment)
             expect(
                 failureError(result) == .packNotFound(packID: "minimal-chime"),
                 "binding must never write into the read-only bundled pack root, got \(result)")
@@ -387,7 +401,8 @@ func runManifestBindingSuites() async {
             let environment = makeEnvironment(userPacksDirectory: userPacks)
 
             let result = bindEventToManifest(
-                event: .stop, fileName: "../../evil.mp3", packID: "my-pack", environment: environment)
+                event: .stop, fileName: "../../evil.mp3", packID: "my-pack",
+                environment: environment)
             expect(
                 failureError(result) == .unsafeFileName,
                 "a `../`-escaping filename must be rejected as .unsafeFileName, got \(result)")
@@ -416,8 +431,9 @@ func runManifestBindingSuites() async {
         }
     }
 
-    suite("bindEventToManifest: a safe filename that doesn't actually exist is rejected as .fileNotFound")
-    {
+    suite(
+        "bindEventToManifest: a safe filename that doesn't actually exist is rejected as .fileNotFound"
+    ) {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
             writeFixture(
@@ -495,7 +511,9 @@ func runManifestBindingSuites() async {
     // that is ABSENT fails one step earlier — inside `loadPackManifestData` — the only
     // `bindEventToManifest` failure branch with no test at all. Reachable for real: importing
     // into a pack directory that exists (importAudioFile created it) but has no manifest yet.
-    suite("bindEventToManifest: a MISSING manifest.json (pack dir exists, file present) is rejected as .manifestUnreadable") {
+    suite(
+        "bindEventToManifest: a MISSING manifest.json (pack dir exists, file present) is rejected as .manifestUnreadable"
+    ) {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
             // Pack directory + the audio file exist; manifest.json deliberately does NOT.
@@ -505,7 +523,10 @@ func runManifestBindingSuites() async {
             let result = bindEventToManifest(
                 event: .stop, fileName: "stop.mp3", packID: "my-pack", environment: environment)
             guard case .manifestUnreadable(let reason) = failureError(result) else {
-                expect(false, "a missing manifest.json must be rejected as .manifestUnreadable, got \(result)")
+                expect(
+                    false,
+                    "a missing manifest.json must be rejected as .manifestUnreadable, got \(result)"
+                )
                 return
             }
             expect(
@@ -537,7 +558,13 @@ func runManifestBindingSuites() async {
             let result = bindEventToManifest(
                 event: .stop, fileName: "stop.mp3", packID: "my-pack", environment: environment)
             expect(
-                { if case .manifestUnreadable = failureError(result) { return true } else { return false } }(),
+                {
+                    if case .manifestUnreadable = failureError(result) {
+                        return true
+                    } else {
+                        return false
+                    }
+                }(),
                 "a valid-JSON top-level ARRAY must fail closed as .manifestUnreadable, never be"
                     + " coerced into an object, got \(result)")
             expect(
@@ -549,14 +576,21 @@ func runManifestBindingSuites() async {
     suite("bindEventToManifest: a corrupt manifest.json is rejected as .manifestUnreadable") {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
-            writeFixture("{ not valid json", to: userPacks.appendingPathComponent("my-pack/manifest.json"))
+            writeFixture(
+                "{ not valid json", to: userPacks.appendingPathComponent("my-pack/manifest.json"))
             writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
             let environment = makeEnvironment(userPacksDirectory: userPacks)
 
             let result = bindEventToManifest(
                 event: .stop, fileName: "stop.mp3", packID: "my-pack", environment: environment)
             expect(
-                { if case .manifestUnreadable = failureError(result) { return true } else { return false } }(),
+                {
+                    if case .manifestUnreadable = failureError(result) {
+                        return true
+                    } else {
+                        return false
+                    }
+                }(),
                 "expected .failure(.manifestUnreadable), got \(result)")
         }
     }
@@ -781,7 +815,8 @@ func runManifestBindingSuites() async {
             guard case .success = rowViewModel.bindResult else {
                 expect(
                     false,
-                    "expected the bind to succeed, got \(String(describing: rowViewModel.bindResult))")
+                    "expected the bind to succeed, got \(String(describing: rowViewModel.bindResult))"
+                )
                 return
             }
 
@@ -789,7 +824,8 @@ func runManifestBindingSuites() async {
                 packID: "my-pack", config: ClaudioConfig(selectedPack: "my-pack"),
                 environment: environment)
             expect(
-                rows.first { $0.event == .notification }?.coverage == .present(fileName: "chime.wav"),
+                rows.first { $0.event == .notification }?.coverage
+                    == .present(fileName: "chime.wav"),
                 "after a real drop through the view-model, notification must recompute to .present,"
                     + " got \(String(describing: rows.first { $0.event == .notification }?.coverage))"
             )
@@ -804,7 +840,8 @@ func runManifestBindingSuites() async {
                 to: userPacks.appendingPathComponent("my-pack/manifest.json"))
             let environment = makeEnvironment(userPacksDirectory: userPacks)
             let importViewModel = AudioImportViewModel(packID: "my-pack", environment: environment)
-            let rowViewModel = EventRowImportViewModel(event: .stop, importViewModel: importViewModel)
+            let rowViewModel = EventRowImportViewModel(
+                event: .stop, importViewModel: importViewModel)
 
             let sourceURL = root.appendingPathComponent("source/evil.mp3")
             writeFixture(evilShellScriptData(), to: sourceURL)
@@ -835,7 +872,8 @@ func runManifestBindingSuites() async {
             // No manifest.json anywhere — the pack dir is created by the import itself.
             let environment = makeEnvironment(userPacksDirectory: userPacks)
             let importViewModel = AudioImportViewModel(packID: "my-pack", environment: environment)
-            let rowViewModel = EventRowImportViewModel(event: .stop, importViewModel: importViewModel)
+            let rowViewModel = EventRowImportViewModel(
+                event: .stop, importViewModel: importViewModel)
 
             let sourceURL = root.appendingPathComponent("source/chime.wav")
             writeFixture(validWAVData(), to: sourceURL)
@@ -875,7 +913,9 @@ func runManifestBindingSuites() async {
     // through, publishing into the SAME `bindResult` surface a failed bind already reports
     // through (this type's own doc comment).
 
-    suite("EventRowImportViewModel.clearBinding(): clears a bound event — bindResult becomes .success, coverage recomputes to .unmapped, the file itself is untouched") {
+    suite(
+        "EventRowImportViewModel.clearBinding(): clears a bound event — bindResult becomes .success, coverage recomputes to .unmapped, the file itself is untouched"
+    ) {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
             writeFixture(
@@ -887,7 +927,8 @@ func runManifestBindingSuites() async {
                 packID: "my-pack",
                 environment: environment,
                 previewState: .reject(.nonWhitelistFormat))
-            let rowViewModel = EventRowImportViewModel(event: .stop, importViewModel: importViewModel)
+            let rowViewModel = EventRowImportViewModel(
+                event: .stop, importViewModel: importViewModel)
 
             rowViewModel.clearBinding()
 
@@ -895,7 +936,8 @@ func runManifestBindingSuites() async {
                 expect(
                     false,
                     "clearBinding() must record .success in bindResult — the SAME surface a failed"
-                        + " bind reports through, got \(String(describing: rowViewModel.bindResult))")
+                        + " bind reports through, got \(String(describing: rowViewModel.bindResult))"
+                )
                 return
             }
             let rows = packCoverage(
@@ -912,11 +954,14 @@ func runManifestBindingSuites() async {
                 "clearBinding() must never delete the audio file — only the manifest key")
             expect(
                 importViewModel.state == .idle,
-                "a newer clear action must remove an older import rejection so it cannot hide the bindResult")
+                "a newer clear action must remove an older import rejection so it cannot hide the bindResult"
+            )
         }
     }
 
-    suite("EventRowImportViewModel.clearBinding(): idempotent on an already-unmapped event — .success, a true no-op") {
+    suite(
+        "EventRowImportViewModel.clearBinding(): idempotent on an already-unmapped event — .success, a true no-op"
+    ) {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
             writeFixture(
@@ -939,17 +984,22 @@ func runManifestBindingSuites() async {
         }
     }
 
-    suite("EventRowImportViewModel.clearBinding(): an unresolvable packID surfaces as .failure(.packNotFound) in bindResult — the SAME surface a failed bind already reports through, never a second, unrendered failure path") {
+    suite(
+        "EventRowImportViewModel.clearBinding(): an unresolvable packID surfaces as .failure(.packNotFound) in bindResult — the SAME surface a failed bind already reports through, never a second, unrendered failure path"
+    ) {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
             let environment = makeEnvironment(userPacksDirectory: userPacks)
-            let importViewModel = AudioImportViewModel(packID: "ghost-pack", environment: environment)
-            let rowViewModel = EventRowImportViewModel(event: .stop, importViewModel: importViewModel)
+            let importViewModel = AudioImportViewModel(
+                packID: "ghost-pack", environment: environment)
+            let rowViewModel = EventRowImportViewModel(
+                event: .stop, importViewModel: importViewModel)
 
             rowViewModel.clearBinding()
 
             expect(
-                failureError(rowViewModel.bindResult ?? .success(())) == .packNotFound(packID: "ghost-pack"),
+                failureError(rowViewModel.bindResult ?? .success(()))
+                    == .packNotFound(packID: "ghost-pack"),
                 "an unresolvable pack must surface .packNotFound through bindResult, got"
                     + " \(String(describing: rowViewModel.bindResult))")
         }
@@ -1011,7 +1061,8 @@ func runManifestBindingSuites() async {
                 event: .stop, importViewModel: failImportViewModel)
             let goodSource2 = root.appendingPathComponent("source/chime2.wav")
             writeFixture(validWAVData(), to: goodSource2)
-            await failRowViewModel.handleDrop(sourceURL: goodSource2, suggestedFileName: "chime2.wav")
+            await failRowViewModel.handleDrop(
+                sourceURL: goodSource2, suggestedFileName: "chime2.wav")
             guard case .failure = failRowViewModel.bindResult else {
                 expect(
                     false,
@@ -1053,7 +1104,8 @@ func runManifestBindingSuites() async {
             guard case .success = rowViewModel.bindResult else {
                 expect(
                     false,
-                    "setup: the bind must succeed, got \(String(describing: rowViewModel.bindResult))")
+                    "setup: the bind must succeed, got \(String(describing: rowViewModel.bindResult))"
+                )
                 return
             }
             guard case .success(let importedBeforeRetarget) = importViewModel.state else {
@@ -1110,7 +1162,13 @@ func runManifestBindingSuites() async {
                 environment: environment)
 
             expect(
-                { if case .manifestUnreadable = failureError(result) { return true } else { return false } }(),
+                {
+                    if case .manifestUnreadable = failureError(result) {
+                        return true
+                    } else {
+                        return false
+                    }
+                }(),
                 "must fail closed as .manifestUnreadable rather than write a manifest nothing can"
                     + " decode, got \(result)")
             expect(
@@ -1153,7 +1211,13 @@ func runManifestBindingSuites() async {
                     event: .stop, fileName: "stop.mp3", packID: "my-pack", environment: environment)
 
                 expect(
-                    { if case .manifestUnreadable = failureError(result) { return true } else { return false } }(),
+                    {
+                        if case .manifestUnreadable = failureError(result) {
+                            return true
+                        } else {
+                            return false
+                        }
+                    }(),
                     "\(shape.label): must fail closed as .manifestUnreadable, never write a manifest"
                         + " PackManifest can't decode and call it a success, got \(result)")
                 expect(
@@ -1191,7 +1255,8 @@ func runManifestBindingSuites() async {
                 userPacksDirectory: userPacks, bundledPacksDirectory: nil, durationProbe: probe,
                 packsLockFile: injectedPacksLock(under: root))
             let importViewModel = AudioImportViewModel(packID: "pack-a", environment: environment)
-            let rowViewModel = EventRowImportViewModel(event: .stop, importViewModel: importViewModel)
+            let rowViewModel = EventRowImportViewModel(
+                event: .stop, importViewModel: importViewModel)
 
             let sourceURL = root.appendingPathComponent("source/chime.wav")
             writeFixture(validWAVData(), to: sourceURL)
@@ -1222,7 +1287,8 @@ func runManifestBindingSuites() async {
             expect(
                 FileManager.default.fileExists(
                     atPath: userPacks.appendingPathComponent("pack-a/chime.wav").path),
-                "setup sanity: the import copied the file into pack-a, the pack selected when it began")
+                "setup sanity: the import copied the file into pack-a, the pack selected when it began"
+            )
 
             let rowsA = packCoverage(
                 packID: "pack-a", config: ClaudioConfig(selectedPack: "pack-a"),
@@ -1230,7 +1296,8 @@ func runManifestBindingSuites() async {
             expect(
                 rowsA.first { $0.event == .stop }?.coverage == .present(fileName: "chime.wav"),
                 "pack-a — the pack that RECEIVED the file — must be the one whose manifest gained the"
-                    + " binding, got \(String(describing: rowsA.first { $0.event == .stop }?.coverage))")
+                    + " binding, got \(String(describing: rowsA.first { $0.event == .stop }?.coverage))"
+            )
             expect(
                 (try? String(contentsOf: manifestB, encoding: .utf8)) == originalB,
                 "pack-b's manifest must be byte-for-byte untouched: the user switched to it, they"
@@ -1253,7 +1320,8 @@ func runManifestBindingSuites() async {
                 userPacksDirectory: userPacks, bundledPacksDirectory: nil, durationProbe: probe,
                 packsLockFile: injectedPacksLock(under: root))
             let importViewModel = AudioImportViewModel(packID: "my-pack", environment: environment)
-            let rowViewModel = EventRowImportViewModel(event: .stop, importViewModel: importViewModel)
+            let rowViewModel = EventRowImportViewModel(
+                event: .stop, importViewModel: importViewModel)
 
             let goodURL = root.appendingPathComponent("source/chime.wav")
             writeFixture(validWAVData(), to: goodURL)
@@ -1369,7 +1437,13 @@ func runManifestBindingSuites() async {
             }
 
             expect(
-                { if case .manifestUnreadable = failureError(result) { return true } else { return false } }(),
+                {
+                    if case .manifestUnreadable = failureError(result) {
+                        return true
+                    } else {
+                        return false
+                    }
+                }(),
                 "a non-object `events` must fail closed as .manifestUnreadable, got \(result)")
             expect(!transformCalled, "the fail-closed guard must run BEFORE transform, never after")
             expect(
@@ -1397,8 +1471,15 @@ func runManifestBindingSuites() async {
             }
 
             expect(
-                { if case .manifestUnreadable = failureError(result) { return true } else { return false } }(),
-                "a non-string `events` value must fail closed as .manifestUnreadable, got \(result)")
+                {
+                    if case .manifestUnreadable = failureError(result) {
+                        return true
+                    } else {
+                        return false
+                    }
+                }(),
+                "a non-string `events` value must fail closed as .manifestUnreadable, got \(result)"
+            )
             expect(!transformCalled, "the fail-closed guard must run BEFORE transform, never after")
             expect(
                 (try? String(contentsOf: manifestFile, encoding: .utf8)) == originalRawJSON,
@@ -1430,7 +1511,13 @@ func runManifestBindingSuites() async {
                 }
 
                 expect(
-                    { if case .manifestUnreadable = failureError(result) { return true } else { return false } }(),
+                    {
+                        if case .manifestUnreadable = failureError(result) {
+                            return true
+                        } else {
+                            return false
+                        }
+                    }(),
                     "\(shape.label): must fail closed as .manifestUnreadable, got \(result)")
                 expect(
                     !transformCalled,
@@ -1443,7 +1530,9 @@ func runManifestBindingSuites() async {
         }
     }
 
-    suite("mutateManifestJSON: a MISSING manifest.json is rejected as .manifestUnreadable, transform never called") {
+    suite(
+        "mutateManifestJSON: a MISSING manifest.json is rejected as .manifestUnreadable, transform never called"
+    ) {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
             // The pack directory exists (created by the temp-dir scaffold below) but has no
@@ -1461,10 +1550,15 @@ func runManifestBindingSuites() async {
             }
 
             guard case .manifestUnreadable(let reason) = failureError(result) else {
-                expect(false, "a missing manifest.json must be rejected as .manifestUnreadable, got \(result)")
+                expect(
+                    false,
+                    "a missing manifest.json must be rejected as .manifestUnreadable, got \(result)"
+                )
                 return
             }
-            expect(reason.contains("不存在或不可读"), "reason must be loadPackManifestData's own message, got \(reason)")
+            expect(
+                reason.contains("不存在或不可读"),
+                "reason must be loadPackManifestData's own message, got \(reason)")
             expect(!transformCalled, "the fail-closed guard must run BEFORE transform, never after")
         }
     }
@@ -1477,6 +1571,8 @@ func runManifestBindingSuites() async {
             let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
             let originalRawJSON = #"{ "id": "my-pack", "events": {}, "x": -1e400 }"#
             writeFixture(originalRawJSON, to: manifestFile)
+            let writeWatch = FileWriteWatch(watching: manifestFile)
+            expect(writeWatch.isArmed, "encoding rejection watch must be armed")
 
             // Reaching the assertions below at all (rather than the process dying with exit
             // 134) IS the fix working — the primitive must inherit this from
@@ -1497,6 +1593,9 @@ func runManifestBindingSuites() async {
                 (try? String(contentsOf: manifestFile, encoding: .utf8)) == originalRawJSON,
                 "a manifest containing an unwritable -inf must be left byte-for-byte untouched on disk"
             )
+            expect(
+                writeWatch.observedWrite() == .untouched,
+                "encoding rejection must not write and restore the manifest")
         }
     }
 
@@ -1512,7 +1611,8 @@ func runManifestBindingSuites() async {
             writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
             let environment = makeEnvironment(userPacksDirectory: userPacks)
 
-            let result = clearEventBinding(event: .stop, packID: "my-pack", environment: environment)
+            let result = clearEventBinding(
+                event: .stop, packID: "my-pack", environment: environment)
             guard case .success = result else {
                 expect(false, "expected .success, got \(result)")
                 return
@@ -1543,13 +1643,17 @@ func runManifestBindingSuites() async {
                 to: userPacks.appendingPathComponent("pack-a/manifest.json"))
             writeFixture("fake-audio", to: userPacks.appendingPathComponent("pack-a/ping.mp3"))
             writeFixture(
-                #"{ "id": "pack-b" }"#, to: userPacks.appendingPathComponent("pack-b/manifest.json"))
+                #"{ "id": "pack-b" }"#, to: userPacks.appendingPathComponent("pack-b/manifest.json")
+            )
             let environment = makeEnvironment(userPacksDirectory: userPacks)
 
             // pack-a: events 对象存在，但没有 "stop" 这个 key.
-            let resultA = clearEventBinding(event: .stop, packID: "pack-a", environment: environment)
+            let resultA = clearEventBinding(
+                event: .stop, packID: "pack-a", environment: environment)
             guard case .success = resultA else {
-                expect(false, "clearing an already-unmapped event (key absent) must succeed, got \(resultA)")
+                expect(
+                    false,
+                    "clearing an already-unmapped event (key absent) must succeed, got \(resultA)")
                 return
             }
             let rowsA = packCoverage(
@@ -1560,11 +1664,14 @@ func runManifestBindingSuites() async {
                 "must still read as .unmapped, got"
                     + " \(String(describing: rowsA.first { $0.event == .stop }?.coverage))")
             expect(
-                rowsA.first { $0.event == .notification }?.coverage == .present(fileName: "ping.mp3"),
-                "the sibling notification binding must survive an unrelated event's clear untouched")
+                rowsA.first { $0.event == .notification }?.coverage
+                    == .present(fileName: "ping.mp3"),
+                "the sibling notification binding must survive an unrelated event's clear untouched"
+            )
 
             // pack-b: events 字段整个不存在.
-            let resultB = clearEventBinding(event: .stop, packID: "pack-b", environment: environment)
+            let resultB = clearEventBinding(
+                event: .stop, packID: "pack-b", environment: environment)
             guard case .success = resultB else {
                 expect(
                     false,
@@ -1577,7 +1684,10 @@ func runManifestBindingSuites() async {
             let resultAAgain = clearEventBinding(
                 event: .stop, packID: "pack-a", environment: environment)
             guard case .success = resultAAgain else {
-                expect(false, "clearing the SAME already-cleared event twice must still succeed, got \(resultAAgain)")
+                expect(
+                    false,
+                    "clearing the SAME already-cleared event twice must still succeed, got \(resultAAgain)"
+                )
                 return
             }
         }
@@ -1597,7 +1707,8 @@ func runManifestBindingSuites() async {
             writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/ping.mp3"))
             let environment = makeEnvironment(userPacksDirectory: userPacks)
 
-            let result = clearEventBinding(event: .stop, packID: "my-pack", environment: environment)
+            let result = clearEventBinding(
+                event: .stop, packID: "my-pack", environment: environment)
             guard case .success = result else {
                 expect(false, "expected .success, got \(result)")
                 return
@@ -1608,12 +1719,17 @@ func runManifestBindingSuites() async {
                     as? [String: Any],
                 let events = rewritten["events"] as? [String: String]
             else {
-                expect(false, "rewritten manifest.json must still be valid JSON with an events object")
+                expect(
+                    false, "rewritten manifest.json must still be valid JSON with an events object")
                 return
             }
-            expect(rewritten["name"] as? String == "极简铃音", "unknown key `name` must survive the clear")
-            expect(rewritten["author"] as? String == "Test Author", "unknown key `author` must survive")
-            expect(rewritten["license"] as? String == "CC0-1.0", "unknown key `license` must survive")
+            expect(
+                rewritten["name"] as? String == "极简铃音", "unknown key `name` must survive the clear")
+            expect(
+                rewritten["author"] as? String == "Test Author", "unknown key `author` must survive"
+            )
+            expect(
+                rewritten["license"] as? String == "CC0-1.0", "unknown key `license` must survive")
             expect(rewritten["schema"] as? Int == 1, "unknown key `schema` must survive")
             expect(events["stop"] == nil, "the cleared `stop` key must be gone, got \(events)")
             expect(
@@ -1635,12 +1751,14 @@ func runManifestBindingSuites() async {
         }
     }
 
-    suite("clearEventBinding: 只存在于只读 bundled 包根的 pack 被拒绝为 .packNotFound，bundled 的 manifest 一字节不动") {
+    suite("clearEventBinding: 只存在于只读 bundled 包根的 pack 被拒绝为 .packNotFound，bundled 的 manifest 一字节不动")
+    {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
             let bundledPacks = root.appendingPathComponent("bundled")
             let bundledManifest = bundledPacks.appendingPathComponent("minimal-chime/manifest.json")
-            let originalBundledJSON = #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#
+            let originalBundledJSON =
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#
             writeFixture(originalBundledJSON, to: bundledManifest)
             writeFixture(
                 "fake-audio", to: bundledPacks.appendingPathComponent("minimal-chime/stop.mp3"))
@@ -1680,12 +1798,15 @@ func runManifestBindingSuites() async {
             writeFixture(
                 #"{ "id": "pack-cleared", "events": { "stop": "stop.mp3" } }"#,
                 to: userPacks.appendingPathComponent("pack-cleared/manifest.json"))
-            writeFixture("fake-audio", to: userPacks.appendingPathComponent("pack-cleared/stop.mp3"))
+            writeFixture(
+                "fake-audio", to: userPacks.appendingPathComponent("pack-cleared/stop.mp3"))
             let environment = makeEnvironment(userPacksDirectory: userPacks)
             let clearResult = clearEventBinding(
                 event: .stop, packID: "pack-cleared", environment: environment)
             guard case .success = clearResult else {
-                expect(false, "setup: clearing pack-cleared's stop binding must succeed, got \(clearResult)")
+                expect(
+                    false,
+                    "setup: clearing pack-cleared's stop binding must succeed, got \(clearResult)")
                 return
             }
 
@@ -1709,17 +1830,22 @@ func runManifestBindingSuites() async {
             let brokenIntegrity = checkPackIntegrity(
                 configFile: configFile, userPacksDirectory: userPacks, bundledPacksDirectory: nil)
             guard case .incomplete(let brokenPackID, let missingFiles) = brokenIntegrity else {
-                expect(false, "doctor must report pack-broken as .incomplete, got \(brokenIntegrity)")
+                expect(
+                    false, "doctor must report pack-broken as .incomplete, got \(brokenIntegrity)")
                 return
             }
             expect(brokenPackID == "pack-broken", "the packID on the report must be pack-broken")
-            expect(missingFiles == ["stop.mp3"], "doctor must list the missing declared file, got \(missingFiles)")
+            expect(
+                missingFiles == ["stop.mp3"],
+                "doctor must list the missing declared file, got \(missingFiles)")
 
             writeFixture(#"{"selected_pack": "pack-cleared"}"#, to: configFile)
             let clearedIntegrity = checkPackIntegrity(
                 configFile: configFile, userPacksDirectory: userPacks, bundledPacksDirectory: nil)
             guard case .noSupportedEvents(let clearedPackID) = clearedIntegrity else {
-                expect(false, "doctor must warn when no supported events remain, got \(clearedIntegrity)")
+                expect(
+                    false,
+                    "doctor must warn when no supported events remain, got \(clearedIntegrity)")
                 return
             }
             expect(clearedPackID == "pack-cleared", "the packID on the report must be pack-cleared")
@@ -1745,7 +1871,8 @@ func runManifestBindingSuites() async {
                 to: userPacks.appendingPathComponent("my-pack/manifest.json"))
             let fileNames = ["task.mp3", "stop.mp3", "fail.mp3", "ping.mp3", "sub.mp3"]
             for fileName in fileNames {
-                writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/\(fileName)"))
+                writeFixture(
+                    "fake-audio", to: userPacks.appendingPathComponent("my-pack/\(fileName)"))
             }
             let environment = makeEnvironment(userPacksDirectory: userPacks)
 
@@ -1794,7 +1921,9 @@ func runManifestBindingSuites() async {
             expect(
                 card.state == .partial(present: 0, total: 5),
                 "the pack row must read partial(0/5) — 「缺 5 个」, got \(card.state)")
-            expect(card.presentEvents.isEmpty, "no event glyph should be lit, got \(card.presentEvents)")
+            expect(
+                card.presentEvents.isEmpty,
+                "no event glyph should be lit, got \(card.presentEvents)")
 
             // 三方分歧之外的那条硬约束：清除绝不删文件——全部四个音频文件必须原封不动地留在磁盘上。
             for fileName in fileNames {
@@ -1855,6 +1984,81 @@ func runManifestBindingSuites() async {
                 onDisk?.contains("stop.mp3") == false,
                 "bind 因为锁忙而失败，manifest 却被改了 —— 说明读-改-写没有**整段**在锁的作用域里"
                     + "（典型写法错误：只把最后那次 `write` 包进锁，读和改在锁外）。实得：\(onDisk ?? "<读不出>")")
+        }
+    }
+
+    suite("mutateManifestJSON：跨进程包锁争用与成功返回前写盘") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let packsLock = injectedPacksLock(under: root)
+            let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
+            writeFixture(#"{ "id": "my-pack", "events": {} }"#, to: manifestFile)
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
+            let environment = makeEnvironment(
+                userPacksDirectory: userPacks, packsLockFile: packsLock)
+
+            let child = Process()
+            child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+            child.arguments = ["--manifest-lock-holder", packsLock.path]
+            let childInput = Pipe()
+            child.standardInput = childInput
+            guard (try? child.run()) != nil else {
+                expect(false, "测试前提：跨进程锁持有者须能启动")
+                return
+            }
+            defer {
+                childInput.fileHandleForWriting.closeFile()
+                let deadline = ProcessInfo.processInfo.systemUptime + 2
+                while child.isRunning && ProcessInfo.processInfo.systemUptime < deadline {
+                    Thread.sleep(forTimeInterval: 0.01)
+                }
+                if child.isRunning { child.terminate() }
+                child.waitUntilExit()
+            }
+
+            var heldByChild = false
+            let deadline = ProcessInfo.processInfo.systemUptime + 2
+            while ProcessInfo.processInfo.systemUptime < deadline && child.isRunning {
+                let probe = FileLock(path: packsLock.path)
+                if !probe.tryLock() {
+                    heldByChild = true
+                    break
+                }
+                probe.unlock()
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+            guard heldByChild else {
+                expect(false, "测试前提：子进程须持有注入的 packs.lock")
+                return
+            }
+            let blocked = bindEventToManifest(
+                event: .stop, fileName: "stop.mp3", packID: "my-pack", environment: environment)
+            expect(failureError(blocked) == .lockBusy, "跨进程持锁时 bind 须返回 lockBusy：\(blocked)")
+            expect(
+                (try? Data(contentsOf: manifestFile))
+                    == Data(#"{ "id": "my-pack", "events": {} }"#.utf8),
+                "跨进程锁竞争时 manifest 原始字节不得改变")
+
+            childInput.fileHandleForWriting.closeFile()
+            let releaseDeadline = ProcessInfo.processInfo.systemUptime + 2
+            while child.isRunning && ProcessInfo.processInfo.systemUptime < releaseDeadline {
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+            guard !child.isRunning else {
+                expect(false, "测试前提：子进程须在 stdin 关闭后释放锁")
+                return
+            }
+            let completed = bindEventToManifest(
+                event: .stop, fileName: "stop.mp3", packID: "my-pack", environment: environment)
+            guard case .success = completed else {
+                expect(false, "子进程释放锁后 bind 须成功：\(completed)")
+                return
+            }
+            let data = try? Data(contentsOf: manifestFile)
+            let json =
+                data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+            let events = json?["events"] as? [String: String]
+            expect(events?["stop"] == "stop.mp3", "返回 success 之前写入须已完成并可读回")
         }
     }
 

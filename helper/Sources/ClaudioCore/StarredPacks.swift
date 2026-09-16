@@ -174,6 +174,8 @@ private func performStarredPacksMutation(
         return .failure(.configMissing)
     case .failure(.writeFailed(let reason)):
         return .failure(.configWriteFailure(reason: reason))
+    case .failure(.postPublishConflict(let recoveryPath)):
+        return .failure(.configWriteFailure(reason: "发布后冲突；外部文件保留在 \(recoveryPath)，请重新读取配置"))
     case .failure(.mutationRejected):
         if let unreadablePacksDirectoryReason {
             return .failure(.userPacksDirectoryUnreadable(reason: unreadablePacksDirectoryReason))
@@ -194,16 +196,19 @@ private func installedStarredPackIDs(
     do {
         entries = try FileManager.default.contentsOfDirectory(atPath: userPacksDirectory.path)
     } catch {
-        return .failure(.unreadable(reason: "无法列出 \(userPacksDirectory.path)：\(error.localizedDescription)"))
+        return .failure(
+            .unreadable(reason: "无法列出 \(userPacksDirectory.path)：\(error.localizedDescription)"))
     }
-    return .success(Set(entries.filter { id in
-        guard !id.hasPrefix(".") else { return false }
-        var isDirectory: ObjCBool = false
-        let exists = FileManager.default.fileExists(
-            atPath: userPacksDirectory.appendingPathComponent(id, isDirectory: true).path,
-            isDirectory: &isDirectory)
-        return exists && isDirectory.boolValue
-    }))
+    return .success(
+        Set(
+            entries.filter { id in
+                guard !id.hasPrefix(".") else { return false }
+                var isDirectory: ObjCBool = false
+                let exists = FileManager.default.fileExists(
+                    atPath: userPacksDirectory.appendingPathComponent(id, isDirectory: true).path,
+                    isDirectory: &isDirectory)
+                return exists && isDirectory.boolValue
+            }))
 }
 
 /// Preserves the caller's first-seen order while collapsing duplicates and dropping stale ids.

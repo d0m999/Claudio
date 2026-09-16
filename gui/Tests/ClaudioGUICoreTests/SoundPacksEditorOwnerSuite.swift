@@ -70,4 +70,44 @@ func runSoundPacksEditorOwnerSuites() {
                 && model.selectedPackIsBuiltinReadOnly,
             "可见 Retry、失败 lifecycle 与 builtin selection 必须指向同一 pack")
     }
+
+    suite("SoundPacks editor owner：manifest 恢复能力绑定失败时包身份") {
+        withTempDirectory { root in
+            let packs = root.appendingPathComponent("packs")
+            let manifest = packs.appendingPathComponent("pack-a/manifest.json")
+            let status = SoundPacksWindowStatus(
+                kind: .audio, severity: .failure, revision: 41,
+                action: "分配声音", message: "manifest 错误", packID: "pack-a",
+                recovery: .manifest(
+                    packID: "pack-a", path: manifest.path, issue: .unreadable,
+                    retry: .assign(fileName: "spare.wav", event: .stop)))
+            let cards = ["pack-a", "pack-b"].map { id in
+                PackCard(
+                    id: id, name: id, isCC0: false, presentEvents: Set(Event.allCases),
+                    state: .complete, isSelected: id == "pack-a")
+            }
+            let owner = SoundPacksEditorOwner.stateGalleryFixture(
+                previewConfig: ClaudioConfig(selectedPack: "pack-a"),
+                packCards: cards, selectedPackID: "pack-a", selectedEventRows: [],
+                windowStatuses: [status],
+                environment: makeAudioImportEnvironment(userPacksDirectory: packs))
+            guard case .sounds(let sounds) = owner.presentation.mode,
+                let recovery = sounds.manifestRecoveryActions.first,
+                let retry = recovery.retryAction,
+                let inspectOther = sounds.packs.first(where: { $0.id == "pack-b" })?.inspectAction
+            else {
+                expect(false, "manifest failure must project Finder and retry capabilities")
+                return
+            }
+            expect(
+                recovery.packID == "pack-a" && recovery.path == manifest.path,
+                "recovery must retain the failing pack and manifest path")
+            expect(
+                owner.send(.invoke(inspectOther)) == .applied,
+                "fixture must switch to the other pack")
+            expect(
+                owner.send(.invoke(retry)) == .rejected(.staleAction),
+                "retry from the previous selection must not mutate the new pack")
+        }
+    }
 }

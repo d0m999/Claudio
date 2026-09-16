@@ -278,7 +278,7 @@ extension Claudio {
                 }
                 switch setSurfacePack(packID, surface: surfaceID) {
                 case .success:
-                    print("✓ 已将 \(surface) 的声音包覆盖切换为 \"\(packID)\"")
+                    print("✓ 已将 \(surface) 的声音包覆盖切换为 \"\(terminalSafePackID(packID))\"")
                 case .failure(let error):
                     print("✗ \(error.description)")
                     throw ExitCode.failure
@@ -287,7 +287,7 @@ extension Claudio {
             }
             switch selectPack(packID) {
             case .success(.selected(let id)):
-                print("✓ 已切换到声音包 \"\(id)\"")
+                print("✓ 已切换到声音包 \"\(terminalSafePackID(id))\"")
             case .failure(let error):
                 print("✗ \(error.description)")
                 throw ExitCode.failure
@@ -359,7 +359,8 @@ private func makeWorkBuddyAcceptancePreflight(
         expectedCommitSHA: explicitCommitSHA
     ) {
         let statusSnapshots = await makeSystemIntegrationManager(
-            executablePath: executablePath).refresh()
+            executablePath: executablePath
+        ).refresh()
         guard let statusSnapshot = statusSnapshots.first(where: { $0.host == .workBuddy }) else {
             throw ValidationError("integrations status 未返回 WorkBuddy surface")
         }

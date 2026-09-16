@@ -69,6 +69,9 @@ enum ConfigMutationFailure: Error, Sendable, Equatable {
     case missing(reason: String)
     /// 改完之后写回磁盘失败（父目录被一个普通文件占位、磁盘满、只读卷……）。
     case writeFailed(reason: String)
+    /// The replacement was published, then an uncoordinated external replacement was found.
+    /// Its displaced bytes remain at `recoveryPath`; callers must not claim zero mutation.
+    case postPublishConflict(recoveryPath: String)
     /// 调用方在同一把锁、同一份已验证 JSON 上发现自己的业务前置条件不成立。这个 case 只让
     /// ``updateConfigJSON(at:onMissing:mutate:)`` 在编码/写盘之前中止；公共写者必须把它映射回自己的
     /// 领域错误，不能把内部占位文案漏给用户。
@@ -80,6 +83,8 @@ enum ConfigMutationFailure: Error, Sendable, Equatable {
         case .unreadable(let reason): reason
         case .missing(let reason): reason
         case .writeFailed(let reason): reason
+        case .postPublishConflict(let recoveryPath):
+            "config.json 已发布，但随后发现外部替换；原文件保留在 \(recoveryPath)。请重新读取当前配置并手工恢复"
         case .mutationRejected: "配置变更被调用方拒绝"
         }
     }
@@ -327,7 +332,8 @@ public func inspectConfig(
     case .failure(let failure):
         let packSelection: PackSelectionStatus
         if let decodedConfig {
-            packSelection = decodedConfig.selectedPack.isEmpty
+            packSelection =
+                decodedConfig.selectedPack.isEmpty
                 ? .notSelected
                 : .selected(packID: decodedConfig.selectedPack)
         } else {
@@ -374,7 +380,8 @@ public func inspectConfigFile(
 
 /// 只读探针：`configFile` 现在能不能被写路径安全重写。**一个字节都不写**，走的是
 /// ``updateConfigJSON`` 用的同一份 ``parseRewritableConfig(_:path:)``。
-public func probeConfigRewritable(configFile: URL = ClaudioPaths.configFile) -> ConfigRewritability {
+public func probeConfigRewritable(configFile: URL = ClaudioPaths.configFile) -> ConfigRewritability
+{
     inspectConfig(configFile: configFile).rewritability
 }
 
@@ -393,11 +400,30 @@ func updateConfigJSON(
     mutate: (inout [String: Any]) -> Result<Void, ConfigMutationFailure>
 ) -> Result<Void, ConfigMutationFailure> {
     var json: [String: Any]
-
-    if FileManager.default.fileExists(atPath: configFile.path) {
-        guard case .success(let data) = readConfigFileBounded(at: configFile) else {
-            return .failure(.unreadable(reason: unreadableConfigReason(path: configFile.path)))
+    if case .createFresh = onMissing,
+        !FileManager.default.fileExists(atPath: configFile.deletingLastPathComponent().path)
+    {
+        do { try ensurePrivateDirectoryExists(at: configFile.deletingLastPathComponent()) } catch {
+            return .failure(.writeFailed(reason: error.localizedDescription))
         }
+    }
+    if case .failClosed = onMissing,
+        !FileManager.default.fileExists(atPath: configFile.deletingLastPathComponent().path)
+    {
+        return .failure(.missing(reason: "config.json 不存在：\(configFile.path)"))
+    }
+    let anchored: AnchoredFileIO
+    let snapshot: AnchoredFileSnapshot
+    do {
+        anchored = try AnchoredFileIO(file: configFile, preserveFinalSymlink: true)
+        snapshot = try anchored.read(maxBytes: maxConfigFileBytes)
+    } catch AnchoredFileError.changed(let path) {
+        return .failure(.writeFailed(reason: "config.json 在读取时发生变化：\(path)"))
+    } catch {
+        return .failure(.unreadable(reason: unreadableConfigReason(path: configFile.path)))
+    }
+
+    if let data = snapshot.data {
         switch parseRewritableConfig(data, path: configFile.path) {
         case .success(let parsed): json = parsed
         case .failure(let failure): return .failure(failure)
@@ -434,10 +460,11 @@ func updateConfigJSON(
     }
 
     do {
-        try ensurePrivateDirectoryExists(at: configFile.deletingLastPathComponent())
-        try data.write(to: configFile, options: .atomic)
+        try anchored.publish(data, expected: snapshot)
+    } catch AnchoredFileError.publishedWithConflict(let recoveryPath) {
+        return .failure(.postPublishConflict(recoveryPath: recoveryPath))
     } catch {
-        return .failure(.writeFailed(reason: error.localizedDescription))
+        return .failure(.writeFailed(reason: String(describing: error)))
     }
 
     return .success(())

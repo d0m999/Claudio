@@ -126,6 +126,8 @@ public enum CommandRunResult: Sendable, Equatable {
     /// The process did not exit within the given timeout — it was actively terminated
     /// (never left to run forever just because the caller gave up waiting).
     case timedOut
+    /// The deadline elapsed and the direct child was not confirmed reaped after SIGKILL.
+    case cleanupFailed(pid: Int32)
     /// `Process.run()` itself threw (executable missing/not executable/etc).
     case launchFailed
 }
@@ -218,16 +220,15 @@ public struct SystemCommandRunner: CommandRunning {
         // remaining holders are the child and anything it hands the descriptor to. EOF here
         // therefore means "nobody can write to us again" — the precondition for the exit wait
         // below to be short rather than open-ended.
-        let deadline = Date().addingTimeInterval(timeout)
+        let deadline = DispatchTime.now() + max(timeout, 0)
         let (stdout, sawEOF) = drainToEOF(outputPipe.fileHandleForReading, deadline: deadline)
 
         if !sawEOF {
-            return terminate(process, returning: .timedOut)
+            return terminateAndReap(process, exited: exited)
         }
-        let remaining = max(deadline.timeIntervalSinceNow, 0)
-        guard exited.wait(timeout: .now() + remaining) == .success else {
+        guard exited.wait(timeout: deadline) == .success else {
             // stdout closed but the child is still running past the deadline.
-            return terminate(process, returning: .timedOut)
+            return terminateAndReap(process, exited: exited)
         }
         return .completed(exitCode: process.terminationStatus, stdout: stdout)
     }
@@ -236,7 +237,7 @@ public struct SystemCommandRunner: CommandRunning {
     /// (capped at ``maximumOutputBytes``) and whether EOF was actually reached — a `false`
     /// there means some descriptor still holds the write end, and the caller must not wait on
     /// it any further.
-    private func drainToEOF(_ handle: FileHandle, deadline: Date) -> (String, Bool) {
+    private func drainToEOF(_ handle: FileHandle, deadline: DispatchTime) -> (String, Bool) {
         let descriptor = handle.fileDescriptor
         let flags = fcntl(descriptor, F_GETFL, 0)
         guard flags != -1, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) != -1 else {
@@ -249,7 +250,12 @@ public struct SystemCommandRunner: CommandRunning {
         var buffer = [UInt8](repeating: 0, count: 4096)
 
         while true {
-            let remaining = deadline.timeIntervalSinceNow
+            let remaining =
+                Double(
+                    deadline.uptimeNanoseconds
+                        - min(
+                            deadline.uptimeNanoseconds, DispatchTime.now().uptimeNanoseconds))
+                / 1_000_000_000
             guard remaining > 0 else { return (decode(collected), false) }
 
             var descriptors = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
@@ -287,11 +293,14 @@ public struct SystemCommandRunner: CommandRunning {
 
     /// Real enforcement, not "assume it's fast": actively stop a child we have stopped waiting
     /// on, rather than leaving it running in the background because we gave up.
-    private func terminate(_ process: Process, returning result: CommandRunResult)
+    private func terminateAndReap(_ process: Process, exited: DispatchSemaphore)
         -> CommandRunResult
     {
         if process.isRunning { process.terminate() }
-        return result
+        if exited.wait(timeout: .now() + .milliseconds(200)) == .success { return .timedOut }
+        if process.isRunning { _ = Darwin.kill(process.processIdentifier, SIGKILL) }
+        if exited.wait(timeout: .now() + .milliseconds(500)) == .success { return .timedOut }
+        return .cleanupFailed(pid: process.processIdentifier)
     }
 }
 
@@ -349,6 +358,8 @@ public func checkClaudeCodeVersion(
     case .timedOut:
         return .undetectable(
             reason: "claude --version 在 \(timeout)s 内未返回，可能是子进程挂起，已放弃等待")
+    case .cleanupFailed(let pid):
+        return .undetectable(reason: "claude --version 超时后未确认子进程 \(pid) 回收")
     case .completed(let exitCode, let stdout):
         guard exitCode == 0 else {
             return .undetectable(

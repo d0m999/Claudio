@@ -23,6 +23,10 @@ import Foundation
 var totalChecks = 0
 var failures = 0
 
+if CommandLine.arguments.dropFirst().first == "--default-lock-probe" {
+    exit(runDefaultLockChildProbe())
+}
+
 @MainActor
 func expect(
     _ condition: Bool,
@@ -57,6 +61,9 @@ runHostEventSourceSuites()
 runHookInputReaderSuites()
 runEventNoticeTransportSuites()
 runConfigFileTransactionSuites()
+runAnchoredFileIOSuites()
+runTerminalDisplaySuites()
+runFileWriteWatchSuites()
 runClaudeCodeHooksTransformSuites()
 runCodexHooksTransformSuites()
 runWorkBuddyHooksTransformSuites()
@@ -74,6 +81,7 @@ runBootstrapReportSuites()
 runPathsSuites()
 runSourceScannerSuites()
 runLockSeparationSuites()
+runDefaultLockBehaviorSuites()
 runAtomicWriteSuites()
 runDynamicQuietStateSuites()
 runPlaySuites()

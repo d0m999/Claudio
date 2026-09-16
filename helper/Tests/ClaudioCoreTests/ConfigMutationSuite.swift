@@ -30,7 +30,8 @@ private func readRawConfigJSON(_ url: URL) -> [String: Any]? {
 @MainActor
 private func makePackDirectory(at url: URL) {
     try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    writeFixture(#"{ "id": "test-pack", "events": {} }"#, to: url.appendingPathComponent("manifest.json"))
+    writeFixture(
+        #"{ "id": "test-pack", "events": {} }"#, to: url.appendingPathComponent("manifest.json"))
 }
 
 /// 磁盘上那份文件的**原始文本**——「逐字保留」这句话说的是字节，不是「解析回来相等」。
@@ -110,6 +111,9 @@ func runConfigMutationSuites() {
             // 报 SUCCESS。用户手调的音量就这样被一次静音点击吃掉了。类型不对 = 文件损坏 = 中止。
             let original = #"{ "selected_pack": "pika", "master_volume": "0.35" }"#
             writeFixture(original, to: configFile)
+            writeFixture("", to: lockFile)
+            let writeWatch = FileWriteWatch(watching: configFile)
+            expect(writeWatch.isArmed, "畸形音量拒写观察器必须武装")
 
             let result = setEventEnabled(
                 .stop, enabled: false, configFile: configFile, lockFile: lockFile)
@@ -125,6 +129,11 @@ func runConfigMutationSuites() {
             expect(
                 (try? String(contentsOf: configFile, encoding: .utf8)) == original,
                 "fail closed 的含义是一个字节都不写——文件必须逐字保持原样")
+            expect(writeWatch.observedWrite() == .untouched, "畸形音量拒写不得触发文件事件")
+            let positive = FileWriteWatch(watching: configFile)
+            expect(positive.isArmed, "畸形音量正向对照必须武装")
+            try! Data(original.utf8).write(to: configFile, options: .atomic)
+            expect(positive.observedWrite() == .written, "同路径原子替换应被观测到")
         }
     }
 
@@ -369,10 +378,14 @@ func runConfigMutationSuites() {
             makePackDirectory(at: userPacks.appendingPathComponent("psyduck", isDirectory: true))
             let original = #"{ "selected_pack": "pika", "master_volume": "0.35" }"#
             writeFixture(original, to: configFile)
+            let lockFile = root.appendingPathComponent("config.lock")
+            writeFixture("", to: lockFile)
+            let writeWatch = FileWriteWatch(watching: configFile)
+            expect(writeWatch.isArmed, "切包字符串音量拒写观察器必须武装")
 
             let result = selectPack(
                 "psyduck", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("config.lock"))
+                lockFile: lockFile)
             guard case .failure(.configReadFailure) = result else {
                 expect(false, "类型不对的 master_volume 必须让切包 fail closed，got \(result)")
                 return
@@ -380,6 +393,11 @@ func runConfigMutationSuites() {
             expect(
                 (try? String(contentsOf: configFile, encoding: .utf8)) == original,
                 "两个写路径共用同一份实现 → 同样一个字节都不写")
+            expect(writeWatch.observedWrite() == .untouched, "切包拒写不得触发文件事件")
+            let positive = FileWriteWatch(watching: configFile)
+            expect(positive.isArmed, "切包拒写正向对照必须武装")
+            try! Data(original.utf8).write(to: configFile, options: .atomic)
+            expect(positive.observedWrite() == .written, "同路径原子替换应被观测到")
         }
     }
 
@@ -698,8 +716,15 @@ func runConfigMutationSuites() {
             let configFile = root.appendingPathComponent("config.json")
             let original = #"{ "selected_pack": "pika", "events": { "stop": 1 } }"#
             writeFixture(original, to: configFile)
+            let writeWatch = FileWriteWatch(watching: configFile)
+            expect(writeWatch.isArmed, "只读探测观察器必须武装")
             _ = probeConfigRewritable(configFile: configFile)
             expect(readRawText(configFile) == original, "诊断绝不能改用户的文件")
+            expect(writeWatch.observedWrite() == .untouched, "只读探测不得触发文件事件")
+            let positive = FileWriteWatch(watching: configFile)
+            expect(positive.isArmed, "只读探测正向对照必须武装")
+            try! Data(original.utf8).write(to: configFile, options: .atomic)
+            expect(positive.observedWrite() == .written, "同路径原子替换应被观测到")
         }
     }
 
@@ -742,6 +767,9 @@ func runConfigMutationSuites() {
             let lockFile = root.appendingPathComponent("config.lock")
             let original = #"{ "selected_pack": "pika", "master_volume": -1e400 }"#
             writeFixture(original, to: configFile)
+            writeFixture("", to: lockFile)
+            let writeWatch = FileWriteWatch(watching: configFile)
+            expect(writeWatch.isArmed, "非有限音量拒写观察器必须武装")
 
             // 到达这一行本身就是这条测试的第一重断言：如果 fail-closed 闸门没接住，
             // `JSONSerialization.data(withJSONObject:)` 会抛出不可捕获的 ObjC 异常，
@@ -762,6 +790,11 @@ func runConfigMutationSuites() {
             expect(
                 (try? String(contentsOf: configFile, encoding: .utf8)) == original,
                 "fail closed 的含义是一个字节都不写——文件必须逐字保持原样")
+            expect(writeWatch.observedWrite() == .untouched, "非有限音量拒写不得触发文件事件")
+            let positive = FileWriteWatch(watching: configFile)
+            expect(positive.isArmed, "非有限音量正向对照必须武装")
+            try! Data(original.utf8).write(to: configFile, options: .atomic)
+            expect(positive.observedWrite() == .written, "同路径原子替换应被观测到")
         }
     }
 
@@ -772,10 +805,14 @@ func runConfigMutationSuites() {
             makePackDirectory(at: userPacks.appendingPathComponent("psyduck", isDirectory: true))
             let original = #"{ "selected_pack": "pika", "master_volume": -1e400 }"#
             writeFixture(original, to: configFile)
+            let lockFile = root.appendingPathComponent("config.lock")
+            writeFixture("", to: lockFile)
+            let writeWatch = FileWriteWatch(watching: configFile)
+            expect(writeWatch.isArmed, "切包拒写观察器必须武装")
 
             let result = selectPack(
                 "psyduck", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("config.lock"))
+                lockFile: lockFile)
             guard case .failure(.configReadFailure(let reason)) = result else {
                 expect(false, "-1e400（解析成 -inf）必须让切包 fail closed，got \(result)")
                 return
@@ -784,6 +821,11 @@ func runConfigMutationSuites() {
             expect(
                 (try? String(contentsOf: configFile, encoding: .utf8)) == original,
                 "两个写路径共用同一份实现 → 同样一个字节都不写")
+            expect(writeWatch.observedWrite() == .untouched, "非有限音量切包拒写不得触发文件事件")
+            let positive = FileWriteWatch(watching: configFile)
+            expect(positive.isArmed, "非有限音量切包正向对照必须武装")
+            try! Data(original.utf8).write(to: configFile, options: .atomic)
+            expect(positive.observedWrite() == .written, "同路径原子替换应被观测到")
         }
     }
 

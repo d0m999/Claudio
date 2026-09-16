@@ -806,6 +806,39 @@ func runSoundPacksRefreshSuites() async {
         }
     }
 
+    suite("SoundPacksWindowModel：manifest 读失败保留原操作和包身份供恢复") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs")
+            let pack = packs.appendingPathComponent("pack-a")
+            let manifest = pack.appendingPathComponent("manifest.json")
+            writeFixture(#"{"selected_pack":"pack-a","events":{}}"#, to: configFile)
+            writeFixture(#"{"id":"pack-a","events":{}}"#, to: manifest)
+            writeFixture("audio", to: pack.appendingPathComponent("spare.mp3"))
+            let model = SoundPacksWindowModel(
+                configFile: configFile, environment: soundPacksEnvironment(packs),
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+            writeFixture(#"{"id":"pack-a","events":[]}"#, to: manifest)
+            let result = model.assignSelectedAudioFile("spare.mp3", to: .notification)
+            guard case .failure(.bind(.manifestUnreadable)) = result else {
+                expect(false, "malformed manifest must reject assignment, got \(result)")
+                return
+            }
+            let status = model.windowStatuses.first(where: { $0.kind == .audio })
+            guard case .manifest(let packID, let path, let issue, let retry)? = status?.recovery
+            else {
+                expect(false, "manifest rejection must carry recovery metadata")
+                return
+            }
+            expect(
+                packID == "pack-a" && path == manifest.path && issue == .unreadable,
+                "recovery must identify the failed pack and exact manifest")
+            expect(
+                retry == .assign(fileName: "spare.mp3", event: .notification),
+                "retry must retain the failed assignment instead of current selection")
+        }
+    }
+
     suite("T11 双向刷新：面板复用包内音频后，已打开窗口不再保留陈旧孤儿；普通内容刷新不改侧栏选择") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")

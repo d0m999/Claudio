@@ -126,8 +126,9 @@ struct StrippedSwiftSource {
     ///
     /// 两类来源，性质完全不同，必须分清楚：
     ///
-    /// 1. **枚举出来的盲区** —— raw string（`#"…"#`）与扩展 regex 字面量（`#/…/#`）。两者都**能**
-    ///    含有裸 `//`，而扫描器不建模它们。按**词法位置**记：只有**代码位置**的 `#"` 才算，
+    /// 1. **枚举出来的盲区** —— raw string（`#"…"#`）、扩展 regex（`#/…/#`），以及
+    ///    无法可靠区分裸 regex 与除法的 `/`。这些构造能带偏结构扫描；按词法位置记账。
+    ///    只有**代码位置**的 `#"` 才算，
     ///    `hasPrefix("#")` 里的那个不算（`ClaudioColorHex.swift` / `ContrastRatio.swift` 里真有这
     ///    一行 —— 一条纯文本的 `#"` 守卫会在它们身上假红，然后被下一个人删掉，洞原样回来）。
     ///
@@ -184,6 +185,41 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
     }
     func note(_ construct: String) {
         if !unmodeled.contains(construct) { unmodeled.append(construct) }
+    }
+    func bareRegexMayStart() -> Bool {
+        let preceding = blanked.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let last = preceding.last else { return true }
+        if "=([{,:?!|&+-*%^~".contains(last) { return true }
+        let word = String(
+            preceding.reversed().prefix {
+                $0.isLetter || $0.isNumber || $0 == "_"
+            }.reversed())
+        return ["return", "throw", "case", "if", "while", "guard", "in", "try", "await"].contains(
+            word)
+    }
+    /// A conservative single-line bare regex reader. Character classes and escaped slashes
+    /// retain their contents; an unmatched candidate is recorded as unmodeled.
+    func bareRegexEnd() -> String.Index? {
+        var cursor = source.index(after: index)
+        var escaped = false
+        var inCharacterClass = false
+        while cursor < source.endIndex {
+            let scalar = source[cursor]
+            if scalar == "\n" { return nil }
+            if escaped {
+                escaped = false
+            } else if scalar == "\\" {
+                escaped = true
+            } else if scalar == "[" {
+                inCharacterClass = true
+            } else if scalar == "]" {
+                inCharacterClass = false
+            } else if scalar == "/" && !inCharacterClass {
+                return source.index(after: cursor)
+            }
+            cursor = source.index(after: cursor)
+        }
+        return nil
     }
     /// `\(` —— 插值表达式**是代码**，不是字符串内容。
     ///
@@ -260,6 +296,19 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
                 blockDepth = 1
                 advance(2)
                 continue
+            }
+            if character.unicodeScalars.first == "/" {
+                if character.unicodeScalars.count != 1 {
+                    note("ambiguous slash grapheme")
+                } else if bareRegexMayStart() {
+                    if let end = bareRegexEnd() {
+                        code += String(source[index..<end])
+                        blanked += "//"  // retain delimiters, never regex content as code
+                        index = end
+                        continue
+                    }
+                    note("ambiguous bare regex or division")
+                }
             }
             // 开引号是**代码位置**（它界定结构），所以它进 `blanked`；从下一个字符起才是「内容」。
             if character == "\"" { mode = .string }

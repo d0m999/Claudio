@@ -221,6 +221,8 @@ private func mutateSurfaceSoundOverride(
         return .failure(.configReadFailure(reason: reason))
     case .ran(.failure(.writeFailed(let reason))):
         return .failure(.configWriteFailure(reason: reason))
+    case .ran(.failure(.postPublishConflict(let recoveryPath))):
+        return .failure(.configWriteFailure(reason: "发布后冲突；外部文件保留在 \(recoveryPath)，请重新读取配置"))
     case .ran(.failure(.mutationRejected)):
         return .failure(.configWriteFailure(reason: "配置变更被调用方拒绝"))
     }

@@ -7347,6 +7347,54 @@
         }
       }
     },
+    "sound-packs.manifest-recovery.location": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manifest location: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清单位置：%@"
+          }
+        }
+      }
+    },
+    "sound-packs.manifest-recovery.read-repair": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep the original file. Check that manifest.json is readable and contains a valid JSON object, correct its format, then retry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请保留原文件，检查 manifest.json 能否读取及是否为有效 JSON 对象，修正格式后重试。"
+          }
+        }
+      }
+    },
+    "sound-packs.manifest-recovery.write-repair": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep the original file. Check write permission, free space, and whether the target changed, then retry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请保留原文件，检查写入权限、可用空间和目标是否变化，再重试。"
+          }
+        }
+      }
+    },
     "sound-packs.delete-error.builtin-read-only": {
       "localizations": {
         "en": {

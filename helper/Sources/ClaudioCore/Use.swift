@@ -74,10 +74,11 @@ public func selectPack(
     lockFile: URL = ClaudioPaths.configLockFile
 ) -> Result<UseOutcome, UseError> {
     guard isSafePackID(packID) else { return .failure(.invalidPackID(packID)) }
-    guard let packDirectory =
-        resolvePackDirectory(
-            id: packID, userPacksDirectory: userPacksDirectory,
-            bundledPacksDirectory: bundledPacksDirectory)
+    guard
+        let packDirectory =
+            resolvePackDirectory(
+                id: packID, userPacksDirectory: userPacksDirectory,
+                bundledPacksDirectory: bundledPacksDirectory)
     else {
         return .failure(.packNotFound(packID))
     }
@@ -127,6 +128,8 @@ private func performSelectPack(
         return .failure(.configReadFailure(reason: reason))
     case .failure(.writeFailed(let reason)):
         return .failure(.configWriteFailure(reason: reason))
+    case .failure(.postPublishConflict(let recoveryPath)):
+        return .failure(.configWriteFailure(reason: "发布后冲突；外部文件保留在 \(recoveryPath)，请重新读取配置"))
     case .failure(.mutationRejected):
         return .failure(.configWriteFailure(reason: "配置变更被调用方拒绝"))
     }

@@ -1066,6 +1066,12 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let soundPacksBindErrorManifestUnreadable: Self =
         "sound-packs.bind-error.manifest-unreadable"
     public static let soundPacksBindErrorWriteFailed: Self = "sound-packs.bind-error.write-failed"
+    public static let soundPacksManifestRecoveryLocation: Self =
+        "sound-packs.manifest-recovery.location"
+    public static let soundPacksManifestReadRepair: Self =
+        "sound-packs.manifest-recovery.read-repair"
+    public static let soundPacksManifestWriteRepair: Self =
+        "sound-packs.manifest-recovery.write-repair"
     public static let soundPacksBindErrorLockBusy: Self = "sound-packs.bind-error.lock-busy"
     public static let soundPacksBindErrorLockFailed: Self = "sound-packs.bind-error.lock-failed"
     public static let soundPacksDeleteErrorBuiltinReadOnly: Self =
@@ -1403,6 +1409,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .soundPacksBindErrorPackNotFound, .soundPacksBindErrorUnsafeFileName,
         .soundPacksBindErrorFileNotFound, .soundPacksBindErrorManifestUnreadable,
         .soundPacksBindErrorWriteFailed, .soundPacksBindErrorLockBusy,
+        .soundPacksManifestRecoveryLocation, .soundPacksManifestReadRepair,
+        .soundPacksManifestWriteRepair,
         .soundPacksBindErrorLockFailed, .soundPacksDeleteErrorBuiltinReadOnly,
         .soundPacksDeleteErrorPackNotFound, .soundPacksDeleteErrorManifestUnreadable,
         .soundPacksDeleteErrorDirectoryUnreadable, .soundPacksDeleteErrorUnsafeFileName,

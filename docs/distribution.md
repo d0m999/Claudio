@@ -137,6 +137,8 @@ Homebrew tap 不是 GitHub Release 的前置条件。tap job 未启用或被跳�
 
 `claudi0 setup` 只保留旧版兼容语义：准备 shared runtime 并连接 Claude Code legacy hooks，不会替用户激活 Codex。旧 hooks 继续调用 `~/.claudio/bin/claudio`，品牌入口 `~/.claudio/bin/claudi0` 与它并存。
 
+再次运行 `install` 时，仅会迁移当前 helper 绝对路径和对应事件下可精确识别的旧版未加引号命令。它会保留第三方 hooks、未知字段及不同 matcher/context 的分组；同组已有等价新命令时去掉旧重复项。身份无法确定的条目会保留，需人工检查；只要精确旧命令仍在，安装状态不会把它误判为已修复。迁移后重复运行应不再写入配置。
+
 ## 用户文件与真实回执
 
 - Claudio 自有状态：`~/.claudio/`。
@@ -158,6 +160,18 @@ codesign --verify --deep --strict --verbose=2 /Applications/claudi0.app
 同时重新核对 `SHA256SUMS.txt`。任何失败都应视为下载损坏、非官方构建或 Release 完整性问题；删除该文件，从官方 Release 重新下载，并在仍可复现时提交 issue。不要把关闭 Gatekeeper 或清除 quarantine 当作安装步骤。
 
 本地运行 `scripts/dev-bundle.sh` 得到的是 ad-hoc 开发包，只用于当前机器走查；它不具备正式 Release 的身份、公证和跨架构保证。
+
+### 真实下载后的嵌套 helper 验收（TD-18）
+
+首个已获授权的签名、公证 DMG 候选出现后，在验收账本中固定 commit SHA、DMG SHA-256、下载来源、
+macOS 版本与 CPU 架构。下载后、复制到 `/Applications` 后、首次启动后、执行 setup 后分别记录
+`claudi0.app` 与 `Contents/Resources/bin/claudio` 的 `com.apple.quarantine` 状态、`codesign`
+验证、Gatekeeper 判定，以及 helper 的实际执行结果。每一步保留原始命令、退出码和脱敏输出；
+明确区分属性不存在与查询失败。复制安装前后的 DMG checksum 必须与同一候选身份一致。
+
+此项必须使用从发布渠道真实下载的候选；本地复制或手工附加 quarantine 只能作为机制测试。
+旧版“未签名包 → 仍要打开”是历史排障场景，不能替代正式候选验收。尚无适用下载候选时，
+账本状态保持 `not_evaluated`，不为本项创建 tag 或触发 RC workflow。
 
 ## 声音不响或 hook 未激活
 

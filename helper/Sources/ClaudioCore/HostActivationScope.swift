@@ -203,7 +203,7 @@ public enum HostActivationScope {
         case .completed(let exitCode, let stdout) where exitCode == 0:
             let normalized = stdout.split(whereSeparator: \.isWhitespace).joined(separator: " ")
             return normalized.isEmpty || normalized.utf8.count > 256 ? nil : normalized
-        case .completed, .timedOut, .launchFailed:
+        case .completed, .timedOut, .cleanupFailed, .launchFailed:
             return nil
         }
     }

@@ -1,4 +1,5 @@
 import AppKit
+import ClaudioCore
 import ClaudioGUICore
 import ClaudioLocalization
 import ClaudioPanelPresentation
@@ -64,6 +65,17 @@ func suite(_ name: String, _ body: @MainActor () -> Void) {
 func suite(_ name: String, _ body: @MainActor () async -> Void) async {
     print("• \(name)")
     await body()
+}
+
+// A separate process holds the same flock as the production manifest writer. The parent
+// closes stdin to release it; no test path under the user's home is involved.
+if let index = CommandLine.arguments.firstIndex(of: "--manifest-lock-holder") {
+    guard CommandLine.arguments.count > index + 1 else { exit(2) }
+    let lock = FileLock(path: CommandLine.arguments[index + 1])
+    guard lock.tryLock() else { exit(3) }
+    _ = readLine()
+    lock.unlock()
+    exit(0)
 }
 
 if CommandLine.arguments.contains("--ai-cue-native-focus") {

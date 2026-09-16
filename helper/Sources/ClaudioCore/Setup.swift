@@ -110,9 +110,11 @@ public struct SetupEnvironment: Sendable {
         self.packsLockRetry = packsLockRetry
         let inferredRoot = claudioBinaryDestination.deletingLastPathComponent()
             .deletingLastPathComponent()
-        self.bootstrapJournalFile = bootstrapJournalFile
+        self.bootstrapJournalFile =
+            bootstrapJournalFile
             ?? inferredRoot.appendingPathComponent("bootstrap-journal.json")
-        self.bootstrapReportsDirectory = bootstrapReportsDirectory
+        self.bootstrapReportsDirectory =
+            bootstrapReportsDirectory
             ?? inferredRoot.appendingPathComponent("bootstrap-reports", isDirectory: true)
         self.afterBootstrapJournalPersisted = afterBootstrapJournalPersisted
         self.afterBootstrapReportPublished = afterBootstrapReportPublished
@@ -180,8 +182,9 @@ private func exactRegularFileData(at url: URL, size: Int) -> Data? {
     guard lstatType(at: url) == .regular else { return nil }
     let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
     guard (attributes?[.size] as? NSNumber)?.intValue == size else { return nil }
-    guard case .success(let data) = readRegularFileBounded(
-        at: url, maxBytes: size, followSymlink: false)
+    guard
+        case .success(let data) = readRegularFileBounded(
+            at: url, maxBytes: size, followSymlink: false)
     else { return nil }
     return data.count == size ? data : nil
 }
@@ -298,8 +301,9 @@ private func isValidatedBundledPackCopy(_ staging: URL, matching source: URL) ->
         sourceEntries.count == expectedEntries.count,
         case .success(let manifest) = loadPackManifest(in: staging),
         manifest.id == "minimal-chime",
-        manifest.events == Dictionary(
-            uniqueKeysWithValues: Event.allCases.map { ($0.rawValue, "\($0.rawValue).mp3") })
+        manifest.events
+            == Dictionary(
+                uniqueKeysWithValues: Event.allCases.map { ($0.rawValue, "\($0.rawValue).mp3") })
     else { return false }
 
     for fileName in expectedEntries {
@@ -310,10 +314,12 @@ private func isValidatedBundledPackCopy(_ staging: URL, matching source: URL) ->
             lstatType(at: sourceFile) == .regular,
             isReallyContained(stagedFile, inside: staging),
             isReallyContained(sourceFile, inside: source),
-            let stagedSize = ((try? FileManager.default.attributesOfItem(
-                atPath: stagedFile.path))?[.size] as? NSNumber)?.intValue,
-            let sourceSize = ((try? FileManager.default.attributesOfItem(
-                atPath: sourceFile.path))?[.size] as? NSNumber)?.intValue,
+            let stagedSize =
+                ((try? FileManager.default.attributesOfItem(
+                    atPath: stagedFile.path))?[.size] as? NSNumber)?.intValue,
+            let sourceSize =
+                ((try? FileManager.default.attributesOfItem(
+                    atPath: sourceFile.path))?[.size] as? NSNumber)?.intValue,
             stagedSize == sourceSize,
             let stagedData = exactRegularFileData(at: stagedFile, size: stagedSize),
             let sourceData = exactRegularFileData(at: sourceFile, size: sourceSize),
@@ -339,8 +345,9 @@ private func upgradePristineMinimalChime(
         }
 
         environment.beforePristinePackFinalVerification()
-        guard let verifiedIdentity = pristineMinimalChimeV100Identity(
-            at: destination, comparedTo: source)
+        guard
+            let verifiedIdentity = pristineMinimalChimeV100Identity(
+                at: destination, comparedTo: source)
         else {
             throw CocoaError(.fileWriteFileExists)
         }
@@ -643,7 +650,8 @@ func validatedExecutablePath(
         guard stat(pathPointer, &status) == 0 else { return (false, false) }
         return (
             (status.st_mode & S_IFMT) == S_IFREG,
-            Darwin.access(pathPointer, X_OK) == 0)
+            Darwin.access(pathPointer, X_OK) == 0
+        )
     }
     guard result.0 else { throw ExecutablePathError.notRegularFile(normalized.path) }
     guard result.1 else { throw ExecutablePathError.notExecutable(normalized.path) }
@@ -923,7 +931,7 @@ public enum SetupError: Error, Sendable, Equatable, CustomStringConvertible {
         case .noAvailablePack(let reason):
             "一个声音包都没有，装完也不会有任何声音（所以这次没有写入任何 hooks）：\(reason)"
         case .selectedPackUnresolvable(let packID, let reason):
-            "你选中的声音包 \"\(packID)\" 已经不在了（或读不出来），而且没有任何一个能顶上的包，"
+            "你选中的声音包 \"\(terminalSafePackID(packID))\" 已经不在了（或读不出来），而且没有任何一个能顶上的包，"
                 + "装完不会有任何声音（所以这次没有写入任何 hooks，也没有改动 config.json）：\(reason)"
         case .configUnusable(let reason):
             "config.json 读不出来，装完不会有任何声音（所以这次没有写入任何 hooks，也没有改动这个文件）："
@@ -1167,7 +1175,8 @@ public func performSharedRuntimeBootstrap(
 /// Kept as the compatibility entry point for `claudio setup` and the GUI's legacy onboarding
 /// action: shared runtime bootstrap happens first, then the existing Claude hook installer runs
 /// with exactly the same outcome and error mapping as before.
-public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupOutcome, SetupError> {
+public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupOutcome, SetupError>
+{
     let bootstrap: SharedRuntimeBootstrapOutcome
     switch performSharedRuntimeBootstrapExecution(environment: environment) {
     case .completed(let outcome):
@@ -1222,7 +1231,8 @@ private func availablePackIDs(in userPacksDirectory: URL) -> [String] {
         .sorted()
         .filter {
             !$0.hasPrefix(".")
-                && directoryExists(at: userPacksDirectory.appendingPathComponent($0, isDirectory: true))
+                && directoryExists(
+                    at: userPacksDirectory.appendingPathComponent($0, isDirectory: true))
         }
 }
 
@@ -1289,7 +1299,9 @@ private let restoreBundledPacksHint =
 /// `moveItem`（同样是 `rename(2)`）—— 两条路都不经过「最终路径上先空一下」那个窗口。
 /// 覆盖一个**正在被执行**的二进制在 macOS 上正是要用 rename：老 inode 会被仍在跑的进程留住，
 /// 而新的事件拿到的是新的那份（TODOS「helper 二进制永不刷新」那条里记着这句话）。
-private func copySelfToFixedLocation(from source: URL, to destination: URL) -> Result<Void, SetupError> {
+private func copySelfToFixedLocation(from source: URL, to destination: URL) -> Result<
+    Void, SetupError
+> {
     let fileManager = FileManager.default
     // 暂存必须与目标**同目录**（同卷）—— rename(2) 不跨卷。名字带 pid：两个并发 setup 互不覆盖
     // 对方的暂存。点开头：万一真被中断留下，它**不会被当成那个二进制**（探测认的是 `bin/claudio`

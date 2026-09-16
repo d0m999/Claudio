@@ -7,7 +7,8 @@ import Foundation
 
 @MainActor
 func runAudioImportSuites() {
-    suite("importAudioFile: oversize source is rejected with the exact byte counts, human message") {
+    suite("importAudioFile: oversize source is rejected with the exact byte counts, human message")
+    {
         withTempDirectory { root in
             let sourceURL = root.appendingPathComponent("source/big.wav")
             var oversized = validWAVData()
@@ -24,7 +25,8 @@ func runAudioImportSuites() {
                 expect(false, "expected .rejected(.oversize), got \(outcome)")
                 return
             }
-            expect(actualBytes > maxBytes, "actualBytes must exceed maxBytes for an oversize reject")
+            expect(
+                actualBytes > maxBytes, "actualBytes must exceed maxBytes for an oversize reject")
             expect(maxBytes == 100, "maxBytes must echo the injected limit")
             expect(
                 !DropRejectionReason.oversize(actualBytes: actualBytes, maxBytes: maxBytes).message
@@ -67,7 +69,9 @@ func runAudioImportSuites() {
                     userPacksDirectory: root.appendingPathComponent("packs-over-cap"),
                     maxFileSizeBytes: capBytes))
             guard case .rejected(.oversize(let actualBytes, let maxBytes)) = overCapOutcome else {
-                expect(false, "one byte over the cap must be rejected as .oversize, got \(overCapOutcome)")
+                expect(
+                    false,
+                    "one byte over the cap must be rejected as .oversize, got \(overCapOutcome)")
                 return
             }
             expect(maxBytes == capBytes, "maxBytes must echo the injected cap")
@@ -132,7 +136,9 @@ func runAudioImportSuites() {
                 environment: environment)
 
             expect(
-                { if case .rejected(.copyFailed) = outcome { return true } else { return false } }(),
+                {
+                    if case .rejected(.copyFailed) = outcome { return true } else { return false }
+                }(),
                 "an unreadable source must be reported as .copyFailed (the real cause), not"
                     + " .nonWhitelistFormat, got \(outcome)")
         }
@@ -164,7 +170,9 @@ func runAudioImportSuites() {
                 environment: environment)
 
             guard case .rejected(.copyFailed) = outcome else {
-                expect(false, "a FIFO/special-file source must be rejected as .copyFailed, got \(outcome)")
+                expect(
+                    false,
+                    "a FIFO/special-file source must be rejected as .copyFailed, got \(outcome)")
                 return
             }
             expect(
@@ -191,7 +199,9 @@ func runAudioImportSuites() {
                 packID: "my-pack", environment: environment)
 
             guard case .rejected(.copyFailed) = outcome else {
-                expect(false, "a character-device source must be rejected as .copyFailed, got \(outcome)")
+                expect(
+                    false,
+                    "a character-device source must be rejected as .copyFailed, got \(outcome)")
                 return
             }
             expect(
@@ -217,7 +227,9 @@ func runAudioImportSuites() {
                 environment: environment)
 
             expect(
-                { if case .rejected(.copyFailed) = outcome { return true } else { return false } }(),
+                {
+                    if case .rejected(.copyFailed) = outcome { return true } else { return false }
+                }(),
                 "a nonexistent source must be rejected as .copyFailed, got \(outcome)")
         }
     }
@@ -286,8 +298,9 @@ func runAudioImportSuites() {
         }
     }
 
-    suite("importAudioFile: a destination that is a symlink escaping the pack directory is rejected")
-    {
+    suite(
+        "importAudioFile: a destination that is a symlink escaping the pack directory is rejected"
+    ) {
         withTempDirectory { root in
             let userPacksDirectory = root.appendingPathComponent("packs")
             let packDirectory = userPacksDirectory.appendingPathComponent(
@@ -373,13 +386,16 @@ func runAudioImportSuites() {
                 environment: environment)
 
             expect(
-                { if case .rejected(.copyFailed) = outcome { return true } else { return false } }(),
+                {
+                    if case .rejected(.copyFailed) = outcome { return true } else { return false }
+                }(),
                 "a symlink source must always be refused, even when small enough to pass the size cap, got \(outcome)"
             )
         }
     }
 
-    suite("importAudioFile: over-duration source is rejected with the exact seconds, human message") {
+    suite("importAudioFile: over-duration source is rejected with the exact seconds, human message")
+    {
         withTempDirectory { root in
             let sourceURL = root.appendingPathComponent("source/long.wav")
             writeFixture(validWAVData(), to: sourceURL)
@@ -400,8 +416,9 @@ func runAudioImportSuites() {
         }
     }
 
-    suite("importAudioFile: an undeterminable duration (probe returns nil) is rejected too, fail-closed")
-    {
+    suite(
+        "importAudioFile: an undeterminable duration (probe returns nil) is rejected too, fail-closed"
+    ) {
         withTempDirectory { root in
             let sourceURL = root.appendingPathComponent("source/mystery.wav")
             writeFixture(validWAVData(), to: sourceURL)
@@ -413,7 +430,9 @@ func runAudioImportSuites() {
                 environment: environment)
 
             guard case .rejected(.overDuration(let actualSeconds, _)) = outcome else {
-                expect(false, "expected .rejected(.overDuration) for an unmeasurable file, got \(outcome)")
+                expect(
+                    false,
+                    "expected .rejected(.overDuration) for an unmeasurable file, got \(outcome)")
                 return
             }
             expect(actualSeconds == nil, "actualSeconds must be nil when the probe couldn't tell")
@@ -474,8 +493,9 @@ func runAudioImportSuites() {
         ("mp3 (frame sync)", validMP3FrameSyncData()), ("aiff", validAIFFData()),
         ("m4a", validM4AData()),
     ] {
-        suite("importAudioFile: a legal \(formatName) file copies into the user pack, surfaces filename")
-        {
+        suite(
+            "importAudioFile: a legal \(formatName) file copies into the user pack, surfaces filename"
+        ) {
             withTempDirectory { root in
                 let sourceURL = root.appendingPathComponent("source/original-name.audio")
                 writeFixture(data, to: sourceURL)
@@ -488,7 +508,8 @@ func runAudioImportSuites() {
                     environment: environment)
 
                 guard case .success(let imported) = outcome else {
-                    expect(false, "expected .success for a legal \(formatName) file, got \(outcome)")
+                    expect(
+                        false, "expected .success for a legal \(formatName) file, got \(outcome)")
                     return
                 }
                 expect(imported.packID == "my-pack", "imported.packID must echo the target pack")
@@ -523,7 +544,8 @@ func runAudioImportSuites() {
         withTempDirectory { root in
             let userPacksDirectory = root.appendingPathComponent("packs")
             let environment = makeAudioImportEnvironment(userPacksDirectory: userPacksDirectory)
-            let packDirectory = userPacksDirectory.appendingPathComponent("my-pack", isDirectory: true)
+            let packDirectory = userPacksDirectory.appendingPathComponent(
+                "my-pack", isDirectory: true)
 
             // This is the T14 user-visible failure shape: 中断了 already owns a.mp3. A
             // later import for 干完了 has the same suggested filename but different bytes;
@@ -544,7 +566,10 @@ func runAudioImportSuites() {
                 environment: environment)
 
             guard case .success(let imported) = secondOutcome else {
-                expect(false, "expected the same-name import to succeed with a unique name, got \(secondOutcome)")
+                expect(
+                    false,
+                    "expected the same-name import to succeed with a unique name, got \(secondOutcome)"
+                )
                 return
             }
             expect(
@@ -552,7 +577,8 @@ func runAudioImportSuites() {
                 "a collision with a.mp3 must use the independent next name a-2.mp3, got \(imported.fileName)"
             )
             expect(
-                (try? Data(contentsOf: packDirectory.appendingPathComponent("a.mp3"))) == interruptedData,
+                (try? Data(contentsOf: packDirectory.appendingPathComponent("a.mp3")))
+                    == interruptedData,
                 "中断了's pre-existing a.mp3 bytes must remain byte-for-byte unchanged"
             )
             expect(
@@ -560,9 +586,16 @@ func runAudioImportSuites() {
                 "the new same-name import must write its bytes only to a-2.mp3"
             )
             expect(
-                { if case .success = bindEventToManifest(
-                    event: .stop, fileName: imported.fileName, packID: "my-pack", environment: environment)
-                { return true } else { return false } }(),
+                {
+                    if case .success = bindEventToManifest(
+                        event: .stop, fileName: imported.fileName, packID: "my-pack",
+                        environment: environment)
+                    {
+                        return true
+                    } else {
+                        return false
+                    }
+                }(),
                 "干完了 must be able to bind the distinct a-2.mp3 result"
             )
 
@@ -575,7 +608,8 @@ func runAudioImportSuites() {
                 environment: environment)
 
             guard case .success(let thirdImported) = thirdOutcome else {
-                expect(false, "expected a second collision to advance to a-3.mp3, got \(thirdOutcome)")
+                expect(
+                    false, "expected a second collision to advance to a-3.mp3, got \(thirdOutcome)")
                 return
             }
             expect(
@@ -583,11 +617,13 @@ func runAudioImportSuites() {
                 "a collision with both a.mp3 and a-2.mp3 must advance to a-3.mp3, got \(thirdImported.fileName)"
             )
             expect(
-                (try? Data(contentsOf: packDirectory.appendingPathComponent("a.mp3"))) == interruptedData,
+                (try? Data(contentsOf: packDirectory.appendingPathComponent("a.mp3")))
+                    == interruptedData,
                 "later collisions must still never modify 中断了's bound a.mp3 bytes"
             )
             expect(
-                (try? Data(contentsOf: packDirectory.appendingPathComponent("a-2.mp3"))) == secondData,
+                (try? Data(contentsOf: packDirectory.appendingPathComponent("a-2.mp3")))
+                    == secondData,
                 "later collisions must leave the first distinct import's a-2.mp3 bytes untouched"
             )
             expect(
@@ -604,8 +640,9 @@ func runAudioImportSuites() {
             let userPacksDirectory = root.appendingPathComponent("packs")
             let environment = makeAudioImportEnvironment(userPacksDirectory: userPacksDirectory)
             let extensionPart = ".wav"
-            let maximumName = String(
-                repeating: "a", count: Int(NAME_MAX) - extensionPart.utf8.count) + extensionPart
+            let maximumName =
+                String(
+                    repeating: "a", count: Int(NAME_MAX) - extensionPart.utf8.count) + extensionPart
 
             var originalData = validWAVData()
             originalData.append(Data("maximum-name-original".utf8))
@@ -627,11 +664,13 @@ func runAudioImportSuites() {
                 environment: environment)
 
             guard case .success(let imported) = secondOutcome else {
-                expect(false, "a NAME_MAX collision must allocate a unique name, got \(secondOutcome)")
+                expect(
+                    false, "a NAME_MAX collision must allocate a unique name, got \(secondOutcome)")
                 return
             }
-            let expectedName = String(
-                repeating: "a", count: Int(NAME_MAX) - "-2.wav".utf8.count) + "-2.wav"
+            let expectedName =
+                String(
+                    repeating: "a", count: Int(NAME_MAX) - "-2.wav".utf8.count) + "-2.wav"
             expect(
                 imported.fileName == expectedName,
                 "the collision name must reserve bytes for -2 and .wav, got \(imported.fileName)")
@@ -640,7 +679,8 @@ func runAudioImportSuites() {
                 "the generated filename must not exceed NAME_MAX bytes")
             let packDirectory = userPacksDirectory.appendingPathComponent("my-pack")
             expect(
-                (try? Data(contentsOf: packDirectory.appendingPathComponent(maximumName))) == originalData,
+                (try? Data(contentsOf: packDirectory.appendingPathComponent(maximumName)))
+                    == originalData,
                 "the full-length original entry must remain byte-for-byte unchanged")
             expect(
                 (try? Data(contentsOf: imported.destinationURL)) == replacementData,
@@ -677,7 +717,8 @@ func runAudioImportSuites() {
                 environment: environment)
 
             guard case .success(let imported) = outcome else {
-                expect(false, "an externally occupied post-check candidate must retry, got \(outcome)")
+                expect(
+                    false, "an externally occupied post-check candidate must retry, got \(outcome)")
                 return
             }
             let externallyCreatedLink = packDirectory.appendingPathComponent("chime-2.wav")
@@ -685,7 +726,8 @@ func runAudioImportSuites() {
                 imported.fileName == "chime-3.wav",
                 "the post-lstat collision must force the next suffix, got \(imported.fileName)")
             expect(
-                (try? FileManager.default.destinationOfSymbolicLink(atPath: externallyCreatedLink.path))
+                (try? FileManager.default.destinationOfSymbolicLink(
+                    atPath: externallyCreatedLink.path))
                     == externalTarget.path,
                 "the externally-created symlink must not be replaced")
             expect(
@@ -697,6 +739,39 @@ func runAudioImportSuites() {
             expect(
                 (try? Data(contentsOf: imported.destinationURL)) == newData,
                 "only the newly allocated destination may receive imported bytes")
+        }
+    }
+
+    suite(
+        "importAudioFile: pack directory replacement after allocation cannot redirect publication"
+    ) {
+        withTempDirectory { root in
+            let packs = root.appendingPathComponent("packs")
+            let pack = packs.appendingPathComponent("my-pack")
+            let moved = root.appendingPathComponent("moved-pack")
+            let source = root.appendingPathComponent("source/tone.wav")
+            writeFixture(validWAVData(), to: source)
+            var environment = makeAudioImportEnvironment(userPacksDirectory: packs)
+            environment.beforeExclusivePublish = { _ in
+                try! FileManager.default.moveItem(at: pack, to: moved)
+                try! FileManager.default.createDirectory(
+                    at: pack, withIntermediateDirectories: false)
+            }
+            let outcome = importAudioFile(
+                sourceURL: source, suggestedFileName: "tone.wav", packID: "my-pack",
+                environment: environment)
+            guard case .rejected(.copyFailed) = outcome else {
+                expect(false, "moved pack directory must refuse publication, got \(outcome)")
+                return
+            }
+            expect(
+                !FileManager.default.fileExists(
+                    atPath: pack.appendingPathComponent("tone.wav").path),
+                "replacement directory must not receive audio")
+            expect(
+                !FileManager.default.fileExists(
+                    atPath: moved.appendingPathComponent("tone.wav").path),
+                "moved directory must not receive audio after its path changed")
         }
     }
 
@@ -731,7 +806,9 @@ func runAudioImportSuites() {
                 environment: environment)
 
             guard case .success(let imported) = outcome else {
-                expect(false, "expected the collision beside an in-pack symlink to succeed, got \(outcome)")
+                expect(
+                    false,
+                    "expected the collision beside an in-pack symlink to succeed, got \(outcome)")
                 return
             }
             expect(
@@ -739,8 +816,10 @@ func runAudioImportSuites() {
                 "an occupied symlink entry must reserve chime.wav and allocate chime-2.wav, got \(imported.fileName)"
             )
             expect(
-                (try? FileManager.default.destinationOfSymbolicLink(atPath: packDirectory
-                    .appendingPathComponent("chime.wav").path)) != nil,
+                (try? FileManager.default.destinationOfSymbolicLink(
+                    atPath:
+                        packDirectory
+                        .appendingPathComponent("chime.wav").path)) != nil,
                 "the original chime.wav directory entry must remain a symlink"
             )
             expect(
@@ -748,7 +827,8 @@ func runAudioImportSuites() {
                 "the unique chime-2.wav destination must contain the newly-imported bytes")
             expect(
                 (try? Data(contentsOf: otherRealFile)) == otherOriginalData,
-                "the symlink target must be untouched — the import must not write through or replace the old link")
+                "the symlink target must be untouched — the import must not write through or replace the old link"
+            )
         }
     }
 
@@ -778,7 +858,9 @@ func runAudioImportSuites() {
                 environment: environment)
 
             guard case .success(let imported) = outcome else {
-                expect(false, "expected the collision beside a dangling symlink to succeed, got \(outcome)")
+                expect(
+                    false,
+                    "expected the collision beside a dangling symlink to succeed, got \(outcome)")
                 return
             }
             expect(
@@ -818,7 +900,8 @@ func runAudioImportSuites() {
             writeFixture(validWAVData(), to: sourceURL)
 
             let environment = makeAudioImportEnvironment(
-                userPacksDirectory: userPacksDirectory, factoryPacksDirectory: factoryPacksDirectory)
+                userPacksDirectory: userPacksDirectory, factoryPacksDirectory: factoryPacksDirectory
+            )
             let outcome = importAudioFile(
                 sourceURL: sourceURL, suggestedFileName: "stop.wav", packID: "minimal-chime",
                 environment: environment)
@@ -828,7 +911,8 @@ func runAudioImportSuites() {
                 "importing into a built-in pack id must be refused, got \(outcome)")
             expect(
                 !FileManager.default.fileExists(
-                    atPath: userPacksDirectory.appendingPathComponent("minimal-chime/stop.wav").path),
+                    atPath: userPacksDirectory.appendingPathComponent("minimal-chime/stop.wav").path
+                ),
                 "a refused import must never have written anything to disk")
         }
     }
@@ -855,7 +939,8 @@ func runAudioImportSuites() {
             writeFixture(validWAVData(), to: sourceURL)
 
             let environment = makeAudioImportEnvironment(
-                userPacksDirectory: userPacksDirectory, bundledPacksDirectory: bundledPacksDirectory)
+                userPacksDirectory: userPacksDirectory, bundledPacksDirectory: bundledPacksDirectory
+            )
             let outcome = importAudioFile(
                 sourceURL: sourceURL, suggestedFileName: "stop.wav", packID: "minimal-chime",
                 environment: environment)
@@ -870,8 +955,9 @@ func runAudioImportSuites() {
         }
     }
 
-    suite("importAudioFile: once a user copy of a same-id pack already exists, import proceeds normally")
-    {
+    suite(
+        "importAudioFile: once a user copy of a same-id pack already exists, import proceeds normally"
+    ) {
         withTempDirectory { root in
             let userPacksDirectory = root.appendingPathComponent("packs")
             let bundledPacksDirectory = root.appendingPathComponent("bundled")
@@ -889,7 +975,8 @@ func runAudioImportSuites() {
             writeFixture(validWAVData(), to: sourceURL)
 
             let environment = makeAudioImportEnvironment(
-                userPacksDirectory: userPacksDirectory, bundledPacksDirectory: bundledPacksDirectory)
+                userPacksDirectory: userPacksDirectory, bundledPacksDirectory: bundledPacksDirectory
+            )
             let outcome = importAudioFile(
                 sourceURL: sourceURL, suggestedFileName: "stop.wav", packID: "minimal-chime",
                 environment: environment)
@@ -904,8 +991,9 @@ func runAudioImportSuites() {
         }
     }
 
-    suite("importAudioFile: a pack id with no bundled counterpart at all is never treated as a collision")
-    {
+    suite(
+        "importAudioFile: a pack id with no bundled counterpart at all is never treated as a collision"
+    ) {
         withTempDirectory { root in
             let userPacksDirectory = root.appendingPathComponent("packs")
             let bundledPacksDirectory = root.appendingPathComponent("bundled")
@@ -917,7 +1005,8 @@ func runAudioImportSuites() {
             writeFixture(validWAVData(), to: sourceURL)
 
             let environment = makeAudioImportEnvironment(
-                userPacksDirectory: userPacksDirectory, bundledPacksDirectory: bundledPacksDirectory)
+                userPacksDirectory: userPacksDirectory, bundledPacksDirectory: bundledPacksDirectory
+            )
             let outcome = importAudioFile(
                 sourceURL: sourceURL, suggestedFileName: "stop.wav", packID: "brand-new-pack",
                 environment: environment)

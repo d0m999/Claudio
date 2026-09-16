@@ -22,7 +22,8 @@ private func makeBundleFixture(
     try? Data("#!fake-binary-fixture".utf8).write(to: executablePath)
     for id in packIDs {
         let packDirectory = packsDirectory.appendingPathComponent(id, isDirectory: true)
-        try? FileManager.default.createDirectory(at: packDirectory, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            at: packDirectory, withIntermediateDirectories: true)
         writeFixture(
             #"{ "schema": 1, "id": "\#(id)", "events": { "stop": "stop.mp3" } }"#,
             to: packDirectory.appendingPathComponent("manifest.json"))
@@ -171,8 +172,10 @@ private func runMinimalChimeUpgradeSuites() {
                 return
             }
             expect(outcome.copiedPacks == ["minimal-chime"], "升级必须进入 copiedPacks 证据")
-            let manifest = (try? String(
-                contentsOf: installed.appendingPathComponent("manifest.json"), encoding: .utf8)) ?? ""
+            let manifest =
+                (try? String(
+                    contentsOf: installed.appendingPathComponent("manifest.json"), encoding: .utf8))
+                ?? ""
             expect(
                 manifest.contains(#""version": "1.1.0""#)
                     && manifest.contains(#""task_start": "task_start.mp3""#),
@@ -198,7 +201,8 @@ private func runMinimalChimeUpgradeSuites() {
             expect(
                 !FileManager.default.fileExists(
                     atPath: environment.userPacksDirectory.appendingPathComponent(
-                        ".minimal-chime.upgrade-\(ProcessInfo.processInfo.processIdentifier)").path),
+                        ".minimal-chime.upgrade-\(ProcessInfo.processInfo.processIdentifier)"
+                    ).path),
                 "成功或幂等启动后不得留下升级 staging")
         }
     }
@@ -231,9 +235,12 @@ private func runMinimalChimeUpgradeSuites() {
                     expect(mkfifo(stop.path, 0o600) == 0, "FIFO fixture 必须创建成功")
                 case .audioDirectory:
                     try! FileManager.default.removeItem(at: stop)
-                    try! FileManager.default.createDirectory(at: stop, withIntermediateDirectories: false)
+                    try! FileManager.default.createDirectory(
+                        at: stop, withIntermediateDirectories: false)
                 }
-                let beforeEntries = try! FileManager.default.contentsOfDirectory(atPath: installed.path).sorted()
+                let beforeEntries = try! FileManager.default.contentsOfDirectory(
+                    atPath: installed.path
+                ).sorted()
                 let beforeManifest = try! Data(
                     contentsOf: installed.appendingPathComponent("manifest.json"))
 
@@ -244,7 +251,8 @@ private func runMinimalChimeUpgradeSuites() {
                 }
                 expect(outcome.copiedPacks.isEmpty, "自定义变体不得报告自动升级：\(variant.rawValue)")
                 let afterEntries = try! FileManager.default.contentsOfDirectory(
-                    atPath: installed.path).sorted()
+                    atPath: installed.path
+                ).sorted()
                 expect(
                     afterEntries == beforeEntries,
                     "自定义变体根集合必须不变：\(variant.rawValue)")
@@ -258,7 +266,8 @@ private func runMinimalChimeUpgradeSuites() {
                         atPath: installed.appendingPathComponent("task_start.mp3").path),
                     "自定义包不得被偷偷补第五音频：\(variant.rawValue)")
 
-                let type = (try? FileManager.default.attributesOfItem(atPath: stop.path)[.type])
+                let type =
+                    (try? FileManager.default.attributesOfItem(atPath: stop.path)[.type])
                     as? FileAttributeType
                 switch variant {
                 case .changedAudio:
@@ -314,7 +323,8 @@ private func runMinimalChimeUpgradeSuites() {
                 "claudio-root/packs/minimal-chime", isDirectory: true)
             writePristineMinimalChimeV100(to: installed)
             let drifted = Data(
-                #"{"id":"minimal-chime","version":"last-moment-user-edit","events":{"stop":"stop.mp3"}}"#.utf8)
+                #"{"id":"minimal-chime","version":"last-moment-user-edit","events":{"stop":"stop.mp3"}}"#
+                    .utf8)
             let manifest = installed.appendingPathComponent("manifest.json")
             let environment = makeEnvironment(
                 root: root,
@@ -483,7 +493,8 @@ func runSetupSuites() {
             let (executablePath, _) = makeBundleFixture(at: bundleRoot)
             let environment = makeEnvironment(root: root, executablePath: executablePath)
             let originalSettings = Data(
-                #"{ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "echo user-owned" }] }] }, "keep": "verbatim" }"#.utf8)
+                #"{ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "echo user-owned" }] }] }, "keep": "verbatim" }"#
+                    .utf8)
             writeFixture(
                 String(decoding: originalSettings, as: UTF8.self), to: environment.settingsFile)
 
@@ -632,8 +643,9 @@ func runSetupSuites() {
                 published == "#!fake-binary-fixture",
                 "覆盖之后磁盘上必须是**新**的那份二进制，实际是 \(published ?? "<读不到>")")
 
-            let permissions = (try? FileManager.default.attributesOfItem(
-                atPath: destination.path))?[.posixPermissions] as? NSNumber
+            let permissions =
+                (try? FileManager.default.attributesOfItem(
+                    atPath: destination.path))?[.posixPermissions] as? NSNumber
             expect(
                 permissions.map { ($0.uint16Value & 0o111) != 0 } ?? false,
                 "覆盖之后那个二进制必须是**可执行**的，实际 mode = "
@@ -646,7 +658,8 @@ func runSetupSuites() {
             // 暂存不许留在磁盘上（它是点开头的，留下来不致命，但留下来就说明发布那一步没走完）。
             let staging = destination.deletingLastPathComponent()
                 .appendingPathComponent(
-                    ".\(destination.lastPathComponent).tmp-\(ProcessInfo.processInfo.processIdentifier)")
+                    ".\(destination.lastPathComponent).tmp-\(ProcessInfo.processInfo.processIdentifier)"
+                )
             expect(
                 !FileManager.default.fileExists(atPath: staging.path),
                 "发布成功之后，暂存文件必须已经不在了（rename 会把它消耗掉）")
@@ -672,7 +685,8 @@ func runSetupSuites() {
                 at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
             let elsewhere = root.appendingPathComponent("some-old-claudio")
             try? Data("#!OLD-EXTERNAL".utf8).write(to: elsewhere, options: .atomic)
-            try? FileManager.default.createSymbolicLink(at: destination, withDestinationURL: elsewhere)
+            try? FileManager.default.createSymbolicLink(
+                at: destination, withDestinationURL: elsewhere)
 
             let result = performFirstRunSetup(environment: environment)
 
@@ -700,20 +714,30 @@ func runSetupSuites() {
         }
     }
 
-    suite("performFirstRunSetup: running from inside a bundle copies binary + pack, selects default, installs hooks") {
+    suite(
+        "performFirstRunSetup: running from inside a bundle copies binary + pack, selects default, installs hooks"
+    ) {
         withTempDirectory { root in
             let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
             let environment = makeEnvironment(root: root, executablePath: executablePath)
 
             let result = performFirstRunSetup(environment: environment)
-            guard case .success(.completed(let copiedBinary, let copiedPacks, _, let packSelection, let hooksOutcome)) = result
+            guard
+                case .success(
+                    .completed(
+                        let copiedBinary, let copiedPacks, _, let packSelection, let hooksOutcome)) =
+                    result
             else {
                 expect(false, "expected .success(.completed(...)), got \(result)")
                 return
             }
             expect(copiedBinary, "binary should be copied when running from inside a bundle")
-            expect(copiedPacks == ["minimal-chime"], "the bundled pack should be copied, got \(copiedPacks)")
-            expect(packSelection == .selectedDefault(packID: "minimal-chime"), "a fresh config.json should default-select the copied pack")
+            expect(
+                copiedPacks == ["minimal-chime"],
+                "the bundled pack should be copied, got \(copiedPacks)")
+            expect(
+                packSelection == .selectedDefault(packID: "minimal-chime"),
+                "a fresh config.json should default-select the copied pack")
             expect(hooksOutcome.didInstall, "a fresh settings.json should get hooks installed")
 
             expect(
@@ -756,11 +780,12 @@ func runSetupSuites() {
                 .deletingLastPathComponent().deletingLastPathComponent()
             let installationID = UUID(
                 uuidString: "56565656-6666-4666-8666-666666666666")!
-            guard case .success(let modern) = connectClaudeCodeHooks(
-                root: ["opaque": ["keep": true]],
-                claudioRoot: claudioRoot.path,
-                claudioBinaryPath: environment.claudioBinaryDestination.path,
-                installationID: installationID)
+            guard
+                case .success(let modern) = connectClaudeCodeHooks(
+                    root: ["opaque": ["keep": true]],
+                    claudioRoot: claudioRoot.path,
+                    claudioBinaryPath: environment.claudioBinaryDestination.path,
+                    installationID: installationID)
             else {
                 expect(false, "测试前提：必须生成完整现代 Claude 配置")
                 return
@@ -772,8 +797,9 @@ func runSetupSuites() {
 
             let result = performFirstRunSetup(environment: environment)
 
-            guard case .success(
-                .completed(_, _, _, _, let hooksOutcome)) = result
+            guard
+                case .success(
+                    .completed(_, _, _, _, let hooksOutcome)) = result
             else {
                 expect(false, "现代连接下 setup 必须保持成功语义，got \(result)")
                 return
@@ -787,7 +813,9 @@ func runSetupSuites() {
         }
     }
 
-    suite("performFirstRunSetup: already running from the fixed destination only ensures hooks (no copy)") {
+    suite(
+        "performFirstRunSetup: already running from the fixed destination only ensures hooks (no copy)"
+    ) {
         withTempDirectory { root in
             let claudioRoot = root.appendingPathComponent("claudio-root", isDirectory: true)
             let destination = claudioRoot.appendingPathComponent("bin/claudio")
@@ -817,7 +845,8 @@ func runSetupSuites() {
                 result
                     == .success(
                         .completed(
-                            copiedBinary: false, copiedPacks: [], salvaged: [], packSelection: .selectedDefault(packID: "minimal-chime"),
+                            copiedBinary: false, copiedPacks: [], salvaged: [],
+                            packSelection: .selectedDefault(packID: "minimal-chime"),
                             hooksOutcome: .installed(backup: .notNeeded))),
                 "re-running setup from the already-installed location must skip copy steps, got \(result)"
             )
@@ -854,7 +883,8 @@ func runSetupSuites() {
             // 本 suite 的原始本意，一字未改：复制二进制**不能**被 packs/ 目录的存在与否卡住。
             expect(
                 FileManager.default.fileExists(atPath: environment.claudioBinaryDestination.path),
-                "the binary must actually exist at the fixed destination even with no sibling packs/")
+                "the binary must actually exist at the fixed destination even with no sibling packs/"
+            )
             // 新长出来的牙：失败必须发生在写 hooks **之前**。settings.json 压根不该被创建出来——
             // 一个注定哑掉的安装，绝不允许在用户的 Claude Code 里留下任何痕迹。
             expect(
@@ -915,7 +945,8 @@ func runSetupSuites() {
                 to: userPackDirectory.appendingPathComponent("manifest.json"))
 
             let result = performFirstRunSetup(environment: environment)
-            guard case .success(.completed(_, let copiedPacks, _, let packSelection, _)) = result else {
+            guard case .success(.completed(_, let copiedPacks, _, let packSelection, _)) = result
+            else {
                 expect(false, "expected success, got \(result)")
                 return
             }
@@ -959,8 +990,10 @@ func runSetupSuites() {
                     "minimal-chime/manifest.json"))
 
             let result = performFirstRunSetup(environment: environment)
-            guard case .success(.completed(let copiedBinary, let copiedPacks, _, let packSelection, _)) =
-                result
+            guard
+                case .success(
+                    .completed(let copiedBinary, let copiedPacks, _, let packSelection, _)) =
+                    result
             else {
                 expect(false, "expected success, got \(result)")
                 return
@@ -1060,14 +1093,17 @@ func runSetupSuites() {
         }
     }
 
-    suite("performFirstRunSetup: multiple bundled packs default-select the alphabetically-first one") {
+    suite(
+        "performFirstRunSetup: multiple bundled packs default-select the alphabetically-first one"
+    ) {
         withTempDirectory { root in
             let (executablePath, _) = makeBundleFixture(
                 at: root.appendingPathComponent("bundle"), packIDs: ["zebra-chime", "alpha-chime"])
             let environment = makeEnvironment(root: root, executablePath: executablePath)
 
             let result = performFirstRunSetup(environment: environment)
-            guard case .success(.completed(_, let copiedPacks, _, let packSelection, _)) = result else {
+            guard case .success(.completed(_, let copiedPacks, _, let packSelection, _)) = result
+            else {
                 expect(false, "expected success, got \(result)")
                 return
             }
@@ -1188,7 +1224,8 @@ func runSetupSuites() {
             let before = try? Data(contentsOf: marker)
 
             let result = try? currentExecutablePathForTesting()
-            expect(result == nil, "a failed process-image query must throw instead of guessing a path")
+            expect(
+                result == nil, "a failed process-image query must throw instead of guessing a path")
             expect(
                 (try? Data(contentsOf: marker)) == before,
                 "path-query failure must not create or modify any setup artifact")
@@ -1204,8 +1241,9 @@ func runSetupSuites() {
             // directory needs to be created — `createDirectory` cannot turn a file into a
             // directory. Journaled bootstrap must now stop even earlier: if it cannot durably
             // record partial effects, it must not attempt the binary copy at all.
-            let blockingFile = root.appendingPathComponent("blocking-file")
+            let blockingFile = root.appendingPathComponent("blocked-parent/blocking-file")
             writeFixture("not a directory", to: blockingFile)
+            let originalBlockingBytes = try! Data(contentsOf: blockingFile)
             let claudioRoot = root.appendingPathComponent("claudio-root", isDirectory: true)
             let environment = SetupEnvironment(
                 executablePath: executablePath,
@@ -1218,6 +1256,8 @@ func runSetupSuites() {
                 // 见 ``injectedSetupPacksLock(under:)``：同上，故意不用可派生的位置。
                 packsLockFile: injectedSetupPacksLock(under: root))
 
+            let writeWatch = FileWriteWatch(watching: blockingFile)
+            expect(writeWatch.isArmed, "setup refusal watch must be armed")
             let result = performFirstRunSetup(environment: environment)
             guard case .failure(.reportingUnavailable) = result else {
                 expect(
@@ -1226,6 +1266,12 @@ func runSetupSuites() {
                 )
                 return
             }
+            expect(
+                (try? Data(contentsOf: blockingFile)) == originalBlockingBytes,
+                "setup refusal must preserve the blocking file")
+            expect(
+                writeWatch.observedWrite() == .untouched,
+                "setup refusal must not touch its blocked destination")
         }
     }
 
@@ -1311,7 +1357,9 @@ func runSetupSuites() {
                 "全新安装必须选出一个真实默认包，got \(String(describing: packSelection))")
 
             let afterSetup = try? Data(contentsOf: environment.configFile)
-            let configAfterSetup = afterSetup.flatMap { try? JSONDecoder().decode(ClaudioConfig.self, from: $0) }
+            let configAfterSetup = afterSetup.flatMap {
+                try? JSONDecoder().decode(ClaudioConfig.self, from: $0)
+            }
             expect(
                 configAfterSetup?.selectedPack == "minimal-chime",
                 "磁盘上的 config.json 必须真的反映自举选出的包")
@@ -1368,12 +1416,18 @@ func runSetupSuites() {
 
             _ = performFirstRunSetup(environment: environment)
             let second = performFirstRunSetup(environment: environment)
-            guard case .success(.completed(let copiedBinary, let copiedPacks, _, let packSelection, let hooksOutcome)) = second
+            guard
+                case .success(
+                    .completed(
+                        let copiedBinary, let copiedPacks, _, let packSelection, let hooksOutcome)) =
+                    second
             else {
                 expect(false, "expected success on second run, got \(second)")
                 return
             }
-            expect(copiedBinary, "the binary copy step itself is not guarded — copying over itself is safe")
+            expect(
+                copiedBinary,
+                "the binary copy step itself is not guarded — copying over itself is safe")
             expect(
                 copiedPacks.isEmpty,
                 "the pack should not be reported as newly copied the second time (destination already exists)"
@@ -1525,11 +1579,13 @@ func runSetupPackSelectionSuites() {
         withTempDirectory { root in
             let environment = makeInstalledEnvironment(root: root)
             writeFixture(
-                #"{ "selected_pack": "wobbuffet", "master_volume": 0.7 }"#, to: environment.configFile)
+                #"{ "selected_pack": "wobbuffet", "master_volume": 0.7 }"#,
+                to: environment.configFile)
             writePack("minimal-chime", in: environment.userPacksDirectory)
 
             let result = performFirstRunSetup(environment: environment)
-            guard case .success(.completed(_, _, _, let packSelection, let hooksOutcome)) = result else {
+            guard case .success(.completed(_, _, _, let packSelection, let hooksOutcome)) = result
+            else {
                 expect(
                     false,
                     "还有能用的包时必须修好它并装完——硬失败会把用户永久挡在画廊之外，got \(result)")
@@ -1599,7 +1655,8 @@ func runSetupPackSelectionSuites() {
                 return
             }
             expect(
-                (try? String(contentsOf: environment.settingsFile, encoding: .utf8)) == userSettings,
+                (try? String(contentsOf: environment.settingsFile, encoding: .utf8))
+                    == userSettings,
                 "一次注定不会响的安装，绝不允许在用户的 Claude Code 配置里留下任何痕迹——逐字节不变")
         }
     }
@@ -1671,8 +1728,9 @@ func runSetupPackSelectionSuites() {
             let result = performFirstRunSetup(environment: environment)
             guard
                 case .success(
-                    .completed(_, let copiedPacks, let salvaged, let packSelection, let hooksOutcome))
-                    = result
+                    .completed(
+                        _, let copiedPacks, let salvaged, let packSelection, let hooksOutcome)) =
+                    result
             else {
                 expect(
                     false,
@@ -1684,7 +1742,8 @@ func runSetupPackSelectionSuites() {
                 copiedPacks == ["minimal-chime"],
                 "残骸必须被挪开、包被重新复制一遍（上一版会因为「目录已存在」而永远跳过它），got \(copiedPacks)"
             )
-            expect(packSelection == .selectedDefault(packID: "minimal-chime"), "got \(packSelection)")
+            expect(
+                packSelection == .selectedDefault(packID: "minimal-chime"), "got \(packSelection)")
             expect(hooksOutcome.didInstall, "治好之后必须真的装上")
             // **搬走一个用户目录，必须被说出来。** 那个目录里完全可能装着他自己导入的、磁盘上唯一一份
             // 音频（`AudioImport` 就是往 packs/<id>/ 里写转码后的字节）。上一版把它搬进一个点开头的隐藏
@@ -1850,7 +1909,8 @@ func runSetupPackSelectionSuites() {
             }
             expect(copiedPacks.isEmpty, "同名的**能用**的用户包必须原样跳过，got \(copiedPacks)")
             expect(
-                (try? String(contentsOf: userPack.appendingPathComponent("mine.mp3"), encoding: .utf8))
+                (try? String(
+                    contentsOf: userPack.appendingPathComponent("mine.mp3"), encoding: .utf8))
                     == "the user's own sound",
                 "用户自己的文件必须一个字节都不动")
             expect(
@@ -1872,7 +1932,8 @@ func runSetupPackSelectionSuites() {
             let environment = makeEnvironment(root: root, executablePath: executablePath)
 
             let result = performFirstRunSetup(environment: environment)
-            guard case .success(.completed(_, _, _, let packSelection, let hooksOutcome)) = result else {
+            guard case .success(.completed(_, _, _, let packSelection, let hooksOutcome)) = result
+            else {
                 expect(false, "「声明了却还没有文件」是内容层缺口——绝不能拦，got \(result)")
                 return
             }
@@ -1886,7 +1947,8 @@ func runSetupPackSelectionSuites() {
                     == .incomplete(packID: "minimal-chime", missingFiles: ["stop.mp3"]),
                 "fixture 自检：这台机器此刻必须真的是 .incomplete（声明了 stop.mp3、文件不在），"
                     + "否则这条防线什么都没防到")
-            expect(packSelection == .selectedDefault(packID: "minimal-chime"), "got \(packSelection)")
+            expect(
+                packSelection == .selectedDefault(packID: "minimal-chime"), "got \(packSelection)")
             expect(hooksOutcome.didInstall, "照常写 hooks")
         }
     }
@@ -1900,7 +1962,8 @@ func runSetupPackSelectionSuites() {
             writePack("empty-pack", in: environment.userPacksDirectory, events: "")
 
             let result = performFirstRunSetup(environment: environment)
-            guard case .success(.completed(_, _, _, let packSelection, let hooksOutcome)) = result else {
+            guard case .success(.completed(_, _, _, let packSelection, let hooksOutcome)) = result
+            else {
                 expect(false, "一个空包不是坏管道——绝不能拦，got \(result)")
                 return
             }

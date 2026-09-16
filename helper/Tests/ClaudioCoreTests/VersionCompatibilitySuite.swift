@@ -1,4 +1,5 @@
 import ClaudioCore
+import Darwin
 import Foundation
 
 // MARK: - 版本兼容 (T13): SemanticVersion parsing/comparison + checkClaudeCodeVersion +
@@ -49,7 +50,8 @@ func runVersionCompatibilitySuites() {
         expect(SemanticVersion(parsing: "abc") == nil, "non-numeric text must fail to parse")
         expect(SemanticVersion(parsing: "2.-1.0") == nil, "a negative component must fail to parse")
         expect(SemanticVersion(parsing: "2..1") == nil, "a doubled dot (empty component) must fail")
-        expect(SemanticVersion(parsing: "2.1.") == nil, "a trailing dot (empty component) must fail")
+        expect(
+            SemanticVersion(parsing: "2.1.") == nil, "a trailing dot (empty component) must fail")
         expect(
             SemanticVersion(parsing: "2.1.201.5") == nil,
             "more than 3 components must fail rather than silently truncating")
@@ -123,7 +125,8 @@ func runVersionCompatibilitySuites() {
     // MARK: checkClaudeCodeVersion (fake CommandRunning — no real subprocess)
 
     suite("checkClaudeCodeVersion: a version at/above the verified minimum reports .verified") {
-        let runner = FakeCommandRunner(result: .completed(exitCode: 0, stdout: "2.1.206 (Claude Code)"))
+        let runner = FakeCommandRunner(
+            result: .completed(exitCode: 0, stdout: "2.1.206 (Claude Code)"))
         let status = checkClaudeCodeVersion(commandRunner: runner)
         expect(
             status == .verified(current: SemanticVersion(major: 2, minor: 1, patch: 206)),
@@ -134,7 +137,8 @@ func runVersionCompatibilitySuites() {
         "checkClaudeCodeVersion: exactly the verified minimum itself reports .verified (boundary,"
             + " not .belowVerifiedMinimum)"
     ) {
-        let runner = FakeCommandRunner(result: .completed(exitCode: 0, stdout: "2.1.201 (Claude Code)"))
+        let runner = FakeCommandRunner(
+            result: .completed(exitCode: 0, stdout: "2.1.201 (Claude Code)"))
         let status = checkClaudeCodeVersion(commandRunner: runner)
         expect(
             status == .verified(current: VersionCompatibility.minimumVerifiedClaudeCodeVersion),
@@ -146,15 +150,18 @@ func runVersionCompatibilitySuites() {
             + " .belowVerifiedMinimum — proves the numeric (not lexical) comparison reaches all"
             + " the way through this function, using the task's own 2.1.201 vs 2.1.99 example"
     ) {
-        let runner = FakeCommandRunner(result: .completed(exitCode: 0, stdout: "2.1.99 (Claude Code)"))
+        let runner = FakeCommandRunner(
+            result: .completed(exitCode: 0, stdout: "2.1.99 (Claude Code)"))
         let status = checkClaudeCodeVersion(commandRunner: runner)
         expect(
-            status == .belowVerifiedMinimum(current: SemanticVersion(major: 2, minor: 1, patch: 99)),
+            status
+                == .belowVerifiedMinimum(current: SemanticVersion(major: 2, minor: 1, patch: 99)),
             "expected .belowVerifiedMinimum(2.1.99), got \(status)")
     }
 
-    suite("checkClaudeCodeVersion: a non-zero exit code (claude not on PATH via env) is .undetectable")
-    {
+    suite(
+        "checkClaudeCodeVersion: a non-zero exit code (claude not on PATH via env) is .undetectable"
+    ) {
         let runner = FakeCommandRunner(result: .completed(exitCode: 127, stdout: ""))
         let status = checkClaudeCodeVersion(commandRunner: runner)
         if case .undetectable = status {
@@ -206,10 +213,12 @@ func runVersionCompatibilitySuites() {
             ("not on PATH", .completed(exitCode: 127, stdout: "")),
             ("unparsable", .completed(exitCode: 0, stdout: "garbage\n")),
             ("timed out", .timedOut),
+            ("cleanup failed", .cleanupFailed(pid: 42)),
             ("launch failed", .launchFailed),
         ]
         for (label, result) in scenarios {
-            let doctorResult = claudeCodeVersionDoctorResult(commandRunner: FakeCommandRunner(result: result))
+            let doctorResult = claudeCodeVersionDoctorResult(
+                commandRunner: FakeCommandRunner(result: result))
             expect(
                 doctorResult.severity != .failure,
                 "\(label) must never produce .failure, got \(doctorResult.severity)")
@@ -220,7 +229,8 @@ func runVersionCompatibilitySuites() {
         "claudeCodeVersionDoctorResult: the below-minimum warning explains StopFailure in"
             + " plain language, and does not blame the other three events"
     ) {
-        let runner = FakeCommandRunner(result: .completed(exitCode: 0, stdout: "2.1.99 (Claude Code)"))
+        let runner = FakeCommandRunner(
+            result: .completed(exitCode: 0, stdout: "2.1.99 (Claude Code)"))
         let result = claudeCodeVersionDoctorResult(commandRunner: runner)
         expect(result.severity == .warning, "expected .warning, got \(result.severity)")
         expect(
@@ -231,7 +241,8 @@ func runVersionCompatibilitySuites() {
     // MARK: macOSVersionDoctorResult — always .ok (anchor 3: informational, never a real gate)
 
     suite("macOSVersionDoctorResult: at/above the documented floor reports .ok") {
-        let result = macOSVersionDoctorResult(current: SemanticVersion(major: 15, minor: 0, patch: 0))
+        let result = macOSVersionDoctorResult(
+            current: SemanticVersion(major: 15, minor: 0, patch: 0))
         expect(result.severity == .ok, "expected .ok, got \(result.severity)")
     }
 
@@ -240,7 +251,8 @@ func runVersionCompatibilitySuites() {
             + " version still reports .ok — never .warning, never .failure — because this branch"
             + " is provably unreachable in production and must not masquerade as a live signal"
     ) {
-        let result = macOSVersionDoctorResult(current: SemanticVersion(major: 10, minor: 15, patch: 0))
+        let result = macOSVersionDoctorResult(
+            current: SemanticVersion(major: 10, minor: 15, patch: 0))
         expect(
             result.severity == .ok,
             "a below-floor macOS version must still report .ok (purely informational), got"
@@ -258,7 +270,8 @@ func runVersionCompatibilitySuites() {
             + " no test hardcodes a second copy of either number)"
     ) {
         expect(
-            VersionCompatibility.minimumMacOSVersion == SemanticVersion(major: 12, minor: 0, patch: 0),
+            VersionCompatibility.minimumMacOSVersion
+                == SemanticVersion(major: 12, minor: 0, patch: 0),
             "minimumMacOSVersion must mirror Package.swift's platforms: [.macOS(.v12)]")
         expect(
             VersionCompatibility.minimumVerifiedClaudeCodeVersion
@@ -306,6 +319,28 @@ func runVersionCompatibilitySuites() {
         expect(result == .launchFailed, "expected .launchFailed, got \(result)")
     }
 
+    suite("SystemCommandRunner.run：忽略 SIGTERM 的直接子进程会被 SIGKILL 并确认回收") {
+        withTempDirectory { directory in
+            let pidFile = directory.appendingPathComponent("child.pid")
+            let runner = SystemCommandRunner()
+            let result = runner.run(
+                executablePath: "/bin/sh",
+                arguments: [
+                    "-c", "trap '' TERM; printf '%d' \"$$\" > \"$1\"; while :; do :; done",
+                    "ignored", pidFile.path,
+                ], timeout: 0.3)
+            expect(result == .timedOut, "忽略 SIGTERM 后也必须明确回收，got \(result)")
+            if let contents = try? String(contentsOf: pidFile, encoding: .utf8),
+                let pid = Int32(contents)
+            {
+                let alive = Darwin.kill(pid, 0) == 0
+                expect(!alive && errno == ESRCH, "返回前直接子进程必须已不存在")
+            } else {
+                expect(false, "fixture 必须写出直接子进程 PID")
+            }
+        }
+    }
+
     suite("SystemCommandRunner.run: a non-zero exit code is reported faithfully, not swallowed") {
         let runner = SystemCommandRunner()
         let result = runner.run(
@@ -347,7 +382,8 @@ func runVersionCompatibilitySuites() {
             executablePath: "/bin/sh",
             arguments: ["-c", "head -c 4194304 /dev/zero | tr '\\0' 'a'"], timeout: 20.0)
         guard case .completed(let exitCode, let stdout) = result else {
-            expect(false, "the cap must not turn a well-behaved child into a timeout, got \(result)")
+            expect(
+                false, "the cap must not turn a well-behaved child into a timeout, got \(result)")
             return
         }
         expect(exitCode == 0, "the child must still exit cleanly, got \(exitCode)")
@@ -409,8 +445,7 @@ func runVersionCompatibilitySuites() {
                 + " thread count went \(before) → \(after) (delta \(after - before))")
     }
 
-    suite("SystemCommandRunner.run: a failed launch leaks neither the stdout reader nor its pipe")
-    {
+    suite("SystemCommandRunner.run: a failed launch leaks neither the stdout reader nor its pipe") {
         // `.launchFailed` fires only when the *executable itself* is missing. It is NOT the branch
         // that fires when `claude` isn't on PATH: `checkClaudeCodeVersion` spawns `/usr/bin/env`,
         // which exists, so a missing `claude` makes `env` exit 127 and lands in `.completed`. (An
@@ -482,7 +517,8 @@ func runVersionCompatibilitySuites() {
     suite("SystemCommandRunner.run: a failed launch leaks neither end of the pipe") {
         let iterations = 40
         let runner = SystemCommandRunner()
-        _ = runner.run(executablePath: "/no/such/executable-claudio-test", arguments: [], timeout: 2.0)
+        _ = runner.run(
+            executablePath: "/no/such/executable-claudio-test", arguments: [], timeout: 2.0)
         let before = openFileDescriptorCount()
         for _ in 0..<iterations {
             _ = runner.run(

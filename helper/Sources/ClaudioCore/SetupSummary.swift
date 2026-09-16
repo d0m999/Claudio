@@ -38,10 +38,10 @@ public func setupSummaryLines(_ outcome: SetupOutcome) -> [String] {
         lines.append(
             copiedPacks.isEmpty
                 ? "  · 没有发现需要复制的新内置声音包"
-                : "  · 已复制内置声音包：\(copiedPacks.joined(separator: ", "))")
+                : "  · 已复制内置声音包：\(copiedPacks.map(terminalSafePackID).joined(separator: ", "))")
         for pack in salvaged {
             lines.append(
-                "  ⚠ \(pack.packID) 读不出 manifest（多半是上次安装被中断留下的残骸，也可能是这个包的"
+                "  ⚠ \(terminalSafePackID(pack.packID)) 读不出 manifest（多半是上次安装被中断留下的残骸，也可能是这个包的"
                     + " manifest 坏了）——已把它原样搬到 \(pack.movedTo)（一个文件都没删），"
                     + "并重新装了一份干净的")
         }
@@ -49,11 +49,11 @@ public func setupSummaryLines(_ outcome: SetupOutcome) -> [String] {
         case .untouched:
             break
         case .selectedDefault(let packID):
-            lines.append("  · 已默认选中声音包 \"\(packID)\"")
+            lines.append("  · 已默认选中声音包 \"\(terminalSafePackID(packID))\"")
         case .repairedDeadSelection(let removed, let selected):
             lines.append(
-                "  ⚠ 你之前选的声音包 \"\(removed)\" 已经不在了（或读不出来）——"
-                    + "已替你选中 \"\(selected)\"，在面板的切包画廊里随时可以换")
+                "  ⚠ 你之前选的声音包 \"\(terminalSafePackID(removed))\" 已经不在了（或读不出来）——"
+                    + "已替你选中 \"\(terminalSafePackID(selected))\"，在面板的切包画廊里随时可以换")
         }
         lines.append("  · \(legacyHooksOutcomeMessage(hooksOutcome))")
         return lines

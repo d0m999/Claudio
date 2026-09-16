@@ -931,6 +931,35 @@ private struct SoundPacksWindowContentView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(message)
             }
+            if let recovery = activeSounds.manifestRecoveryActions.first(where: {
+                $0.statusRevision == status.revision
+            }) {
+                Text(l10n.format(.soundPacksManifestRecoveryLocation, recovery.path))
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(
+                    l10n.text(
+                        recovery.issue == .unreadable
+                            ? .soundPacksManifestReadRepair : .soundPacksManifestWriteRepair)
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 12) {
+                    Button(l10n.text(.soundPacksReveal)) {
+                        invoke(recovery.revealAction)
+                    }
+                    .accessibilityValue(recovery.path)
+                    .accessibilityIdentifier("sound-packs.manifest-reveal.\(recovery.packID)")
+                    if let retryAction = recovery.retryAction {
+                        Button(l10n.text(.commonRetry)) {
+                            invoke(retryAction)
+                        }
+                        .accessibilityIdentifier("sound-packs.manifest-retry.\(recovery.packID)")
+                    }
+                }
+            }
             if case .retryFactoryRestores(let packIDs)? = status.recovery {
                 ForEach(
                     activeSounds.recoveryActions.filter { packIDs.contains($0.packID) }

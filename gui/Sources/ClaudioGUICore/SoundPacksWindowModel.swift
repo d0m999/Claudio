@@ -106,6 +106,19 @@ public enum SoundPacksWindowStatusKind: String, Sendable, Equatable, Hashable {
 
 public enum SoundPacksWindowStatusRecovery: Sendable, Equatable {
     case retryFactoryRestores(packIDs: [String])
+    case manifest(
+        packID: String, path: String, issue: ManifestRecoveryIssue,
+        retry: ManifestRetryIntent)
+}
+
+public enum ManifestRecoveryIssue: Sendable, Equatable {
+    case unreadable
+    case writeFailed
+}
+
+public enum ManifestRetryIntent: Sendable, Equatable {
+    case assign(fileName: String, event: Event)
+    case clear(event: Event)
 }
 
 /// One model-owned status projection. The View sorts nothing and invents no lifetime rules.
@@ -1712,6 +1725,7 @@ package final class SoundPacksWindowModel {
                 .failure(.bind(error)),
                 invalidatingPackID: packID,
                 refreshAfterFailure: manifestBindFailureInvalidatesWindowReadModel(error),
+                manifestRetry: .assign(fileName: fileName, event: event),
                 mutation: mutation)
         }
     }
@@ -1751,6 +1765,7 @@ package final class SoundPacksWindowModel {
                 .failure(.bind(error)),
                 invalidatingPackID: selectedPackID,
                 refreshAfterFailure: manifestBindFailureInvalidatesWindowReadModel(error),
+                manifestRetry: .clear(event: event),
                 mutation: mutation)
         }
     }
@@ -2158,6 +2173,7 @@ package final class SoundPacksWindowModel {
         _ result: Result<Void, SoundPacksWindowAudioActionError>,
         invalidatingPackID: String? = nil,
         refreshAfterFailure: Bool = false,
+        manifestRetry: ManifestRetryIntent? = nil,
         mutation: SoundPackLibraryMutation? = nil
     ) -> Result<Void, SoundPacksWindowAudioActionError> {
         switch result {
@@ -2170,12 +2186,34 @@ package final class SoundPacksWindowModel {
                 mutation: mutation)
         case .failure(let error):
             audioActionError = error
+            let recovery: SoundPacksWindowStatusRecovery?
+            if case .bind(let bindError) = error,
+                let manifestRetry, let packID = invalidatingPackID
+            {
+                let issue: ManifestRecoveryIssue?
+                switch bindError {
+                case .manifestUnreadable: issue = .unreadable
+                case .writeFailed: issue = .writeFailed
+                default: issue = nil
+                }
+                recovery = issue.map {
+                    .manifest(
+                        packID: packID,
+                        path: environment.userPacksDirectory
+                            .appendingPathComponent(packID)
+                            .appendingPathComponent("manifest.json").path,
+                        issue: $0, retry: manifestRetry)
+                }
+            } else {
+                recovery = nil
+            }
             setWindowStatus(
                 kind: .audio,
                 severity: .failure,
                 actionText: .localized(.soundPacksStatusAddAudio),
                 messageText: error.statusText,
-                packID: selectedPackID)
+                packID: invalidatingPackID ?? selectedPackID,
+                recovery: recovery)
             completeSynchronousWrite(.failed, mutation: mutation)
             if invalidatingPackID != nil, refreshAfterFailure {
                 reload(followActivePack: false)
