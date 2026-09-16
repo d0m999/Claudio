@@ -41,8 +41,11 @@ policy 注入；NON-DISTRIBUTION 仅在外部归档名称/台账标记。
 ## Remaining
 
 六个新候选已依次触发播放，实际出声与 TTS/木琴意图匹配仍等待所有者反馈；播放状态不代替听感。
-所有者随后对 TTS 试听回复“没”，含义尚待明确。当前系统输出静音的只读观察不能回溯凌晨状态。
-TTS 临时候选已在切换 SFX 时清理；本次没有追加付费生成，已采用 SFX 音频仍保留。
+所有者随后明确当时错过了 TTS 试听，该反馈不是已观察到的播放失败；合并询问中的 SFX 反馈仍为
+“存在问题或尚未听到”。两类听感均继续记为 `NOT VERIFIED`。当前系统输出静音的只读观察不能
+回溯凌晨状态。TTS 临时候选已在切换 SFX 时清理；本次没有追加付费生成。已采用 SFX 音频仍保留，
+只读解码检测到非静音信号（mean `-25.2 dB`、peak `-3.8 dB`），这不代替实际听到或木琴意图确认。
+完整重试听需新增 3 次 TTS POST 与 1 次 SFX batch POST，待所有者准备试听后单独发起。
 反馈前只记录本地实现/技术复验 PASSED，不记录 T9 完整闭合 PASSED。
 macOS 12–13、Intel、universal/Developer ID、公证及正式分发未验证；不声明生产就绪。
 未 push、创建 PR、合并、发布或修改 Issue；main production 仍为 policy nil/四 profiles。
