@@ -150,6 +150,64 @@ func runPanelFocusOrderSuites() {
             order == [.recentNotices, .soundScope, .openSoundSettings, .quitApplication],
             "needsPack 焦点顺序错误：\(order)")
     }
+
+    suite("panelFocusAfterTopContentChange：错误原因文字变化不重置仍存在的控件焦点") {
+        let nextOrder: [PanelFocusTarget] = [
+            .headerSettings, .recentNotices, .soundScope, .configReveal, .quitApplication,
+        ]
+        let target = panelFocusAfterTopContentChange(
+            previous: .configFailure(reason: "旧原因"),
+            current: .configFailure(reason: "新原因"),
+            focusedTarget: .configReveal,
+            nextOrder: nextOrder)
+        expect(
+            target == .configReveal,
+            "同一失败卡只改变 reason 时，仍存在的 Reveal 控件必须保留焦点，得到 \(String(describing: target))")
+    }
+
+    suite("panelFocusAfterTopContentChange：原本无焦点时内容发布不主动聚焦") {
+        let nextOrder: [PanelFocusTarget] = [
+            .headerSettings, .recentNotices, .soundScope, .configReveal, .quitApplication,
+        ]
+        expect(
+            panelFocusAfterTopContentChange(
+                previous: .configFailure(reason: "旧原因"),
+                current: .configFailure(reason: "新原因"),
+                focusedTarget: nil,
+                nextOrder: nextOrder) == nil,
+            "失败原因文字变化时，原本无焦点的面板必须继续无焦点")
+        expect(
+            panelFocusAfterTopContentChange(
+                previous: .events,
+                current: .configFailure(reason: "坏配置"),
+                focusedTarget: nil,
+                nextOrder: nextOrder) == nil,
+            "切换内容种类也不能在没有消失控件时凭空创建焦点")
+    }
+
+    suite("panelFocusAfterTopContentChange：事件控件消失时优先恢复按钮，否则回到声音作用域") {
+        let recoveryOrder: [PanelFocusTarget] = [
+            .headerSettings, .recentNotices, .soundScope, .configReveal, .quitApplication,
+        ]
+        expect(
+            panelFocusAfterTopContentChange(
+                previous: .events,
+                current: .configFailure(reason: "坏配置"),
+                focusedTarget: .eventMute(.stop),
+                nextOrder: recoveryOrder) == .configReveal,
+            "事件行消失并进入配置失败态时，焦点必须落在有效恢复按钮")
+
+        let needsPackOrder: [PanelFocusTarget] = [
+            .headerSettings, .recentNotices, .soundScope, .quitApplication,
+        ]
+        expect(
+            panelFocusAfterTopContentChange(
+                previous: .events,
+                current: .needsPack,
+                focusedTarget: .eventMute(.stop),
+                nextOrder: needsPackOrder) == .soundScope,
+            "事件行消失且没有恢复按钮时，焦点必须回到声音作用域")
+    }
 }
 
 @MainActor

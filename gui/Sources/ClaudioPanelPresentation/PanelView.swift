@@ -1,4 +1,3 @@
-import AppKit
 import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
@@ -6,25 +5,6 @@ import ClaudioLocalization
 import SwiftUI
 
 private let panelScrollViewportCoordinateSpace = "panel.scroll-viewport"
-
-/// Keeps the production config-lock identity in the same guarded source as PanelView's config
-/// writer while allowing another read-model projection for the retained event settings window.
-@MainActor
-func makeEventSettingsConfigController(
-    configFile: URL,
-    environment: AudioImportEnvironment,
-    soundPackLibrary: SoundPackLibrary,
-    soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator,
-    afterFullReload: @escaping @MainActor (ClaudioConfig) -> Void
-) -> PanelConfigController {
-    PanelConfigController(
-        configFile: configFile,
-        lockFile: ClaudioPaths.configLockFile,
-        environment: environment,
-        soundPackLibrary: soundPackLibrary,
-        afterFullReload: afterFullReload,
-        soundPacksRefreshCoordinator: soundPacksRefreshCoordinator)
-}
 
 /// 菜单栏 Agent 集成面板。生产树只呈现一个当前作用域的五行事件与两行播放设置；
 /// 连接/诊断、事件设置和完整声音编辑继续由 retained window 负责。
@@ -36,6 +16,7 @@ public struct PanelView: View {
     @State private var activityRange: LocalActivityRange = .today
     @State private var scrollViewportHeight: CGFloat = 0
     @State private var soundScopePickerBottom: CGFloat = 0
+    @State private var previousTopContent: PanelTopContent?
     @FocusState private var focusedTarget: PanelFocusTarget?
 
     @ObservedObject private var focusCoordinator: PanelFocusCoordinator
@@ -58,6 +39,8 @@ public struct PanelView: View {
     private let onOpenRecentNotices: @MainActor () -> Void
     private let onOpenIntegration: @MainActor (HostID) -> Void
     private let onQuit: @MainActor () -> Void
+    private let onRevealConfig: @MainActor (URL) -> Void
+    private let onAnnounce: @MainActor (String) -> Void
 
     public init(
         audioEnvironment: AudioImportEnvironment,
@@ -75,6 +58,8 @@ public struct PanelView: View {
         onOpenRecentNotices: @escaping @MainActor () -> Void,
         onOpenIntegration: @escaping @MainActor (HostID) -> Void,
         onQuit: @escaping @MainActor () -> Void,
+        onRevealConfig: @escaping @MainActor (URL) -> Void,
+        onAnnounce: @escaping @MainActor (String) -> Void,
     ) {
         self.audioEnvironment = audioEnvironment
         self.configFile = configFile
@@ -88,6 +73,8 @@ public struct PanelView: View {
         self.onOpenRecentNotices = onOpenRecentNotices
         self.onOpenIntegration = onOpenIntegration
         self.onQuit = onQuit
+        self.onRevealConfig = onRevealConfig
+        self.onAnnounce = onAnnounce
         previewPlayer = NSSoundAudioPreviewPlayer()
         refreshesActivityOnLifecycle = true
 
@@ -107,7 +94,7 @@ public struct PanelView: View {
     /// Deterministic production-composition initializer used only by the state gallery. The
     /// injected model owns every visible state; callbacks are inert and the injected typed
     /// preferences are isolated so frames cannot change the user's real panel preferences.
-    init(
+    public init(
         previewPanelModel: PanelConfigController,
         previewScope: PanelSoundScopeID,
         previewSoundScopeExpanded: Bool = false,
@@ -144,6 +131,8 @@ public struct PanelView: View {
         self.onOpenRecentNotices = {}
         self.onOpenIntegration = { _ in }
         self.onQuit = {}
+        self.onRevealConfig = { _ in }
+        self.onAnnounce = { _ in }
     }
     #endif
 
@@ -224,7 +213,15 @@ public struct PanelView: View {
             applyFirstFocus()
         }
         .onChange(of: panelModel.libraryPresentationState) { _ in
-            if isEventFocusTarget(focusedTarget) { applyFirstFocus() }
+            if isEventFocusTarget(focusedTarget) { applyFocusAfterContentChange() }
+        }
+        .onChange(of: panelModel.configState.topContent) { content in
+            focusedTarget = panelFocusAfterTopContentChange(
+                previous: previousTopContent,
+                current: content,
+                focusedTarget: focusedTarget,
+                nextOrder: focusOrder(for: content))
+            previousTopContent = content
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(headerAccessibilityLabel)
@@ -292,13 +289,7 @@ public struct PanelView: View {
                 guard coordinator.hideCount == hideCount,
                     let sentence = announcer.consume(summary, openCount: coordinator.showCount)
                 else { return }
-                NSAccessibility.post(
-                    element: NSApp as Any,
-                    notification: .announcementRequested,
-                    userInfo: [
-                        .announcement: sentence,
-                        .priority: NSAccessibilityPriorityLevel.high.rawValue,
-                    ])
+                onAnnounce(sentence)
             }
         }
     }
@@ -453,7 +444,7 @@ public struct PanelView: View {
             {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(ClaudioColor.warning(colorScheme))
+                        .foregroundColor(ClaudioTheme.warning(colorScheme))
                     Text(localizedEventName(.stopFailure, language: languageStore.language))
                     Spacer(minLength: 4)
                     Text(String(count)).monospacedDigit()
@@ -708,16 +699,18 @@ public struct PanelView: View {
     private func configFailureNotice(reason: String) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             FailureRow(message: reason)
-            Button {
-                NSWorkspace.shared.activateFileViewerSelecting([configFile])
-            } label: {
-                Label(l10n.text(.panelRevealConfig), systemImage: "folder")
+            if let recoveryTarget = panelConfigRecoveryTarget(configFile: configFile) {
+                Button {
+                    onRevealConfig(recoveryTarget)
+                } label: {
+                    Label(l10n.text(.panelRevealConfig), systemImage: "folder")
+                }
+                .buttonStyle(.bordered)
+                .focused($focusedTarget, equals: .configReveal)
+                .accessibilityLabel(l10n.text(.panelRevealConfig))
+                .accessibilityHint(l10n.text(.panelRevealConfigHint))
+                .accessibilityIdentifier("panel.reveal-config")
             }
-            .buttonStyle(.bordered)
-            .focused($focusedTarget, equals: .configReveal)
-            .accessibilityLabel(l10n.text(.panelRevealConfig))
-            .accessibilityHint(l10n.text(.panelRevealConfigHint))
-            .accessibilityIdentifier("panel.reveal-config")
         }
         .accessibilityIdentifier("panel.config-failure")
     }
@@ -766,7 +759,8 @@ public struct PanelView: View {
                     panelWriteFailures(
                         muteError: panelModel.muteError,
                         packSwitchError: panelModel.packSwitchError,
-                        masterVolumeError: panelModel.masterVolumeError
+                        masterVolumeError: panelModel.masterVolumeError,
+                        configFailureReason: currentConfigFailureReason
                     ).enumerated()),
                 id: \.offset
             ) { _, message in
@@ -789,10 +783,36 @@ public struct PanelView: View {
         return l10n.format(.panelSurfaceOverrideDamaged, name)
     }
 
+    private var currentConfigFailureReason: String? {
+        switch panelModel.configState {
+        case .malformed(let reason), .unwritable(let reason): return reason
+        case .operational, .needsPack: return nil
+        }
+    }
+
     // MARK: - Focus and playback
 
     private func applyFirstFocus() {
         let content = panelModel.configState.topContent
+        focusedTarget = focusCoordinator.requestedTarget.flatMap { requested in
+            let order = focusOrder(for: content)
+            return order.contains(requested) ? requested : nil
+        } ?? focusOrder(for: content).first(where: { $0 == .soundScope })
+            ?? focusOrder(for: content).first
+        previousTopContent = content
+    }
+
+    private func applyFocusAfterContentChange() {
+        let content = panelModel.configState.topContent
+        focusedTarget = panelFocusAfterTopContentChange(
+            previous: previousTopContent,
+            current: content,
+            focusedTarget: focusedTarget,
+            nextOrder: focusOrder(for: content))
+        previousTopContent = content
+    }
+
+    private func focusOrder(for content: PanelTopContent) -> [PanelFocusTarget] {
         let visibleEvents =
             content.showsEventContent
                 && panelModel.libraryPresentationState.hasUsableSnapshot
@@ -803,15 +823,9 @@ public struct PanelView: View {
                 hasActivityOverview: true,
                 hasMasterVolume: content.showsEventContent
                     && panelModel.libraryPresentationState.hasUsableSnapshot,
-                hasConfigFailureNotice: content.hasConfigFailureNotice))
-        if let requested = focusCoordinator.requestedTarget, order.contains(requested) {
-            focusedTarget = requested
-        } else {
-            // Natural Tab order still starts at the fixed header. Opening the panel for its
-            // primary task starts in the scope picker; a Settings handback supplies the
-            // explicit header target through the coordinator above.
-            focusedTarget = order.contains(.soundScope) ? .soundScope : order.first
-        }
+                hasConfigFailureNotice: content.hasConfigFailureNotice
+                    && panelConfigRecoveryTarget(configFile: configFile) != nil))
+        return order
     }
 
     private func isEventFocusTarget(_ target: PanelFocusTarget?) -> Bool {
@@ -828,7 +842,7 @@ public struct PanelView: View {
                 packID: panelModel.config.selectedPack,
                 environment: audioEnvironment)
         else {
-            panelModel.reload()
+            panelModel.reloadAfterMissingPreview()
             return false
         }
         return previewPlayer.play(

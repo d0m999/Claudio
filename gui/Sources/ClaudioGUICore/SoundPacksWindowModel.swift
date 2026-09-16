@@ -1350,6 +1350,10 @@ package final class SoundPacksWindowModel {
     /// stale UI identity without inventing a sound-pack scan.
     func refreshEditorConfigProjection() {
         #if DEBUG
+        // The state gallery owns an injected config projection, not a file at its /dev/null
+        // sentinel path. Re-reading that path would discard the fixture before capability
+        // freshness can be checked.
+        if isStateGalleryFixture { return }
         guard readSource.readsSharedSnapshot else {
             reloadSynchronously(followActivePack: false)
             return

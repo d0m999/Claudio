@@ -1,6 +1,7 @@
 import AppKit
 import ClaudioGUICore
 import ClaudioLocalization
+import ClaudioPanelPresentation
 import ClaudioSettingsPresentation
 import Foundation
 
@@ -217,6 +218,7 @@ runSoundPacksWindowAccessibilitySuites()
 runSoundPacksEditorAccessibilityPostingSuites()
 runSoundPacksWindowStarredPacksSuites()
 runPanelConfigControllerSuites()
+runPanelConfigFailureLifecycleSuites()
 runPanelFocusCoordinatorSuites()
 await runSettingsPreferencesSuites()
 runDynamicQuietPolicySuites()
@@ -232,6 +234,7 @@ runPreviewFixturesSuites()
 runMultiProviderPrototypeContractSuites()
 runVolumeDragSessionSuites()
 runPanelWriteFailuresSuites()
+runPanelPresentationMountSuites()
 runActivityOverviewSuites()
 runAICueDescriptionSuites()
 // Keep the native AppKit suite after every async suite; see the targeted ordering above.

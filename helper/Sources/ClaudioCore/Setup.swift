@@ -18,10 +18,8 @@ import Foundation
 
 public struct SetupEnvironment: Sendable {
     /// The absolute, symlink-resolved path to the binary currently executing `claudio
-    /// setup`. Real callers derive this from `CommandLine.arguments[0]` via
-    /// ``currentExecutablePath(arguments:currentDirectory:)`` — there's no meaningful
-    /// static default, since it's inherently "wherever this process happens to be running
-    /// from".
+    /// setup`. Real callers derive this from the process image, not from a user-controlled
+    /// command-line spelling.
     public let executablePath: URL
     public let claudioBinaryDestination: URL
     public let userPacksDirectory: URL
@@ -595,30 +593,130 @@ public func packSelectionPlan(
     }
 }
 
-/// `argv[0]` — absolute if invoked with a full path (the common case when a user pastes
-/// the path printed by `docs/distribution.md`'s Terminal instructions; also true once
-/// re-invoked from the fixed `~/.claudio/bin/claudio` destination), relative-to-`currentDirectory`
-/// if invoked as `./claudio` or `../some/dir/claudio`.
+/// Failure while determining the executable that is actually running.
+public enum ExecutablePathError: Error, Sendable, Equatable, CustomStringConvertible {
+    case processImageUnavailable
+    case invalidCandidate(String)
+    case notRegularFile(String)
+    case notExecutable(String)
+
+    public var description: String {
+        switch self {
+        case .processImageUnavailable:
+            return "无法确定当前正在运行的 claudio 二进制路径；未执行 setup 或宿主连接写入"
+        case .invalidCandidate(let path):
+            return "运行中的 claudio 路径无法规范化或不存在：\(path)"
+        case .notRegularFile(let path):
+            return "运行中的 claudio 路径不是普通文件：\(path)"
+        case .notExecutable(let path):
+            return "运行中的 claudio 路径不可执行：\(path)"
+        }
+    }
+}
+
+private let executablePathProbeLimit = 16 * 1024 * 1024
+
+/// Normalize and verify one path reported by the operating system.
 ///
-/// **Known gap (Codex adversarial review, `/ship` pre-landing, tracked in TODOS.md):**
-/// a bare name with no `/` at all (e.g. plain `claudio`, found via a `$PATH` lookup the
-/// *shell* performed) is NOT actually resolved against `PATH` here — it falls into the
-/// same branch as `./claudio` and gets treated as relative to `currentDirectory`, which is
-/// wrong: the shell may have found the real binary somewhere else on `PATH` entirely. This
-/// only misresolves when Claudio isn't invoked with a `/` in the command at all, which
-/// `docs/distribution.md`'s own instructions never do — but it's still a latent bug for
-/// anyone who's added `~/.claudio/bin` to their own `PATH` and runs bare `claudio setup`
-/// from an unrelated directory.
-public func currentExecutablePath(
-    arguments: [String] = CommandLine.arguments,
-    currentDirectory: String = FileManager.default.currentDirectoryPath
-) -> URL {
-    let raw = arguments[0]
-    let url =
-        raw.hasPrefix("/")
-        ? URL(fileURLWithPath: raw)
-        : URL(fileURLWithPath: raw, relativeTo: URL(fileURLWithPath: currentDirectory, isDirectory: true))
-    return url.resolvingSymlinksInPath()
+/// `relativeTo` exists only for the DEBUG test seam. Production process-image APIs are
+/// required to return an absolute path; accepting a relative path there would reintroduce
+/// the exact current-directory guess this function is meant to remove.
+func validatedExecutablePath(
+    _ rawPath: String,
+    relativeTo baseDirectory: URL? = nil
+) throws -> URL {
+    guard !rawPath.isEmpty else { throw ExecutablePathError.invalidCandidate(rawPath) }
+
+    let candidate: URL
+    if rawPath.hasPrefix("/") {
+        candidate = URL(fileURLWithPath: rawPath)
+    } else if let baseDirectory {
+        candidate = URL(fileURLWithPath: rawPath, relativeTo: baseDirectory)
+    } else {
+        throw ExecutablePathError.invalidCandidate(rawPath)
+    }
+
+    let normalized = candidate.standardizedFileURL.resolvingSymlinksInPath()
+    var status = stat()
+    let result = normalized.withUnsafeFileSystemRepresentation { pathPointer -> (Bool, Bool) in
+        guard let pathPointer else { return (false, false) }
+        guard stat(pathPointer, &status) == 0 else { return (false, false) }
+        return (
+            (status.st_mode & S_IFMT) == S_IFREG,
+            Darwin.access(pathPointer, X_OK) == 0)
+    }
+    guard result.0 else { throw ExecutablePathError.notRegularFile(normalized.path) }
+    guard result.1 else { throw ExecutablePathError.notExecutable(normalized.path) }
+    return normalized
+}
+
+/// Ask Darwin for the process image path. Unlike `argv[0]`, this remains the identity of the
+/// binary even when the shell was invoked with a bare command found through `PATH`.
+private func processImagePath(for pid: pid_t) -> String? {
+    var bufferSize: UInt32 = 4 * 1024
+    while bufferSize <= UInt32(executablePathProbeLimit) {
+        var buffer = [CChar](repeating: 0, count: Int(bufferSize))
+        let capacity = buffer.count
+        let length = buffer.withUnsafeMutableBytes { rawBuffer -> Int32 in
+            guard let baseAddress = rawBuffer.baseAddress else { return 0 }
+            return proc_pidpath(pid, baseAddress, UInt32(capacity))
+        }
+        if length > 0 {
+            if let path = decodedExecutableCString(buffer) { return path }
+        }
+        bufferSize *= 2
+    }
+    return nil
+}
+
+/// Ask dyld for the process image path using a dynamically-sized buffer. `_NSGetExecutablePath`
+/// may need more than `MAXPATHLEN`, and may return a path containing symlinks; both cases are
+/// handled by `validatedExecutablePath` below.
+private func dyldExecutablePath() -> String? {
+    var bufferSize: UInt32 = 4 * 1024
+    while bufferSize <= UInt32(executablePathProbeLimit) {
+        var buffer = [CChar](repeating: 0, count: Int(bufferSize))
+        var requiredSize = bufferSize
+        let result = buffer.withUnsafeMutableBufferPointer { pointer in
+            _NSGetExecutablePath(pointer.baseAddress, &requiredSize)
+        }
+        if result == 0 {
+            if let path = decodedExecutableCString(buffer) { return path }
+        }
+        if requiredSize > bufferSize {
+            bufferSize = requiredSize
+        } else {
+            bufferSize *= 2
+        }
+    }
+    return nil
+}
+
+func decodedExecutableCString(_ buffer: [CChar]) -> String? {
+    let end = buffer.firstIndex(of: 0) ?? buffer.endIndex
+    let path = String(
+        decoding: buffer[..<end].map { UInt8(bitPattern: $0) },
+        as: UTF8.self)
+    return path.isEmpty ? nil : path
+}
+
+/// Return the verified absolute path of the currently-running executable.
+///
+/// The process API is authoritative. `_NSGetExecutablePath` is only a fallback for systems on
+/// which `proc_pidpath` is unavailable. Neither `argv[0]`, `PATH`, nor the current directory is
+/// consulted.
+public func currentExecutablePath() throws -> URL {
+    var lastError: ExecutablePathError?
+    for rawPath in [processImagePath(for: getpid()), dyldExecutablePath()].compactMap({ $0 }) {
+        do {
+            return try validatedExecutablePath(rawPath)
+        } catch let error as ExecutablePathError {
+            lastError = error
+        } catch {
+            lastError = .invalidCandidate(rawPath)
+        }
+    }
+    throw lastError ?? .processImageUnavailable
 }
 
 // MARK: - Outcome / errors

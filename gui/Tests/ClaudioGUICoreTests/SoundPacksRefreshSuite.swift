@@ -2134,7 +2134,7 @@ func runSoundPacksRefreshSuites() async {
 
     suite("Panel Settings：通过单一 pending-close 展示统一 Settings") {
         guard
-            let panel = soundPacksCode("gui/Sources/ClaudioGUI/PanelView.swift"),
+            let panel = soundPacksCode("gui/Sources/ClaudioPanelPresentation/PanelView.swift"),
             let menu = soundPacksCode("gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let requestBody = soundPacksFunctionBody(
                 after: "fileprivate func requestEventsSettingsPresentation(", in: menu),

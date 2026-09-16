@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 struct TestProcessResult {
@@ -974,9 +975,7 @@ private struct FileIdentity: Equatable {
     let attributesChangedSeconds: Int64
     let attributesChangedNanoseconds: Int64
 
-    init?(of url: URL) {
-        var info = stat()
-        guard stat(url.path, &info) == 0 else { return nil }
+    init(info: stat) {
         device = Int64(info.st_dev)
         inode = UInt64(info.st_ino)
         size = Int64(info.st_size)
@@ -987,86 +986,220 @@ private struct FileIdentity: Equatable {
     }
 }
 
+private enum FileInspection: Equatable {
+    case absent
+    case present(FileIdentity)
+    case failed(errno: Int32)
+
+    var isFailure: Bool {
+        if case .failed = self { return true }
+        return false
+    }
+}
+
+private struct FileWatchSnapshot: Equatable {
+    let linkEntry: FileInspection
+    let target: FileInspection
+}
+
+/// 写入观察的三态结果。无法完成必要的观察时必须显式失败，不能把未知当成未写入。
+enum FileWriteObservation: Equatable {
+    case untouched
+    case written
+    case inspectionFailed(String)
+}
+
 /// 从构造那一刻起，`file` 有没有被**写过** —— 哪怕它此刻的字节与构造那一刻逐字相同。
 /// 完整推理（含它不兜什么）见上面那节。
 final class FileWriteWatch {
-    /// 被观测的那条路径，**原样**，不做 `resolvingSymlinksInPath()`。
-    ///
-    /// 第一版在这里调了 `resolvingSymlinksInPath()`，并在文档里声称「否则一次穿过链接写到目标的
-    /// 安装会一声不响」。**那句话是假的**：``FileIdentity`` 用的是 `stat(2)`，而 `stat` 本来就
-    /// **跟随符号链接** —— 对着链接自己 stat，拿到的就是**目标**的 dev / ino / ctime。所以那一行
-    /// 解析对身份快照毫无影响，是一行纯装饰，而它的文档在替它撒谎。
-    ///
-    /// （dotfiles 的 stow / chezmoi 确实会把 `settings.json` 做成符号链接，而 `atomicWrite` 也确实
-    /// 写的是 `resolvingSymlinksInPath()` 之后的目标。真正让观测跟得上的是 `stat` 的跟随语义，
-    /// 不是那次解析。`SymlinkedSettings` 那条正向对照就钉这件事：换成 `lstat` 当场变红。）
+    /// 被观测的那条路径保留原始入口，分别用 `lstat(2)` 观察链接目录项、用 `stat(2)` 观察解析后的
+    /// 目标；这样既能捕捉替换链接本身，也能捕捉穿过链接写目标文件。
     private let file: URL
-    /// 目录项那一半盯的是**未解析**的父目录 —— 刻意的：一个把符号链接**整个替换**成正规文件的写者
-    /// 根本不碰目标（`stat` 那一半看不见），但它改了**这里**的目录项。两条路各盖一种，合起来没有缺口。
+    /// 入口目录观察链接本身；目标目录观察解析后的目标节点。二者任一无法武装都必须 fail closed。
     private let entryDirectory: URL
     private let directoryDescriptor: Int32
+    private let targetDirectoryDescriptor: Int32
     private let queue: Int32
-    private let identityBefore: FileIdentity?
+    private let snapshotBefore: FileWatchSnapshot
+    private let initialInspectionFailure: String?
+    private let forcedPollResult: Int32?
     private var sawDirectoryEvent = false
+    private var observedInspectionFailure: String?
 
-    /// **目录那一半**真的武装起来了吗（目录 fd 开到了、`kevent` 注册成功了）。
-    ///
-    /// ⚠️ **它管不着身份快照那一半** —— 这句话第一版写的是「`false` 时 ``observedWrite()`` 会永远
-    /// 返回 `false`，一条恒假的守卫」，而**那是假的**（第二轮台账 R2a 实测反证）：`identityBefore`
-    /// 在 `open()` **之前**就拍好了，与 fd / kevent 无关。于是武装失败的观测器不是**瞎**，是**半瞎**：
-    /// 任何改动 dev / ino / size / mtime / ctime 的写它照样看得见（一次真实的 `atomicWrite` 安装就是），
-    /// 它丢掉的**恰好**是终态身份不变的那一类 —— 「写了又删掉」（nil → nil），以及「把符号链接整个
-    /// 替换成正规文件」（目标没动）。而「写了又删掉」正是 `/codex review ee026db` 指出的那一类，
-    /// 也正是这整套观测存在的理由。**覆盖损失是要害的，但不是「全归零」。**
-    ///
-    /// （措辞比覆盖范围大，第十一次 —— 这一次复发在**杀掉它的那一刀自己的文档里**。留着这段话，
-    /// 是因为下一个人会本能地想把 `identityBefore` 挪进 guard 后面「让它真的恒假」——不必，
-    /// 半瞎比全瞎好，而 `isArmed` 的断言会先于一切当场变红。）
-    ///
-    /// 每个调用点都必须先断言它（七处，第二轮台账下 7/7 全红）。
+    /// 必要目录 fd 与 kqueue 注册都成功了吗。每个调用点仍必须先断言它；构造或轮询失败时，
+    /// `observedWrite()` 返回 `.inspectionFailed`，不能被当作 `.untouched`。
     let isArmed: Bool
 
-    init(watching file: URL) {
+    init(watching file: URL, forcedPollResult: Int32? = nil) {
         self.file = file
-        entryDirectory = file.deletingLastPathComponent()
-        identityBefore = FileIdentity(of: file)
+        self.forcedPollResult = forcedPollResult
+        entryDirectory = file.deletingLastPathComponent().standardizedFileURL
+        let resolvedFile = file.standardizedFileURL.resolvingSymlinksInPath()
+        let resolvedTargetDirectory = Self.nearestExistingDirectory(
+            from: resolvedFile.deletingLastPathComponent())
+        let before = Self.snapshot(of: file)
+        snapshotBefore = before
+        var failure: String?
+        if resolvedTargetDirectory == nil {
+            failure = "无法找到配置目标目录"
+        } else if before.linkEntry.isFailure || before.target.isFailure {
+            failure = "无法检查配置链接入口或目标"
+        }
 
-        let descriptor = open(entryDirectory.path, O_EVTONLY)
         let kernelQueue = kqueue()
-        directoryDescriptor = descriptor
-        queue = kernelQueue
-        guard descriptor >= 0, kernelQueue >= 0 else {
-            isArmed = false
-            return
+        var entryDescriptor: Int32 = -1
+        var targetDescriptor: Int32 = -1
+        if kernelQueue < 0 {
+            failure = Self.errorMessage("无法创建 kqueue", errno: errno)
+        } else if failure == nil {
+            entryDescriptor = Self.registerDirectory(
+                entryDirectory, in: kernelQueue, failure: &failure)
+            if entryDescriptor >= 0, let resolvedTargetDirectory,
+                resolvedTargetDirectory.path != entryDirectory.path
+            {
+                targetDescriptor = Self.registerDirectory(
+                    resolvedTargetDirectory, in: kernelQueue, failure: &failure)
+            }
+        }
+        if failure != nil {
+            if entryDescriptor >= 0 { close(entryDescriptor) }
+            if targetDescriptor >= 0 { close(targetDescriptor) }
+            if kernelQueue >= 0 { close(kernelQueue) }
+            directoryDescriptor = -1
+            targetDirectoryDescriptor = -1
+            queue = -1
+        } else {
+            directoryDescriptor = entryDescriptor
+            targetDirectoryDescriptor = targetDescriptor
+            queue = kernelQueue
+        }
+        initialInspectionFailure = failure
+        isArmed = failure == nil
+    }
+
+    /// 构造之后，这个文件被写过吗？**幂等**：问几次答案都一样（见下面那段缓存）。
+    /// 任一必要观察失败都返回 `.inspectionFailed`，调用方不能把它当成 `.untouched`。
+    func observedWrite() -> FileWriteObservation {
+        if let initialInspectionFailure {
+            return .inspectionFailed(initialInspectionFailure)
+        }
+        if let observedInspectionFailure {
+            return .inspectionFailed(observedInspectionFailure)
+        }
+        if !sawDirectoryEvent {
+            if let forcedPollResult, forcedPollResult < 0 {
+                let message = Self.errorMessage(
+                    "轮询目录监听失败", errno: errno == 0 ? EIO : errno)
+                observedInspectionFailure = message
+                return .inspectionFailed(message)
+            }
+            var event = kevent()
+            var immediately = timespec(tv_sec: 0, tv_nsec: 0)
+            // `EV_CLEAR`：事件取一次就被内核清掉。**必须缓存**，否则第二次调用会返回 `false` ——
+            // 一条「问第二遍就翻供」的守卫，正是这里最不该出现的东西（今天每个调用点都只问一次，
+            // 所以这段缓存**没有任何断言在钉它** —— 除了「写观测器①」里那条刻意问两遍的断言）。
+            let pollResult: Int32
+            if let forcedPollResult {
+                pollResult = forcedPollResult
+            } else {
+                pollResult = kevent(queue, nil, 0, &event, 1, &immediately)
+            }
+            if pollResult < 0 {
+                let message = Self.errorMessage("轮询目录监听失败", errno: errno)
+                observedInspectionFailure = message
+                return .inspectionFailed(message)
+            }
+            sawDirectoryEvent = pollResult > 0
+        }
+        let snapshotAfter = Self.snapshot(of: file)
+        if snapshotAfter.linkEntry.isFailure || snapshotAfter.target.isFailure {
+            return .inspectionFailed("无法检查配置链接入口或目标")
+        }
+        return sawDirectoryEvent || snapshotAfter != snapshotBefore
+            ? .written
+            : .untouched
+    }
+
+    deinit {
+        if directoryDescriptor >= 0 { close(directoryDescriptor) }
+        if targetDirectoryDescriptor >= 0 { close(targetDirectoryDescriptor) }
+        if queue >= 0 { close(queue) }
+    }
+
+    private static func snapshot(of file: URL) -> FileWatchSnapshot {
+        FileWatchSnapshot(
+            linkEntry: inspect(file, followSymlink: false),
+            target: inspect(file, followSymlink: true))
+    }
+
+    private static func inspect(_ url: URL, followSymlink: Bool) -> FileInspection {
+        var info = stat()
+        let result = url.withUnsafeFileSystemRepresentation { pathPointer -> Int32 in
+            guard let pathPointer else {
+                errno = EINVAL
+                return -1
+            }
+            return followSymlink ? stat(pathPointer, &info) : lstat(pathPointer, &info)
+        }
+        guard result == 0 else {
+            let inspectionErrno = errno
+            return inspectionErrno == ENOENT
+                ? .absent
+                : .failed(errno: inspectionErrno)
+        }
+        return .present(FileIdentity(info: info))
+    }
+
+    private static func nearestExistingDirectory(from start: URL) -> URL? {
+        var candidate = start.standardizedFileURL
+        while true {
+            var info = stat()
+            let result = candidate.withUnsafeFileSystemRepresentation { pathPointer -> Int32 in
+                guard let pathPointer else {
+                    errno = EINVAL
+                    return -1
+                }
+                return stat(pathPointer, &info)
+            }
+            if result == 0 {
+                return (info.st_mode & S_IFMT) == S_IFDIR ? candidate : nil
+            }
+            let statErrno = errno
+            guard statErrno == ENOENT || statErrno == ENOTDIR else { return nil }
+            let parent = candidate.deletingLastPathComponent().standardizedFileURL
+            guard parent.path != candidate.path else { return nil }
+            candidate = parent
+        }
+    }
+
+    private static func registerDirectory(
+        _ directory: URL,
+        in queue: Int32,
+        failure: inout String?
+    ) -> Int32 {
+        let descriptor = open(directory.path, O_EVTONLY)
+        guard descriptor >= 0 else {
+            failure = errorMessage("无法监听目录 \(directory.path)", errno: errno)
+            return -1
         }
 
         var change = kevent()
         change.ident = UInt(descriptor)
         change.filter = Int16(EVFILT_VNODE)
         change.flags = UInt16(EV_ADD | EV_ENABLE | EV_CLEAR)
-        // 刻意**不**要 `NOTE_ATTRIB`：目录的属性变化（例如 readdir 顶 atime）与「有人写了这个文件」
-        // 无关，收它只会换来一条时不时假红、然后被人删掉的断言。目录项的增 / 删 / 改名就够了 ——
-        // 创建、原子替换（temp + rename）、删除，全在这三条里。
         change.fflags = UInt32(NOTE_WRITE | NOTE_DELETE | NOTE_RENAME)
-        isArmed = kevent(kernelQueue, &change, 1, nil, 0, nil) == 0
-    }
-
-    /// 构造之后，这个文件被写过吗？**幂等**：问几次答案都一样（见下面那段缓存）。
-    func observedWrite() -> Bool {
-        if !sawDirectoryEvent {
-            var event = kevent()
-            var immediately = timespec(tv_sec: 0, tv_nsec: 0)
-            // `EV_CLEAR`：事件取一次就被内核清掉。**必须缓存**，否则第二次调用会返回 `false` ——
-            // 一条「问第二遍就翻供」的守卫，正是这里最不该出现的东西（今天每个调用点都只问一次，
-            // 所以这段缓存**没有任何断言在钉它** —— 除了「写观测器①」里那条刻意问两遍的断言）。
-            sawDirectoryEvent = kevent(queue, nil, 0, &event, 1, &immediately) > 0
+        guard kevent(queue, &change, 1, nil, 0, nil) == 0 else {
+            let registrationErrno = errno
+            close(descriptor)
+            failure = errorMessage(
+                "无法注册目录监听 \(directory.path)", errno: registrationErrno)
+            return -1
         }
-        return sawDirectoryEvent || FileIdentity(of: file) != identityBefore
+        return descriptor
     }
 
-    deinit {
-        if directoryDescriptor >= 0 { close(directoryDescriptor) }
-        if queue >= 0 { close(queue) }
+    private static func errorMessage(_ prefix: String, errno errorNumber: Int32) -> String {
+        "\(prefix)：\(String(cString: strerror(errorNumber)))"
     }
 }
 

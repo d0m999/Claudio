@@ -2,6 +2,12 @@ import ClaudioCore
 import Combine
 import Foundation
 
+private enum PanelRefreshOrigin: Equatable {
+    case external
+    case writeAction
+    case missingPreview
+}
+
 /// 运行态面板的 **config 读模型 + 流经它的写操作** —— 从 `PanelView` 里抽出来的那一半
 /// （ENGINEERING.md「视图拆进可 import 的 library target」，红队 9cccc9c 兑现）。
 ///
@@ -267,6 +273,7 @@ public final class PanelConfigController: ObservableObject {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.reload(
+                        origin: .external,
                         refreshSoundPackLibrary:
                             self.soundPacksRefreshCoordinator?
                             .panelReloadRequiresLibraryRefresh ?? true)
@@ -282,7 +289,7 @@ public final class PanelConfigController: ObservableObject {
                         self.soundPacksRefreshCoordinator?.configFactSource
                             != self.configProjectionToken
                     else { return }
-                    self.reload(refreshSoundPackLibrary: false)
+                    self.reload(origin: .external, refreshSoundPackLibrary: false)
                 }
             }
 
@@ -319,13 +326,13 @@ public final class PanelConfigController: ObservableObject {
             case .success:
                 muteError = nil
                 surfaceSoundIssue = nil
-                reloadConfigOnly()
+                reloadConfigOnly(origin: .writeAction)
                 soundPacksRefreshCoordinator?.completePanelConfigChange(
                     .changed,
                     source: configProjectionToken)
             case .failure(let error):
                 surfaceSoundIssue = error.description
-                reloadConfigOnly()
+                reloadConfigOnly(origin: .writeAction)
             }
             return
         }
@@ -334,8 +341,8 @@ public final class PanelConfigController: ObservableObject {
         // setEnabled 成功把 lastError 清 nil、失败记下错误，所以此刻读它就是这次写盘的结果。
         muteError = muteController.lastError
         switch panelRefreshRoute(muteSucceeded: succeeded, error: muteController.lastError) {
-        case .configOnly: reloadConfigOnly()
-        case .full: reload()
+        case .configOnly: reloadConfigOnly(origin: .writeAction)
+        case .full: reload(origin: .writeAction, refreshSoundPackLibrary: true)
         case .noRefresh: break
         }
         if succeeded {
@@ -366,8 +373,8 @@ public final class PanelConfigController: ObservableObject {
         switch masterVolumeRefreshRoute(
             succeeded: landed != nil, error: masterVolumeController.lastError)
         {
-        case .configOnly: reloadConfigOnly()
-        case .full: reload()
+        case .configOnly: reloadConfigOnly(origin: .writeAction)
+        case .full: reload(origin: .writeAction, refreshSoundPackLibrary: true)
         case .noRefresh: break
         }
         if landed != nil {
@@ -406,7 +413,7 @@ public final class PanelConfigController: ObservableObject {
             case .success:
                 packSwitchError = nil
                 surfaceSoundIssue = nil
-                reload(refreshSoundPackLibrary: false)
+                reload(origin: .writeAction, refreshSoundPackLibrary: false)
                 soundPacksRefreshCoordinator?.completeConfigFactChange(
                     .changed,
                     source: configProjectionToken)
@@ -428,7 +435,7 @@ public final class PanelConfigController: ObservableObject {
             packSwitchError = nil
             // `selected_pack` is config, not a disk-pack fact. The selected card came from the
             // current snapshot and `selectPack` just revalidated it, so a scan here is pure I/O.
-            reload(refreshSoundPackLibrary: false)
+            reload(origin: .writeAction, refreshSoundPackLibrary: false)
             soundPacksRefreshCoordinator?.completeConfigFactChange(
                 .changed,
                 source: configProjectionToken)
@@ -436,8 +443,8 @@ public final class PanelConfigController: ObservableObject {
         case .failure(let error):
             packSwitchError = error
             switch packSwitchRefreshRoute(after: error) {
-            case .configOnly: reloadConfigOnly()
-            case .full: reload()
+            case .configOnly: reloadConfigOnly(origin: .writeAction)
+            case .full: reload(origin: .writeAction, refreshSoundPackLibrary: true)
             case .noRefresh: break
             }
             return .failed(error)
@@ -452,13 +459,35 @@ public final class PanelConfigController: ObservableObject {
     /// 排在最前，但它探的是 helper 二进制 / settings.json，与 config 读模型**互不依赖**，挪到后面结果一字
     /// 不差；而 `retarget` 必须排在 config 重载**之后**（它要用新的 `selectedPack`），闭包收到的正是新 config。
     public func reload() {
-        reload(refreshSoundPackLibrary: true)
+        reload(origin: .external, refreshSoundPackLibrary: true)
+    }
+
+    /// A preview asset disappeared after its row was rendered. Refresh disk-backed rows without
+    /// discarding an unresolved config write error from a separate action.
+    public func reloadAfterMissingPreview() {
+        reload(origin: .missingPreview, refreshSoundPackLibrary: true)
     }
 
     private func reload(refreshSoundPackLibrary: Bool) {
+        reload(origin: .external, refreshSoundPackLibrary: refreshSoundPackLibrary)
+    }
+
+    private func reload(
+        origin: PanelRefreshOrigin,
+        refreshSoundPackLibrary: Bool
+    ) {
+        if origin == .external {
+            clearWriteFailures()
+        }
         reload(using: loadPanelConfig(from: configFile))
         guard readSource.readsSharedSnapshot, refreshSoundPackLibrary else { return }
         Task { await soundPackLibrary.requestRefresh(trigger: .panelPresentation) }
+    }
+
+    private func clearWriteFailures() {
+        packSwitchError = nil
+        muteError = nil
+        masterVolumeError = nil
     }
 
     public func retrySoundPackLibraryRefresh() {
@@ -497,6 +526,13 @@ public final class PanelConfigController: ObservableObject {
     /// ⚠️ 改名自 `reloadEnabledFlags()`：那个名字在**低报**它做的事 —— 它从第一天起就在重算 `configState`
     /// （下面第一行），只是没人注意到，于是没人想到「失败路径也可以用它」。
     public func reloadConfigOnly() {
+        reloadConfigOnly(origin: .external)
+    }
+
+    private func reloadConfigOnly(origin: PanelRefreshOrigin) {
+        if origin == .external {
+            clearWriteFailures()
+        }
         let previousSelectedPack = config.selectedPack
         let reloaded = loadPanelConfig(from: configFile)
         if selectedSurface != nil {
@@ -592,13 +628,13 @@ public final class PanelConfigController: ObservableObject {
         {
         case .success:
             surfaceSoundIssue = nil
-            reload(refreshSoundPackLibrary: false)
+            reload(origin: .writeAction, refreshSoundPackLibrary: false)
             soundPacksRefreshCoordinator?.completePanelConfigChange(
                 .changed,
                 source: configProjectionToken)
         case .failure(let error):
             surfaceSoundIssue = error.description
-            reloadConfigOnly()
+            reloadConfigOnly(origin: .writeAction)
         }
     }
 

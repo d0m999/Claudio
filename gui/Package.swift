@@ -88,6 +88,20 @@ let package = Package(
                 .product(name: "ClaudioCore", package: "helper"),
             ]
         ),
+        // Importable production menu-bar panel. The panel owns only SwiftUI composition and
+        // consumes injected actions; AppKit window/popover ownership and system effects remain in
+        // `ClaudioGUI`. The harness mounts this exact target, so production wiring is compiled
+        // instead of being represented only by source-text tripwires.
+        .target(
+            name: "ClaudioPanelPresentation",
+            dependencies: [
+                "ClaudioLocalization",
+                "ClaudioGUICore",
+                "ClaudioGUIComponents",
+                "SoundPacksWindow",
+                .product(name: "ClaudioCore", package: "helper"),
+            ]
+        ),
         // The SwiftUI app shell owns the status-item panel, native adapters, and one retained
         // Settings window. The imported presentation target consumes `ClaudioGUICore` values and
         // never opens host config itself, so composition creates no second truth source.
@@ -105,6 +119,7 @@ let package = Package(
                 "ClaudioGUIComponents",
                 "SoundPacksWindow",
                 "ClaudioSettingsPresentation",
+                "ClaudioPanelPresentation",
                 .product(name: "ClaudioCore", package: "helper"),
             ],
             resources: [
@@ -149,6 +164,7 @@ let package = Package(
                 "ClaudioGUIComponents",
                 "SoundPacksWindow",
                 "ClaudioSettingsPresentation",
+                "ClaudioPanelPresentation",
                 .product(name: "ClaudioCore", package: "helper"),
             ],
             path: "Tests/ClaudioGUICoreTests"

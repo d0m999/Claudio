@@ -93,7 +93,7 @@ private func ensurePrivateDirectory(
 /// Once a component is absent, the remaining suffix is necessarily absent too and the recursive
 /// creator above owns its construction. This intentionally does not chmod ancestors: callers may
 /// start below `$HOME`, `/tmp`, or another user-owned directory.
-private func validateExistingDirectoryComponents(of directory: URL) throws {
+func validateExistingDirectoryComponents(of directory: URL) throws {
     let components = directory.pathComponents
     guard components.first == "/" else {
         throw PrivateDirectoryError.unsafeNode(path: directory.path)

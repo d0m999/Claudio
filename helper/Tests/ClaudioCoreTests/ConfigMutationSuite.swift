@@ -952,6 +952,48 @@ func runConfigMutationSuites() {
         }
     }
 
+    suite("probeConfigRewritable: 不可读节点保留与真实写路径相同的修复指引") {
+        withTempDirectory { root in
+            let directory = root.appendingPathComponent("directory-config.json")
+            try? FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
+            let fifo = root.appendingPathComponent("fifo-config.json")
+            makeFIFO(at: fifo)
+            let oversized = root.appendingPathComponent("oversized-config.json")
+            writeFixture(String(repeating: "x", count: (1 << 16) + 1), to: oversized)
+
+            for configFile in [directory, fifo, oversized] {
+                let verdict = probeConfigRewritable(configFile: configFile)
+                guard case .malformed(let probedReason) = verdict else {
+                    expect(false, "不可读 config 必须判为 .malformed：\(configFile.path)")
+                    continue
+                }
+                let writeResult = setEventEnabled(
+                    .stop, enabled: false, configFile: configFile,
+                    lockFile: root.appendingPathComponent("config.lock"))
+                guard case .failure(.configReadFailure(let writeReason)) = writeResult else {
+                    expect(false, "不可读 config 的真实写路径必须拒绝：\(writeResult)")
+                    continue
+                }
+                expect(probedReason == writeReason, "预检与写路径必须给出相同原因")
+                expect(
+                    probedReason.contains("请检查") && probedReason.contains("会丢失自定义字段"),
+                    "不可读原因必须保留可执行且说明代价的修复指引")
+            }
+
+            let denied = root.appendingPathComponent("denied-config.json")
+            writeFixture(#"{"selected_pack":"pika"}"#, to: denied)
+            let inspection = inspectConfig(configFile: denied) { _ in .unreadable }
+            guard case .malformed(let deniedReason) = inspection.rewritability else {
+                expect(false, "底层读失败必须判为 .malformed")
+                return
+            }
+            expect(
+                deniedReason.contains("请检查") && deniedReason.contains("会丢失自定义字段"),
+                "权限或 I/O 拒读也必须保留写入判定的修复指引")
+        }
+    }
+
     suite(
         "probeConfigRewritable: 一份**合法、可完整解析**但超过 64 KiB 上限的 config.json → .malformed"
             + "（换一个不裸读大小上限的 Data(contentsOf:) 实现，这份文件会解析成功并报 .rewritable——"
@@ -1125,6 +1167,86 @@ func runConfigMutationSuites() {
                     "父目录只读时真去写也必须失败（探针与写路径必须一致），got \(writeResult)")
                 return
             }
+        }
+    }
+
+    suite("probeConfigRewritable: 缺失 config 的父目录链可创建时才是 .absent") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("missing/nested/config.json")
+            expect(
+                probeConfigRewritable(configFile: configFile) == .absent,
+                "现有可写父目录可以创建缺失目录链，必须保留全新安装的 .absent 语义")
+            expect(
+                configRewritabilityResult(configFile: configFile).severity == .ok,
+                "doctor 必须与面板共享可创建父目录的 .absent 结论")
+        }
+    }
+
+    suite("probeConfigRewritable: 缺失 config 的路径被普通文件占位时 → .unwritable，并点名占位路径") {
+        withTempDirectory { root in
+            let placeholder = root.appendingPathComponent("not-a-directory")
+            writeFixture("blocking file", to: placeholder)
+            let configFile = placeholder.appendingPathComponent("nested/config.json")
+
+            guard case .unwritable(let reason) = probeConfigRewritable(configFile: configFile)
+            else {
+                expect(false, "普通文件不能作为缺失 config 的父目录")
+                return
+            }
+            expect(reason.contains(placeholder.path), "必须点名挡住创建的普通文件路径")
+            expect(
+                configRewritabilityResult(configFile: configFile).message.contains(
+                    placeholder.path),
+                "doctor 必须复用同一父目录故障原因")
+        }
+    }
+
+    suite("probeConfigRewritable: 缺失 config 经用户目录链接时 → .unwritable，与写路径一致") {
+        withTempDirectory { root in
+            let target = root.appendingPathComponent("real-config-root", isDirectory: true)
+            try? FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+            expect(FileManager.default.fileExists(atPath: target.path), "测试必须使用真实存在的目录目标")
+            let link = root.appendingPathComponent("config-root", isDirectory: true)
+            createSymlink(at: link, pointingTo: target)
+            let configFile = link.appendingPathComponent("nested/config.json")
+
+            guard case .unwritable(let reason) = probeConfigRewritable(configFile: configFile)
+            else {
+                expect(false, "用户目录链接会被真实写路径拒绝，预检不能宣称可创建")
+                return
+            }
+            expect(reason.contains(link.path), "预检应指出被拒绝的目录链接")
+            expect(
+                configRewritabilityResult(configFile: configFile).severity == .warning,
+                "doctor 不能宣称链接下的 config 可创建")
+
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+            makePackDirectory(at: userPacks.appendingPathComponent("psyduck", isDirectory: true))
+            let result = selectPack(
+                "psyduck", configFile: configFile, userPacksDirectory: userPacks,
+                lockFile: root.appendingPathComponent("config.lock"))
+            guard case .failure(.configWriteFailure) = result else {
+                expect(false, "真实切包写路径也必须拒绝目录链接，got \(result)")
+                return
+            }
+            expect(!FileManager.default.fileExists(atPath: configFile.path), "失败不能创建 config")
+        }
+    }
+
+    suite("probeConfigRewritable: 缺失 config 经悬空符号链接祖先时 → .unwritable") {
+        withTempDirectory { root in
+            let link = root.appendingPathComponent("config-root", isDirectory: true)
+            createSymlink(
+                at: link,
+                pointingTo: root.appendingPathComponent("removed-config-root", isDirectory: true))
+            let configFile = link.appendingPathComponent("nested/config.json")
+
+            guard case .unwritable(let reason) = probeConfigRewritable(configFile: configFile)
+            else {
+                expect(false, "悬空祖先链接不能宣称缺失 config 可创建")
+                return
+            }
+            expect(reason.contains(link.path), "悬空链接故障必须可定位")
         }
     }
 }

@@ -50,7 +50,13 @@ extension Claudio {
             @Flag(name: .long, help: "输出机器可读 JSON") var json = false
 
             mutating func run() async throws {
-                let manager = makeSystemIntegrationManager()
+                let manager: HostIntegrationManager
+                do {
+                    manager = try makeSystemIntegrationManager()
+                } catch {
+                    print("✗ \(error)")
+                    throw ExitCode.failure
+                }
                 let snapshots = await manager.refresh()
                 if json {
                     let encoder = JSONEncoder()
@@ -81,7 +87,13 @@ extension Claudio {
                     print("✗ 未知宿主：\(host)")
                     throw ExitCode.failure
                 }
-                let manager = makeSystemIntegrationManager()
+                let manager: HostIntegrationManager
+                do {
+                    manager = try makeSystemIntegrationManager()
+                } catch {
+                    print("✗ \(error)")
+                    throw ExitCode.failure
+                }
                 switch await manager.connect(hostID) {
                 case .success(let snapshot):
                     print("✓ \(hostID.displayName)：\(integrationSnapshotText(snapshot))")
@@ -106,7 +118,13 @@ extension Claudio {
                     print("✗ 未知宿主：\(host)")
                     throw ExitCode.failure
                 }
-                let manager = makeSystemIntegrationManager()
+                let manager: HostIntegrationManager
+                do {
+                    manager = try makeSystemIntegrationManager()
+                } catch {
+                    print("✗ \(error)")
+                    throw ExitCode.failure
+                }
                 switch await manager.disconnect(hostID) {
                 case .success:
                     print("✓ 已断开 \(hostID.displayName)；另一宿主、声音包与第三方 hooks 均未修改")
@@ -286,7 +304,13 @@ extension Claudio {
             abstract: "legacy 自举：准备 shared runtime 并连接 Claude Code legacy hooks；不连接 Codex。"
         )
         func run() throws {
-            let environment = SetupEnvironment(executablePath: currentExecutablePath())
+            let environment: SetupEnvironment
+            do {
+                environment = SetupEnvironment(executablePath: try currentExecutablePath())
+            } catch {
+                print("✗ \(error)")
+                throw ExitCode.failure
+            }
             switch performFirstRunSetup(environment: environment) {
             case .success(let outcome):
                 printSetupSummary(outcome)
@@ -311,23 +335,31 @@ extension Claudio {
     }
 }
 
-private func makeSystemIntegrationManager() -> HostIntegrationManager {
+private func makeSystemIntegrationManager(
+    executablePath: URL
+) -> HostIntegrationManager {
     HostIntegrationManager(
         adapters: [
             ClaudeCodeIntegrationAdapter(), CodexIntegrationAdapter(),
             WorkBuddyIntegrationAdapter(),
         ],
         bootstrapper: SystemSharedRuntimeBootstrapper(
-            environment: SetupEnvironment(executablePath: currentExecutablePath())))
+            environment: SetupEnvironment(executablePath: executablePath)))
+}
+
+private func makeSystemIntegrationManager() throws -> HostIntegrationManager {
+    try makeSystemIntegrationManager(executablePath: currentExecutablePath())
 }
 
 private func makeWorkBuddyAcceptancePreflight(
     explicitCommitSHA: String?
 ) async throws -> WorkBuddyAcceptancePreflight {
-    try await WorkBuddyAcceptancePreflightCollector.collect(
+    let executablePath = try currentExecutablePath()
+    return try await WorkBuddyAcceptancePreflightCollector.collect(
         expectedCommitSHA: explicitCommitSHA
     ) {
-        let statusSnapshots = await makeSystemIntegrationManager().refresh()
+        let statusSnapshots = await makeSystemIntegrationManager(
+            executablePath: executablePath).refresh()
         guard let statusSnapshot = statusSnapshots.first(where: { $0.host == .workBuddy }) else {
             throw ValidationError("integrations status 未返回 WorkBuddy surface")
         }

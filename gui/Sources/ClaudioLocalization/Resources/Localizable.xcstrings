@@ -2472,13 +2472,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show config.json in Finder"
+            "value": "Show config location in Finder"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在访达中显示 config.json"
+            "value": "在访达中显示配置位置"
           }
         }
       }
@@ -2488,13 +2488,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Locate config.json in Finder for manual repair"
+            "value": "Open config.json or its containing directory for manual repair"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在访达中定位 config.json，方便手工修正"
+            "value": "打开 config.json 或其所在目录，方便手工修正"
           }
         }
       }

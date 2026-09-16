@@ -101,10 +101,10 @@ public struct MasterVolumeRow: View {
         VStack(alignment: .leading, spacing: 1) {
             Text(ClaudioL10n(language: language).text(.panelMasterVolume))
                 .font(.system(size: 12.5 * typeScale, weight: .medium, design: .rounded))
-                .foregroundColor(ClaudioColor.text(colorScheme))
+                .foregroundColor(ClaudioTheme.text(colorScheme))
             Text(ClaudioL10n(language: language).text(.panelMasterVolumeDescription))
                 .font(.system(size: 9.5 * typeScale, design: .rounded))
-                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityHidden(true)

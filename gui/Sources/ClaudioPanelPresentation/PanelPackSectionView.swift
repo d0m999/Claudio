@@ -5,7 +5,7 @@ import SwiftUI
 
 /// 主面板声音包区域的唯一渲染器。生产面板与 DEBUG state gallery 共用它，避免四态只存在于
 /// Foundation 模型、却没有逐帧视觉真相。
-struct PanelPackSectionView: View {
+public struct PanelPackSectionView: View {
     let state: PanelPackSectionState
     let typeScale: CGFloat
     let adaptation: PanelLayoutAdaptation
@@ -15,7 +15,7 @@ struct PanelPackSectionView: View {
 
     @Environment(\.colorScheme) private var colorScheme
 
-    init(
+    public init(
         state: PanelPackSectionState,
         typeScale: CGFloat,
         focusedTarget: FocusState<PanelFocusTarget?>.Binding,
@@ -32,7 +32,7 @@ struct PanelPackSectionView: View {
     }
 
     @ViewBuilder
-    var body: some View {
+    public var body: some View {
         switch state {
         case .loading:
             HStack(spacing: 8) {

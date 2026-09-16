@@ -1082,36 +1082,116 @@ func runSetupSuites() {
     }
 
     suite(
-        "currentExecutablePath: an absolute argv[0] behind a symlink resolves to the real target"
+        "currentExecutablePath: an absolute process-image path behind a symlink resolves to the real target"
     ) {
         withTempDirectory { root in
             let realTarget = root.appendingPathComponent("real/claudio")
             writeFixture("#!fake-binary-fixture", to: realTarget)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: realTarget.path)
             let symlinkPath = root.appendingPathComponent("link/claudio")
             createSymlink(at: symlinkPath, pointingTo: realTarget)
 
-            let result = currentExecutablePath(arguments: [symlinkPath.path], currentDirectory: "/")
+            let result = try? currentExecutablePathForTesting(procPIDPath: symlinkPath.path)
             expect(
                 result == realTarget.resolvingSymlinksInPath(),
-                "an absolute argv[0] behind a symlink must resolve to the real target, got \(result)"
+                "an absolute process-image path behind a symlink must resolve to the real target, got \(String(describing: result))"
             )
         }
     }
 
     suite(
-        "currentExecutablePath: a bare/relative argv[0] resolves against the given currentDirectory, not the real process cwd"
+        "currentExecutablePath: a relative process-image result is normalized only in the explicit test seam"
     ) {
         withTempDirectory { root in
             let subdirectory = root.appendingPathComponent("subdir", isDirectory: true)
             let executablePath = subdirectory.appendingPathComponent("claudio")
             writeFixture("#!fake-binary-fixture", to: executablePath)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: executablePath.path)
 
-            let result = currentExecutablePath(
-                arguments: ["claudio"], currentDirectory: subdirectory.path)
+            let result = try? currentExecutablePathForTesting(
+                procPIDPath: "./claudio",
+                relativeTo: subdirectory)
             expect(
                 result == executablePath.resolvingSymlinksInPath(),
-                "a relative argv[0] must resolve against the passed-in currentDirectory, got \(result)"
+                "a relative process-image fixture must resolve against the explicit test base, got \(String(describing: result))"
             )
+        }
+    }
+
+    suite(
+        "currentExecutablePath: an absolute process-image result wins over a bare fallback spelling"
+    ) {
+        withTempDirectory { root in
+            let actual = root.appendingPathComponent("actual/claudio")
+            writeFixture("#!fake-binary-fixture", to: actual)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: actual.path)
+
+            let result = try? currentExecutablePathForTesting(
+                procPIDPath: actual.path,
+                fallbackPath: "claudio",
+                relativeTo: root.appendingPathComponent("unrelated", isDirectory: true))
+            expect(
+                result == actual.resolvingSymlinksInPath(),
+                "a bare command spelling must never replace the process image path, got \(String(describing: result))"
+            )
+        }
+    }
+
+    suite(
+        "currentExecutablePath: a long verified path resolves without MAXPATHLEN truncation"
+    ) {
+        withTempDirectory { root in
+            var directory = root
+            for index in 0..<32 {
+                directory = directory.appendingPathComponent("long-component-\(index)-abcdefgh")
+            }
+            let executablePath = directory.appendingPathComponent("claudio")
+            writeFixture("#!fake-binary-fixture", to: executablePath)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: executablePath.path)
+
+            let result = try? currentExecutablePathForTesting(procPIDPath: executablePath.path)
+            expect(
+                result == executablePath.resolvingSymlinksInPath(),
+                "a long process-image path must be returned intact, got \(String(describing: result))"
+            )
+        }
+    }
+
+    suite("currentExecutablePath: process-image C string preserves trailing filename controls") {
+        withTempDirectory { root in
+            for suffix in ["\n", "\t"] {
+                let executablePath = root.appendingPathComponent("claudio\(suffix)")
+                writeFixture("#!fake-binary-fixture", to: executablePath)
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o755], ofItemAtPath: executablePath.path)
+
+                let result = try? currentExecutablePathForTesting(
+                    procPIDCString: Array(executablePath.path.utf8CString))
+                expect(
+                    result == executablePath.resolvingSymlinksInPath(),
+                    "C string decoder must preserve the trailing filename byte, got"
+                        + " \(String(describing: result))")
+            }
+        }
+    }
+
+    suite(
+        "currentExecutablePath: query failure is explicit and leaves the filesystem untouched"
+    ) {
+        withTempDirectory { root in
+            let marker = root.appendingPathComponent("marker")
+            writeFixture("unchanged", to: marker)
+            let before = try? Data(contentsOf: marker)
+
+            let result = try? currentExecutablePathForTesting()
+            expect(result == nil, "a failed process-image query must throw instead of guessing a path")
+            expect(
+                (try? Data(contentsOf: marker)) == before,
+                "path-query failure must not create or modify any setup artifact")
         }
     }
 

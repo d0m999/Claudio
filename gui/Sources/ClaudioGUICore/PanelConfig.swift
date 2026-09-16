@@ -1,4 +1,5 @@
 import ClaudioCore
+import Darwin
 import Foundation
 
 /// D23 定稿：the panel's complete verdict on `config.json` — combining BOTH orthogonal axes
@@ -76,6 +77,21 @@ public enum PanelTopContent: Sendable, Equatable {
 }
 
 extension PanelTopContent {
+    public enum Kind: Sendable, Equatable {
+        case events
+        case needsPack
+        case configFailure
+    }
+
+    /// 不包含错误文字的内容种类。焦点只在控件真正出现/消失时迁移，原因文字变化不应重置焦点。
+    public var kind: Kind {
+        switch self {
+        case .events: return .events
+        case .needsPack: return .needsPack
+        case .configFailure: return .configFailure
+        }
+    }
+
     /// The operational events content — five event rows + the master-volume slider — is on screen,
     /// true only for `.events`. Drives both `visibleRows` (which rows are actually rendered into the
     /// opening-focus order) and `hasMasterVolume` (the slider is on screen exactly then).
@@ -96,6 +112,33 @@ extension PanelTopContent {
         if case .configFailure = self { return true }
         return false
     }
+}
+
+/// 为顶部内容变化保留或迁移当前焦点。当前控件仍在下一份焦点序中时无论内容种类是否变化都
+/// 保留；只有控件消失才优先落到有效的配置恢复按钮，再回到声音作用域或下一项可用控件。
+public func panelFocusAfterTopContentChange(
+    previous: PanelTopContent?,
+    current: PanelTopContent,
+    focusedTarget: PanelFocusTarget?,
+    nextOrder: [PanelFocusTarget]
+) -> PanelFocusTarget? {
+    guard !nextOrder.isEmpty else { return nil }
+    guard let focusedTarget else { return nil }
+    if nextOrder.contains(focusedTarget) {
+        return focusedTarget
+    }
+    // Only an existing target that disappeared needs a fallback. A reason-only publication
+    // must not create focus when the panel had none.
+    if previous?.kind == current.kind {
+        return nextOrder.first(where: { $0 == .soundScope }) ?? nextOrder.first
+    }
+    if current.kind == .configFailure, nextOrder.contains(.configReveal) {
+        return .configReveal
+    }
+    if nextOrder.contains(.soundScope) {
+        return .soundScope
+    }
+    return nextOrder.first
 }
 
 extension PanelConfigState {
@@ -136,10 +179,14 @@ extension PanelConfigState {
 /// 这也是这个函数不再无条件回落成 `ClaudioConfig(selectedPack: "")` 的理由：那个回落曾经把「文件缺失
 /// / 空串选择」（自救路径本来就通）与「文件畸形」（自救路径走不通，需要诚实告知 + 修复指令）混成了
 /// 同一个样子，二者对用户的意义完全不同（D23 定稿）。
-public func loadPanelConfig(from configFile: URL) -> PanelConfigState {
+public func loadPanelConfig(
+    from configFile: URL,
+    reader: ConfigInspectionReader = readConfigFileBounded(at:)
+) -> PanelConfigState {
+    let inspection = inspectConfig(configFile: configFile, reader: reader)
     // 写这一半先问：内容合法但写不进去、或内容本身畸形，都让读这一半的答案作废——即便
     // `packSelection` 认为「选了」，一份写不动的 config 也绝不能被当成可以正常操作的面板。
-    switch probeConfigRewritable(configFile: configFile) {
+    switch inspection.rewritability {
     case .malformed(let reason):
         return .malformed(reason: reason)
     case .unwritable(let reason):
@@ -148,16 +195,45 @@ public func loadPanelConfig(from configFile: URL) -> PanelConfigState {
         break
     }
 
-    switch packSelection(configFile: configFile) {
+    switch inspection.packSelection {
     case .malformed(let reason):
         return .malformed(reason: reason)
     case .notSelected:
         return .needsPack
     case .selected:
-        // 写这一半已经放行，读这一半也认得出一个选择——两者一致时，`loadClaudioConfig` 理应
-        // 总是成功；仍然兜底成 `.needsPack` 而不是崩溃或强行解包一个不存在的值，防的是两条轴
-        // 之间一个尚未想到的分歧（防御性，而不是假装这里"不可能"失败）。
-        guard let config = loadClaudioConfig(from: configFile) else { return .needsPack }
+        // The decoded value belongs to the same bounded read. A decoder disagreement is a
+        // malformed config, never evidence that no pack was selected.
+        guard let config = inspection.decodedConfig else {
+            return .malformed(reason: "config.json 解析失败：无法从已读取内容建立配置")
+        }
         return .operational(config)
+    }
+}
+
+/// 返回配置失败态的可用 Finder 恢复目标：文件或链接节点仍在时定位该节点，否则定位最近存在的目录。
+/// 这是纯投影，不创建目录、不跟随写路径；真正的修复仍由用户或既有写入锁完成。
+public func panelConfigRecoveryTarget(configFile: URL) -> URL? {
+    let fileManager = FileManager.default
+    let normalizedFile = configFile.standardizedFileURL
+    var status = stat()
+    let leafExists = normalizedFile.withUnsafeFileSystemRepresentation { path -> Bool in
+        guard let path else { return false }
+        return Darwin.lstat(path, &status) == 0
+    }
+    if leafExists {
+        return normalizedFile
+    }
+
+    var directory = normalizedFile.deletingLastPathComponent()
+    while true {
+        var isDirectory: ObjCBool = false
+        if fileManager.fileExists(atPath: directory.path, isDirectory: &isDirectory),
+            isDirectory.boolValue
+        {
+            return directory
+        }
+        let parent = directory.deletingLastPathComponent()
+        guard parent.path != directory.path else { return nil }
+        directory = parent
     }
 }

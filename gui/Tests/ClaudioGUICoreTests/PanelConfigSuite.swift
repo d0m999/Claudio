@@ -115,6 +115,94 @@ func runPanelConfigSuites() {
         }
     }
 
+    suite("loadPanelConfig: 一次刷新只消费一份有界配置快照，磁盘在读取后变化也不混合三份结果") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let first = Data(
+                #"{ "selected_pack": "first-pack", "master_volume": 0.25, "events": { "stop": false } }"#.utf8)
+            let second = Data(
+                #"{ "selected_pack": "second-pack", "master_volume": 0.75, "events": { "stop": true } }"#.utf8)
+            try? first.write(to: configFile)
+            var reads = 0
+
+            let state = loadPanelConfig(from: configFile) { _ in
+                reads += 1
+                try? second.write(to: configFile)
+                return .success(first)
+            }
+
+            expect(reads == 1, "一次 loadPanelConfig 刷新必须只读取一次 config.json")
+            guard case .operational(let config) = state else {
+                expect(false, "第一份快照本身合法时必须得到 .operational")
+                return
+            }
+            expect(config.selectedPack == "first-pack", "selected_pack 必须来自同一份第一快照")
+            expect(config.masterVolume == 0.25, "master_volume 不得从读取期间的新文件混入")
+            expect(config.isEnabled(.stop) == false, "events 不得从读取期间的新文件混入")
+            expect(
+                (try? Data(contentsOf: configFile)) == second,
+                "读取期间的磁盘变化应当保留，但不能改变本次状态")
+        }
+    }
+
+    suite("inspectConfig: 同一次读取同时提供写判定、选包判定和已解码配置") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            writeFixture(
+                #"{ "selected_pack": "lofi", "master_volume": 0.4, "events": {} }"#,
+                to: configFile)
+            var reads = 0
+            let inspection = inspectConfig(configFile: configFile) { url in
+                reads += 1
+                return readConfigFileBounded(at: url)
+            }
+
+            expect(reads == 1, "ConfigInspection 必须由一份有界读形成")
+            expect(inspection.rewritability == .rewritable, "合法内容应可重写")
+            expect(
+                inspection.packSelection == .selected(packID: "lofi"),
+                "选包投影必须来自同一快照")
+            expect(
+                inspection.decodedConfig?.selectedPack == "lofi"
+                    && inspection.decodedConfig?.masterVolume == 0.4,
+                "已解码配置必须与选包、写判定共享同一快照")
+        }
+    }
+
+    suite("panelConfigRecoveryTarget: 文件存在时定位文件，文件缺失时定位最近的现存目录") {
+        withTempDirectory { root in
+            let existingConfig = root.appendingPathComponent("config.json")
+            writeFixture(#"{"selected_pack":"lofi"}"#, to: existingConfig)
+            expect(
+                panelConfigRecoveryTarget(configFile: existingConfig)
+                    == existingConfig.standardizedFileURL,
+                "配置文件仍存在时，恢复动作必须定位该文件")
+
+            let missingConfig = root.appendingPathComponent("missing/nested/config.json")
+            expect(
+                panelConfigRecoveryTarget(configFile: missingConfig)
+                    == root.standardizedFileURL,
+                "配置文件缺失时，恢复动作必须回退到最近的现存目录，而不是制造无效文件按钮")
+        }
+    }
+
+    suite("panelConfigRecoveryTarget: 悬空 config 链接定位链接节点本身") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let missingTarget = root.appendingPathComponent("missing-target.json")
+            createSymlink(at: configFile, pointingTo: missingTarget)
+            expect(!FileManager.default.fileExists(atPath: configFile.path), "链接目标必须不存在")
+            guard case .malformed = loadPanelConfig(from: configFile) else {
+                expect(false, "悬空配置链接必须呈现配置失败态")
+                return
+            }
+            expect(
+                panelConfigRecoveryTarget(configFile: configFile)
+                    == configFile.standardizedFileURL,
+                "Finder 恢复动作必须选中需要修复的链接节点")
+        }
+    }
+
     // PanelConfigState.topContent（/codex review f54d335 P1#1）：`PanelView` 的 operationalPanel 顶部渲染
     // 与 applyFirstFocus 的开局焦点派生此前各 `switch panelModel.configState` 一遍、只靠 ViewWiringSuite
     // 文本绊线防漂移。抽出这个单一分类后，两边都读它——而它是 ClaudioGUICore 的纯映射，可被 import，于是

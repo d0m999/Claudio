@@ -223,7 +223,8 @@ func runHitTargetSuites() {
     }
 
     suite("生产接线：声音包与 onboarding 使用显式命中合同") {
-        let packGallery = productionSource("gui/Sources/ClaudioGUI/PackGalleryView.swift")
+        let packGallery = productionSource(
+            "gui/Sources/ClaudioPanelPresentation/PackGalleryView.swift")
         let panelRows = productionSource("gui/Sources/ClaudioGUI/PanelRows.swift")
 
         expect(

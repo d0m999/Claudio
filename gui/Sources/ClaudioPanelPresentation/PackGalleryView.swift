@@ -211,7 +211,7 @@ private struct PackCardView: View {
                 HStack(spacing: 3) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 10 * typeScale))
-                        .foregroundColor(ClaudioColor.warning(colorScheme))
+                        .foregroundColor(ClaudioTheme.warning(colorScheme))
                         Text(ClaudioL10n(language: language).format(
                             .soundPacksMissingCount,
                             Int64(missingCount)))
@@ -266,7 +266,7 @@ private struct PackCardView: View {
         HStack(spacing: 4) {
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 11 * typeScale))
-                .foregroundColor(ClaudioColor.error(colorScheme))
+                .foregroundColor(ClaudioTheme.error(colorScheme))
             Text(ClaudioL10n(language: language).text(.soundPacksFileMissing))
                 .font(ClaudioTheme.font(.caption))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))

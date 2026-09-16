@@ -5,7 +5,7 @@ import SwiftUI
 
 /// 固定在菜单栏面板滚动区下方的紧凑退出入口。视图只发出退出意图；应用生命周期由
 /// `MenuBarController` 注入的闭包负责。
-struct PanelQuitFooter: View {
+public struct PanelQuitFooter: View {
     let language: ClaudioAppLanguage
     let onQuit: @MainActor () -> Void
     private let focusedTarget: FocusState<PanelFocusTarget?>.Binding
@@ -14,7 +14,7 @@ struct PanelQuitFooter: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
 
-    init(
+    public init(
         language: ClaudioAppLanguage,
         focusedTarget: FocusState<PanelFocusTarget?>.Binding,
         onQuit: @escaping @MainActor () -> Void
@@ -24,7 +24,7 @@ struct PanelQuitFooter: View {
         self.onQuit = onQuit
     }
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: 0) {
             Spacer(minLength: 0)
             Button(action: onQuit) {

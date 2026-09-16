@@ -1,5 +1,6 @@
 import AppKit
 import ClaudioCore
+import ClaudioPanelPresentation
 import ClaudioGUICore
 import ClaudioLocalization
 import ClaudioSettingsPresentation
@@ -274,6 +275,18 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             },
             onQuit: {
                 NSApp.terminate(nil)
+            },
+            onRevealConfig: { configURL in
+                NSWorkspace.shared.activateFileViewerSelecting([configURL])
+            },
+            onAnnounce: { sentence in
+                NSAccessibility.post(
+                    element: NSApp as Any,
+                    notification: .announcementRequested,
+                    userInfo: [
+                        .announcement: sentence,
+                        .priority: NSAccessibilityPriorityLevel.high.rawValue,
+                    ])
             })
         hostingController = NSHostingController(rootView: panel)
 

@@ -505,7 +505,7 @@ struct PanelSoundScopePicker: View {
     private func statusColor(_ status: HostSourceRowStatus) -> Color {
         switch status {
         case .ready: ClaudioTheme.success(colorScheme)
-        case .awaitingActivation, .legacy: ClaudioColor.warning(colorScheme)
+        case .awaitingActivation, .legacy: ClaudioTheme.warning(colorScheme)
         case .notConnected: ClaudioTheme.secondaryText(colorScheme)
         case .needsAttention: ClaudioTheme.error(colorScheme)
         }

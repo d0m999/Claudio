@@ -866,7 +866,7 @@ func runOnboardingActionsSuites() {
                     + "前 \(before?.count.description ?? "<无文件>")，"
                     + "后 \(after?.count.description ?? "<无文件>")")
             expect(
-                watch.observedWrite(),
+                watch.observedWrite() == .written,
                 "磁盘上真的躺过一份 settings.json，而字节比较全程绿（前后都是「无文件」）。观测器的"
                     + "**目录**那一半必须看得见它 —— 看不见 = 下面四条「必须没被碰过」全是恒真断言")
             // 问第二遍必须还是同一个答案。kqueue 的 `EV_CLEAR` 会在事件被取走之后清掉它，所以
@@ -874,7 +874,7 @@ func runOnboardingActionsSuites() {
             // 除了这一条之外**没有任何断言在钉它**：删掉缓存，全套测试照样绿，而下一个写「先读一次
             // 做诊断、再断言一次」的人会拿到一个凭空变绿的守卫。
             expect(
-                watch.observedWrite(),
+                watch.observedWrite() == .written,
                 "同一个观测器问第二遍，答案必须一样 —— `EV_CLEAR` 会把取走的事件清掉，`observedWrite()`"
                     + "必须自己把它记住。翻供 = 一条「问两遍就变绿」的守卫")
         }
@@ -904,11 +904,60 @@ func runOnboardingActionsSuites() {
                 .write(to: settings.resolvingSymlinksInPath(), options: .atomic)
 
             expect(
-                watch.observedWrite(),
+                watch.observedWrite() == .written,
                 "一次穿过符号链接写到目标的安装：`dot-claude/` 的目录项一个都没动（目录那一半全程安静），"
                     + "链接自己也纹丝未动 —— 让观测跟得上的是 `stat(2)` 的**跟随**语义（对着链接 stat，"
                     + "拿到的是**目标**的 ino/ctime）。换成 `lstat` 这条就红，而四条持锁 suite 一条都不会红："
                     + "一个把 settings.json 软链进 dotfiles 的用户，从此再没有任何东西守着他的那份配置")
+        }
+    }
+
+    suite("写观测器：悬空符号链接目标的创建与删除都必须被看见") {
+        withTempDirectory { root in
+            let entryDirectory = root.appendingPathComponent("dot-claude", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: entryDirectory, withIntermediateDirectories: true)
+            let targetDirectory = root.appendingPathComponent("dotfiles", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: targetDirectory, withIntermediateDirectories: true)
+            let target = targetDirectory.appendingPathComponent("settings.json")
+            let link = entryDirectory.appendingPathComponent("settings.json")
+            createSymlink(at: link, pointingTo: target)
+
+            let creationWatch = FileWriteWatch(watching: link)
+            expect(creationWatch.isArmed, "悬空目标创建的观察器必须成功武装")
+            try? Data(#"{"hooks":{}}"#.utf8).write(to: target, options: .atomic)
+            expect(
+                creationWatch.observedWrite() == .written,
+                "穿过链接创建原本不存在的目标文件时必须报告 written")
+
+            let deletionWatch = FileWriteWatch(watching: link)
+            expect(deletionWatch.isArmed, "悬空目标删除的观察器必须成功武装")
+            try? FileManager.default.removeItem(at: target)
+            expect(
+                deletionWatch.observedWrite() == .written,
+                "穿过链接删除目标文件时必须报告 written")
+        }
+    }
+
+    suite("写观测器：kevent 轮询失败与必需目录监听失败都不能伪装成 untouched") {
+        withTempDirectory { root in
+            let settings = root.appendingPathComponent("settings.json")
+            writeFixture(#"{"hooks":{}}"#, to: settings)
+            let pollingWatch = FileWriteWatch(watching: settings, forcedPollResult: -1)
+            expect(pollingWatch.isArmed, "注入轮询故障前，目录监听本身应成功武装")
+            if case .inspectionFailed = pollingWatch.observedWrite() {
+            } else {
+                expect(false, "kevent 轮询失败必须返回 inspectionFailed")
+            }
+
+            let missingParent = root.appendingPathComponent("gone/settings.json")
+            let failedWatch = FileWriteWatch(watching: missingParent)
+            expect(!failedWatch.isArmed, "必需的父目录监听失败时 isArmed 必须为 false")
+            if case .inspectionFailed = failedWatch.observedWrite() {
+            } else {
+                expect(false, "必需目录监听失败必须返回 inspectionFailed，不能返回 untouched")
+            }
         }
     }
 
@@ -930,7 +979,7 @@ func runOnboardingActionsSuites() {
                 fileBytes(settings) == before,
                 "test setup: 内容必须被恢复成逐字相同，否则这条对照钉不到 ctime")
             expect(
-                watch.observedWrite(),
+                watch.observedWrite() == .written,
                 "一个「原地重写、再把内容与 mtime 都按回去」的写者：目录里一个条目都没动（目录那一半"
                     + "全程安静），字节也逐字相同 —— 只有 ctime 出卖了它，而 ctime 是 userspace 唯一"
                     + "伪造不了的字段。看不见 = 身份快照那一半是死的，`atomicWrite` 哪天不再原子，"
@@ -999,7 +1048,7 @@ func runOnboardingActionsSuites() {
                     + "断的是**哪一步**被挡住，不只是「被挡住了」")
 
             expect(
-                !settingsWatch.observedWrite(),
+                settingsWatch.observedWrite() == .untouched,
                 "包发布被挡住了，那 settings.json 就必须**一次都没被写过** —— 不是「终态一样」，是"
                     + "**一个字节都没落过盘**。观测器响了 = 写 hooks 跑到了包发布**前面**（错误码一模"
                     + "一样，上面那条照样绿），或者它写完又把文件删/改了回去（**字节比较看不见这一种**）。"
@@ -1080,7 +1129,7 @@ func runOnboardingActionsSuites() {
             // 所以「没被碰过」现在由 `FileWriteWatch` **观测**（目录级 kqueue + 伪造不了的 ctime），
             // 而字节比较降级成它本来就是的那个东西：一条**终态**断言，外加一句好读的诊断。
             expect(
-                !settingsWatch.observedWrite(),
+                settingsWatch.observedWrite() == .untouched,
                 "config.json 的写被挡住了，那 settings.json 就必须**一次都没被写过** —— 不是「终态一样」，"
                     + "是**一个字节都没落过盘**。观测器响了 = 写 hooks 跑到了写 config **前面**（错误码一模"
                     + "一样，上面那条照样绿），或者它写完又把文件删/改了回去（**字节比较看不见这一种**）。"
@@ -1158,7 +1207,7 @@ func runOnboardingActionsSuites() {
             // **正是**被挡住的那一步，所以「它有没有在被挡住之前先落一次盘」是这条 suite 的全部内容。
             // 一次 `.lockBusy` 之前就已经写下去的字节，字节比较在「写完又回滚」时**看不见**。
             expect(
-                !settingsWatch.observedWrite(),
+                settingsWatch.observedWrite() == .untouched,
                 "settings.json 的写正是被挡住的那一步 —— 它必须**一次都没被写过**。观测器响了 = 它在"
                     + "拿到锁之前（或者在报 lockBusy 之后回滚之前）已经往用户的 Claude Code 里落过字节。"
                     + "`installClaudioHooks` 的读-改-写整段都在 `withNonBlockingLock` 里面，这条断言就是"
@@ -1214,7 +1263,7 @@ func runOnboardingActionsSuites() {
             // settings.json 的 Claude Code，看见的是一个**没有任何 claudio hook** 的配置。断开是这条
             // 路径上 settings.json 的**第二个**写者，它和接管适用同一条不变式。
             expect(
-                !settingsWatch.observedWrite(),
+                settingsWatch.observedWrite() == .untouched,
                 "被锁挡住的断开必须是**原子**的：settings.json 一次都不许被写过。观测器响了 = 它先动了手"
                     + "（摘了几条 / 整份重写）才报的错 —— 哪怕它事后把字节都擦回去，那个窗口里 Claude Code "
                     + "读到的就是一份少了 hook 的配置，而面板对用户说「断开失败，你的配置一个字都没动」")
@@ -1281,7 +1330,7 @@ func runOnboardingActionsSuites() {
 
             // 标题括号里那半句的磁盘证据：断开**一个字节都不写 config.json**。
             expect(
-                !configWatch.observedWrite(),
+                configWatch.observedWrite() == .untouched,
                 "断开只摘 settings.json 里的 hook —— 它一个字节都不许写 config.json。观测器响了 = 断开"
                     + "偷偷动了用户的选包（而它没拿 config.lock：持着这把锁的这个 holder 一点都没挡住它）。"
                     + "config.json 的另外两个写者是静音开关与切包 —— 一个不持锁的第三写者，就是数据丢失。"

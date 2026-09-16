@@ -31,20 +31,5 @@ public enum PackSelectionStatus: Sendable, Equatable, Codable {
 /// ``readConfigFileBounded(at:)`` + `JSONDecoder` 解码同一份 ``ClaudioConfig``），因为两者描述的
 /// 是同一件事——config.json 读不出来——不该各自发明一套说法。
 public func packSelection(configFile: URL = ClaudioPaths.configFile) -> PackSelectionStatus {
-    guard FileManager.default.fileExists(atPath: configFile.path) else { return .notSelected }
-
-    guard case .success(let data) = readConfigFileBounded(at: configFile) else {
-        return .malformed(
-            reason: "config.json 无法读取：\(configFile.path)"
-                + "（须是不大于 \(maxConfigFileBytes) 字节的普通文件）")
-    }
-
-    let config: ClaudioConfig
-    do {
-        config = try JSONDecoder().decode(ClaudioConfig.self, from: data)
-    } catch {
-        return .malformed(reason: "config.json 解析失败：\(error.localizedDescription)")
-    }
-
-    return config.selectedPack.isEmpty ? .notSelected : .selected(packID: config.selectedPack)
+    inspectConfig(configFile: configFile).packSelection
 }

@@ -319,7 +319,7 @@ func runLockSeparationSuites() {
             ("switch uninstallClaudioHooks() {", "claudio uninstall", "settings.lock"),
             ("switch selectPack(packID) {", "claudio use", "config.lock"),
             (
-                "SetupEnvironment(executablePath: currentExecutablePath())", "claudio setup",
+                "SetupEnvironment(executablePath: try currentExecutablePath())", "claudio setup",
                 "config.lock + settings.lock"
             ),
         ]
@@ -342,7 +342,7 @@ func runLockSeparationSuites() {
         //
         // ```swift
         // let environment = SetupEnvironment(
-        //     executablePath: currentExecutablePath(), configLockFile: ClaudioPaths.playLockFile)
+        //     executablePath: try currentExecutablePath(), configLockFile: ClaudioPaths.playLockFile)
         // ```
         //
         // —— `claudio setup`（首次安装！）在写 config.json 时占住 play 的去抖锁 —— 而这条负向兜底

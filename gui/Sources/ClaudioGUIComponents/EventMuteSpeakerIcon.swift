@@ -3,11 +3,16 @@ import SwiftUI
 
 /// Mockup 已修正的 24×24 扬声器几何。静音只降低两道声波的不透明度并叠加斜线；按钮本身的
 /// 行为、颜色、焦点和无障碍身份仍由各事件行拥有。
-struct EventMuteSpeakerIcon: View {
+public struct EventMuteSpeakerIcon: View {
     let isMuted: Bool
     let color: Color
 
-    var body: some View {
+    public init(isMuted: Bool, color: Color) {
+        self.isMuted = isMuted
+        self.color = color
+    }
+
+    public var body: some View {
         ZStack {
             SpeakerBodyShape()
                 .fill(color)

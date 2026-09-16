@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// `config.json` 的**外科式读-改-写**：把文件当成一张原始 JSON 表（`[String: Any]`）读进来，
@@ -107,7 +108,8 @@ enum MissingConfigPolicy: Sendable, Equatable {
 /// （`Doctor.swift`）与 `gui` 面板的路由判定（`PanelConfig.swift` 的 `loadPanelConfig(from:)`，
 /// D23 定稿②「写」这半条正交轴）都读这一个判定，而不是各自再解析一遍。
 public enum ConfigRewritability: Sendable, Equatable {
-    /// 文件还不存在。这**不是**错误：写路径会新建一份最小 config（全新安装的正常状态）。
+    /// 文件还不存在，且其父目录链可安全创建。这**不是**错误：写路径会新建一份最小 config
+    /// （全新安装的正常状态）。
     case absent
     /// 读得懂，写路径可以安全地做外科式读-改-写。
     case rewritable
@@ -123,37 +125,257 @@ public enum ConfigRewritability: Sendable, Equatable {
     case unwritable(reason: String)
 }
 
-/// 只读探针：`configFile` 现在能不能被写路径安全重写。**一个字节都不写**，走的是 `updateConfigJSON`
-/// 用的同一份 ``parseRewritableConfig(_:path:)``——「能不能写」的定义只有一个，不存在 doctor 说能、
-/// 真去写又失败（或反过来）的可能。
-public func probeConfigRewritable(configFile: URL = ClaudioPaths.configFile) -> ConfigRewritability
-{
-    guard FileManager.default.fileExists(atPath: configFile.path) else { return .absent }
-    guard case .success(let data) = readConfigFileBounded(at: configFile) else {
-        return .malformed(reason: unreadableConfigReason(path: configFile.path))
+/// The one bounded config read shared by the panel's three projections. The closure is a small
+/// deterministic seam for the harness; production passes ``readConfigFileBounded(at:)``.
+public typealias ConfigInspectionReader = (URL) -> BoundedFileRead
+
+/// One bounded read of `config.json`, projected into the independent facts needed by the panel.
+/// `rewritability` uses the strict write parser, while `packSelection` and `decodedConfig` retain
+/// the established lenient read semantics for fields that are unrelated to `selected_pack`.
+public struct ConfigInspection: Sendable, Equatable {
+    public let rewritability: ConfigRewritability
+    public let packSelection: PackSelectionStatus
+    public let decodedConfig: ClaudioConfig?
+
+    public init(
+        rewritability: ConfigRewritability,
+        packSelection: PackSelectionStatus,
+        decodedConfig: ClaudioConfig?
+    ) {
+        self.rewritability = rewritability
+        self.packSelection = packSelection
+        self.decodedConfig = decodedConfig
     }
-    switch parseRewritableConfig(data, path: configFile.path) {
-    case .failure(let failure): return .malformed(reason: failure.reason)
-    case .success: break
+}
+
+private enum ConfigParentProbe {
+    case creatable
+    case unwritable(reason: String)
+}
+
+private func configReadFailureReason(path: String) -> String {
+    "config.json 无法读取：\(path)（须是不大于 \(maxConfigFileBytes) 字节的普通文件）"
+}
+
+private func configParentFailureReason(
+    configFile: URL,
+    directory: URL,
+    detail: String
+) -> String {
+    "配置路径 \(configFile.path) 所在的目录 \(directory.path) 不可用（\(detail)）。"
+        + "请修正该目录的写入与搜索权限（例如 chmod u+rwx \(directory.path)），然后重试。"
+}
+
+/// Read-only preflight for a config parent. Apply the write path's no-follow directory policy,
+/// then walk toward the nearest existing ancestor to check write and search permission. It is
+/// only a prediction; the existing locked write path revalidates the filesystem at publication.
+private func probeConfigParent(for configFile: URL) -> ConfigParentProbe {
+    var directory = configFile.deletingLastPathComponent().standardizedFileURL
+
+    do {
+        try validateExistingDirectoryComponents(of: directory)
+    } catch let error as PrivateDirectoryError {
+        switch error {
+        case .unsafeNode(let path):
+            return .unwritable(
+                reason: "配置路径 \(configFile.path) 的目录链包含符号链接或非目录节点：\(path)。"
+                    + "请将该节点改为真实目录后重试。")
+        case .operationFailed(let path, let code):
+            return .unwritable(
+                reason: configParentFailureReason(
+                    configFile: configFile,
+                    directory: URL(fileURLWithPath: path, isDirectory: true),
+                    detail: String(cString: strerror(code))))
+        }
+    } catch {
+        return .unwritable(
+            reason: configParentFailureReason(
+                configFile: configFile,
+                directory: directory,
+                detail: error.localizedDescription))
     }
 
-    // 内容过关，还差最后一问：这份文件所在的目录**让不让写**。
-    //
-    // 「能不能写」的定义只有一个（见上面的类型注释），而「解析得通过」只是它的一半。原子写（先在同一个
-    // 目录里落一个临时文件、再 rename 盖上去）要的是**父目录**可写；父目录只读时，一份完全合法的
-    // config 照样一个字节也写不进去。少了这一问，`doctor` 会对着这种局面打印「✓ config.json 可安全
-    // 重写」，而用户真去点静音钮时它一次次失败——doctor 的整个存在意义就是不让用户遇到这种事
-    // （本轮 /ship 评审：`/codex review` [P2]）。
-    //
-    // `access(2)` 语义的只读探针，一个字节都不写（`isWritableFile(atPath:)` 底下就是它）。
-    let parentDirectory = configFile.deletingLastPathComponent()
-    guard FileManager.default.isWritableFile(atPath: parentDirectory.path) else {
-        return .unwritable(
-            reason: "\(configFile.path) 的内容没问题，但它所在的目录 \(parentDirectory.path) 不可写，"
-                + "所以 App 里的静音 / 切包一定会失败。请修正该目录的权限"
-                + "（例如 chmod u+w \(parentDirectory.path)）。")
+    while true {
+        var status = stat()
+        let lstatResult = directory.withUnsafeFileSystemRepresentation { pathPointer -> Int32 in
+            guard let pathPointer else {
+                errno = EINVAL
+                return -1
+            }
+            return lstat(pathPointer, &status)
+        }
+
+        if lstatResult == 0 {
+            let mode = status.st_mode & S_IFMT
+            if mode == S_IFLNK {
+                var targetStatus = stat()
+                let statResult = directory.withUnsafeFileSystemRepresentation {
+                    pathPointer -> Int32 in
+                    guard let pathPointer else {
+                        errno = EINVAL
+                        return -1
+                    }
+                    return stat(pathPointer, &targetStatus)
+                }
+                guard statResult == 0,
+                    (targetStatus.st_mode & S_IFMT) == S_IFDIR
+                else {
+                    return .unwritable(
+                        reason: configParentFailureReason(
+                            configFile: configFile,
+                            directory: directory,
+                            detail: "祖先符号链接悬空或没有指向目录"))
+                }
+            } else if mode != S_IFDIR {
+                return .unwritable(
+                    reason: configParentFailureReason(
+                        configFile: configFile,
+                        directory: directory,
+                        detail: "该路径由普通文件占用，不是目录"))
+            }
+
+            let accessResult = directory.withUnsafeFileSystemRepresentation {
+                pathPointer -> Int32 in
+                guard let pathPointer else {
+                    errno = EINVAL
+                    return -1
+                }
+                return access(pathPointer, W_OK | X_OK)
+            }
+            guard accessResult == 0 else {
+                let accessErrno = errno
+                return .unwritable(
+                    reason: configParentFailureReason(
+                        configFile: configFile,
+                        directory: directory,
+                        detail: String(cString: strerror(accessErrno))))
+            }
+            return .creatable
+        }
+
+        let lstatErrno = errno
+        guard lstatErrno == ENOENT || lstatErrno == ENOTDIR else {
+            return .unwritable(
+                reason: configParentFailureReason(
+                    configFile: configFile,
+                    directory: directory,
+                    detail: String(cString: strerror(lstatErrno))))
+        }
+
+        let parent = directory.deletingLastPathComponent().standardizedFileURL
+        guard parent.path != directory.path else {
+            return .unwritable(
+                reason: configParentFailureReason(
+                    configFile: configFile,
+                    directory: directory,
+                    detail: "无法找到可写且可搜索的父目录"))
+        }
+        directory = parent
     }
-    return .rewritable
+}
+
+/// Inspect `configFile` once and form all three panel projections from that bounded byte snapshot.
+/// No projection falls back to `.needsPack` when decoding fails: a malformed file stays an honest
+/// malformed verdict so the panel and `doctor` can expose the actionable reason.
+public func inspectConfig(
+    configFile: URL = ClaudioPaths.configFile,
+    reader: ConfigInspectionReader = readConfigFileBounded(at:)
+) -> ConfigInspection {
+    let fileManager = FileManager.default
+    let fileExists = fileManager.fileExists(atPath: configFile.path)
+
+    if !fileExists {
+        if leafNodeIsSymbolicLink(at: configFile) {
+            let reason = configReadFailureReason(path: configFile.path)
+            return ConfigInspection(
+                rewritability: .malformed(reason: reason),
+                packSelection: .malformed(reason: reason),
+                decodedConfig: nil)
+        }
+        switch probeConfigParent(for: configFile) {
+        case .creatable:
+            return ConfigInspection(
+                rewritability: .absent,
+                packSelection: .notSelected,
+                decodedConfig: nil)
+        case .unwritable(let reason):
+            return ConfigInspection(
+                rewritability: .unwritable(reason: reason),
+                packSelection: .notSelected,
+                decodedConfig: nil)
+        }
+    }
+
+    let data: Data
+    switch reader(configFile) {
+    case .success(let readData):
+        data = readData
+    case .notRegularFile, .oversize, .unreadable:
+        let readReason = configReadFailureReason(path: configFile.path)
+        return ConfigInspection(
+            rewritability: .malformed(reason: unreadableConfigReason(path: configFile.path)),
+            packSelection: .malformed(reason: readReason),
+            decodedConfig: nil)
+    }
+
+    // Keep the established strict write-parser reason as the authoritative malformed
+    // explanation. Decode the same bytes separately only for the read projections; doing the
+    // lenient decode first would replace actionable failures such as a missing selected_pack with
+    // a generic Codable error.
+    let decodedConfig = try? JSONDecoder().decode(ClaudioConfig.self, from: data)
+    switch parseRewritableConfig(data, path: configFile.path) {
+    case .failure(let failure):
+        let packSelection: PackSelectionStatus
+        if let decodedConfig {
+            packSelection = decodedConfig.selectedPack.isEmpty
+                ? .notSelected
+                : .selected(packID: decodedConfig.selectedPack)
+        } else {
+            packSelection = .malformed(reason: failure.reason)
+        }
+        return ConfigInspection(
+            rewritability: .malformed(reason: failure.reason),
+            packSelection: packSelection,
+            decodedConfig: decodedConfig)
+    case .success:
+        guard let decodedConfig else {
+            let reason = "config.json 解析失败：无法从已读取内容建立配置"
+            return ConfigInspection(
+                rewritability: .malformed(reason: reason),
+                packSelection: .malformed(reason: reason),
+                decodedConfig: nil)
+        }
+        let packSelection: PackSelectionStatus =
+            decodedConfig.selectedPack.isEmpty
+            ? .notSelected
+            : .selected(packID: decodedConfig.selectedPack)
+        switch probeConfigParent(for: configFile) {
+        case .creatable:
+            return ConfigInspection(
+                rewritability: .rewritable,
+                packSelection: packSelection,
+                decodedConfig: decodedConfig)
+        case .unwritable(let reason):
+            return ConfigInspection(
+                rewritability: .unwritable(reason: reason),
+                packSelection: packSelection,
+                decodedConfig: decodedConfig)
+        }
+    }
+}
+
+/// Compatibility spelling for callers that prefer the noun form.
+public func inspectConfigFile(
+    at configFile: URL = ClaudioPaths.configFile,
+    reader: ConfigInspectionReader = readConfigFileBounded(at:)
+) -> ConfigInspection {
+    inspectConfig(configFile: configFile, reader: reader)
+}
+
+/// 只读探针：`configFile` 现在能不能被写路径安全重写。**一个字节都不写**，走的是
+/// ``updateConfigJSON`` 用的同一份 ``parseRewritableConfig(_:path:)``。
+public func probeConfigRewritable(configFile: URL = ClaudioPaths.configFile) -> ConfigRewritability {
+    inspectConfig(configFile: configFile).rewritability
 }
 
 /// 读 `configFile` → 校验 → 交给 `mutate` 只改它拥有的键 → 原子写回。

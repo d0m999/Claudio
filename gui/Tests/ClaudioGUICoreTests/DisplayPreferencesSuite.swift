@@ -9,7 +9,7 @@ func runDisplayPreferencesSuites() {
             let settings = displaySource(
                 "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let preferences = displaySource("gui/Sources/ClaudioGUICore/SettingsPreferences.swift"),
-            let panel = displaySource("gui/Sources/ClaudioGUI/PanelView.swift")
+            let panel = displaySource("gui/Sources/ClaudioPanelPresentation/PanelView.swift")
         else {
             expect(false, "读不到 Display、Preferences 或 Panel 源码")
             return
@@ -36,7 +36,7 @@ func runDisplayPreferencesSuites() {
 
     suite("Display：旧 UserDefaults 值停止读取且不新增迁移") {
         let sourcePaths = [
-            "gui/Sources/ClaudioGUI/PanelView.swift",
+            "gui/Sources/ClaudioPanelPresentation/PanelView.swift",
             "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift",
             "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift",
             "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift",

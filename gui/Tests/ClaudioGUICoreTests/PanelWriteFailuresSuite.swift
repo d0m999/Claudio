@@ -182,4 +182,38 @@ func runPanelWriteFailuresSuites() {
         expect(messages.count == 1, "静音与主音量撞上同一份 .lockBusy 文案——只保留一条。得到：\(messages)")
         expect(messages == [mute.description], "去重后剩下的一条必须等于那份共享文案。得到：\(messages)")
     }
+
+    suite("panelWriteFailureItems：同因按 typed reason 去重，配置卡只吞掉完全相同的原因") {
+        let lockItems = panelWriteFailureItems(
+            muteError: .lockBusy,
+            packSwitchError: .lockBusy,
+            masterVolumeError: .lockBusy)
+        expect(
+            lockItems.map(\.reason) == [.lockBusy],
+            "三个写者撞同一把锁时必须按 typed reason 稳定去重")
+
+        let distinct = panelWriteFailureItems(
+            muteError: .configReadFailure(reason: "events is an array"),
+            packSwitchError: .configReadFailure(reason: "master_volume is a string"),
+            masterVolumeError: nil)
+        expect(
+            distinct.map(\.reason)
+                == [
+                    .configReadFailure(reason: "events is an array"),
+                    .configReadFailure(reason: "master_volume is a string"),
+                ],
+            "不同磁盘原因必须各自保留，不能按错误类型或共同前缀合并")
+
+        let cardReason = SetEventEnabledError.configReadFailure(reason: "events is an array")
+            .description
+        let hiddenByCard = panelWriteFailureItems(
+            muteError: .configReadFailure(reason: "events is an array"),
+            packSwitchError: .configReadFailure(reason: "master_volume is a string"),
+            masterVolumeError: nil,
+            configFailureReason: cardReason)
+        expect(
+            hiddenByCard.map(\.reason)
+                == [.configReadFailure(reason: "master_volume is a string")],
+            "配置失败卡只应去掉同一 reason 的操作错误，其他 reason 仍需显示")
+    }
 }
