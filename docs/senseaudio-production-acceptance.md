@@ -1163,7 +1163,8 @@ T8 风险接受，不启用 production，也不把本地结果记为远端 CI �
 
 ## 26. T9 本地默认启用与最终 Bundle 复验
 
-执行日期：2026-09-15 至 2026-09-16（Asia/Singapore；正式 smoke 为 2026-09-16 00:06–00:13）。
+执行日期：2026-09-15 至 2026-09-16（Asia/Singapore；正式 smoke 为 2026-09-16 00:06–00:13，
+听感闭合轮次为 11:41–11:52）。
 本轮用户直接要求实施 T9 计划，授权本地默认启用、正式 smoke、独立测试包的一次采用与原选择恢复。
 交付终点为本地实现与验收；不 push、不创建 PR、不合并、不修改 Issue、不发布。
 
@@ -1243,19 +1244,37 @@ metadata 与 `claudi0-NON-DISTRIBUTION-senseaudio-t9-e9ff6284-arm64.zip`。不�
 ### 正式 smoke、原生采用与恢复
 
 沿用用户计划明确的付费授权，首轮预算 **3 TTS POST + 1 SFX POST、零 probe**；
-POST 零自动 retry，最多三个资源 URL/总计六次 GET。实际仅触发一次 TTS 生成与一次 SFX 生成，
-不发起 animal、partial、额外 probe 或新的付费轮次。
+POST 零自动 retry，最多三个资源 URL/总计六次 GET。首轮只触发一次 TTS 生成与一次 SFX 生成，
+不发起 animal、partial 或额外 probe。首轮播放后所有者明确当时错过 TTS；临时候选已按正常生命周期
+清理。2026-09-16 11:41 前，所有者明确回复“已准备，可以生成并试听”，单独授权听感闭合轮次；
+该轮严格增加 **3 TTS POST + 1 SFX batch POST + 3 asset GET**，仍为零 probe、零自动 retry。
 
 | 实际路线 | 脱敏技术结果 |
 |---|---|
 | TTS | 3 次 POST，3 次 HTTP 200，零 retry；原生发布编号 1/2/3。MP3 / 32000 Hz / 单声道；时长 1.800 / 1.656 / 1.476 秒，大小 29129 / 26825 / 23945 bytes，均通过项目大小/时长校验 |
 | SFX | 1 次 batch POST，HTTP 200，响应约 69.1 秒，零 retry；3 次 GET 均 HTTP 200，GET retry 0。原生发布编号 1/2/3，MP3 / 44100 Hz / 双声道，均 2.037500 秒 / 32929 bytes / 0600 |
 | HTTP/MIME/安全边界 | CFNetwork 脱敏记录保留 task/time/category/status/字节计数，不保留原消息或 URL/header/body；HTTP 200 为实际记录。JSON 与 audio/mpeg、MP3 magic、整批 exact origin、匿名 GET、零 redirect 由固定源码门禁接受真实成功输出，未保留原始响应 header 抓包 |
-| 真实凭据与重启 | 旧 T8 进程退出，启动最终 Bundle PID 57191；应用显示 SenseAudio 已保存/已验证并内部使用原 Key 完成生成。采用后同一封存 Bundle 重启 PID 65883，状态及绑定读回；恢复后 PID 66538 再次读回已保存/已验证 |
+| 真实凭据与重启 | 旧 T8 进程退出，启动最终 Bundle PID 57191；应用显示 SenseAudio 已保存/已验证并内部使用原 Key 完成生成。采用后同一封存 Bundle 重启 PID 65883，状态及绑定读回；恢复后 PID 66538 再次读回已保存/已验证。听感闭合后同一 Bundle 重启 PID 25771，仍读回已保存/已验证 |
 | 原生可控检查 | 实际 retained 设置窗口打开；选择器按稳定顺序显示全部五项，SenseAudio 能力为语音/动物叫声/纯音效；原偏好仍为 SenseAudio，不改写为默认值。六个候选的原生播放动作均已依次触发，不以该动作代替实际听到 |
 | 一次采用与持久化 | GUI 克隆独立 CC0 测试包 `minimal-chime-copy-2`，仅临时选择 WorkBuddy；SFX 候选 1 经既有 adopter 绑定 stop。重启后原生绑定可见，manifest stop/audio_names 与正规 MP3 文件读回一致，重新试听动作成功 |
 | 原选择恢复 | 经既有 ClaudioCore lock/CAS owner 仅移除本轮 selected_pack 稀疏覆盖；原 WorkBuddy 其他覆盖字段、全局选择及原包 manifest 字节均保持不变。恢复后原生 WorkBuddy 有效包读回原包；测试包与已采用 MP3 保留，不删除 |
 | 真实 Key 保护 | 只比较目录/文件 lstat metadata，0700/0600、inode/uid/gid/link/size/mtime/ctime 未变化；未读取、打印、hash、导出或重新录入明文，未触碰其他 Provider 凭据 |
+
+听感闭合轮次的脱敏技术与人工结果如下；外部记录为
+`network-66538-relisten-redacted.ndjson`（SHA-256
+`1e483118eeced8a34c40a3b7da2d9559d9bc3306dbf69af7205f9f291b76f4ad`）与
+`smoke-relisten-result-redacted.json`（SHA-256
+`8b762cc9b8c26e893b85e8e26446a86a2b4fbab63b41d7e69c548a4995299d1f`）；均为 0600，不进入 Git：
+
+| 闭合项 | 结果 |
+|---|---|
+| 网络预算 | 7 个 CFNetwork task，全部 HTTP 200：3 TTS POST、1 SFX batch POST、3 asset GET；零 probe、POST/GET retry 均为 0。SFX POST 约 61.3 秒；未保留完整 URL、header/body 或原消息 |
+| TTS 技术结果 | 三个 MP3 经 production magic/大小/时长门禁接受并原生发布，UI 时长 1.8 / 2.4 / 1.7 秒；系统输出未静音、播放时音量 65%，按 1/2/3 依次播放 |
+| TTS 人工听感 | 所有者确认三个均实际听到，均完整说出预期台词，且没有额外描述或其他内容：`PASSED` |
+| SFX 技术结果 | 三个 MP3 均 44100 Hz / 双声道 / 2.037500 秒 / 32929 bytes / 0600；只读解码 mean 为 -32.2 / -29.4 / -33.0 dB，peak 为 -1.6 / -1.1 / -1.6 dB。系统输出未静音、播放时音量 84%，按 1/2/3 依次播放 |
+| SFX 人工听感 | 所有者确认三个均实际听到，均为短促木琴音效且完全没有人声：`PASSED` |
+| 两轮总计 | 6 TTS POST、2 SFX batch POST、6 asset GET，14 个 HTTP task 均为 200；零 probe、零自动 retry。第二轮只为补齐首轮未完成的实际听感，不把播放状态当作听到 |
+| 清理与恢复 | 关闭 composer 后第二轮临时候选目录已清空；既有采用音频保留。ClaudioCore lock/CAS owner 再次只移除 WorkBuddy 临时 `selected_pack`，重启 PID 25771 后原生读回 WorkBuddy 原“皮卡丘”包、既有 stop 绑定和 SenseAudio 已保存/已验证；界面作用域恢复 Codex |
 
 原生观察通过外部 AX/CGEvent 工具完成，工具不读取 secure/editable text value，不增加生产接口。
 CUA 初始化因 enabled surfaces 缺失失败；AX 对菜单栏 popover 的快照有局限，使用实际窗口 frame
@@ -1284,20 +1303,14 @@ composer、采用/播放服务、helper 与依赖没有源码变化。
   同意不阻塞本轮，不要求重新录入或修改真实 Key；不能把 fake Key 测试写成真实保存通过。
 - VoiceOver、实际 partial 展示、animal 意图质量延续第 22–23 节所有者有限 `RISK ACCEPTED`，
   均不记为实测通过，不增加本轮 animal 调用，也不扩展为网络或凭据安全豁免。
-- 新 TTS/SFX 均已依次播放，**实际出声与听感反馈待所有者确认，当前 `NOT VERIFIED`**。
-  历史 TTS/木琴听感保留原证据，不用播放状态升级这组六个新候选的听感。
-  2026-09-16，所有者先针对 TTS 试听回复“没”，随后明确“当时错过了试听”；该反馈不是已观察到的
-  播放失败，也不能证明实际出声或听感，TTS 继续记为 `NOT VERIFIED`。针对随后合并询问的 SFX 反馈为
-  “存在问题或尚未听到”，未确认三个木琴候选均实际听到，SFX 继续记为 `NOT VERIFIED`。
-  当日上午（Asia/Singapore）只读检查发现系统输出静音、输出音量 55%、Claudio 主音量 45%；
-  该观察不能反推凌晨 smoke 时的系统静音状态，未确认代码根因、未修改系统音量或源码。
-  执行方在收到听感反馈前切换 SFX，导致三个未采用 TTS 临时候选按既有生命周期清理；这是
-  本轮试听流程缺口。已采用 SFX 音频仍保留；对其只读解码检测到非静音信号（mean `-25.2 dB`、
-  peak `-3.8 dB`），这只证明文件含音频信号，不证明实际听到或木琴意图。本次没有追加付费请求或
-  再次自动播放。完整重试听需要新增 3 次 TTS POST 与 1 次 SFX batch POST，须在所有者已准备试听后
-  单独发起，仍保持零 probe、POST 零自动 retry，不把原授权轮次扩写为已执行事实。
+- 首次播放后的“没”已由所有者澄清为当时错过 TTS，不是已观察到的播放失败；执行方在收到反馈前
+  切换 SFX，导致三个未采用 TTS 临时候选按既有生命周期清理，保留为试听流程缺口。当日上午只读
+  发现的系统静音状态不能回溯凌晨 smoke，也不作为代码根因。
+- 所有者随后明确就位并授权听感闭合轮次。三个新 TTS 均实际听到、预期台词完整且无多余内容；
+  三个新 SFX 均实际听到、均为短促木琴且无人声。实际出声与本轮意图听感现为人工 `PASSED`；
+  结论来自所有者反馈，不由播放按钮、文件非静音信号或 HTTP 200 替代。
 - macOS 12–13 原生、Intel、双架构、Developer ID/universal、notarization、正式分发与生产就绪
   未验证。main 与 Issue 状态保持不变。
 
-当前结论：**T9 本地实现与最终 Bundle 技术复验 PASSED；完整本地闭合等待实际听感反馈，
-未合并、未发布。** 不把待确认项目写成最终 Bundle 完整验收 PASSED。
+当前结论：**T9 本地实现与最终 Bundle 复验 PASSED，未合并、未发布。** 结论限于上述 arm64
+NON-DISTRIBUTION 本地候选及已列风险接受/未验证边界，不扩展为正式分发或生产就绪。

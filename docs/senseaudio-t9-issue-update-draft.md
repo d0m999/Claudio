@@ -1,7 +1,7 @@
 # Issue #189 更新草案
 
 状态：本地草案，尚未发布或修改 GitHub Issue。T9 已按用户直接授权完成本地实现及最终 Bundle
-技术复验；实际听感反馈待确认，完整闭合仍为 `NOT VERIFIED`。证据见
+复验，包含补录的实际听感确认；本地闭合为 `PASSED`。证据见
 `senseaudio-production-acceptance.md` 第 26 节；第 24–25 节修复历史保留。
 
 ## Scope
@@ -27,8 +27,11 @@ policy 注入；NON-DISTRIBUTION 仅在外部归档名称/台账标记。
 - 最终完整设置集成门禁通过：helper 3272 / 0、GUI 9869 / 0；Debug/Release、localization、selector、
   candidates 11 / 0、bundle、ad-hoc 签名与 size 通过；strict format 新增诊断 0。首轮 fixture/隐私名称
   合同失败及修复记录保留在台账，不能宣称首轮全绿。
-- 最终 arm64 本地 Bundle 真实重验 3 TTS POST + 1 SFX POST + 3 asset GET，七次 HTTP 200，
-  零 probe/零 retry；三 TTS/三 SFX 均通过 MP3 大小/时长校验并触发原生播放。
+- 最终 arm64 本地 Bundle 首轮真实重验 3 TTS POST + 1 SFX POST + 3 asset GET，七次 HTTP 200，
+  零 probe/零 retry；三 TTS/三 SFX 均通过 MP3 大小/时长校验并触发原生播放。所有者明确当时错过
+  TTS 后，另行确认已就位并授权同预算听感闭合轮次；第二轮同为七个 HTTP 200、零 probe/零 retry。
+- 第二轮三个 TTS 均实际听到、预期台词完整且无多余内容；三个 SFX 均实际听到、均为短促木琴音效
+  且完全没有人声。人工听感 `PASSED`，不由播放状态或 HTTP 200 代替。
 - WorkBuddy × stop 在独立 CC0 测试包一次采用成功；重启原生/manifest/音频读回通过。
   完成后仅恢复原包选择，其他覆盖/原包 manifest/真实凭据元数据不变；测试包及已采用音频保留。
 - 源码/policy/Bundle/executable/archive 摘要完整绑定；继承输入法/键盘证据有精确 source delta。
@@ -40,12 +43,8 @@ policy 注入；NON-DISTRIBUTION 仅在外部归档名称/台账标记。
 
 ## Remaining
 
-六个新候选已依次触发播放，实际出声与 TTS/木琴意图匹配仍等待所有者反馈；播放状态不代替听感。
-所有者随后明确当时错过了 TTS 试听，该反馈不是已观察到的播放失败；合并询问中的 SFX 反馈仍为
-“存在问题或尚未听到”。两类听感均继续记为 `NOT VERIFIED`。当前系统输出静音的只读观察不能
-回溯凌晨状态。TTS 临时候选已在切换 SFX 时清理；本次没有追加付费生成。已采用 SFX 音频仍保留，
-只读解码检测到非静音信号（mean `-25.2 dB`、peak `-3.8 dB`），这不代替实际听到或木琴意图确认。
-完整重试听需新增 3 次 TTS POST 与 1 次 SFX batch POST，待所有者准备试听后单独发起。
-反馈前只记录本地实现/技术复验 PASSED，不记录 T9 完整闭合 PASSED。
+首次 TTS 被错过及过早切换 SFX 的流程缺口保留在台账；第二轮已在所有者明确就位后逐类播放并先后
+取得反馈。临时候选随后由正常生命周期清理；既有采用音频保留，WorkBuddy 原声音包与 Codex 界面
+作用域均恢复，重启读回通过。
 macOS 12–13、Intel、universal/Developer ID、公证及正式分发未验证；不声明生产就绪。
 未 push、创建 PR、合并、发布或修改 Issue；main production 仍为 policy nil/四 profiles。
