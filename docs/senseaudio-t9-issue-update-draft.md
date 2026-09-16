@@ -41,6 +41,8 @@ policy 注入；NON-DISTRIBUTION 仅在外部归档名称/台账标记。
 ## Remaining
 
 六个新候选已依次触发播放，实际出声与 TTS/木琴意图匹配仍等待所有者反馈；播放状态不代替听感。
+所有者随后对 TTS 试听回复“没”，含义尚待明确。当前系统输出静音的只读观察不能回溯凌晨状态。
+TTS 临时候选已在切换 SFX 时清理；本次没有追加付费生成，已采用 SFX 音频仍保留。
 反馈前只记录本地实现/技术复验 PASSED，不记录 T9 完整闭合 PASSED。
 macOS 12–13、Intel、universal/Developer ID、公证及正式分发未验证；不声明生产就绪。
 未 push、创建 PR、合并、发布或修改 Issue；main production 仍为 policy nil/四 profiles。
