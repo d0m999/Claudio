@@ -1,18 +1,151 @@
 # TODOS
 
-> **台账清理（2026-08-22，基于当前工作树）**
+> **台账清理（2026-09-16，基于 `main` 9f363a4）**
 >
-> - 已删除标题带 `✅`、明确标为「已解决 / 已被替代 / 设计否决」以及 `Completed` 下的条目。
-> - 未标记且没有明确关闭说明的条目继续视为开放项。
+> - 已对照当前生产 composition、源码、测试与提交历史，删除已解决、已被替代和只描述旧版非生产 UI 的条目。
+> - 未标记且仍能在当前生产路径或待验收边界中复现的条目继续视为开放项。
 > - 「源码 / harness 已通过」不等于 native SwiftUI、VoiceOver、真实 release 下载路径或正式验收；人工验收项继续保留。
-> - 本文件仅保留待执行项；人工和外部发布验收仍是独立状态。
+> - 本文件保留原排期编号及逐项执行证据；已通过自动验收的项目与仍开放的人工、外部验收分开记录。
+
+## 开发优先级（2026-09-16）
+
+原排期共 **35 项：P1 6 项、P2 17 项、P3 12 项**。P1 六项的实现与仓库自动验收已完成；
+P1-06 的真实焦点行为仍按 P2-10 做原生验收。P2 当前有 9 项完成仓库自动验收、8 项仍开放。
+P1/P2/P3 是原执行优先级；
+历史评审中的缺陷等级保留在原文，不与本轮排期混用。正文仍按领域归档，下面的索引是执行入口；
+`TD-01` 至 `TD-35` 为本轮按原清单顺序分配的稳定引用编号，不随优先级变化重排。
+
+| 优先级 | 数量 | 安排原则 |
+|---|---:|---|
+| P1 | 6 | 六项已实现并有自动回归；面板真实焦点行为继续由 P2-10 验收。 |
+| P2 | 17 | P1 后推进：写盘与进程加固、核心回归缺口、原生及真实发布路径验收。 |
+| P3 | 12 | 后续评估：潜伏形状、低收益整理、长期政策、新能力与条件触发的架构路线。 |
+
+同级按表内顺序推进，硬依赖优先；没有依赖的任务可独立安排。条件尚未满足的验收项继续保留，
+不阻塞其他可执行项。排期完成不代表代码修复或验收完成；每项开工先复现，再按对应合同验收。
+P1 包含现有面板的 UI/交互修复；mixed 是 P3 新功能，NSPanel 是 P3 条件路线。
+
+**P1 · 已实现与自动验收（6 项）**
+
+| 顺序 | 原条目 | 当前状态与证据 |
+|---|---|---|
+| P1-01 | [TD-20 · `currentExecutablePath` 裸命令路径解析](#todo-20) | `6617b5d` 改用真实进程映像路径；`SetupSuite` 覆盖裸命令、链接、长路径和查询失败。自动验收完成。 |
+| P1-02 | [TD-05 · `FileWriteWatch` 两处 fail-open](#todo-05) | `6617b5d` 将轮询失败显式报告，并观测悬空链接的目标目录；`OnboardingActionsSuite` 有故障与写入正向对照。自动验收完成。 |
+| P1-03 | [TD-02 · `loadPanelConfig` 三次独立读取](#todo-02) | `6617b5d` 统一为单次有界快照；`PanelConfigSuite` 断言一次刷新只读一次。自动验收完成。 |
+| P1-04 | [TD-33 · config 缺失时遗漏父目录权限探测](#todo-33) | `6617b5d` 对缺失配置检查父目录链；`ConfigMutationSuite` 同时核对 doctor 与写路径。自动验收完成。 |
+| P1-05 | [TD-30 · panel presentation 不能由 harness import](#todo-30) | `6617b5d` 提取 `ClaudioPanelPresentation` 并在 GUI harness 注册 compiled suites。自动验收完成；原生 owner 保留。 |
+| P1-06 | [TD-34 · 面板 config 失败态、焦点与错误寿命](#todo-34) | `6617b5d` 加入失败去重、焦点协调与错误寿命回归。代码与自动验收完成；原生焦点和 VoiceOver 仍属 P2-10。 |
+
+以上自动证据不等于原生键盘、焦点或 VoiceOver 验收；详细条目的问题描述保留为修复前背景。
+
+P1 修复提交为 `6617b5d`。在当前 `470e585` 上复核：GUI harness 9985/9985 通过；
+helper 首轮 3455/3456，唯一失败为 `HostIntegrationModelSuite.swift:68` 的 NVM shim 探测，
+顺序复跑 3456/3456 通过。保留首轮失败记录，不把复跑通过写成首轮全绿。
+
+**P2 · 随后加固与验收（17 项）**
+
+| 顺序 | 原条目 | 排期理由 / 执行边界 |
+|---|---|---|
+| P2-01 | [TD-04 · 推广真正的“不写盘”事件观测](#todo-04) | 在 P1-02 完成后逐路径增加正向对照，补齐数据保护回归。 |
+| P2-02 | [TD-25 · manifest / import / config 的 symlink 与 TOCTOU](#todo-25) | 先保护 config 读写同一目标，再处理目录级竞态；与下一项共用设计。 |
+| P2-03 | [TD-07 · 外部删除的 config 被原子写复活](#todo-07) | 与 P2-02 同批处理 config 写入边界，单独验收删除竞争。 |
+| P2-04 | [TD-06 · install 备份先于乐观并发检查](#todo-06) | 收紧备份时机；保留原件与失败语义，不能只改注释算完成。 |
+| P2-05 | [TD-03 · `play` 与配置写互不阻塞的行为测试](#todo-03) | 先提供隔离的路径锚点，再验证生产默认锁之间的关系。 |
+| P2-06 | [TD-19 · `selected_pack` 控制字符与 ANSI 输出](#todo-19) | 小范围提高 setup / doctor 输出可信度，统一转义与长度限制。 |
+| P2-07 | [TD-22 · `SystemCommandRunner` 超时后子进程回收](#todo-22) | 增加有界等待和强制回收，真实验证忽略 SIGTERM 的进程。 |
+| P2-08 | [TD-28 · `ManifestBindError` 缺少恢复指引](#todo-28) | 为损坏用户包提供可执行出路；恢复操作仍须保留用户资产。 |
+| P2-09 | [TD-21 · 升级后 legacy 坏 hook 与新条目并存](#todo-21) | 有自愈路径，但迁移会改变幂等合同；独立设计并保护第三方 hooks。 |
+| P2-10 | [TD-26 · 默认关闭 FKA 的键盘焦点复验](#todo-26) | P1 面板修复后做原生验收；失败再决定焦点实现。 |
+| P2-11 | [TD-29 · 试听与真实播放的音量曲线验证](#todo-29) | 主音量已存在，可直接做真实音频 A/B；先验证再决定是否改实现。 |
+| P2-12 | [TD-17 · T3 fixture 承重条件的可执行验证](#todo-17) | 先实跑存活变异，再加针对性断言，为后续扫描器调整保留判别力。 |
+| P2-13 | [TD-08 · T3 跨文件调度绕过并发检查](#todo-08) | T3 核心加固：围住完整同步事务，避免只扩充 token 黑名单。 |
+| P2-14 | [TD-10 · T3 非 func 写入点不可见](#todo-10) | 与 P2-13 统一设计声明归属和隔离模型，再落地实现。 |
+| P2-15 | [TD-09 · T3 private 放行可经闭包导出](#todo-09) | 依赖 P2-14 的非 func 模型，同批修复并独立验证逃逸形状。 |
+| P2-16 | [TD-12 · T3 裸 regex 未建模](#todo-12) | 共享词法模型的缺口；为后续嵌套形状识别提供前提。 |
+| P2-17 | [TD-18 · 真实下载后嵌套 helper 的 quarantine 验收](#todo-18) | 外部验收项；有真实 tag 下载候选时执行，不因排期自行发版。 |
+
+**P2 执行记录（2026-09-16）**
+
+实现提交为 `f74ad9e`；此后的 P2-01 测试补充仍在工作树。基线 `6617b5d` 的复跑结果：helper 3299/3299、GUI 9912/9912；此前记录的 GUI
+`AICueHTTPTransportSuite.swift:435` 失败本轮未复现。以下“代码完成”只表示本地实现及对应
+自动断言通过，不代表原生交互、真实音频、下载路径或正式验收。
+
+| 项目 | 本轮代码 / 自动证据 | 尚需验收或实现 |
+|---|---|---|
+| P2-01 / TD-04 | helper 复制修复后的 `FileWriteWatch`；多种畸形 config 的写入拒绝、只读探测、setup 拒写及 GUI manifest 拒写有 `.untouched` 事件断言与同路径正向对照。提交后又补齐三条 setup 的 settings/config 断言，隔离同目录合法产物；helper 3447/3447 通过。 | 仓库自动验收完成；三条补充测试随本轮提交。 |
+| P2-02 / TD-25 | `AnchoredFileIO` 固定目录 fd、保留 config symlink，并供 config、manifest、导入使用；链接改指向、父目录换位及导入冲突有回归。 | 外部写者的任意时序 CAS 与原生操作未获完整证明。 |
+| P2-03 / TD-07 | 已有 config 用 `RENAME_SWAP`，初建用排他发布；读后删除、首次创建竞争、交换后外部替换有回归。 | 这是目标身份和删除保护，不宣称完整外部写者 CAS。 |
+| P2-04 / TD-06 | 首次并发重验移至备份前，发布前保留第二次重验；晚期删除及现有备份合同回归通过。 | 真实跨进程短窗口仍需外部压力验证。 |
+| P2-05 / TD-03 | 隔离子进程走生产默认锁路径，覆盖异锁不阻塞与同锁争用。 | 原生播放声音未由锁测试证明。 |
+| P2-06 / TD-19 | setup、doctor、CLI `use` 共用终端安全显示；控制符、双向控制符与长度边界有回归。 | 无。 |
+| P2-07 / TD-22 | 单调时钟、TERM/KILL 有界回收及独立清理失败结果；忽略 TERM 的真实子进程回归通过。 | 系统级极端回收失败只经结果接口覆盖。 |
+| P2-08 / TD-28 | 声音包编辑器给出原位置、Finder、保留原件的修复步骤和重试；动作捕获失败时的包身份，切包失效有 compiled 回归。 | 原生布局、键盘、VoiceOver 尚未验收。 |
+| P2-09 / TD-21 | 精确旧 hook 迁移、同组去重、第三方及未知字段保留、再次 install 幂等有回归。疑似旧命令身份不明时拒绝混装、保留原文件，并在 install 错误中提示人工检查；只读状态不报告已安装。 | 真实 Claude Code 设置界面的错误呈现与旧配置迁移仍需外部验收。 |
+| P2-10 / TD-26 | 只读确认本机 `AppleKeyboardUIMode=0`。 | 默认关闭 FKA 的完整原生焦点与 VoiceOver 路径未跑，保持开放。 |
+| P2-11 / TD-29 | 记录本机输出条件。 | 缺同设备同音频三轮 A/B 录制，无法判定 ≤1 dB 或决定是否更换试听适配器。 |
+| P2-12 / TD-17 | 补了路径、污染扫描与检查数见证。 | 九处原始削弱及对应变异尚未逐项实跑，保持开放。 |
+| P2-13～P2-15 / TD-08、TD-10、TD-09 | 锁内同步事务保留；独立进程锁争用和成功返回即读回通过。有限调用图加入跨文件同步调用、非 `func` 原语调用拒绝、公开闭包导出私有写者拒绝及纯私有辅助函数正向对照。 | 模型尚未覆盖任意调用形状、间接文件 I/O 或完整声明归属；九处 fixture 变异也未逐项实跑，三项继续开放。 |
+| P2-16 / TD-12 | 两包共享扫描区区分注释、除法、裸 regex；不确定形状进入 `unmodeledConstructs`，回归通过。 | 有限词法模型不构成任意 Swift 程序证明。 |
+| P2-17 / TD-18 | 文档改为签名、公证 DMG 的四阶段下载验收步骤。 | 没有适用的已授权下载候选，quarantine、签名和执行的真实下载证据仍缺。 |
+
+本轮自动门禁：helper 3435/3435，GUI 9959/9959；GUI Debug 与 Release 产品构建通过；
+`scripts/dev-bundle.sh` 的本机 arm64 ad-hoc bundle 签名及体积门禁通过（正规文件总计
+9,481,303 B / 11,250,000 B）；本地化 catalog 可解析，`git diff --check` 通过，
+相对 `6617b5d` 的严格 swift-format 诊断没有新增。提交前，固定 `BASE_SHA` 的
+`verify-settings-experience.sh` 因工作树非干净 HEAD 按脚本合同拒绝运行；组成门禁已逐项
+运行，当时不能称为通过了官方集成 gate。上述自动证据均不代表原生/外部验收。
+
+提交后的干净检出已运行 `bash scripts/verify-settings-experience.sh 6617b5d` 并通过：
+helper 3435/3435、GUI 9959/9959、两种配置的 settings target / GUI product 构建、
+本机 arm64 ad-hoc bundle 签名和体积门禁均通过；严格格式诊断没有新增。
+此结果绑定 `f74ad9e`，不包含随后工作树中的 P2-01 测试补充；后者另由 helper 3447/3447 验证。
+
+**P2 状态复核：**P2-01～P2-07、P2-09、P2-16 已完成各自的仓库自动验收（9 项）。
+P2-08、P2-10～P2-15、P2-17 仍开放（8 项）：分别缺原生恢复体验、默认关闭 FKA 焦点、
+真实音量 A/B、九处 fixture 变异，以及 T3 声明/引用与逃逸模型的剩余实现和独立验收、
+正式下载候选的 quarantine 证据。`f74ad9e` 不能被称为 17 项全部闭合。
+
+**P3 · 后续与条件触发（12 项）**
+
+| 顺序 | 原条目 | 排期理由 / 执行边界 |
+|---|---|---|
+| P3-01 | [TD-11 · T3 自证的 root 差异](#todo-11) | 成本高的自证增强；核心围栏加固后再评估真实 checkout 变异 smoke。 |
+| P3-02 | [TD-16 · T3 pathPrefix 与 subpath 联合差异](#todo-16) | 与 P3-01 同根因、同批评估，避免另建一套自证机制。 |
+| P3-03 | [TD-13 · T3 运算符与 Unicode 函数名假红](#todo-13) | 当前台账记录为未使用形状；出现实际阻塞时提前。 |
+| P3-04 | [TD-14 · T3 合法私有 / 嵌套形状假红](#todo-14) | 先完成 P2-16；引入相关形状时再扩展，不能以放宽检查制造假绿。 |
+| P3-05 | [TD-15 · T3 形状表与诊断文本未同源](#todo-15) | 可维护性改进，可随同区域修改处理，不单独抢占核心修复。 |
+| P3-06 | [TD-32 · AtomicWrite 围栏词汇表与 SwiftSyntax 路线](#todo-32) | 先比较依赖成本与可证明边界；不把引入 AST 等同于完整写入证明。 |
+| P3-07 | [TD-31 · 断电持久化分级策略](#todo-31) | 先明确产品保证和成本；当前不能承诺完整掉电安全。 |
+| P3-08 | [TD-23 · claude-version 超时与 env 路径常量](#todo-23) | 纯重复常量整理，随相关模块修改处理。 |
+| P3-09 | [TD-24 · Setup 点前缀的 Unicode 判定粒度](#todo-24) | 下游已有拒绝保护，低收益一致性修正。 |
+| P3-10 | [TD-35 · `forkPack` 副本名称措辞](#todo-35) | 纯产品文案决策，定稿后同步代码与断言。 |
+| P3-11 | [TD-01 · SenseAudio mixed 新能力](#todo-01) | 独立产品里程碑；先确定合同与范围，再做单独授权的付费及听感验收。 |
+| P3-12 | [TD-27 · NSPopover 改 NSPanel 的条件路线](#todo-27) | 有真实丢字反馈再启动，先做 AX 探针并确认窗口设计。 |
+
+**依赖与批次约束**
+
+- P1-02 → P2-01：先修 `FileWriteWatch`，再复制和推广；每个“不写盘”断言保留正向对照。
+- P1-03 / P1-04 共享配置探测上下文；P1-05 提供面板 compiled 接缝后，完成 P1-06 的呈现回归。
+  面板接缝只覆盖所需 presentation，不把整个 native app 抽离当作缺陷修复前置。
+- P2-02 / P2-03 统一 config 写入设计，分别关闭 symlink、外部删除和目录竞争的验收项。
+  config 的“读目标、写链接”不需要提权即可发生，不再把“未来提权”作为整条任务的启动条件。
+- P2-12 至 P2-16 作为同一批 T3 工程设计，保留五项独立验收；先测现有变异与误报，再决定
+  深化同步写接口或调整扫描模型。P3 的 SwiftSyntax 选型可一并评估，但不作为默认前置或已定方案。
+- FKA、真实音量与 quarantine 分别记录原生/音频/发布证据；自动 harness 不替代这些验收。
+  首个适用的真实 release 下载候选出现时执行 P2-17；当前只排期，不新建 tag 或发布。
+
+**本轮校正的依赖事实**：`.github/workflows/ci.yml` 已配置 helper 与 GUI harness，T3 的 `root`
+自证不再依赖一项已删除的“CI 不跑测试”任务；待补的是对应端到端变异验证。主音量已接入生产面板，
+音量曲线任务剩余的是实际音频验证。以上来自当前源码/配置核对，不表示本轮运行过 CI 或人工验收。
 
 ## AI 提示音
 
+<a id="todo-01"></a>
+
 ### SenseAudio `senseaudio-a1` mixed 生成路线留待独立设计与验收
 
-**What:** 当前 `senseaudio-cn` 只计划用 `sensenova-tts-2.0` 处理 `speech`，并用
-`senseaudio-sfx-1.0-260626` 处理 `animal` / `soundEffect`；`.mixed` 在读取 Keychain 或发网络前明确
+**What:** 当前 `senseaudio-cn` 用 `sensenova-tts-2.0` 处理 `speech`，并用
+`senseaudio-sfx-1.0-260626` 处理 `animal` / `soundEffect`；`.mixed` 在读取凭据或发网络前明确
 fail closed。不要把一段同时含台词和背景声的描述拆成两次请求后本地拼接，也不要把 TTS 或 SFX
 单路线伪装成 mixed。
 
@@ -26,12 +159,16 @@ endpoint/model/输出格式、费用、留存、候选集合语义和真实听�
 fallback。
 
 **Effort:** L
-**Priority:** P3
+**Priority:** P3（P3-11）
 **Depends on:** `senseaudio-cn` TTS + SFX 完整合同、ADR 0014 固定资源 policy 与真实 Provider 验收
 
 ## Ship / CI
 
+<a id="todo-02"></a>
+
 ### `loadPanelConfig` 每次调用把 config.json 独立读三遍 —— 文档写的「一次读 + 一次目录 stat」和实现对不上
+
+**状态（2026-09-16）：**已由 `6617b5d` 修复并有单次快照的 compiled 回归；下文是修复前问题描述。
 
 **What:** D23 把面板的 config 判定拆成「写」「读」两条正交轴（`probeConfigRewritable` + `packSelection`），
 再加上最后 `loadClaudioConfig` 解码一次 —— `loadPanelConfig` 在 happy path 上因此对同一个 `configFile` 各自
@@ -51,8 +188,10 @@ fallback。
 预读 `Data` 的内部重载，`loadPanelConfig` 只在最外层读一次文件、把字节传给三个判定复用。
 
 **Effort:** S
-**Priority:** P2（性能影响可忽略，正确性影响自限且无数据丢失；但文档与实现的说法已经不一致）
+**Priority:** P1（P1-03；性能影响可忽略，正确性影响自限且无数据丢失；但文档与实现的说法已经不一致）
 **Depends on:** None
+
+<a id="todo-03"></a>
 
 ### 剩余的行为级缺口：`play` 与设置写之间的「互不阻塞」，仍然只有人工读码背书
 
@@ -72,8 +211,10 @@ fallback。
 **回归时没有灯会灭**。
 
 **Effort:** M
-**Priority:** P2
+**Priority:** P2（P2-05）
 **Depends on:** `ClaudioPaths.root` 需要先获得可覆盖锚点（独立 PR，不要混进阶段 B 主音量滑块）
+
+<a id="todo-04"></a>
 
 ### 全仓还有十几处「一个字节都不写」，背书它们的仍然只是**字节比较** —— 而字节比较看不见「写了又擦回去」
 
@@ -105,10 +246,14 @@ claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所�
 在那条路径上真的会响 —— 一个观测不到写的观测器，会把每一条「没被碰过」变成恒真，那正是它要杀的病升了一层。
 
 **Effort:** M（每条断言都要配一次定向变异验证，不能批量替换了事）
-**Priority:** P2
-**Depends on:** None（工具已就绪）
+**Priority:** P2（P2-01）
+**Depends on:** [TD-05：`FileWriteWatch` fail-open 修复](#todo-05)；完成后才能复制进 helper 或推广断言
+
+<a id="todo-05"></a>
 
 ### `FileWriteWatch` 自己有两处 fail-open —— 一个观测不到写的观测器，会把每一条「没被碰过」变回恒真
+
+**状态（2026-09-16）：**已由 `6617b5d` 修复；轮询故障和悬空链接目标变化均有正向对照。
 
 **What:** `/codex review 96ed71c` 的两条 P2，都打在 `FileWriteWatch`（`gui/Tests/…/TestSupport.swift`）身上 ——
 即上一条 TODO 指望「抄一份进 helper」的那个工具。**抄之前必须先修，否则是把两个洞抄成四个。**
@@ -137,8 +282,10 @@ claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所�
 链接本身」两个快照都拍。
 
 **Effort:** ① S（三行 + 一次定向变异）/ ② M（新对照 + 两轮台账）
-**Priority:** P2（不阻断本分支；**但阻断「把 FileWriteWatch 抄进 helper」那条 TODO** —— 别把洞抄一遍）
+**Priority:** P1（P1-02；不阻断本分支；**但阻断「把 FileWriteWatch 抄进 helper」那条 TODO** —— 别把洞抄一遍）
 **Depends on:** None
+
+<a id="todo-06"></a>
 
 ### 一次性备份写在乐观闸门**之前** —— 一次 `.concurrentModification` 中止会留下一份 install 从没写过的永久备份
 
@@ -160,8 +307,10 @@ claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所�
 止损 —— 但**别只做后者然后当成修好了**。
 
 **Effort:** S（改注释）/ M（拆闸门）
-**Priority:** P3
+**Priority:** P2（P2-04）
 **Depends on:** None
+
+<a id="todo-07"></a>
 
 ### `updateConfigJSON` 的残余 TOCTOU：读完之后被外部删掉的 config，会被 `.atomic` 写**复活**（且报 `.success`）
 
@@ -174,65 +323,24 @@ claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所�
 **Context:** 2026-07-13 `/codex review 573336d`。真修 = 与「GUI 写/读路径的同用户 symlink TOCTOU」那条的 config 侧加固**同一处**：写前解析 symlink + 乐观并发重读（读到的字节 vs 写之前重读的字节，不一致就 `.concurrentModification` 中止 —— `SettingsInstaller.swift:619` 对 `settings.json` 已经是这个形状，config 侧照抄即可）。三条并作一处改。
 
 **Effort:** M
-**Priority:** P3（需要一个不拿 config.lock 的外部写者，恰好落进读→rename 那几微秒；且后果是「旧 config 复活」，不是数据损坏）
+**Priority:** P2（P2-03；需要一个不拿 config.lock 的外部写者，恰好落进读→rename 那几微秒；且后果是「旧 config 复活」，不是数据损坏）
 **Depends on:** None
 
-### T3 判定腿之二（并发黑名单）仍是**白名单探针** —— 跨文件调度这条逃逸是可编译的真代码
+<a id="todo-08"></a>
 
-> **更新（2026-07-20 · `/codex review 48cbc07`）：下面的 ① 已修，② 未修，本条现在只讲 ②。**
-> ① 的修法就是本条当年写下的那一条（「别继续扩正则打地鼠，反过来把『认不出』变成红」）：新增
-> `allFuncDeclarationNames` 当标尺、`fileLocalFuncNames` 当白名单第二格，
-> `unrecognizedFuncDeclarations` 按**计数**做差 —— `func` 声明总数 ≠ 两台识别器认出来的数之和，
-> 差额就是漏网的，逐个变红。实测：`internal`（不写修饰符）/ `package` / `open` /
-> `public extension` 里省略修饰符的成员，四种形态各一条 fixture 全部真的开火；真仓库
-> `ManifestBinding.swift` 那个 `private func resolveUserPackDirectory` 不假红（白名单第二格接住）。
-> 变异台账 5/5 被逮，且按断言原文归因确认红是这三条新正控打出来的（`✗ 3 of 2174`），不是连坐。
-> **注意这只关掉了「修饰符形态」这一根轴。** 判定腿仍然只看**单个文件**，② 原封不动。
+### T3 判定腿之二（并发黑名单）仍是**白名单探针** —— 跨文件调度可绕过锁作用域检查
 
-**What:** `SourceScannerSuite.auditManifestConcurrencyFence` 的**枚举**那一层是围栏（认不出 ⇒ 红：
-symlink、读不到、属性判不出、子树枚举出错，全部 fail-closed，且各有自证），**@MainActor 腿**自
-2026-07-20 起在「声明形态」这根轴上也是围栏了（见上面那条更新）。但**并发腿**仍不是：
+**What:** `SourceScannerSuite.auditManifestConcurrencyFence` 只把含 `mutateManifestJSON` 字样的文件纳入并发 token 检查。若以后把真正的异步调度或裸文件写移到另一个 helper 文件，原文件只保留一次看似同步的 helper 调用，那么原文件没有 `Task` / `await` / `DispatchQueue`，helper 文件又不含原语名，两边都能静默通过。
 
-1. ~~**@MainActor 腿只查「正则认得出的 `public func`」。**~~ ✅ 2026-07-20 已修（见上）。
+**Why:** 当前生产实现已有 `packs.lock`，并把 `performManifestMutation` 完整放在锁闭包内。剩余风险是一次重构把真实 I/O 安排到锁闭包返回之后，使锁只保护“安排任务”而不保护读改写。现有单文件白名单无法证明这件事没有发生。
 
-2. **并发腿只扫「包含原语名的那一个文件」。** 纳入判据是单文件文本 `contains("mutateManifestJSON")`，
-   黑名单随后只扫那一个文件。于是把 `Task` 挪进**另一个文件**就整条绕开：
-
-   ```swift
-   // BackgroundExecutor.swift —— 不含 mutateManifestJSON，压根不被纳入
-   func launchManifestWork(_ op: @escaping @Sendable () async -> Void) { _ = Task.detached(operation: op) }
-   ```
-   ```swift
-   // ManifestBinding.swift —— 没有 async / Task / DispatchQueue 任何一个黑名单 token
-   @MainActor public func deferredWriter(at dir: URL) -> Result<Void, ManifestBindError> {
-       launchManifestWork { _ = await mutateManifestJSON(at: dir) { _ in } }
-       return .success(())
-   }
-   ```
-   两个文件都编译进 app，真正的写被 detached task 调度。`await` **不在**黑名单里，所以两个文件都清白。
-
-**Why:** `manifest.json` 今天零锁，并发安全**全靠**「全同步 + 全在 @MainActor」这一条不变式，而这条
-源码绊线是它唯一的自动守卫。②「把耗时的写挪到后台去，别卡主线程」是重构时最自然的念头之一，
-它会让读-改-写交错、丢更新，**且零运行时报错**。
-
-**要害不在漏，在措辞。** 文件里 `bannedConcurrencyTokens` 头上那段 doc comment **早就诚实写着**
-「两条腿都是探针，各自覆盖一组已知形态，合起来仍有缺口」。可 suite 名、commit headline、以及这几轮
-review 的结论全都叫它「**内容围栏**」，而围栏的判据是「认不出 ⇒ 红」。**措辞比覆盖范围大** —— memory 里
-`fence-polarity-and-self-recurrence` 记着的那条，这是第八次应验，而且照例复发在「自称已经把探针升成
-围栏」的那一刀上。① 修掉之后这句话**依然成立**：@MainActor 腿在「声明形态」这根轴上是围栏了，
-并发腿在**任何**轴上都还不是。别把「① 已修」读成「围栏补齐了」。
-
-**Context:** 2026-07-20 `/codex review 36fce57` 的 P1 之二，`/codex review 48cbc07` 复核后仍在。
-同一轮的 P1 之一（@MainActor 腿）已修，见上面那条更新。
-
-**可能的修法**（未定）：纳入判据从「文件含原语名」升成**调用图**（谁调了原语、谁调了调原语的人），
-或者退一步——把黑名单扫描范围从「含原语的文件」放宽到**整个 target**，代价是要先量一次假红。
-`await` 无论如何该进黑名单（它今天不在，是个独立的小漏），但**单加 `await` 是创可贴**：它会让任何
-含 `await` 的文件假红，而假红的守卫会被下一个人删掉。
+**修复方式:** 将并发/写盘检查扩到整个 target，或把“锁闭包内执行完整同步事务”做成更深的不可异步接口并补行为级竞争测试。只往 token 清单里加 `await` 不能解决跨文件调度。
 
 **Effort:** M
-**Priority:** P2
+**Priority:** P2（P2-13）
 **Depends on:** None
+
+<a id="todo-09"></a>
 
 ### T3 修饰符白名单放行 `private`，靠的是一条**被实测证伪**的前提
 
@@ -261,8 +369,10 @@ fixture 产出 **0** 条 finding。
 单独修这一条不划算。
 
 **Effort:** M（与「只数 `func`」合并修）
-**Priority:** P2
+**Priority:** P2（P2-15）
 **Depends on:** 「T3 判定腿只数 `func`」
+
+<a id="todo-10"></a>
 
 ### T3 判定腿只数 `func` —— 计算属性 / subscript / init 里的写入点，四条腿一条都看不见
 
@@ -301,8 +411,10 @@ public var probeTrigger: Int { mutateManifestJSON(); return 1 }   // ← 计算�
 （见上一条 ②），顺带对**含原语的那几行**做一次「它落在哪个声明里」的定位，认不出归属 ⇒ 红。
 
 **Effort:** L
-**Priority:** P2
+**Priority:** P2（P2-14）
 **Depends on:** None
+
+<a id="todo-11"></a>
 
 ### T3 围栏的自证闭不上 `root` 这根轴 —— 一句按扫描根判真假的谓词能让生产静默失效而自证全绿
 
@@ -332,12 +444,14 @@ for finding in audit.findings where !root.path.hasPrefix("/Users/d0m999/Desktop/
   两侧的 `root` 形状同构，`hasPrefix` 这类谓词失去分辨力。代价是围栏要多一层间接，而**多一层间接
   就是多一个可改的接缝**（这正是 `15ce131` → `36fce57` → `48cbc07` 三轮反复踩的那个坑）。
 - 或者接受它，转而在**别处**兜底：一条 CI 侧的「把一个已知脏写者塞进真仓库、断言 suite 真的红」的
-  端到端冒烟。这条不依赖任何注入，但需要 CI 真的跑测试 —— 而 CI 今天一次测试都不跑（见本文件
-  「CI 一次测试都不跑」那条），所以它**依赖那条先修**。
+  端到端冒烟。当前 `.github/workflows/ci.yml` 已配置两套 harness；剩余工作是在隔离 checkout 中
+  注入已知违规、确认生产入口确实报错，并清理注入。不能在共享工作树中污染真实源码。
 
 **Effort:** L
-**Priority:** P3
-**Depends on:** 「CI 一次测试都不跑」（若走第二条修法）
+**Priority:** P3（P3-01）
+**Depends on:** 现有 CI harness 已配置；若走端到端路线，需为本条补隔离 checkout 的变异 smoke
+
+<a id="todo-12"></a>
 
 ### T3 扫描器不建模**裸 regex 字面量** —— 它既不记账，又是唯一能把反引号贴到 `func` 左边的通道
 
@@ -365,7 +479,9 @@ let probe = /`func mutate/       // swiftc -swift-version 6 -typecheck rc=0
 别顺手做。
 
 **Effort:** M
-**Priority:** P3
+**Priority:** P2（P2-16）
+
+<a id="todo-13"></a>
 
 ### T3 判定腿对 `func ==` 与 Unicode 函数名是**恒假红**，而诊断给的补救对 `==` 物理上做不到
 
@@ -384,7 +500,9 @@ let probe = /`func mutate/       // swiftc -swift-version 6 -typecheck rc=0
 而不是判成认不出）。注意它必须与 `funcKeywordLexeme` 共用词素，否则就是本文件刚修掉的那个漂移。
 
 **Effort:** M
-**Priority:** P3
+**Priority:** P3（P3-03）
+
+<a id="todo-14"></a>
 
 ### T3「认不出 ⇒ 红」对四类合法私有形状恒红 —— 这是**主动选择**的代价，不是没看见
 
@@ -422,8 +540,10 @@ private struct Batch  { func apply()  { mutateManifestJSON() } }      // 及 enu
 
 **Effort:** L（要先给「括号嵌套」这根新读模型轴造正向对照 —— 现有 `unmodeledConstructs` 是**词法**
 台账，守不住它）
-**Priority:** P3
+**Priority:** P3（P3-04）
 **Depends on:** 「T3 扫描器不建模裸 regex 字面量」
+
+<a id="todo-15"></a>
 
 ### T3 形状表与诊断串**未同源** —— 覆盖锁只挡得住「删行」，挡不住「诊断长出新形状」
 
@@ -447,8 +567,10 @@ struct` 一行，是 `/codex review ae494b1` P2-2 打出来的，不是绊线响
 `fenceProofVectors` 的 `count == 2`（改为成员锁）—— 理由见下一条。
 
 **Effort:** M
-**Priority:** P3
+**Priority:** P3（P3-05）
 **Depends on:** 无
+
+<a id="todo-16"></a>
 
 ### T3 双向量自证收窄了 `pathPrefix` 那根轴，但**联合读取**那根还开着
 
@@ -469,8 +591,10 @@ struct` 一行，是 `/codex review ae494b1` P2-2 打出来的，不是绊线响
 且长在上一轮**为了修它而新加的那条腿**上。
 
 **Effort:** L
-**Priority:** P3
+**Priority:** P3（P3-02）
 **Depends on:** 「T3 围栏的自证闭不上 `root` 这根轴」（同一根因，同一批修法）
+
+<a id="todo-17"></a>
 
 ### T3 fixture 的**承重形状**普遍只由散文守着 —— ⑯ 已修，另有 8 处同形
 
@@ -508,134 +632,24 @@ struct` 一行，是 `/codex review ae494b1` P2-2 打出来的，不是绊线响
 写者挪到中间，**2269 条断言一条不红**。这是「措辞比覆盖范围大」的第十二次复发。
 
 **Effort:** M（九处各自独立，可逐条落；#1 #5 #7 最便宜）
-**Priority:** P2（#1 是全仓唯一杀得掉 M12 的 fixture，#9 能整条撤销 `abbf48e` 那一轮的修复）
+**Priority:** P2（P2-12；#1 是全仓唯一杀得掉 M12 的 fixture，#9 能整条撤销 `abbf48e` 那一轮的修复）
 **Depends on:** 无
 
-### 穷尽性断言丢了 `action` 这一维 —— 「断开失败」这一视觉态从没被任何一帧渲染过
+<a id="todo-18"></a>
 
-**What:** `PreviewFixtures.onboardingActionStateCoverage` 对 `.failed` 的分类是 `case .failed(_, _, let detail)` —— **`action` 被 `_` 丢掉了**，只按 detail 是否为 nil 分成 `failed.noDetail` / `failed.withDetail`。而 `onboardingActionStates` 里两条 `.failed` fixture **都是 `.takeOver`**。于是 `.failed(action: .disconnect, …)` 在整个 state gallery 里**一帧都没有**，而 `assertExhaustive()` 照样全绿 —— 因为两个标签都已被 takeOver 的 fixture 满足。
+### 签名、公证 DMG 下载后的嵌套 helper quarantine —— 未在真实下载路径上验证
 
-**Why:** 这与 `PreviewFixtures.swift` 自己的注释声称在防的那件事（「否则 T17 引入的两个新视觉态**从来不会被任何一帧渲染**，而 `assertExhaustive()` 仍然全绿」，即 `/ship` 收口记录 ③ 那次翻车）是**同一类错，在声称修好它的那个函数里**。
+**What:** T17 本地实测确认 `FileManager.copyItem` 会传播 `com.apple.quarantine`，`setup` 有剥离及回验路径。**没验的是**：从正式签名、公证 DMG 下载、复制安装并首次启动后，app 与 `Contents/Resources/bin/claudio` 的 quarantine 状态，以及 `setup` 后嵌套 helper 的实际执行结果。
 
-**Context:** 2026-07-12 T17c。修法：`case .failed(let action, _, let detail): "failed.\(onboardingDiskActionCoverage(action)).\(detail == nil ? "noDetail" : "withDetail")"`，同步扩 `PreviewFixturesSuite` 的 expected 名册、补两条 `.failed(action: .disconnect, …)` fixture。**注意依赖**：补了 fixture 也没用，除非画廊能渲染真正画那颗按钮的视图 —— 见下一条。
+**Why:** 本地 ad-hoc bundle 不能代替真实下载与 Gatekeeper 的传递行为；需要用下载候选绑定 app SHA、DMG checksum、系统版本和架构，并逐阶段记录 xattr、签名和实际执行。
 
-**Effort:** S
-**Priority:** P2
-**Depends on:** 「state gallery 给「断开连接」画的是一帧 app 里不存在的画面」
-
-### 「仍要打开」之后，bundle 里的嵌套 helper 还带不带 quarantine —— 未在真实下载路径上验证
-
-**What:** T17 实测确认了三件事：`FileManager.copyItem` 会传播 `com.apple.quarantine`；一个带章的二进制经 `/bin/sh -c` 执行会被 Gatekeeper SIGKILL（`exit=137`，零 stderr）；`setup` 现在会剥离 + 回头验证。**没验的是**：用户在「系统设置 > 隐私与安全性 > 仍要打开」里批准这个 app 之后，`Contents/Resources/bin/claudio` 上的章**是不是也跟着被清掉了**。
-
-**Why:** 如果是，那么 `setup` 的剥离在真实下载路径上是一次 no-op（无害）；如果不是，它就是唯一挡在「装完永远静音」前面的东西。**两种情况下修法都不变**（剥 + 验），所以这不阻断发布 —— 但它决定了这道闸门到底是保险丝还是主保险。真机复现需要一次真实的未签名 DMG 下载 + Gatekeeper 批准流程，本地 ad-hoc `.app` 造不出来（本地编译的二进制根本不带章）。
-
-**Context:** 2026-07-12 T17b。验法：打一个真 tag → 从 GitHub Releases 下载 DMG → 拖进 /Applications → 走「仍要打开」→ `xattr -lr /Applications/Claudio.app | grep quarantine`。
+**Context:** 2026-07-12 T17b 历史场景使用未签名包与「仍要打开」；正式验收按当前签名、公证 DMG 合同，等待首个已授权的适用下载候选，不为此创建 tag、触发 RC workflow 或发布。具体步骤见 `docs/distribution.md`。
 
 **Effort:** S
-**Priority:** P3
-**Depends on:** 首个真实 tag release
+**Priority:** P2（P2-17）
+**Depends on:** 首个已授权的签名、公证 DMG 下载候选
 
-### `claudio use` / `claudio install` 没有 T17e 那条不变式 —— 一条命令就能重新造出 setup 刚拒绝创造的那台哑机器
-
-**What:** T17e 让 `performFirstRunSetup` 立下了「报成功时 `selected_pack` 一定指向一个 `play` 解析得出来的包」
-这条不变式。但它**只是 `performFirstRunSetup` 这一个函数的不变式，不是系统的**：
-- `selectPack`（`claudio use <id>`，Use.swift:63）只校验 `resolvePackDirectory`，**不读 manifest** —— 于是
-  `claudio use <一个只有目录、没有 manifest 的残骸>` 会返回 `.success` 并打印「✓ 已切换到声音包」，而 `play`
-  从此每次都 `.notReady`。
-- `claudio install`（Subcommands.swift）直接调 `installClaudioHooks()`，**零校验**，成功就打印 ✓。用户被 setup
-  的失败拦下之后，最自然的下一条命令就是它。
-
-**Why:** 「注定是哑的安装不许报成功」这条纪律，只要有一扇门没装上，它就不是一条纪律，只是一个函数的局部性质。
-
-**Context:** 2026-07-12 T17e 对抗评审（bypass 镜头 + 完备性批评者独立命中）。本次刻意不做：`use` 加校验要新增
-`UseError` case（波及 UseSuite ＋ GUI 画廊），`install` 加校验会改动一条**文档里的一等命令**的契约（ENGINEERING.md
-契约表：「把 hook 写进 settings.json（幂等）」）—— 两者都该单独评审，不该混进一次 bugfix。
-GUI 侧的切包画廊只列**解析得出来**的包，所以主动线暂时安全；这个洞主要长在 Terminal 上。
-
-**可能的修法:** `selectPack` 在 `resolvePackDirectory` 之后追加一次 `loadPackManifest`（与 T17e 的
-`isUsablePack` 同源），失败返回新的 `UseError.manifestUnreadable`；`installClaudioHooks` 的入口加同一道判据
-（或至少让 `Install.run()` 先跑一次 `checkPackIntegrity`，坏管道时拒绝并给出与 setup 一字不差的那句话）。
-
-**Effort:** S（use）/ M（install，要动契约）
-**Priority:** P2
-**Depends on:** None
-
-### install **失败**时，CLI 与 GUI 都没有完整报告，而副作用已经落盘，且重试**永远不会**补发
-
-**What:** install 失败路径更糟，而且是**结构性**的：
-
-`SetupError`（`Setup.swift:221-275`）的每一个 case 只带 `reason: String` 或子错误 —— **没有任何字段能承载
-`[SalvagedPack]` / `PackSelectionOutcome`**。而 `performFirstRunSetup` 的副作用顺序是：复制二进制 → **搬走坏包**
-（`:403-431`，`moveItem` 到 `packs/.<id>.broken-<pid>` + `salvagedPacks.append`）→ 复制干净的内置包 → **写 config**
-（选包）→ **写 hooks**（`:551`，`installClaudioHooks`）。
-
-也就是说：**做主的那两个副作用，发生在可能失败的那一步之前。** 一旦最后一步失败（`.lockBusy` / `.notWritable` /
-`.malformedHooksSection` / `.concurrentModification` —— 后三个每次重跑都一字不差地失败），`:562` 就
-`return .failure(.installFailure(error))`，`salvagedPacks` 就地丢弃。CLI 只 `print("✗ \(error.description)")`
-（`Subcommands.swift:117`，那句带绝对路径的 ⚠ 只在 `printSetupSummary` 的成功分支）；GUI 只
-`actionState = .failed(...)`（`OnboardingViewModel.swift:344-346`）。
-
-**而且补不回来**：用户按提示「再点一次」，这一次 `isUsablePack(minimal-chime)` 已经为真（上一轮刚盖了一份干净的）
-→ `:392` 直接 `continue` → `salvagedPacks` 恒空 → **就算这次成功，告知也永远不会再生成**。
-
-净结果：用户的包目录（里面可能有他自己导入的音频）被搬进了一个**每一个界面都过滤掉**的点开头目录
-（`availablePackIDs` 与 `PackGallery` 都显式过滤 `.` 开头），而唯一一条载着 `movedTo` 绝对路径的消息被丢弃了。
-`SalvagedPack` 自己的文档（`Setup.swift:186-190`）写的是：「**现在它是 outcome 的一等公民**」——
-它只是**成功** outcome 的一等公民。
-
-**Why:** 缓解是真的：`moveItem` 一个文件都没删，`AudioImport` 也只复制不移动源文件，所以用户拖进来的原件通常
-还在 Desktop / Downloads。**但这只是把「丢数据」降级成「藏数据」**：菜单栏 app 的用户，Finder 默认不显示点目录，
-app 内每一个界面又都过滤它 —— 我们替他做了主，然后在唯一一次该开口的时候闭嘴了。
-
-⚠️ **这条不是锁分离引入的**：`.malformedHooksSection` / `.notWritable` / `.concurrentModification` 在 `main` 上
-就走得出同一条路。锁分离只是给它新增了一条 `.lockBusy` 触发方式。**别让一条 147 行的锁分离分支扛它。**
-
-**可能的修法:** 让 `SetupError` 带得动部分结果 —— `case installFailure(SettingsUpdateError, salvaged: [SalvagedPack],
-packSelection: PackSelectionOutcome)`；`OnboardingActionFailure` 跟着带上 notices；GUI 的 `.failed` 分支与 CLI 的
-`print("✗ …")` 都把那行 ⚠ + 绝对路径打出来。修复时需同时覆盖 CLI、GUI 以及跨重启可见性，不能只补一条即时提示。
-
-**Context:** 2026-07-13 生产代码 diff 的六路对抗 review（lock-semantics / assume-broken 两个镜头独立命中）。
-上一条 TODO 只覆盖了成功路径的 GUI 侧，失败路径**两边都没有** —— 而失败路径才是副作用真的会留在磁盘上的那条。
-
-**Effort:** M
-**Priority:** P1（用户损害面：可能藏掉他磁盘上唯一一份自导入音频，且不可补发）
-**Depends on:** None
-
-### `claudio` 可执行 target 的输出从来没有被测过一行 —— T17e 那两句 ⚠ 是产品语义，却住在测试够不到的地方
-
-**What:** `printSetupSummary` / `hooksOutcomeMessage` 住在 `helper/Sources/claudio/Subcommands.swift`（可执行
-target），而 `claudio-tests` 只依赖 `ClaudioCore`。于是 T17e 新增的两句 ⚠（「已替你选中 X」「已把你的包原样搬到 Y」）
-—— 也就是「替用户做主必须说出来」这条规矩的**唯一载体** —— **零测试覆盖**：把它们整段删掉，1025 checks 照样全绿。
-
-**Why:** 这与 `ViewWiringSuite` 头部自陈的那个结构问题同源（`ClaudioGUI` 是 executableTarget，harness 一行都跑不到）。
-一条产品承诺，如果没有任何断言钉着它，它离被顺手删掉只有一次重构的距离。
-
-**可能的修法:** 把 `printSetupSummary` 的**纯字符串部分**下沉进 `ClaudioCore`（例如
-`setupSummaryLines(_ outcome: SetupOutcome) -> [String]`），`Subcommands` 只负责 `print`。然后表驱动地钉住每一种
-outcome 该出现哪几行（尤其是那两个 ⚠ 必须出现、且必须带绝对路径）。
-
-**Effort:** S
-**Priority:** P2
-**Depends on:** None
-
-### `doctor` 会把两类「一声都发不出来」的包报成 ✓ 完整
-
-**What:** 两个各自独立的假阳性：
-① **manifest 的事件键全拼错**（第三方包写了 `"on_stop"` 而不是 `"stop"`）→ `checkPackIntegrity` 的 `missingFiles`
-   为空 → `.complete` → doctor 打印「✓ 声音包完整」，而四个 v1 事件一个都没映射上，**每个事件都静默无声**。
-② **0 字节 / 根本不是音频的文件**（见上一条「0 字节」）。
-
-**Why:** doctor 是「静默失败必须有诊断轨迹」（决议 6）的唯一出口。它自己失明的地方，就是用户永远查不到的地方。
-
-**Context:** 2026-07-12 T17e 第二轮对抗评审（bypass 镜头）。T17e 的判据只走到「manifest 读得出来」，够不到这一层。
-
-**可能的修法:** `checkPackIntegrity` 只认 `Event.allCases.map(\.manifestKey)` 这四个键；四个都没映射上时返回一个新的
-`.noMappedEvents(packID:)`，doctor 渲染成 ⚠（**仍是 warning，不硬失败** —— 包内容的缺口不该阻断安装，见 T17e
-「管道 vs 内容」那条线）。
-
-**Effort:** S
-**Priority:** P2
-**Depends on:** None
+<a id="todo-19"></a>
 
 ### `selected_pack` 里的控制字符 / ANSI 转义会被原样打进终端
 
@@ -653,45 +667,14 @@ T17e 只是**新增了一个打印点**。
 setup 与 doctor 的所有 packID 打印点统一走它。
 
 **Effort:** S
-**Priority:** P3
+**Priority:** P2（P2-06）
 **Depends on:** None
 
-### 一个 0 字节 / 根本不是音频的文件，会被判成「这个事件有声音」
-
-**What:** `doctor` / `play` / GUI 覆盖度三边共用的判据是 `regularFileExists`（`stat` 判 `S_IFREG`）——它只问「是不是
-一个正规文件」，不问「里面有没有东西」。一个 0 字节的 `stop.mp3`（下载中断、Git-LFS 指针、`touch` 出来的占位）
-会让 `doctor` 打印「✓ 声音包完整」、面板把这一行画成 `.present`（甚至给出试听按钮）、`play` 兴高采烈地 spawn
-`afplay` —— 然后**什么声音都没有**。afplay 的失败退出码没人接（fire-and-forget），`claudio.log` 一个字都不会写。
-
-**Why:** 这是「装完是哑的」这一族里**最后一个零信号的形状**：四个界面（setup ✓、doctor ✓、面板 present、日志空）
-全部说「好着呢」。T17e 的判据只走到「manifest 读得出来」，够不到这一层。
-
-**Context:** 2026-07-12 T17e 对抗评审（bypass 镜头）。本次不做：修法要**同时**改三处同源判据
-（`Doctor.swift` 的 missingFiles、`Play.swift` 的 `resolveAudioFile`、`gui/CoverageState.swift` 的 `coverageState`），
-少改一处就会制造出这三个文件的注释里反复警告过的「两套判据」。
-
-**可能的修法:** 在 `SafeFileRead.swift` 加一个 `playableFileExists(at:) = regularFileExists && st_size > 0`，三处
-逐字替换。（更彻底的做法是校验音频头，但那需要引入解码依赖，不值得。）
-
-**Effort:** S
-**Priority:** P2
-**Depends on:** None
-
-### AudioImportViewModel 并发 handleDrop() 的完成顺序竞态（生产路径已有 revision 保护，通用语义仍待收口）
-
-**Status（2026-08-19）：** 部分完成。Sound Packs Window 的生产导入路径已经用 `audioImportActionRevision` 保护新旧操作顺序；通用 `AudioImportViewModel.handleDrop()` 仍需决定是删除/归档，还是补齐「最新操作获胜、旧完成不能覆盖新状态」的契约与测试。以下 What / Why 保留为原始发现。
-
-**What:** `handleDrop(sourceURL:...)` / `handleDrop(requests:)` 都把耗时工作丢进 `Task.detached`，只有 `@Published state` 的写回在主 actor。如果同一个 view-model 实例上两次 drop 重叠触发（比如探测时长慢的文件 vs. 快的文件），两个 detached task 完成顺序不保证跟触发顺序一致，`state` 最终可能反映的是较早那次 drop 的结果，不是最近一次。
-
-**Why:** 目前 `AudioDropZoneView` 还没接进真正跑起来的 app（T15 留白），这条代码路径没有任何真实用户能触发，风险为零。但 T16（逐事件导入绑定）真正接线后，多个事件行各自的 drop-zone 一旦允许用户快速连续拖拽，这个顺序竞态就会变成真实、可观察的 bug。
-
-**Context:** Testing 专家在 `/ship` pre-landing review（2026-07-10）里发现的。修法方向：要么显式定义"最后完成的赢"是不是就是想要的语义（如果是，加个回归测试钉住它），要么给每个 view-model 实例加一个"正在处理"的 in-flight task 引用，新的 handleDrop 调用先取消/等待前一个。留给 T16 真正接线那批工作一起处理，不单独抽出来。
-
-**Effort:** M
-**Priority:** P3
-**Depends on:** T16（逐事件导入绑定）
+<a id="todo-20"></a>
 
 ### currentExecutablePath 没有真正解析 PATH，裸命令名被当成当前目录的相对路径
+
+**状态（2026-09-16）：**已由 `6617b5d` 改为读取进程映像路径，相关 `SetupSuite` 回归已注册。
 
 **What:** `currentExecutablePath` 的 doc comment 曾经声称支持"裸命令名走 `PATH` 解析"，但实现只是把 `argv[0]` 当成 `currentDirectory` 的相对路径拼起来——如果用户把 `~/.claudio/bin` 加进自己的 `PATH`，然后在一个不相关的目录里跑裸 `claudio setup`，这里解析出来的路径跟 shell 实际通过 `PATH` 找到的二进制毫无关系。
 
@@ -700,8 +683,10 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Context:** 正确修法要改用 macOS 的 `_NSGetExecutablePath`（真正拿到 OS 层"这个进程实际怎么被启动的"路径，不用猜 `argv[0]`），但这个 API 没法像现在这样注入 `arguments`/`currentDirectory` 参数来写测试，需要重新设计一个可测试的封装（比如注入一个 `() -> String` 闭包，默认调 `_NSGetExecutablePath`）。这次先不做，只把文档改成实话，行为改动留到下一轮。
 
 **Effort:** M
-**Priority:** P2
+**Priority:** P1（P1-01）
 **Depends on:** None
+
+<a id="todo-21"></a>
 
 ### install 不清扫升级前留下的坏 hook 条目，异形 HOME 下会与新条目并存
 
@@ -712,34 +697,22 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Context:** 红队（5 finder × 3 怀疑者，2026-07-10）在 codex review 9913ae9 的修复补丁上提出，两个独立维度各自命中。glob 那一支的实测证据：同级存在 `a!b` 与 `a*b` 时，`sh -c '…/a*b/prog'` 执行的是 `…/a!b/prog`。
 
 **Effort:** M
-**Priority:** P3
+**Priority:** P2（P2-09）
 **Depends on:** None
 
-### 菜单栏 app 以 GUI 方式启动时 PATH 极简，doctor 的 Claude Code 版本检查会恒报 warning
-
-**What:** `checkClaudeCodeVersion` 走 `/usr/bin/env claude --version` 做 PATH 查找。终端里没问题（实测 `claude` 在 `~/.local/bin/claude`，0.05s 返回 `2.1.206 (Claude Code)`）。但 Finder/launchd 启动的 GUI 进程拿到的是极简 PATH：实测 `env -i PATH=/usr/bin:/bin /usr/bin/env claude --version` → `env: claude: No such file or directory`（退出码 127）。
-
-**Why:** 眼下无害——`doctor` 是 CLI，永远在终端里跑，拿得到用户的 PATH。但 `VersionCompatibility.swift` 的 doc comment 明确写着菜单栏 app 计划 in-process 复用这套 API；那一刻这个检查会对**每个**用户恒定报一条"⚠ 无法核实 Claude Code 版本"，而它其实装得好好的。修法：GUI 侧探测时补上常见安装位置（`~/.local/bin`、`~/.claude/local`、Homebrew 前缀），或者干脆读用户的 login shell PATH，而不是依赖继承来的那个。
-
-**Context:** 2026-07-10 codex review 9913ae9 期间自查发现（codex 未报此条）。同一轮里另一条推测——"`claude --version` 是 Node CLI，2s 超时可能不够"——**实测证伪**，它是原生二进制，0.05s 返回，2s 绰绰有余，故不列为 TODO。
-
-**Effort:** S
-**Priority:** P3
-**Depends on:** T7 / 菜单栏 app 真正复用 CommandRunning
+<a id="todo-22"></a>
 
 ### SystemCommandRunner 超时后只 terminate() 不强制回收，忽略 SIGTERM 的子进程仍可能失控
 
-**Status（2026-08-19）：** 部分完成。`SystemCommandRunner` 已加入 `terminationHandler` 和 deadline-bounded 的输出排空；但超时后仍没有 bounded wait，必要时也没有升级到 `SIGKILL` 并完成回收。以下 What / Why 是原始发现，当前只保留剩余硬化项（相关修复：`72d0765`）。
+**What:** `SystemCommandRunner.run` 的超时路径仍只调用 `process.terminate()`（SIGTERM）并返回；它不做 bounded wait，也不在子进程拒绝退出时升级为 SIGKILL 并回收。`terminationHandler` 和 deadline-bounded stdout 排空已经补齐，但 `trap "" TERM` 的子进程仍能在 `.timedOut` 返回后继续运行。
 
-**What:** `SystemCommandRunner.run` 的超时路径只调用 `process.terminate()`（发 SIGTERM）就返回，不 `waitpid`、也不在子进程赖着不退时升级为 SIGKILL。一个 `trap "" TERM` 或需要时间清理的子进程会被报成 `.timedOut`，但真实进程仍在后台继续跑。另一处相关：`drainToEOF` 之后的 `exited.wait`（`VersionCompatibility.swift:210-214`）——若排空 stdout 几乎耗尽 deadline，即使已 `sawEOF`、子进程只差微秒就退出，`exited.wait` 拿到约 0 的剩余时间也可能返回 `.timedOut`，于是 doctor 显示"无法核实版本"而非那个（可能低于下限的）真实版本。
-
-**Why:** 眼下无害：生产里唯一的命令是 `/usr/bin/env claude --version`——它不 trap SIGTERM、会乖乖被杀，且是原生二进制 0.05s 返回，远快于 2s 上限，EOF-后误报那一支实际不可达；runner 目前也只被一次性的 `doctor` CLI 进程调用，进程随后就退出。但 `VersionCompatibility.swift` 的 doc comment 反复写明菜单栏 app 计划 in-process 复用这套 API；那一刻，面对刻意忽略 SIGTERM 的子进程，失控子进程会累积。
-
-**Context:** Codex 结构化评审（2026-07-11 `/ship`，[P2]）与 Claude 对抗子代理（finding #3）各自独立命中同一区域，一个说"terminate 不 reap"、一个说"EOF 后仍可能误报超时"，均 LOW/latent、生产不可达。修法：`terminate()` 后做一次 bounded 等待，仍在跑就 `SIGKILL` 并回收；`drainToEOF` 返回后若 `sawEOF && !process.isRunning` 直接 `.completed(exitCode, stdout)`，不再进那个可能拿到约 0 剩余时间的 `exited.wait`。已有超时测试用 `sleep`（会被 SIGTERM 杀），没覆盖 trap-TERM 的子进程——补测需要一个真的忽略 SIGTERM 的子进程 fixture。
+**Why:** 当前生产调用者是一次性的 `claudio doctor`，风险低于常驻 GUI 进程，但 runner 的「超时后不会留下失控子进程」合同仍不成立。应在 SIGTERM 后限时等待，再按需 SIGKILL 并确认退出；同时增加一个真实忽略 SIGTERM 的 fixture。
 
 **Effort:** M
-**Priority:** P3
-**Depends on:** T7 / 菜单栏 app 真正 in-process 复用 CommandRunning
+**Priority:** P2（P2-07）
+**Depends on:** None
+
+<a id="todo-23"></a>
 
 ### claude-version 探测的 2s 超时与 `/usr/bin/env` 路径在三处各写一遍字面量
 
@@ -750,8 +723,10 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Context:** Maintainability 专家在 2026-07-11 `/ship` pre-landing review 提出（confidence 6）。修法：加命名常量（如 `VersionCompatibility.defaultClaudeVersionProbeTimeout` 与一个 `defaultEnvPath`），三处默认参数都引用它。
 
 **Effort:** S
-**Priority:** P4
+**Priority:** P3（P3-08）
 **Depends on:** None
+
+<a id="todo-24"></a>
 
 ### Setup.swift 的默认选包点前缀过滤用 Character 级而非 scalar 级
 
@@ -762,8 +737,10 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Context:** Claude 对抗子代理（2026-07-11 `/ship`，finding #5）提出。修法：改成 scalar 级判定（如 `$0.unicodeScalars.first == "."`）与本包其余部分的粒度对齐。
 
 **Effort:** S
-**Priority:** P4
+**Priority:** P3（P3-09）
 **Depends on:** None
+
+<a id="todo-25"></a>
 
 ### GUI 写/读路径的同用户 symlink TOCTOU 未闭合（manifest bind + import + config，v2）
 
@@ -776,54 +753,22 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **2026-07-13 `/codex review 573336d` 独立复现同一条（[P2]），行号已锁死**：`ConfigMutation.swift:205` 是裸 `try data.write(to: configFile, options: .atomic)` —— **没有** `resolvingSymlinksInPath()`；而同一个仓库的 `SettingsInstaller.swift:634` 就在写 `settings.json` 前先解析了，还配了一段注释专门讲这个坑（「`.atomic` 做的是 temp+rename **on the symlink**，把链接本身替换成普通文件，与 dotfiles 仓库静默分叉」）。更刺的是 `SafeFileRead.swift:110` **明确允许** `config.json` 是 symlink 并跟随读取 —— 于是 stow / chezmoi 用户的 config 是**读目标、写链接**：两边操作的根本不是同一个文件。D23 定稿①（`573336d`）改的正是 `ConfigMutation` 的这个写函数，**没有**顺手加上这一行；本条仍然开着。（真修与本条上面那半是同一处加固，仍建议合并处理。）
 
 **Effort:** L
-**Priority:** P3
-**Depends on:** helper 未来提权运行 / 处理不可信可写目录时才升级
+**Priority:** P2（P2-02）
+**Depends on:** 与 [TD-07：config 外部删除竞争](#todo-07) 共用写入边界设计；config 读写目标一致性不依赖未来提权
 
-### DesignTokens 规范化 / 生成式 token 模块归并延后（原划归 T14，越界故未做）
+<a id="todo-26"></a>
 
-**What:** `gui/Sources/ClaudioGUI/DesignTokens.swift` 仍是跨 T7/T15/T16 手抄扩展的 DESIGN.md 调色子集（neutral/brand/surface-2/四事件色/glyph），非一个规范化（理想是从 DESIGN.md 生成）的 token 模块。
+### 默认关闭 Full Keyboard Access 时，当前生产面板的 Tab 与首焦点仍未复验
 
-**Why:** ENGINEERING.md「T7 非阻断遗留②」原把这项归并划给 T14；T14 落地时刻意不做——越出「state gallery」范围，且会 churn 四个已上线视图换 token 引用、对 gallery 无收益。当前手抄方式功能正常、值与 DESIGN.md 逐一对齐，故为非阻断。
+**What:** 当前生产面板已换成 Settings、近期提示、Sound Scope、活动范围、事件试听/静音、主音量和退出等控件，但仍用 `@FocusState` 与系统 key-view loop，没有自建 Tab 分发。macOS 默认关闭「键盘导航」时，SwiftUI `Button` 是否进入 Tab 顺序、`focusedTarget` 的首次赋值是否真的落地，尚无当前版本的原生复验。
 
-**Context:** T14 swift-reviewer（2026-07-11）+ 实现者自评。`DesignTokens.swift` 两处注释已更正为指向本条。修法：抽一个规范 token 模块（或从 DESIGN.md 生成），四视图改引用它。
+**Why:** `panelFocusOrder(_:)` 和 source-wiring 测试只证明预期顺序与接线，不能证明 AppKit 在默认系统设置下实际接受焦点。应在关闭 FKA 的真实会话中验证打开焦点、Tab/Shift+Tab、`Picker`、事件按钮和 `Slider`；若系统行为仍阻断，再决定是否引入自建键盘焦点层。
 
-**Effort:** M
-**Priority:** P3
+**Effort:** S（先复验；若需自建焦点层则 L）
+**Priority:** P2（P2-10）
 **Depends on:** None
 
-### T15 真身面板的交互 a11y / 播放 / 接线仍需真机走查（**「需要一台装 Xcode 的 Mac」这个前提是错的，已推翻**）
-
-**What:** 原条目说这些只能在「一台装 Xcode 的 Mac」上验 —— **不对**。2026-07-11 在本机（CommandLineTools，无 Xcode）用 `swift build -c release` 出来的二进制手工组了一个 ad-hoc 签名的 `Claudio.app`（跟 release.yml 一模一样的做法：`LSUIElement` Info.plist + `Resources/bin/claudio` + `Resources/packs/` + `codesign --sign -`），双击就跑起来了，菜单栏图标、面板、真机 AX 探针全都能用。**没有 Xcode 也能做完整真机走查**，此前所有「等一台有 Xcode 的 Mac」的等待都是自缚。
-
-已由那次走查验掉的：`NSStatusItem` 点击 ↔ popover 开关 ✅；`.transient` Esc 关闭 ✅（**并非白来的** —— 见下方 `NSApp.activate` 那笔账）；面板渲染 ✅。
-
-**仍未验、且必须在 state 到 `.installed` 之后才够得着的**（本机当前 `~/.claudio/bin/` 不存在、settings.json 无 claudio hooks，所以第一屏永远是 `.helperMissing`，运行态面板根本进不去）：Tab/Shift+Tab 走 action→mute 序（**注意：默认系统设置下这条根本不成立，见下一条 TODO**）、切包画廊滚动/点选、reduce-transparency、静音/切包后 SwiftUI refresh、`NSOpenPanel` 端到端喂进导入管线。
-
-> **2026-07-14 更新（PLAN-MASTER-VOLUME.md §9 真机走查，聚焦主音量行）**：VoiceOver 逐控件导航 + 进入播报 **✅ 已验**——开 VoiceOver、焦点移到主音量滑块，VO 字幕面板截图实测依次显示「42% 主音量, slider」→按↑箭头→「45%」，`config.json` 同步落盘，播报/推动/落盘三条断言全部拿到证据。真实 `NSSound` 试听 **✅ 已验**（拖到 ~20% 明显变小、拖到 0% 完全无声）。**Dynamic Type 三级真实布局 ❌ 验出真失败**——系统「文字大小」拉到最大档（`defaults read com.apple.universalaccess FontSizeCategory` 确认 `global=AX5`）、完全重启 app 后，主音量行没有任何变化（不折行、面板不加宽）。见新条目「主音量行的 Dynamic Type 三级布局在真机上完全不生效」。
-
-~~此外仍未接线：onboarding CTA（接管/修复/断开）**全是 no-op**~~ → **2026-07-12 已接线并真机验证通过（T17b）**：CTA 现在真的会复制二进制 + 内置包、选默认包、写 hooks，失败会当场说出来；「断开连接」在运行态面板底部有了真入口。仍未做：状态栏图标仍是占位 SF Symbol（`waveform.circle`），非最终定制单色字形。
-
-**Why:** 面板核心逻辑（状态派生 / 写回 / 焦点顺序 / 对比度 / Dynamic Type 表）已下沉 `ClaudioGUICore` 并单测覆盖（helper 945 / gui 543），但交互真身只在真机成立 —— 而真机走查现在**随时可做**，不再有硬前提。
-
-**Context:** T15 tdd-guide + a11y-architect + swift-reviewer（2026-07-11）；同日真机走查推翻了「需要 Xcode」的前提。修法：把剩余项在真机走完 —— 但先得让 state 进 `.installed`（要么跑 `claudio setup` 真接管，要么接完 T17 的 CTA）。
-
-**Effort:** M
-**Priority:** P2
-**Depends on:** state 到 `.installed`（`claudio setup` 或 T17）
-
-### 面板的 Tab 遍历 / 首焦点在**默认系统设置**下是死的（macOS「键盘导航」默认关闭）
-
-**What:** 面板里的可聚焦控件**绝大多数**是 SwiftUI `Button`（`EventRowView` 试听/导入/静音、`PackGalleryView` 卡片、`OnboardingView` CTA），全 `gui/Sources/` 里 `.focusable()` 出现 **0 次**。而 macOS 的「键盘导航 / Full Keyboard Access」**系统默认是关的**，关闭时 Button 不进 key view loop —— `applyFirstFocus()` 那次 `@FocusState` 赋值直接落空，Tab 在面板里也无处可去。
-
-> ⚠️ **本条的措辞原为「所有可聚焦控件都是 Button」，阶段 D 之后不再成立**：`MasterVolumeRow` 的 `Slider` 是个例外，且它在 FKA 关闭时的行为**没人验过**（Button 的那套理由不适用于 value-adjust 控件）。**别拿这条台账的判据给整个面板的 Tab 结案** —— 它只覆盖 Button。见下方独立条目「主音量滑块在 FKA 关闭时到底能不能 Tab 到」。
-
-**Why:** ENGINEERING.md 的无障碍规格已按实际行为改写（分成「无条件成立」和「仅 FKA 开启时成立」两档），所以**文档不再撒谎**；但产品缺口还在：一个没开 FKA 的纯键盘用户（非 VoiceOver）操作不了这个面板。VoiceOver 用户不受影响（VO 光标独立于 FKA），Esc 与鼠标也不受影响。
-
-**Context:** T15 a11y 对抗评审（2026-07-11）。Apple WWDC23 “The SwiftUI cookbook for focus” 原文：「macOS and iPadOS don't give focus to buttons when you tap them, and the only way to reach them with the Tab key is to turn on keyboard navigation system-wide.」**别指望 `.focusable()`**：它的默认 interactions 就是 `.activate`，纯 no-op；`.focusable(interactions:)` 还是 macOS 14+ API，超出本包 macOS 12 floor。真要在不开 FKA 时也能纯键盘操作，唯一出路是**自建焦点系统**：`focusedTarget` 从 `@FocusState` 换成普通 `@State` + 自绘焦点环（DESIGN.md 需补 focus-ring token），并在 `MenuBarController` 里挂 `NSEvent.addLocalMonitorForEvents(matching: .keyDown)` 拦 Tab/Shift+Tab/空格/回车，用已有的纯模型函数 `panelFocusOrder(_:)` / `panelOpeningFocus(rows:packCardIDs:)` 推进焦点并派发 action（这些函数已有单测，自建路径照样可测）。
-
-**Effort:** L
-**Priority:** P3
-**Depends on:** None
+<a id="todo-27"></a>
 
 ### 逃生路线：若真实用户反馈「点 Claudio 图标丢字」，唯一出路是丢掉 NSPopover 改 NSPanel
 
@@ -834,121 +779,40 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Context:** T15 对抗评审（2026-07-11，ux-regression lens）。修法只有一条：丢掉 `NSPopover`，自建 `NSPanel` + `.nonactivatingPanel`（公开 API 里唯一「window 能拿 key 而 app 不激活」的机制）。代价：① 丢掉 popover 的尖角与自动锚定（DESIGN.md / T15 明写「NSPopover 带尖角」→ **属未授权设计偏离，须重新拍板**）；② `.transient` 的点外/切 app 自动关闭要用全局事件监视器自己重写；③ **「非激活 panel 在 inactive app 下会不会进 AX 树」在本机无法静态断言 —— 必须先用真机 AX 探针验证再决定**，否则可能原样复现「拿不到 key」的老问题，白改一场。
 
 **Effort:** L
-**Priority:** P4（触发条件驱动，不主动做）
+**Priority:** P3（P3-12；触发条件驱动，不主动做）
 **Depends on:** 真机 AX 探针先验证 nonactivating panel 能进 AX 树
 
-### 主音量滑块在 FKA 关闭时到底能不能 Tab 到 —— 面板第一个非 Button 可聚焦控件，没人验过
+<a id="todo-28"></a>
 
-**What:** `MasterVolumeRow` 的 `Slider` 是面板里**唯一**的非 Button 可聚焦控件（阶段 D 新增），已被排进焦点序（`PanelFocusOrder` 的 `.masterVolume`）并绑了 `.focused(...)`。而上一条台账（「Tab 遍历在默认系统设置下是死的」）的**整段论证**建立在「面板里所有可聚焦控件都是 SwiftUI `Button`」这个前提上 —— 那个前提今天有了例外。
+### ManifestBindError 的 `manifestUnreadable` / `writeFailed` 仍没有可执行修复指引
 
-**Why:** Button 不进 key view loop 的理由（`.activate` interactions、`.focusable()` 是 no-op）是 **Button 专属**的，根本不描述一个由 `NSSlider` 支撑的 **value-adjust** 控件 —— AppKit 里 NSSlider 在 FKA **关闭**时是否进 key view loop，与 Button 不是同一个答案。**我们没验过。** 风险不在「滑块能不能 Tab 到」本身，而在：将来有人按上一条台账去评估「Tab 修好了没有」，会拿一个只覆盖 Button 的判据，给一个已经含 Slider 的面板结案。
+**What:** 当前 Sound Packs Window 已把绑定失败本地化并持久呈现；导入后未绑定的文件也会进入 orphan 列表，可重新分配或显式删除。因此旧条目的「孤儿文件不可见、没有出路」部分已经关闭。剩余问题是 `manifestUnreadable` / `writeFailed` 仍只说明读写失败，没有提供修复或重建 `manifest.json` 的操作入口。
 
-**Context:** `/codex review 8771946` 完备性批评（2026-07-14）。ENGINEERING.md 的无障碍规格已就此**明确不作承诺**（在验之前）。验法：系统设置里**关掉**「键盘导航」，开面板，按 Tab —— 看焦点会不会落到滑块上（以及 ←/→ 能不能调值）。VoiceOver 那一档不受影响（VO 光标独立于 FKA，滑块的 label/value 已落地并有守卫）。
-
-**Effort:** S（一次真机走查即可定性；若结论是「能」，上一条台账的措辞要跟着收窄）
-**Priority:** P3
-**Depends on:** None
-
-### T16/T15 GUI 小项：用户可见绑定错误已并入 ManifestBindError 主条目，孤儿文件回滚与 doc-comment D 编号仍待处理
-
-**Status（2026-08-19）：** 部分完成。绑定失败的用户可见错误已由下方 `ManifestBindError` 条目统一跟踪；当前仍开放的是失败后的孤儿文件清理/回滚，以及过期的 doc-comment D 编号引用。
-
-**What:** ① `EventRowImportViewModel`：导入成功但随后 `bindEventToManifest` 失败时，已复制进包目录的音频文件会留下、不被任何事件引用（孤儿文件）——**文件本身仍未清理**，非安全问题，纯整洁。② T15/T16 新文件里约 26 处 doc-comment 引用「ENGINEERING.md T15 D3/D4」等 D 编号，但 ENGINEERING.md 无此细分——溯源/可读性 nit，读者按 D 编号 grep 会落空。
-
-**Why:** 均无功能风险；两项都是「诚实但可更整洁」，攒到某次 GUI 收尾 pass 一起清。
-
-**Context:** T16 security-reviewer + T15/T14 swift-reviewer（2026-07-11）。**本条此前记载不实，已更正**：原文写孤儿文件「已通过 `bindResult` 如实上报（非静默）」——事实是 `bindResult` 从未被任何视图读过（三个独立评审各自 grep 确认），它一直是静默的。**2026-07-11 `/ship` 这一批才真正接上上报**：`EventRowView` 现在会渲染 `bindResult` 的绑定失败与导入被拒（过程中发现内层 `AudioImportViewModel` 的 `@Published` 不会穿过外层 `EventRowImportViewModel` 自动传播，必须额外挂一个 `@ObservedObject` 才收得到）。所以「用户看不见失败」已解决，**留下的遗留只剩孤儿文件本身没被清掉**。修法：① 绑定失败时清掉刚复制进包的那个文件，或把孤儿文件纳入下次 doctor/清理；② 把 D 编号软化为「T15/T16」或「(本任务 step D4)」。
-
-**Effort:** S
-**Priority:** P4
-**Depends on:** None
-
-### Dynamic Type 三级布局在真机上疑似完全不生效——代码路径已替换，四档人工复验待做（2026-08-02）
-
-**2026-08-02 更新：** 不再把 macOS SwiftUI `dynamicTypeSize` 误作会跟随系统设置的能力。三个界面现统一读取 `ClaudioInterfaceTextSize` 的四档 `UserDefaults` 偏好，并显式注入 `dynamicTypeSize`；入口位于主面板「Claudio 选项」。原根因已绕开，但真实四档布局与 VoiceOver 仍需在 AppKit 会话复验后才能关闭本条。
-
-**What:** PLAN-MASTER-VOLUME.md §9 真机走查第 ⑪ 条（2026-07-14）：系统设置 → 辅助功能 → 显示 → 文字大小拉到最大档（`defaults read com.apple.universalaccess FontSizeCategory` 确认 `global=AX5`，即最高档），**完全退出重启** `Claudio.app` 后重新打开面板——D17/D44 描述的「主音量行变两行、面板加宽到 360pt」**完全没有发生**，面板与默认档位下逐像素一致。测试过程：先误增到系统设置里另一条无关滑块（显示对比度），发现后已改回原值，不影响本条结论；随后精确定位到「文字大小」这一控件（description 为「首选阅读字体大小」，range 0–14）并推到顶（14/14，预览文案确认变为「示例 42 点」），关闭面板重开、乃至 `⌘Q` 全新进程重启后复测，结果不变。**这次真机走查只覆盖了主音量行**（PLAN-MASTER-VOLUME.md §9 的走查范围本就是主音量行），`EventRowView`/`PackGalleryView` 从未被单独这样复测过。
-
-**Why:** 这不是「测试没测对地方」——`defaults` 确认系统偏好确实写到了最高档，且给了 app 一次全新进程生命周期去读取它。真正的怀疑落在上面那条邻近 TODO（`DynamicTypeSize → PanelTypeSizeTier` 映射）默认成立的前提上：`PanelView.swift` 的 `typeSizeTier` 读的是 SwiftUI 的 `@Environment(\.dynamicTypeSize)`，而 macOS 上这个环境值**是否真的跟随「辅助功能 → 显示 → 文字大小」这个系统偏好**，本仓库从未验证过——两者可能根本不是同一件事（iOS 上 `dynamicTypeSize` 直接映射系统文字大小；macOS 的等价桥接历来更弱，`@Environment(\.dynamicTypeSize)` 在纯 AppKit 宿主的 SwiftUI 视图里默认恒为 `.large` 也是已知的平台坑）。如果确实如此，那么 `typeSizeTier` 后面接的那张三档映射表（`.larger`/`.largest`/`.maximum`，ENGINEERING.md:269 术语表）**永远读不到非默认值**，D17/D44 的验收标准在真机上不可能通过——不管 `switch` 里 `default:` 写不写 `@unknown` 都无关紧要（上面那条 TODO 因此可能是在打磨一段永远执行不到非默认分支的代码）。
-
-关键一点：`typeSizeTier`/`layoutAdaptation` 是 `PanelView.swift` 里的**同一个**计算属性（`private var layoutAdaptation: PanelLayoutAdaptation { panelLayoutAdaptation(for: typeSizeTier) }`），`EventRowView`（T15 起接线）、`MasterVolumeRow`（本条实测对象）、`PackGalleryView`（2026-07-24 补线，见下方追加）三个调用点读的是**同一份**上游值，没有第二条独立的 `@Environment` 读取路径。所以这条根因怀疑一旦坐实，**波及范围不是「主音量行」这一处，而是全部三个消费者**——只是目前只有主音量行被真机走查实际验证过失效，另外两个是根因层面的合理推断，尚未逐一复测。
-
-> **2026-07-24 追加**：`PackGalleryView`（T4 竖排整宽行重写，commit 6c40fbc）当时完全没有接 `adaptation: PanelLayoutAdaptation`——独立的 `/codex review 6c40fbc` 揪出这处遗漏（P1：最大字号下会挤裁切包名），已修复（同日），现在也读上面那同一个 `layoutAdaptation`。这次修复本身经 `swift build`（0 error）、`swift run claudio-gui-tests`（2484/2484）与一次独立 swift-reviewer 对抗审查确认代码层面无误——但它继承的正是本条尚未解决的疑点：如果 `typeSizeTier` 在真机上真的读不到非默认值，`PackGalleryView` 的两行布局分支和 `MasterVolumeRow`/`EventRowView` 一样，可能同样永远触发不到。下一次真机排查（见下方「下一步排查建议」）只需验一次 `typeSizeTier` 本身，三个消费者不必分别走查——反之，根因一旦修好，三处会同时恢复。
-
-**Context:** PLAN-MASTER-VOLUME.md §9 走查第 ⑪ 条实测（2026-07-14，本机 macOS 26.5.1，`swift build -c release` 出的 ad-hoc `Claudio.app`）。按 Acceptance 要求本轮**未修改任何 Swift 代码**，只如实记录现象。下一步排查建议：① 确认 `PanelView.swift` 的 `typeSizeTier` 具体读的是哪个 SwiftUI/AppKit API；② 若确认是 `@Environment(\.dynamicTypeSize)`，查它在纯 `LSUIElement` + `NSPopover` 宿主下是否真的桥接系统「文字大小」偏好（可能需要显式监听 `NSApplication` 的辅助功能通知或改读 `NSApplication.shared.effectiveAppearance`/`NSFont` 的等价系统 API）；③ 有其它 macOS 系统 app（如 Finder/Notes）在同一台机器同一个系统偏好下是否表现出字体变化，作为「这是 macOS 平台限制」还是「只有 Claudio 没接对」的判据；④ 根因修好后，`EventRowView`/`PackGalleryView` 也各自需要一次真机复测，不能只验主音量行就假定另外两个也好了。
+**Why:** fail closed 是正确的，但用户仍可能被永久卡在损坏的用户包上。需要给这两个状态补可执行恢复路径，例如显示 manifest 位置、提供安全重建/恢复建议，或由 doctor 给出同一套指引。
 
 **Effort:** M
-**Priority:** P1（D17/D44 是已拍板的验收决议，真机验证不通过意味着「阶段 D 已交付」这句话目前不成立；范围已从「主音量行」扩到全部三个 Dynamic Type 降级消费者，优先级不降）
-**Depends on:** 先查清 `typeSizeTier` 读的具体 API 再定修法；可能与上一条「`DynamicTypeSize → PanelTypeSizeTier` 映射用裸 `default:`」共用一次修复窗口；修好后 `EventRowView`/`PackGalleryView` 需要各自的真机复测（目前只有主音量行被验证过失效）
-
-### PackCardView 的 CC0 徽标标签已修，但子槽图标与 native VoiceOver 仍待验证
-
-**Status（2026-08-19）：** 部分完成。CC0 徽标的 VoiceOver 标签已在 `d6dafe8` 后修复；子槽图标的可访问性归属以及真实 macOS VoiceOver 行为没有装机实测，不能按源码或 harness 结果关闭。
-
-**What（原文，2026-07-11 pre-T4/T5 组件形态）：** `PackCardView` 的 `eventGrid` 每个字形都 `.accessibilityHidden(true)`（已由卡片自身 `accessibilityLabel` 汇总），但 `statusLine` 的 `xmark.circle.fill` +「文件丢失」、`CC0` 徽标、`N/4` 计数都**未**隐藏，可能作为冗余/自动生成 label 的 VoiceOver 停靠泄漏；且 `CC0` 根本没进 `accessibilityLabel`，VoiceOver 用户完全听不到「这是 CC0 包」。
-
-**现状（2026-07-24）：** `eventGrid`/`statusLine` 是 T4/T5（竖排整宽行）之前的旧组件形态，今天的 `PackCardView`（`PackGalleryView.swift`）已经是 `metaSlot`/`trailingSlot`/`brokenStatusRow` 三槽结构，原文点名的两个属性名已不存在，需要按今天的形状重新判断：
-
-- **CC0 未播报半 —— 已修。** `d6dafe8` T5 引入的 `slots.license`（CC0 / `.none`）此前只喂 `metaSlot`（视觉），没喂 `accessibilityLabel`（听觉）——`/codex review d6dafe8` [P2] 抓到同一个洞。修法：把 `metaSlot`/`accessibilityLabel` 收口到同一个 `private var metaSlots: PackRowMetaSlots` 计算属性上（单一来源，两个读者），`accessibilityLabel` 追加「，CC0 授权」后缀（`card.isSelected` 与 `.broken` 分支同样生效，`.broken` 因 `packRowMetaSlots` 本身对 `.broken` 恒返回 `.none` 而正确地不播报）。`swift run --package-path gui claudio-gui-tests` 2494 项全绿（无回归，`metaSlots` 只是既有 `packRowMetaSlots` 纯函数的一层薄读取，纯函数本身已被 `PackGallerySuite` 覆盖）。
-- **子槽图标未 `accessibilityHidden` 半 —— 结构已变，很可能不再是问题，但未验证。** 原文的担忧是「图标会作为冗余/未标注的 VoiceOver 停靠泄漏」——这在 `EventRowView` 是真实风险，因为那一行是 `.accessibilityElement(children: .contain)`（同一行里 fileNameMenu/试听/静音三个**各自独立可达**的控件，`.contain` 故意不合并，所以每个纯装饰 `Image` 都得手动 `.accessibilityHidden(true)` 才不会冒出来）。而今天的 `PackCardView` 整行是**一个** `Button(action: onSelect)`，直接在 Button 本身挂 `.accessibilityLabel(accessibilityLabel)`——SwiftUI 对 `Button` 的默认无障碍行为就是把它折叠成单一元素（不像 `.contain` 那样让子视图各自可达），所以 `metaSlot`/`trailingSlot` 里的 `Image`/`Text` 大概率本来就不会被 VoiceOver 单独枚举到。但这是框架默认行为的推理，不是设备实测——本机没有 Xcode/VoiceOver 可验（同「T15 真身面板」那条的天花板）。如果之后哪次真机走查发现确实冗余播报，再补 `.accessibilityHidden(true)`。
-
-**Why:** 均无功能风险，纯 VoiceOver 体验。CC0 半已随 `d6dafe8` 后续修复补齐；子槽图标半保留观察，不阻塞。
-
-**Context:** T14/T15/T16 pre-landing 评审（2026-07-11，a11y-architect，confidence 5）原文；`/codex review d6dafe8`（2026-07-24）独立命中同一个 CC0 缺口并已修。
-
-**Effort:** ~~S（CC0 半）~~ 已完成 / XS（子槽图标半，若日后需要）
-**Priority:** ~~P4（CC0 半）~~ 已关闭 / P4（子槽图标半，观察）
+**Priority:** P2（P2-08）
 **Depends on:** None
 
-### 当前包目录被删时画廊不生成 broken 当前包卡片，selected 卡片直接消失
-
-**What:** `PackGallery.swift`（`availablePacks`/`packCards`）只枚举磁盘上真实存在的包目录。若 `config.selectedPack` 指向一个已被删除的包，当前包不在 `availablePacks` 里，于是 `packCards` 里没有 `isSelected` 卡片；用户看到的是全 unmapped 事件行 + 一个没有"当前项"的画廊，而不是一个可理解的"当前包坏了"状态。
-
-**Why:** 静默丢失当前包卡片，与 DESIGN.md"真打包错误不被伪装成正常静默"的取向不符——用户无法从 UI 看出"你选的包不见了"。修法：把安全化后的 `config.selectedPack` 并入候选 ID 集合，即使目录不存在也走 `buildPackCard` 生成一张 `.broken(reason: "声音包目录未找到")` 的 selected 卡片。
-
-**Context:** codex review（2026-07-11，commits e4dd25f/6b9cb66）P2。需同时想清楚：broken 当前包的事件行该显示什么（当前 `packCoverage` 对无法解析的包已回落全 `.unmapped`，见 `CoverageState.swift` 注释），卡片层与行层对"当前包缺失"的表达要一致。
-
-**Effort:** S
-**Priority:** P3
-**Depends on:** None
-
-### ManifestBindError 的两个失败态没有「怎么修」的出路，且绑定失败会留下孤儿文件
-
-**What:** `config.json` 的每一条 fail-closed 原因都带 `configRebuildHint`（「手工改这个键，或删掉文件让 claudio 重建」），而 `ManifestBindError.manifestUnreadable` / `.writeFailed` 的文案只说了「读不动 / 写不进」，没有任何下一步；代码里也没有任何路径能重建 / 修复一个用户包的 manifest.json。叠加已知的「绑定失败留孤儿文件」（音频已拷进去、manifest 没更新），用户在那个包上就被永久卡住，而且一旦那条 toast 消失，磁盘上再没有任何证据。
-
-**Why:** 与 config 侧「fail closed 必须给出路」是同一条原则，只是 manifest 侧没跟上。
-
-**Context:** 2026-07-11 `/ship` 九路评审（红队）。修法：给这两个 case 补可执行 hint（对齐 `configRebuildHint` 的形状），并让 doctor 或面板能提示「这个包的 manifest 坏了，重装 / 重建它」；孤儿文件在 `.writeFailed` 时回滚删除。（原「绑定失败留孤儿文件」P4 条目并入本条。）
-
-**Effort:** M
-**Priority:** P3
-**Depends on:** None
+<a id="todo-29"></a>
 
 ### 试听（`NSSound.volume`）与真实播放（`afplay -v`）的增益曲线是否一致，未经证明
 
-**What:** 主音量滑块落地后，面板的「试听 ▶」会用 `NSSound.volume` 施加 `master_volume`，而真实 hook 播放走 `afplay -v`。两者**同为 0…1 标量**（`NSSound.h:65` 明确 `volume` 是单个 sound 的音量、范围 0…1、不影响系统音量；`afplay -h` 只说 `-v/--volume VOLUME set the volume`），但**没有任何文档说明二者的增益曲线（线性振幅 vs 感知/对数）相同**。
+**What:** 主音量滑块已落地，当前面板的「试听 ▶」用 `NSSound.volume` 施加 `master_volume`，而真实 hook 播放走 `afplay -v`。两者**同为 0…1 标量**（`NSSound.h:65` 明确 `volume` 是单个 sound 的音量、范围 0…1、不影响系统音量；`afplay -h` 只说 `-v/--volume VOLUME set the volume`），但**没有任何文档说明二者的增益曲线（线性振幅 vs 感知/对数）相同**。
 
 **Why:** 如果曲线不同，同一个 `master_volume` 值下「试听听到的响度」与「真实提示音的响度」会有落差 —— 用户按试听调好的音量，实际用起来偏大或偏小。今天两者都极可能是线性振幅乘子（这是这类 API 的常规），所以风险低；但它是一个**未验证的假设**，不该被当成已知。
 
 **Context:** 2026-07-11 `/plan-eng-review` 的 Codex 外部声音提出（Claude 侧未想到）。修法两条，二选一：① 真机 A/B 实测两条路径在同一 `master_volume` 下的实际响度，一致则把结论写进 `Volume.swift` 的注释（把假设升级成事实）；② 若不一致，试听改走 `afplay -v` 本身（复用 `AfplayVolume.afplayArgument`，与真实播放路径逐字相同）—— 代价是引入进程 spawn 延迟与一个新失败模式（afplay 缺失），故不作为默认选项。
 
 **Effort:** S
-**Priority:** P3
-**Depends on:** 主音量滑块落地（在那之前这条不可观察）
+**Priority:** P2（P2-11）
+**Depends on:** 主音量滑块已落地；需同一音频、相同系统输出与 `master_volume` 下的真机 A/B 证据
 
-### StateGalleryView 没有整面板（PanelView）帧，路由态零仓库内视觉验证
-
-**What:** `StateGalleryView` 的四个族全是子视图帧，从不渲染 PanelView。于是 D23 定稿引入的三个面板级路由态（`.needsPack` 空态「先选包」/ `.malformed` / `.unwritable` 诚实失败态）落地后在仓库内没有任何视觉真相源 —— 而 DESIGN.md:161 声明「视觉真相源 = 仓库内 state gallery」。
-
-**Why:** 这三个态恰恰是最难手动复现的（要删 / 改坏 `~/.claudio/config.json`）。目前由 PLAN-MASTER-VOLUME §5.2 走查 ⑫⑬ 真机兜底，可接受但依赖人肉。
-
-**Context:** 2026-07-12 mockup 展示板议题 ②，用户授权拍板为 **D38**：主音量的 `MasterVolumeState` 族照常进 gallery（展示板 §2 即规格）；整面板 `PanelRouteState` 族因需要给 gallery 引入一类全新宿主（渲染整个 PanelView + 假 config 环境）而**不随主音量方案做**，登记于此。展示板 §4 的三帧可作将来实现时的参照。
-
-**Effort:** M
-**Priority:** P3
-**Depends on:** 阶段 A′（路由态本身落地之后才有东西可画）
+<a id="todo-30"></a>
 
 ### `ClaudioGUI` 的 panel 与 native composition 仍不能由 harness import
+
+**状态（2026-09-16）：**`ClaudioPanelPresentation` 已由 `6617b5d` 提取并供 GUI harness import；原生 window owner 的行为仍需独立验收。
 
 **What:** `ClaudioGUI` 是带 `@main` 的 **executableTarget**，其 `PanelView`、AppDelegate、
 `MenuBarController` 与 native window adapter 不能由 harness 直接 import。Settings 这一半已经解决：
@@ -967,249 +831,24 @@ T17 要修的 bug，而编译与当时 652 项测试没有发现。Settings 的 
 不要把已经删除的 Settings 源码形状扫描重新扩回来。
 
 **Effort:** M
-**Priority:** P2
-**Depends on:** None
-
-### state gallery 的旧 `.running(.disconnect)` 记录已由集成目的页替代
-
-**Status（2026-08-31）：** 已关闭。集成连接动作已迁入统一 Settings 的
-`IntegrationsSettingsDestinationView`；生产状态由 `HostIntegrationUserAction.disconnect` 和
-`IntegrationDestinationModel` 投影，gallery 新增固定的 `workbuddy.disconnect-in-flight` production
-frame。旧 `OnboardingActionState` 的 `.running(.disconnect)` 仍保留在明确标注为 Legacy 的历史归档中，
-不再声称它是当前生产画面。
-
-**Boundary:** 本次保留 onboarding/Panel 的历史 fixture 与其穷举测试，不把已退役的 action enum 重新接回
-生产连接路径；新 frame 覆盖的是当前真实集成目的页的断开中状态。
-
-**Effort:** S
-**Priority:** P3
-**Depends on:** None
-
-### in-flight 期间 onboarding 的键盘焦点无处可去（当前是「诚实的空」，不是想清楚的答案）
-
-**What:** 一个 `.takeOver` / `.disconnect` 跑到一半时，两颗 CTA 都 `.disabled`。`applyFirstFocus()` 于是拿 `ctaOperable: false` 去算焦点序，而 onboarding scope 里除了这两颗按钮**没有别的候选**（失败行此刻不存在 —— `runDiskAction` 一开跑就把 actionState 换成 `.running`）→ `panelFirstFocusTarget` 返回 `nil` → `focusedTarget = nil` → SwiftUI 的 `@FocusState` 置 nil 会 resign first responder，光标整个消失。
-
-**Why:** `PanelView` 那段 `.onChange(of: actionState)` 的注释白纸黑字说这次改动就是为了「没人把焦点接走的话，键盘用户按完空格就无处可去了」—— 而实现出来的结果正是「无处可去」。测试也把这个行为钉成了断言（`panelFirstFocusTarget(scope, ctaOperable: false) == nil`），而那条断言的失败文案写着「caret 必须有人接管，而不是悬在那儿」。
-
-**但这不是一个纯 bug**：in-flight 期间那张卡上**确实没有任何可操作的东西**，把光标指向一颗禁用的按钮同样是撒谎。这是一个真实的产品取舍（① 保持焦点不动，让它停在那颗已禁用但仍在屏幕上的按钮上，AppKit 的 key loop 会自己跳过 disabled view；② 让正在跑的那颗按钮保持可聚焦但不可激活，配 `.accessibilityValue("正在接管…")`；③ 把焦点交给面板容器）。需要拍板，不该由评审代劳。**运行态面板**已由 T7 的 `.manageSounds` 接过无条件锚点：它在四种 configState 恒渲染且 in-flight 恒可操作，零行零卡的 `.needsPack` 也返回 `.manageSounds`；`.malformed`/`.unwritable` 则仍由视觉更靠前的 `.configReveal` 领焦点。运行态因此重新保证非 nil，本条只讨论 onboarding 卡，二者独立。
-
-**Context:** 2026-07-12 T17c（Swift 专项 + 设计专项独立指出）。T17c 已修掉相邻的注释腐烂（`panelFirstFocusTarget` 的 doc 此前写着「Returns nil only for a genuinely empty order」，那句话在 `ctaOperable` 落地那一刻就是假的）。
-
-**Effort:** S
-**Priority:** P3
-**Depends on:** None（需要先拍板取哪种行为）
-
-### `DiskOnboardingActionRunner` 用 `Task.detached` 在 Swift 协作线程池上跑阻塞式磁盘 I/O
-
-**What:** `await Task.detached(priority: .userInitiated) { performOnboardingDiskAction(...) }.value` —— 闭包体是纯同步阻塞 I/O（复制一个 universal 二进制 + 整个声音包目录 + flock + 原子写 settings.json）。
-
-**Why:** 协作池的线程数按核数固定，Swift Concurrency 的前向进度假设是「线程永不阻塞」。菜单栏 app 的 Task 并发度低、`flock` 是 `LOCK_NB`（不会长时间等锁），所以今天不致命 —— 但这是教科书级反模式，一旦将来有后台探测 / 定时刷新 / 更多并发动作，它会真的咬人。
-
-**Context:** 2026-07-12 T17c（Swift 专项 + 红队独立指出）。修法：换成 GCD 逃生舱 —— `await withCheckedContinuation { c in DispatchQueue.global(qos: .userInitiated).async { c.resume(returning: performOnboardingDiskAction(action, environment: environment)) } }`。行为一字不变，阻塞的是一条可增长的 GCD 线程而不是协作线程。
-
-**Effort:** S
-**Priority:** P3
-**Depends on:** None
-
-### 「下面的声音包」与告知行的位置断言，在 onboarding 卡上都是假的
-
-**What:** `SetupNotice.repairedDeadSelection` 的文案里有一句**关于布局的断言**：「你随时可以在**下面的**声音包里换成别的」。它由 `PanelView.operationalPanel` 的排布兑现（提示行排在 `PackGalleryView` 之前），并由 `ViewWiringSuite` 的顺序断言钉死。**但 `OnboardingView` 那张卡也渲染 `ActionNoticeRow`（`OnboardingView.swift:125`），而那张卡既没有声音包画廊、也没有四行事件覆盖度** —— 那句「下面的声音包」在它上面指向的是空气。
-
-**Why:** 今天不会伤到人，但理由是「这条路径不可达」：一次成功的 `takeOver` 必然把 state 推成 `.installed`，于是每一条告知都诞生在运行态面板那一侧，onboarding 卡接不住它。**而「我推理出这个格子不可达」正是这个仓库交过两次学费的那句话**（T17d 的「重开 = 看过了」、T17e 的「零包不会写 hooks」）—— 而且这张卡**之所以**渲染告知行，恰恰是因为 T17f 拒绝对不可达性做推理（「两个渲染点都无条件画」是它的结构不变式）。两条理由自己打架：要么承认它可达、给它一句站得住的文案，要么承认它不可达、别渲染。
-
-**Context:** 2026-07-12 T17g（`/codex review 0d789dd` 自评审顺带发现）。同一轮里刻意**没有**往文案里再加一句「上面四行会告诉你哪些还缺」，就是不想在这个洞里再多埋一条位置断言。修法二选一：① 把告知行做成一个自带上下文的组件（不假设自己上下有什么），文案去掉方位词；② 让 `onboardingVisibleNotices` 在 onboarding 卡上恒为空，并用一条测试把「告知只可能诞生在 `.installed`」钉死 —— 那等于正式承认这条不可达，就得配一条会变红的断言，而不是一句注释。
-
-**Effort:** S
-**Priority:** P3
-**Depends on:** None
-
-## 前端设计冗余（2026-07-15 视图层通读审计）
-
-> 一次针对 `gui/Sources/ClaudioGUI/` 全部 14 个视图文件（3598 行）的冗余专项。判据是 DESIGN.md：
-> **凡是 DESIGN.md 定义了「一个」组件 / 一档 token，而代码里存在两份及以上互不相认的实现，即记一条。**
-> 下面仍保留的三条具体开放项按「同一个东西被写了几遍」排序，不按修复代价。
-> 已有的同族条目「DesignTokens 规范化 / 生成式 token 模块归并延后」（P3）不在此重开。
-
-### `typeScale` 是一个被手工穿线的环境值 —— 6 个视图各声明一份，40 处手写乘法，漏一处就静默不跟随 Dynamic Type
-
-**What:** `gui/Sources/ClaudioGUI/` 里**每一个**渲染文字的视图都各自声明了同一行：
-
-```swift
-@ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
-```
-
-`PanelView` / `EventRowView` / `OnboardingView` / `AudioDropZoneView` / `PackGalleryView` / `MasterVolumeRow` —— 六份。然后每一处字号都手写成 `.font(.system(size: 11 * typeScale))`，全树 **40 处**这样的乘法。
-
-更糟的是 `ActionFailureRow` / `ActionNoticeRow`：它们是独立的 `struct`，拿不到父视图的 `@ScaledMetric`，于是 `typeScale: CGFloat` 被做成了**构造参数**，由 `PanelView` / `OnboardingView` 在 4 个调用点手工传下去（`typeScale: typeScale`）。一个本该是环境值的东西，正在被当参数搬运。
-
-**Why:** 这是一条**只会静默失败**的约束。新加一个视图、忘了声明 `typeScale`，或者新加一行 `Text` 忘了乘 —— 编译过、测试全绿、真机上那行字**就是不跟随系统「文字大小」**。而这个失败模式**已经真的发生过一次**：TODOS.md 上面那条「主音量行的 Dynamic Type 三级布局在真机上完全不生效」（2026-07-14 走查 ⑪ 实测失败）就是同一个病根的另一半 —— 那条是**布局**没跟随，这条是**字号**没跟随，两者共享同一个根因：**Dynamic Type 在这棵树里靠人手工接线，没有任何结构强制它。**
-
-`ContrastSuite` 也守不住这一条：它是纯 hex 数学，看不见 `.font()`。
-
-**Context:** 2026-07-15 视图层通读审计。修法：一个 `.claudioFont(.rowLabel)` 式的 `ViewModifier` + 一个字号 token 枚举（见下一条：那个枚举**同时**是收敛字号阶梯的载体），`@ScaledMetric` 只在 modifier 内部声明一次，视图侧再也写不出「忘了乘」这种代码。这与上面那条「DesignTokens 规范化 / 生成式 token 模块归并延后」（P3）是**同一次重构**的两半 —— 那条管颜色 token，这条管字号 token（而字号 token 今天**根本不存在**）。合并考虑。
-
-**Effort:** M
-**Priority:** P2
-**Depends on:** None（与「DesignTokens 规范化」合做最划算）
-
-### 字号阶梯：原「代码在用 8 档」描述已过期，但固定字面量与 DESIGN.md 矛盾仍待收口
-
-**Status（2026-08-19）：** 部分完成。当前持久化接口字号已收敛为四档；但字号实现仍有 `9` / `11.5` / `12.5` 等固定字面量，且 `DESIGN.md` 仍有两处阶梯定义冲突。以下 What / Why 按当前残余问题理解，不再把旧的「8 档」计数当作事实。
-
-**What:** DESIGN.md「字号阶梯」表里，App 内只有四档：**面板标题 14–15 · 行标签 13 · 次要/状态 11 · 数据/事件 id 10–12**。
-
-代码实际在用：**9 · 10 · 11 · 11.5 · 12 · 12.5 · 13 · 15** —— 八档。越界的三个：
-
-- **`11.5`** —— `AudioDropZoneView` 的 `rejectRow` + `successRow`。不在任何一档上。
-- **`12.5`** —— `AudioDropZoneView.promptLabel` + `OnboardingView` 卡正文。**但这一个不是代码的错**：DESIGN.md「State Components · onboarding 卡」白纸黑字写着「正文 `text-2` **12.5**」—— 也就是说 **DESIGN.md 的字号阶梯表与它自己的 State Components 节对不上**。要么阶梯表漏了一档，要么 State Components 越了界，得拍板一个。
-- **`9`** —— `ActionFailureRow.messageRow` 的 chevron，低于阶梯最小档。而 `PackCardView.statusLine` 里有一句现成的注释：「此前这三行都用 9pt，**低于阶梯的最小档**」，并已修掉 —— **同一个 9pt 在另一个文件里活得好好的，那次修复没走到底。**
-
-**Why:** 不是审美洁癖。字号阶梯是 DESIGN.md 唯一一处对「文字层级」的规定，而八档意味着「次要文字」这一个层级今天有 11 / 11.5 / 12.5 三种大小同屏 —— 用户看到的是三种「同等重要」的文字长得不一样大。且这三个越界值全都**没有任何测试或断言守着**（`ContrastSuite` 只管颜色对比度，不看字号）。
-
-**Context:** 2026-07-15 视图层通读审计。修法与上一条（字号 token 枚举）是**同一刀**：枚举的 case 就是 DESIGN.md 的档位，越界的字号在写枚举的那一刻就没有 case 可用。**但必须先拍板两件事**（不该由实现者代劳）：① `12.5` 进不进阶梯表（= DESIGN.md 自身冲突的收口）；② `11.5` 与 `9` 分别收敛到哪一档。
-
-**Effort:** S（收敛本身很小；拍板是前置）
-**Priority:** P3
-**Depends on:** 需先拍板 ①②
-
-### 「拖一个音频文件到这儿」的旧虚线规格条目已过期，当前 drop targets 需按 Sound Packs Window + EventRowView 重写
-
-**Status（2026-08-19）：** 需重写。原文依赖已移除的 `AudioDropZoneView`；当前仍可讨论 `SoundPacksWindow` 与 `EventRowView.importAffordance` 的统一规范，但不能直接按原文执行。
-
-**What:** 面板里有两个 drop 目标，视觉语言是两套：
-
-| | 圆角 | 线宽 | dash | hover |
-|---|---|---|---|---|
-| `AudioDropZoneView`（面板底部大区） | 10 | **1.5** | **[4, 3]** | 边框转 clay + `clay-soft` 底 |
-| `EventRowView.importAffordance`（行尾「未配置 / 文件丢失」） | 6 | **1** | **[3, 2]** | 边框转 clay + `clay-soft` 底 |
-
-DESIGN.md 只定义了**前者**（「拖入 drop-zone：虚线 **1.5px** `hairline-strong` + radius 10」）。后者的 1px / `[3,2]` / radius 6 **没有任何 DESIGN.md 背书** —— 它是第二套虚线语言，凭空长出来的。
-
-**Why:** 两者是**同一个语义**（「往这儿拖一个音频文件」），hover 反馈也已经是同一套（边框转黏土 + `clay-soft` 底 —— 这一半是对的，说明当初确实有意对齐）。虚线规格却各写各的。危害有限（不影响可用性，也不违反任何对比度约束），但它是「同一个东西两份实现」这条主线上最便宜的一条：一个 `dashedBorder(radius:)` modifier 就收掉了。
-
-⚠️ 注意 radius 6 vs 10 **可能是对的** —— DESIGN.md 圆角阶梯里「控件 / 芯片 = 6，卡片 / 行 = 10」，行尾那个小按钮确实更像「控件」而非「卡片」。所以要收的是**线宽与 dash pattern**（两者没有任何理由不同），圆角保留两档、但要在 DESIGN.md 里把「行内小 drop 目标 = 控件档 radius 6」这句话补上，让它从「凭空」变成「有据」。
-
-**Context:** 2026-07-15 视图层通读审计。
-
-**Effort:** XS
-**Priority:** P3
-**Depends on:** None
-
-### 视图层的绊线以**散文**形式存在 —— 本轮实测腐烂 3 处，而它此前已经踩响过至少 4 次
-
-**What:** `gui/Sources/ClaudioGUI/` 的注释占比：`PanelView.swift` **56%**（894 行里 508 行注释 / 348 行代码）、`MasterVolumeRow.swift` **53%**、`EventRowView.swift` 44%。整个视图层的 SwiftUI 代码只有约 1200 行，被约 1100 行散文包着。
-
-**这一条不是在说「注释太多」。** 那些散文里装的是这个项目最贵的资产——「为什么**不能**那样做」的负空间知识（tile 底为什么不能用 `surface-2`、`.tint` 为什么不能自绘、告知行为什么必须排在画廊之前、`say()` 为什么不能从 `switchPack` 再调一次）。删掉它们是自杀。
-
-这一条说的是：**那些散文里混着三种载体完全不同的东西，而今天它们长得一模一样，于是没有人能分辨哪一句还活着。**
-
-| 类别 | 它是什么 | 正确的载体 | 今天的载体 |
-|---|---|---|---|
-| **A** | 「这五处必须一致」「这棵树里没有动画」 | **编译期结构**（一个共享组件 → 「一致」不再需要被断言，它成为无法违反的事实） | doc comment |
-| **B** | 「告知行必须排在画廊之前」「`.idle` 那一格必须先 `reload()`」 | **行为断言**（真磁盘 / 真状态机） | doc comment（+ 部分 `ViewWiringSuite` 的文本 `contains()`） |
-| **C** | 「走查 ⑨ 每次动控件行都必须重跑」 | **会过期的 checklist**（结构上测不到——`ContrastSuite` 是纯 hex 数学，`ClaudioGUICore` 连 SwiftUI 都不 link，看不见 `NSSlider` 填了什么色） | doc comment |
-
-**Why —— 腐烂不是风险，是已经发生的事实，而且反复发生：**
-
-*本轮实测新发现的 3 处（全部是 A 类，全部在说同一件事）：*
-1. `EventRowView.importErrorRow` 的注释：「reused **verbatim** from `AudioDropZoneView`'s own `rejectRow(_:)`」
-2. `ActionFailureRow` 的注释：「与 `PanelView` 的 `errorNotice(_:)` 和 `AudioDropZoneView` 的 `rejectRow(_:)` **完全一致**」
-3. `PanelView.errorNotice` 的注释：「**identical to** `AudioDropZoneView`'s `rejectRow(_:)` and `EventRowView`'s `importErrorRow(_:)`」
-
-三句话都是假的（图标字号、文字字号、spacing 三处已漂移——详见本节第一条）。
-
-*而在此之前，同一种腐烂已经踩响过至少 4 次，每一次都被如实记在案：*
-- `PanelView.swift:62-75` ——「本视图树零动画，所以不读 `accessibilityReduceMotion`，**这条注释就是绊线**」。T17c 往树里加了两颗 spinner，**跨过了它**，既没 gate 也没回来改。注释自己写着：「一条自己被跨过去还留在原地的绊线，比没有绊线更坏。」
-- `DESIGN.md:147` + `DESIGN.md` Decisions Log 2026-07-12 那一行 —— **两处**都在引用上面那条**已被推翻**的绊线原话，作为「控件行不得加动画」的理由。2026-07-14 才更正。
-- `MasterVolumeRow.swift:195-198` + `DESIGN.md` Decisions Log —— **两处**都写着走查 ⑨「That run is still owed / 本轮重新欠账」，而那一跑**已经跑完了**。注释自己写着：「话写在跑之前，跑完没人回来改……它对一条**真**纪律喊了狼来了。」
-- `PanelView.swift:603-604` —— 「`runSetupNoticeSuites` 钉住了『文案里有下面的声音包』这一半；另一半——**它真的在下面**——只有这条注释和你的眼睛守着。」这是一条 B 类不变式，主动声明自己没有断言背书。
-
-**而已经存在的那次「把绊线变成测试」的尝试，本身也在同一个坑里。** `ViewWiringSuite` 是读 `.swift` 源码文本做 `contains(字面量)`——它的 doc comment 自己列了四条失效模式，其中两条是**实测**的：
-
-- 第一版 `contains("Bundle.main")` **被一句注释假绿**（注释里的字面量与真调用同形）
-- 「把『全量 refresh』钉成 `contains("refresh()")`，而 `refresh()` 在那个文件里出现 **37 次**，那个合取子**恒真**」
-- 「那种断言能证明**修饰符在**，证明不了**闭包体做了什么**」
-- 同类呈现级接线问题仍受文本绊线的覆盖边界限制。
-
-所以修法**不是**「把散文改写成 `contains()` 断言」——那只是把一种脆弱换成另一种（探针，不是围栏：认不出的东西一律绿）。
-
-**Context:** 2026-07-15 视图层通读审计（本条是元层条目：它是本节前三条具体开放项的**共同成因**，不是第六个并列现象）。根因是 `ClaudioGUI` 是 `@main` executableTarget，harness **一行都 import 不到**——所以视图层的每一条不变式，要么下沉进 `ClaudioGUICore`（已做过多次：`PanelConfigController` / `panelAnnouncement` / `panelFocusOrder` / `previewClaimsActionFocus`，每一次都是被一次真实的翻车逼出来的），要么就只能是一句话。
-
-**修法（按顺序，不是三选一）：**
-1. ✅ **已执行（2026-07-15）—— A 类优先，因为它最便宜也最彻底**：共享 `FailureRow` 与 `PanelHeader` 已落地。那三句「完全一致」的注释**不再需要存在**——七份变一份，「一致」从一句需要被守的话变成了一个**编译期事实**。**这是唯一一种不会腐烂的绊线。**
-
-   **实践中学到的两件事，都不在原计划里：**
-   - **A 类修复会顺手带走它没瞄准的 bug。** `StateGalleryView` 那份副本的字号是裸 `size: 11`、没乘 `typeScale`（展柜里那行字从不跟随 Dynamic Type）。没有人发现过它，也没有人修过它——它是被合并**免费**带走的（组件自带 `@ScaledMetric`）。这是 A 类相对 B 类（补断言）的额外红利：**断言只能证明你想到的那条，组件把你没想到的那条也一起收了。**
-   - **而 A 类修复自己也会犯同一种病。** 抽组件前我 grep 的是**函数名**（`rejectRow` / `errorNotice` / `importErrorRow`）——一张白名单——于是漏了两份（一份没有独立函数名、一份名字不一样）。**能找全它们的判据是视觉特征本身（`xmark.circle.fill`），不是名字。** 围栏按「它长什么样」围，不按「它可能叫什么」猜。
-2. **B 类下沉**，沿用仓库已经走了五次的那条路（搬进 `ClaudioGUICore` + 真行为断言），而不是加更多 `contains()`。
-3. **C 类必须换载体**：真机走查那几条（⑨ `.tint` 是不是黏土、⑪ Dynamic Type）结构上测不到，它们**只能**靠人。但它们今天散落在三个文件的 doc comment 里，且已经被证明会写成过去时。给它们一个**单一的、带时间戳的走查清单**（`docs/` 里一份，每次 `/ship` 前跑，跑完记 commit sha）——ENGINEERING.md §9 已经有 15 条真机走查的雏形，把注释里的纪律**收编进去**，别让它们继续住在代码旁边。
-
-**Effort:** M（普查 + 分类是 M；A 类的两次抽组件已完成；C 类收编是 S）
-**Priority:** P2
+**Priority:** P1（P1-05）
 **Depends on:** None
 
 ## 写盘原子性：这一刀（`/codex review 3af8d5f` 的修复）**没**收进去的那几条
 
-### `.atomic` 不是掉电安全 —— 全仓没有一处 `fsync` / `F_FULLFSYNC`
+<a id="todo-31"></a>
 
-**What:** `Data.write(options: .atomic)` = 同目录临时文件 + `rename(2)`。`rename` 对**目录项**是原子的，
-所以**进程被 kill** 之后终态只有「没有」和「完整」两种 —— 这一半是真的。但 POSIX **不**保证掉电时临时文件的
-**数据块**先于那条目录项落盘：APFS 实践上大多会排序，规范上不保证。于是掉电之后，一个**目录项已经改好、
-内容却是零长度 / 半截**的 `.claudio.bak` 在原理上是可能的 —— 而那正是「一次性备份 + `fileExists` 闸门」
-最怕的东西（它认不出残缺）。
+### 配置事务已 fsync staging，但仍未定义断电持久化策略
 
-**Why:** 行为风险低（要真正撞上得掉电撞在那个毫秒窗口里），但**措辞风险是满的**：commit `3af8d5f` 的正文与
-它写进生产注释的那段散文，都白纸黑字声称了「掉电」。那是这个仓库栽了十五次的同一个病（措辞比覆盖范围大）。
-注释已经改成实话（只声称 kill），但**能力**本身还没补。
+**What:** `ConfigFileTransaction.secureAtomicPublish` 会在 rename 前 `fsync` staging fd，bootstrap report、host receipt、activity 和音频导入等路径也有同类处理。当前剩余边界是没有 `F_FULLFSYNC`，rename 后也没有同步父目录，因此不能把原子发布表述成完整的掉电持久化保证。
 
-**可能的修法:** 写完临时文件后 `fcntl(fd, F_FULLFSYNC)`，`rename` 之后再 fsync 一次父目录 —— 这要绕开
-`Data.write(options:)`，自己拿 fd 写。代价：`.claudio.bak` 那一处（一次性、路径短）值得；`config.json` /
-`play.state` 那种高频写不值得（F_FULLFSYNC 在 macOS 上是真的慢）。所以它**不是**一条全仓不变量，
-而是一条「哪些文件配得上掉电安全」的分级政策 —— 那需要先想清楚，不该混在一次 bugfix 里。
+**Why:** 进程崩溃与突然断电是不同合同。当前代码已经覆盖前者并显著改善后者；是否要为一次性备份或其他低频关键文件支付 `F_FULLFSYNC` 与父目录同步成本，仍需先定分级政策。
 
-**Effort:** M（自己拿 fd 写 + 一条分级政策 + 台账）
-**Priority:** P3（不阻断发布：注释已经不再撒谎，而真实风险窗口极窄）
+**Effort:** M
+**Priority:** P3（P3-07）
 **Depends on:** None
 
-### 一份 0600 的 `settings.json`，备份成了一份 0644 的 `.claudio.bak`
-
-**What:** 本机实测（Darwin 25.5, umask 022）：`Data.write(options: .atomic)` 写到一个**已存在**的目标会保留
-它原来的 mode（所以 `settings.json` 那一处 `:618` 没问题），但写一个**新**文件时 mode 走 umask → 0644。
-而 `.claudio.bak` **永远是新文件**（`!fileExists` 闸门保证了这一点）。于是一个把 `~/.claude/settings.json`
-chmod 到 0600 的用户（它可以装着 API key —— hook 命令、`env` 段），拿到的备份是**全世界可读**的。
-
-**Why:** 这不是这一刀引入的（上一版的非原子 `write(to:)` 同样走 umask），但它是**这一刀的邻居**，而且是
-一次真实的权限放宽。修法本身很短：备份写完之后按源文件的 mode `setAttributes` 一次。
-
-**Effort:** S（三行 + 一条断言）
-**Priority:** P2（安全相关，但需要用户自己先 chmod 过 —— 不是默认路径）
-**Depends on:** None
-
-### `~/.claudio/bin` 用 `createDirectory` 无显式 mode 建成 —— 松 umask 下组/世界可写，而里面的二进制每个事件都被 exec
-
-**What:** 本机实测（Darwin 25.5）：`copySelfToFixedLocation` 里 `createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)`（`Setup.swift:677`）**不传 `attributes:`**，于是新建的 `~/.claudio/bin`（及 `~/.claudio`）的 mode 走 umask：umask 022 → 0755（安全），umask 002 → **0775（组可写）**，umask 000 → 0777。而 `~/.claudio/bin/claudio` 正是 `settings.json` 四条 hook 每个 Claude Code 事件都 exec 的那个二进制。目录若组/世界可写，同组或本地另一个用户就能替换它（或抢先占用可预测的 `.claudio.tmp-<pid>` 暂存名）→ 下一个事件即以受害者身份**执行任意代码**。本分支的原子发布只加固了「崩溃/kill 时的完整性」，没有约束它发布进去的那个目录的**权限**。
-
-**Why:** 默认 macOS umask 是 022 → 0755，所以**默认单用户 Mac 打不到**；触发需要「非默认松 umask（MDM / 某些 dotfiles 会设 002）+ 多用户机 + 同组敌手」。但代价是代码执行，量级高于它的孪生项。修法很短：`~/.claudio` 与 `~/.claudio/bin` 显式建成 `0700`（`createDirectory(attributes: [.posixPermissions: 0o700])`，并对存量目录 `setAttributes` 兜底），无论用户 umask 是什么，被 exec 的二进制都不可能落在一个组/世界可写的目录里。与上一条（`.claudio.bak` 的 0644）是**同一形状的孪生**：都是「新建 filesystem 对象不传显式 mode → 继承 umask → 在一个安全敏感的位置放宽了权限」，建议一并修。
-
-**Context:** 2026-07-13 `/review feat/lock-separation` 的 security specialist（Claude 侧，opus）实测命中，Codex 对抗评审未报。台账此前只有文件侧（`.claudio.bak` 0644），漏了目录侧这条 exec 劫持路径。
-
-**Effort:** S（一行 `attributes:` + 一次存量 `setAttributes` 兜底 + 一条断言）
-**Priority:** P2（安全相关，但默认 umask 022 已使其不可达 —— 需用户/MDM 先设松 umask + 多用户机）
-**Depends on:** None
-
-### `claudio install` 在一台从没有过 `settings.json` 的机器上，照样说「备份见 settings.json.claudio.bak」
-
-**What:** `hooksOutcomeMessage(.installed)`（`Subcommands.swift:167`）**无条件**印出那句备份提示。而
-`backupOriginalIfNeeded` 在 `originalData == nil` 时**直接 `.success(())` 返回、什么都不写**（`:572`）——
-那正是「用户装了 Claude Code 但从没有过 `settings.json`」的常见全新态。于是 CLI 指着一个**不存在的文件**
-说「你的备份在这儿」。
-
-**Why:** 「假注释就是 bug」这条规矩对**印给用户看的字**只会更严。它不会弄坏任何东西，但它是一句假话，
-而这个产品的整个信任叙事（onboarding 的「会搞坏我现有配置吗？」→「自动备份」）就压在这句话上。
-
-**Effort:** S（把 outcome 带上「有没有真的写过备份」这一位）
-**Priority:** P2
-**Depends on:** None
+<a id="todo-32"></a>
 
 ### 围栏的词汇表仍是一张枚举清单 —— 真要闭合，只能上 SwiftSyntax
 
@@ -1225,149 +864,46 @@ chmod 到 0600 的用户（它可以装着 API key —— hook 命令、`env` �
 生产码里的调用名**清单比对 —— 那样「我没听说过」就真的不可能是绿的了。代价：一个新依赖 + 测试包变重。
 
 **Effort:** L
-**Priority:** P3
+**Priority:** P3（P3-06）
 **Depends on:** None
 
-## 面板 config 路由（D23 / 阶段 A′）落地后剩下的三条
+## 面板 config 路由（D23 / 阶段 A′）遗留
+
+<a id="todo-33"></a>
 
 ### `probeConfigRewritable` 的 `.absent` 早退，不问父目录可不可写
 
-**What:** `ConfigMutation.swift` 的 `probeConfigRewritable` 一发现 `config.json` 不存在就 `return .absent`
-（「全新安装的正常状态」），**在那之前不问一句父目录让不让写**——而这一问它对**存在**的 config 是问了的
-（`.unwritable` 那一支）。于是「config 缺失 **且** `~/.claudio/` 不可写」这一格会被两轴合成判成 `.needsPack`，
-面板渲染「先选包」空态，用户点一张包卡 → `selectPack` 在写盘那一步才失败。
+**状态（2026-09-16）：**已由 `6617b5d` 修复；缺失 config 的父目录检查与 doctor 结论有 compiled 回归。
 
-**Why:** 失败**是**如实上报的（`packSwitchError` → `errorNotice`），所以这不是静默失败，也不是撒谎——
-但它把一句本可以在面板一打开就说清的话（「你的目录不让写，chmod 一下」）推迟成了一次注定失败的点击。
-与 `probeSettingsWritable` 那条（本文件上一节）是**同一个形状**：探测的粒度比真正要写的东西细一级。
+**What:** `probeConfigRewritable` 发现 `config.json` 不存在就直接返回 `.absent`，不会检查父目录能否创建文件；对已存在 config，它却会检查父目录写权限。于是「config 缺失且 `~/.claudio/` 不可写」仍被面板和 doctor 当作普通未配置状态，直到用户在 Settings 里选择声音包时才得到写入失败。
 
-**Effort:** S（`.absent` 那一支 return 前补一次 `isWritableFile(父目录)`，与 `.unwritable` 复用同一句 reason）
-**Priority:** P3
-**Depends on:** 会改到 `doctor` 的既有输出（`Doctor.swift:379` 是它今天的另一个调用方），要同批改 DoctorSuite。
+**Why:** 失败会如实上报，但本可在首次探测时直接说明权限问题。修复时应让 `.absent` 同样检查父目录的存在、目录类型与写/搜索权限，并同步更新 doctor 契约和测试。
 
-### `.malformed` / `.unwritable` 都丢掉了仍然读得出来的 `selected_pack` —— 拖拽拒绝理由、画廊高亮、VoiceOver 播报全部遭殃
-
-**What:** `PanelConfigState.malformed(reason:)` 和 `.unwritable(reason:)` 都不带 packID，`resolvedConfig`
-一律回落成 `ClaudioConfig(selectedPack: "")`。但两者都常常只坏在**别的**地方——`.malformed`：
-`{"selected_pack": "lofi", "master_volume": "0.35"}`，`selected_pack` 好好的，只是 `master_volume`
-是字符串；`.unwritable`：内容**必然**合法（`loadPanelConfig` 走到 `.unwritable` 分支之前，
-`probeConfigRewritable` 已经跑完 `parseRewritableConfig`——顶层对象、`selected_pack` 合法字符串、
-`master_volume` 数字、`events` 全布尔全部通过），坏的只是**父目录写不进去**。两种情况下
-`selected_pack` 其实都读得出来，却被那句硬编码的空默认值一起扔掉。
-
-**验证过的具体后果**（`.unwritable` 这一半，2026-07-14 `/ship` Step 11 adversarial review，Claude
-子代理逐行核对源码而非只看 diff hunk 确认）：
-- `AudioDropZoneView` 不像事件行那样受 `configState` 顶层路由收纳，是**无条件渲染**的。用户在
-  `~/.claudio` 目录突然变只读（MDM chmod、磁盘写满、同步工具占锁——都不是内容坏）时拖一个音频进去，
-  `importAudioFile` 第一道闸门 `isSafePackID("")` 判假，报的是 **「这个文件名 Claudio 不敢直接用，换个
-  正常一点的名字再拖一次」**——把一个目录权限问题说成文件名问题。
-- `PackGalleryView` 的选中高亮（`config.selectedPack` 比对）整卡熄灭，即便磁盘上明明有一张选中的卡。
-- `headerAccessibilityLabel` 对 VoiceOver 播报空包名，而不是真实、合法的那个。
-
-`.malformed` 那一半仍是原始 finding（拖拽拒绝理由报 `.pathTraversal`，文不对题）。`.unwritable`
-这一半是**更干净的修法**：`loadClaudioConfig(from:)` 在这个分支下保证解码成功（构造上不存在
-「解不出来」的可能），不需要 `.malformed` 那种「解不解得出来看情况」的判断。
-
-**Why:** 不是静默失败（拒绝 / 空高亮都会显式渲染），是**措辞与真实原因对不上，且发生在完全非对抗性的
-生产场景下**（目录权限变化，不需要任何人手动改坏 config 内容）——这个仓库反复栽在同一件事上。
-
-**Context:** 2026-07-14 `/ship` Step 11 adversarial review（Claude adversarial subagent + Codex adversarial
-两路独立命中 `.unwritable` 这一半的不同侧面，均已用实际源码核实，非猜测）。顺带发现一条更窄、优先级更低、
-与本条同一处的相关缺口，先记在这里而非单开一条：`PanelConfigController.reloadConfigOnly()`（mute 成功 /
-`.configOnly` 失败两条路共用）重读 `configState`/`config` 之后，`eventRows` 只重算 `enabled` 位，
-`coverage` 原样带过来自旧值——如果外部一个不受锁约束的写者（`claudio use`）恰好在同一个窗口把
-`selected_pack` 换掉，`config`/header 会正确显示新包，但 `eventRows.coverage` 会继续显示旧包的文件
-存在性，直到下一次全量 reload。**这条不是本分支引入的回归**——`git show origin/main:.../PanelView.swift`
-确认 pre-branch 的 `refreshEnabledFlags()` 就是同一个模式（`eventRows.map` 只翻 `enabled`），本分支
-只是重命名+挪了地方，行为字面未变。窗口窄（需要外部 CLI 恰好在这个时间点写）、后果自限（下一次任何
-一次全量刷新——重开 popover、切包成功——就会纠正），不足以单开一条，但修上面这条 packID 携带问题时
-顺手看一眼这条是否也该在「新旧 selectedPack 不一致」时升级成全量刷新。
-
-**Effort:** M（给 `.malformed` / `.unwritable` 都加一个可选 packID 字段；`.unwritable` 那一半可以直接调
-`loadClaudioConfig` 拿到手，`.malformed` 那一半仍要处理「解不解得出来看情况」；牵动 PanelConfigSuite
-的合成矩阵）
-**Priority:** P2（从 P3 上调——`.unwritable` 这一半三处真实 UI 表面都受影响，且触发条件是完全非对抗性的
-目录权限变化，比原始 `.malformed` finding 的影响面更广）
+**Effort:** S
+**Priority:** P1（P1-04）
 **Depends on:** None
 
-### 单源化到「决策级」之后，`operationalPanel` 的 case→子视图 render 映射仍是手写 switch，只文本探针背书 —— 要 ViewInspector 才根治
+<a id="todo-34"></a>
 
-**What:** f54d335 P1#1 把 `configState` 单源化到**决策级**：render 路径（`operationalPanel` 顶部
-`switch panelModel.configState.topContent`，PanelView.swift:514）与开局焦点派生（`applyFirstFocus` 读
-`content.showsEventContent` / `content.hasConfigFailureNotice`，:826/:830）现在读**同一个** `PanelTopContent`
-分类 + 同两颗 `PanelConfigSuite` 单测钉过返回值的纯投影。**决策级漂移**（两条路各 key 一个不同的
-state→content 映射）确实由类型堵死。但那个 `switch` 里 **case→画哪个子视图** 仍是**手写**的：没有任何
-import 单测把「`.events` 分支真的画了滑块 + 四行事件」「`.configFailure` 分支真的画了带 Reveal 钮的失败卡」
-钉到实际在屏幕上的控件。把 `EventRows` 误塞进 `.needsPack` 分支、或把滑块从 `.events` 分支删掉——两颗
-投影仍全绿、`PanelConfigSuite` 也全绿，而 render 与 focus 已经对不上。
+### 当前面板的 config 失败态仍有重复提示、焦点丢失与过期错误寿命
 
-**Why:** 这是 `/codex review 457bff9`（2026-07-18）P2#2 的落点，也是本仓库反复自陈的那道天花板：
-`ViewWiringSuite` 只能 `codeOnly()` + `contains(修饰符字面量)` 文本探针——它证明得了「那一行还在」，
-证明不了「它接在对的 case / 对的子视图上」（ViewWiringSuite.swift:916-918 已如实自陈同一件事；本文件
-「视图层的绊线以散文形式存在」那条同族）。**源码注释此前写「在类型层一致，不可能漂移」，比真实覆盖范围大**；
-本轮已把 PanelConfig.swift 与 PanelView.swift（顶部 switch + `applyFirstFocus`）三处注释软化成「决策级封、
-呈现级 render 映射仅文本探针封」，与测试注释既有的「决策层」措辞对齐。真正堵住呈现级洞只有一条路：
-ViewInspector / XCTest（本机 CommandLineTools 没有，见本文件「CI 一次测试都不跑」与「`ClaudioGUI` 整个
-target 在 harness 里一行都跑不到」两条）。
+**状态（2026-09-16）：**`6617b5d` 已修复生产路径并补 compiled 回归；真实键盘焦点与 VoiceOver 继续按 P2-10 验收。
 
-**Effort:** L（要么引 ViewInspector 把 `operationalPanel` 各分支渲染出的可见控件结构化断言；要么把
-「每个 topContent → 该出现的控件集 + 焦点输入」抽成一个可 import 单测的展示描述符，让视图只照它渲染）
-**Priority:** P3（非阻断：决策级已封，剩下的是「手写 switch 塞错子视图」这类**改错**才触发，非生产路径
-自然发生；与「`ClaudioGUI` target 零回归网」「ViewWiringSuite 文本绊线只挡整行删」同族，本质是无
-ViewInspector 的固有天花板）
-**Depends on:** 与「`ClaudioGUI` 整个 target 在 harness 里一行都跑不到」「`ViewWiringSuite` 的文本绊线只挡得住
-「整行被删」」同根，宜一并处理
+**What:** 三个残余仍能从当前生产路径成立：
 
----
+1. 静音或主音量写入把 `configState` 重路由到 `.configFailure` 时，顶部失败卡与 `panelWriteFailures` 可能重复显示同一原因。
+2. `.events` 切到 `.configFailure` / `.needsPack` 会摘掉当前事件按钮或滑块，但写入路径没有在顶层内容变化后重新应用合法焦点。
+3. `muteError` / `masterVolumeError` 只在下一次同类成功时清除；普通 `reload()` 不裁定旧错误是否还成立，因此一次瞬时 `.lockBusy` 可跨多次 popover 重开继续显示。兼容保留的 `packSwitchError` 也采用同一寿命规则。
 
-### 诚实失败态（`.malformed` / `.unwritable` / `.needsPack`）本身的三处毛病 —— 红队 1c65215 实测，非本轮引入
+**Why:** 这些不是数据损坏，但会重复报错、让键盘/VoiceOver 光标消失，或长期显示已经失效的故障。应让失败呈现按 reason 去重，在 `topContent` 真正变化时恢复焦点，并为瞬时写入错误定义明确的刷新寿命。
 
-**Context:** 2026-07-14。`/codex review` 两条 [P1] 修完后，对修复本身发动多视角红队（14 条 finding，8 条挺过双反驳者）。其中三条与**路由**无关 —— 它们是这三个状态**出厂就带的**，任何一条抵达它们的路（包括最老的 `.configMissing` 和 popover 重开）都会撞上。修完路由之后它们更容易被看见了，所以入册。
-
-**1. `errorNotice` 的滤网没跟着极性一起扩 —— 同一句 reason 被印两遍**
-
-D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态卡本身就是解释，再画一遍它的 description 就是重复」。滤网是硬编码的 `error != .configMissing`（PanelView.swift:559），而 `packSwitchError` 那条**零滤网**（:562）。现在 `.configReadFailure` / `.configWriteFailure` / `.lockFailed` 也会重路由到一张**自带解释**的诚实失败卡 —— 于是同一份约 90 字的修复指令，会在同一屏、两个真红 circle-x 图标下渲染两遍。D43 的判据（「卡片本身就是解释」）现在适用于三条错误，滤网却只认得一条 —— 一元白名单探针。
-
-**Effort:** S（滤网改成「这条 error 是否已经被 configState 重路由并自带解释」的判断，而不是逐个 case 点名）
-**Priority:** P2
-
-**2. 顶部视图切换会吃掉键盘焦点 —— 而两条写路径上一处 `applyFirstFocus()` 都没有**
-
-`configState` 从 `.operational` 翻到 `.malformed` / `.unwritable` / `.needsPack` 会把四行事件行（或用户刚按下的那张包卡）整个从视图树里摘掉，SwiftUI 随即把 `@FocusState` 置 nil。键盘 / VoiceOver 用户按完空格，光标凭空消失。`applyFirstFocus()` 只挂在 `onAppear` / `showCount` / onboarding state / actionState 四处 —— `toggleMute` 和 `switchPack` 一处也没有。**不是本轮引入**：`.configMissing → .full → .needsPack` 这条路从 D43 起就能触发同样的摘除，本轮只是把触发点从一个扩到四个。
-
-**Effort:** M（写路径上在 configState 真的换了顶层视图时补一次 applyFirstFocus；要小心别在每次成功静音后都抢焦点）
-**Priority:** P2
-
-**3. `muteError` / `packSwitchError` 没有寿命 —— 一条过期红字能穿过每一次 popover 重开**
-
-两条 error 都只有「下一次**成功**的同类操作」才会清（`muteError` 在 `setEnabled` 成功时清，`packSwitchError` 在 `switchPack` 成功时清）。而**刷新从不清它们** —— `reload()` / `reloadConfigOnly()` 都不碰。popover 重开做的唯一一件事是 `panelModel.reload()`（PanelView.swift:246），而 `PanelView` 由 `MenuBarController.init` 构造**一次**、活满整个进程，`panelModel` 这个 `@StateObject` 从不重建。于是：一次 `.lockBusy`（并发的 `claudio use`，早就跑完了）留下的红字，会一直挂在面板上，直到用户碰巧成功静音一次。
-
-（`packSwitchError` 的 `init` 值已有断言守着，红队 round5；缺的是**寿命**，不是初值。）
-
-**Effort:** S（刷新时按新的 configState 重新裁定：错误还成立吗？或给 error 打时间戳/序号）
-**Priority:** P2
-
-**⚠️ 本轮**已经**关掉的，别重复记账：** 失败路径改走 `.configOnly`（不调 `afterFullReload`）之后，「拿一份 `selectedPack` 为空的 config 去 retarget，污染 drop zone / 抹掉画廊选中卡高亮」在 `.configReadFailure` / `.configWriteFailure` / `.lockFailed` 三条路上**不再发生**。但 `.configMissing → .full` 那条路**仍然**会（它必须重扫画廊，`afterFullReload` 躲不掉）—— 那一格的 drop zone 污染是真的、仍然开着，只是它比这三条老得多。
+**Effort:** M
+**Priority:** P1（P1-06）
+**Depends on:** None
 
 ## 声音包管理（PLAN-SOUND-MANAGER.md）落地债
 
-### T2 文件名 Menu 已迁入 Sound Packs Window；新三界面 VoiceOver 真机走查仍未做（2026-08-02）
-
-**Status（2026-08-19）：** 部分完成。迁移本身已完成；Sound Packs Window、EventRowView、PackCardView 三个当前生产 surface 的 native VoiceOver 走查仍待执行。
-
-**2026-08-02 更新：** 主面板不再渲染文件名 `Menu`；事件身份按钮只负责显式路由。完整文件菜单、清除绑定和拖放都在 Sound Packs Window。原字符串级测试保留历史契约，新人工验收应覆盖三个生产界面的唯一名称、Hint、Selected trait、稳定 identifier 与焦点返回。
-
-**What:** T2（事件行文件名升格为原生 `Menu`，三态共用）落地后，PLAN-SOUND-MANAGER.md §2.5 第 7 条要求的三件事——① 行身份与菜单 label 不重复播报；② 禁用的试听 ▶ 不抢播；③ unmapped 行的 Menu label 让 VO 用户听得出"这里能修"——**现在①③有真正的字符串级单测，②有结构级断言，但没有一条是真机 VoiceOver 走查**。`fileNameMenuAccessibilityLabel`/`accessibilityLabel` 的实际 DECISION 逻辑已从 `EventRowView`（住在不可 `import` 的 `ClaudioGUI` executableTarget）拆成 `ClaudioGUICore` 的纯函数 `eventRowIdentityAccessibilityLabel`/`eventRowFileNameMenuAccessibilityLabel`（`EventRowAccessibility.swift`），`EventRowAccessibilitySuite` 直接断言这两个函数的**返回字符串本身**（三态各断一次「不逐字重复」+ unmapped 的可操作动词「选择」）——这条修复过程中当场抓到一个真 bug：`.broken` 的旧菜单措辞把 identity 的「声音文件丢失」原样复述了一遍，两个 VoiceOver 停靠点背靠背念同一句话，现已改写为只说"能做什么"。②（禁用试听 ▶ 不被 `.combine` 合并抢播）是控件树**形状**问题、不是字符串问题，走的是 `ViewWiringSuite` 的源码结构断言（`.disabled(!enabled)` 结构性存在 + 行级 `.contain`、非 `.combine` + `identity` 节点内无 Button 混入）。WCAG 2.1.1 的 Tab 顺序（三槽焦点模型下 Menu 是否会被跳过）已由 `PanelFocusOrderSuite` 的既有断言覆盖（`.eventSound` 恒排每行首位、恒可操作，从未被 T2 之后的任何 fixture 跳过）。**但这一切仍然是本机能做到的上限**——`EventRowView.swift` 所在的 `ClaudioGUI` 执行体 target 不可 `import`（本机 CommandLineTools 无 ViewInspector/XCTest），没有任何测试能真正驱动一次运行期的 VoiceOver 会话，字符串对不对、结构对不对，都不等于"VoiceOver 实际念出来是什么"。
-
-**Why:** 这正是本仓库反复记录的"呈现级洞"天花板——不是偷懒没写,是这台机器结构上够不到 SwiftUI 运行期的无障碍树。如实标注比谎称"类型层已覆盖"更重要（DESIGN.md/ENGINEERING.md 反复踩过"断言存在 ≠ 断言为真"这同一个坑）；这次的教训又添了一条：**字符串级单测能抓到真 bug**（`.broken` 的重复播报），但它抓不到的是"两个 VoiceOver 停靠点之间的实际停顿/语速/是否被系统截断"这类只有真机才回答得了的问题。
-
-**Context:** PLAN-SOUND-MANAGER.md §2.5 第 7 条原文即预告了这条走查项："落进 PanelAnnouncement / 行 accessibilityLabel 的单测 + 一条真机 VO 走查"——本条把后半句正式记账，避免它只活在计划文档的散文里、落地后被遗忘。2026-07-18 a11y-architect 一轮补齐了前半句（单测）与结构断言，后半句依旧原样成立。
-
-**修复方式:** 在一台真 Mac 上开启 VoiceOver，对 `.present`/`.unmapped`/`.broken` 三态各走一遍：确认识别到的是两条不同措辞的公告（行身份 + 菜单控件），确认禁用的试听 ▶ 被 VO 跳过（Tab/VO-Right 移上去不触发播放），确认 unmapped 行的菜单公告让人听得出"可以选文件修好它"。
-
-**Effort:** S（人工走查，非代码改动；若发现真的措辞问题则另计）
-**Priority:** P3（不阻断发布——字符串级单测 + 结构断言已经把重复播报的概率降到接近零，真机走查是锦上添花的确认，不是已知缺陷）
-**Depends on:** None
+<a id="todo-35"></a>
 
 ### `forkPack` 副本 `name` 字段的措辞未拍板——plan 原文的书名号是不是要求字面写入，没有定论
 
@@ -1380,5 +916,5 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **修复方式:** 找一次产品/设计决策（比如看一眼 DESIGN.md 里其它地方引用包名时用不用书名号，或直接由用户拍板），定了之后同步改 `PackFork.swift:187` 与 `PackForkSuite.swift` 里断言该字符串的几处。
 
 **Effort:** XS
-**Priority:** P4（纯文案分歧，不影响功能正确性）
+**Priority:** P3（P3-10；纯文案分歧，不影响功能正确性）
 **Depends on:** None

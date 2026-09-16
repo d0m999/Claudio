@@ -35,6 +35,8 @@ private func makeEnvironment(
     root: URL,
     executablePath: URL,
     claudioRootName: String = "claudio-root",
+    configDirectory: URL? = nil,
+    settingsDirectory: URL? = nil,
     beforePristinePackFinalVerification: @escaping @Sendable () -> Void = {},
     beforePristinePackAtomicExchange: @escaping @Sendable () -> Void = {},
     replacePristinePack: @escaping @Sendable (URL, URL) throws -> Void = {
@@ -57,13 +59,15 @@ private func makeEnvironment(
     }
 ) -> SetupEnvironment {
     let claudioRoot = root.appendingPathComponent(claudioRootName, isDirectory: true)
+    let configRoot = configDirectory ?? claudioRoot
+    let settingsRoot = settingsDirectory ?? root
     return SetupEnvironment(
         executablePath: executablePath,
         claudioBinaryDestination: claudioRoot.appendingPathComponent("bin/claudio"),
         userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
-        configFile: claudioRoot.appendingPathComponent("config.json"),
-        settingsFile: root.appendingPathComponent("settings.json"),
-        configLockFile: claudioRoot.appendingPathComponent("config.lock"),
+        configFile: configRoot.appendingPathComponent("config.json"),
+        settingsFile: settingsRoot.appendingPathComponent("settings.json"),
+        configLockFile: configRoot.appendingPathComponent("config.lock"),
         settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
         // 见 ``injectedSetupPacksLock(under:)``：故意不用 `claudioRoot.appendingPathComponent(
         // "packs.lock")` —— 那个位置能从 `userPacksDirectory` 派生回来，规不出 `Setup.swift`
@@ -491,12 +495,19 @@ func runSetupSuites() {
         withTempDirectory { root in
             let bundleRoot = root.appendingPathComponent("Claudio.app", isDirectory: true)
             let (executablePath, _) = makeBundleFixture(at: bundleRoot)
-            let environment = makeEnvironment(root: root, executablePath: executablePath)
+            let settingsDirectory = root.appendingPathComponent("watched-settings")
+            try! FileManager.default.createDirectory(
+                at: settingsDirectory, withIntermediateDirectories: false)
+            let environment = makeEnvironment(
+                root: root, executablePath: executablePath,
+                settingsDirectory: settingsDirectory)
             let originalSettings = Data(
                 #"{ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "echo user-owned" }] }] }, "keep": "verbatim" }"#
                     .utf8)
             writeFixture(
                 String(decoding: originalSettings, as: UTF8.self), to: environment.settingsFile)
+            let writeWatch = FileWriteWatch(watching: environment.settingsFile)
+            expect(writeWatch.isArmed, "共享自举的 settings 观察器必须武装")
 
             // 持有 Claude settings 自己的锁：共享 bootstrap 若仍偷偷调用旧 installer，必然得到
             // `.settingsLocked`；正确实现与这把宿主专属锁完全无关，应该照常完成。
@@ -519,6 +530,15 @@ func runSetupSuites() {
             expect(
                 (try? Data(contentsOf: environment.settingsFile)) == originalSettings,
                 "共享 bootstrap 返回后，用户的 Claude settings fixture 必须逐字节不变")
+            expect(
+                writeWatch.observedWrite() == .untouched,
+                "共享自举不得触发 settings 的文件事件")
+            let positive = FileWriteWatch(watching: environment.settingsFile)
+            expect(positive.isArmed, "settings 正向对照必须武装")
+            try! originalSettings.write(to: environment.settingsFile, options: .atomic)
+            expect(
+                positive.observedWrite() == .written,
+                "同路径相同字节的原子替换必须被观察到")
         }
     }
 
@@ -774,8 +794,12 @@ func runSetupSuites() {
     suite("performFirstRunSetup：完整现代 Claude 连接传播为幂等成功，settings 逐字不变") {
         withTempDirectory { root in
             let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
+            let settingsDirectory = root.appendingPathComponent("watched-settings")
+            try! FileManager.default.createDirectory(
+                at: settingsDirectory, withIntermediateDirectories: false)
             let environment = makeEnvironment(
-                root: root, executablePath: executablePath, claudioRootName: ".claudio")
+                root: root, executablePath: executablePath, claudioRootName: ".claudio",
+                settingsDirectory: settingsDirectory)
             let claudioRoot = environment.claudioBinaryDestination
                 .deletingLastPathComponent().deletingLastPathComponent()
             let installationID = UUID(
@@ -794,6 +818,8 @@ func runSetupSuites() {
                 withJSONObject: modern.root, options: [.prettyPrinted, .sortedKeys])
             try! settingsData.write(to: environment.settingsFile)
             let before = try! Data(contentsOf: environment.settingsFile)
+            let writeWatch = FileWriteWatch(watching: environment.settingsFile)
+            expect(writeWatch.isArmed, "现代连接的 settings 观察器必须武装")
 
             let result = performFirstRunSetup(environment: environment)
 
@@ -810,6 +836,15 @@ func runSetupSuites() {
             expect(
                 (try? Data(contentsOf: environment.settingsFile)) == before,
                 "setup shared bootstrap 后不得改写完整现代 settings")
+            expect(
+                writeWatch.observedWrite() == .untouched,
+                "现代连接下 setup 不得触发 settings 的文件事件")
+            let positive = FileWriteWatch(watching: environment.settingsFile)
+            expect(positive.isArmed, "settings 正向对照必须武装")
+            try! before.write(to: environment.settingsFile, options: .atomic)
+            expect(
+                positive.observedWrite() == .written,
+                "同路径相同字节的原子替换必须被观察到")
         }
     }
 
@@ -1383,9 +1418,17 @@ func runSetupSuites() {
             // 本 suite 的**本意一字未改**，而且仍然被下面两条断言钉着：自举**不会**替用户选包，
             // 也**绝不**覆盖那份他读不懂的文件。改的只是结论——不写 hooks，大声失败。
             let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
-            let environment = makeEnvironment(root: root, executablePath: executablePath)
+            let configDirectory = root.appendingPathComponent("watched-config")
+            try! FileManager.default.createDirectory(
+                at: configDirectory, withIntermediateDirectories: false)
+            let environment = makeEnvironment(
+                root: root, executablePath: executablePath,
+                configDirectory: configDirectory)
             let original = "{ not valid json"
             writeFixture(original, to: environment.configFile)
+            try! Data().write(to: environment.configLockFile)
+            let writeWatch = FileWriteWatch(watching: environment.configFile)
+            expect(writeWatch.isArmed, "config 拒写观察器必须武装")
 
             let result = performFirstRunSetup(environment: environment)
             guard case .failure(.configUnusable) = result else {
@@ -1398,6 +1441,15 @@ func runSetupSuites() {
             expect(
                 (try? String(contentsOf: environment.configFile, encoding: .utf8)) == original,
                 "失败路径同样必须逐字保住用户那份 config——一个字节都不许动")
+            expect(
+                writeWatch.observedWrite() == .untouched,
+                "畸形 config 的 setup 拒写不得触发文件事件")
+            let positive = FileWriteWatch(watching: environment.configFile)
+            expect(positive.isArmed, "config 正向对照必须武装")
+            try! Data(original.utf8).write(to: environment.configFile, options: .atomic)
+            expect(
+                positive.observedWrite() == .written,
+                "同路径相同字节的原子替换必须被观察到")
             // 本意 ②（新长出来的牙）：失败必须发生在写 hooks **之前**。
             expect(
                 !FileManager.default.fileExists(atPath: environment.settingsFile.path),
