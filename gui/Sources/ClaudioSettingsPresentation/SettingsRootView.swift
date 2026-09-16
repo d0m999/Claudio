@@ -119,13 +119,9 @@ package struct SettingsRootView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 7) {
-                ClaudioOrbitWordmark(height: 19)
-                Text("claudi0")
-                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
-            }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 16)
+            ClaudioOrbitWordmark(height: 19)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 16)
 
             ForEach(
                 settingsSidebarSections(
