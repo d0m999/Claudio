@@ -61,6 +61,7 @@ private func manifestRewriteReason(_ error: ManifestBindError) -> String {
     switch error {
     case .manifestUnreadable(let reason): return reason
     case .writeFailed(let reason): return reason
+    case .publishedButFailed(let reason): return reason
     case .lockBusy: return "另一个写者正持有声音包锁（packs.lock）"
     case .lockFailed(let errno): return "取声音包锁失败（errno \(errno)）"
     case .packNotFound(let packID): return "包目录未找到：\(packID)"

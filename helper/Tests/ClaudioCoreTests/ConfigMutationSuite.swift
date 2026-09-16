@@ -1291,4 +1291,107 @@ func runConfigMutationSuites() {
             expect(reason.contains(link.path), "悬空链接故障必须可定位")
         }
     }
+
+    suite("selectPack: 已存在的 config 父目录仍拒绝更高一级的符号链接") {
+        withTempDirectory { root in
+            let target = root.appendingPathComponent("real-root", isDirectory: true)
+            let nested = target.appendingPathComponent("nested", isDirectory: true)
+            try! FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+            let targetConfig = nested.appendingPathComponent("config.json")
+            let original = #"{"selected_pack":"old"}"#
+            writeFixture(original, to: targetConfig)
+            let link = root.appendingPathComponent("link", isDirectory: true)
+            createSymlink(at: link, pointingTo: target)
+            let configFile = link.appendingPathComponent("nested/config.json")
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+            makePackDirectory(at: userPacks.appendingPathComponent("psyduck", isDirectory: true))
+
+            guard case .unwritable = probeConfigRewritable(configFile: configFile) else {
+                expect(false, "只读预检必须拒绝祖先链接")
+                return
+            }
+            let result = selectPack(
+                "psyduck", configFile: configFile, userPacksDirectory: userPacks,
+                lockFile: root.appendingPathComponent("config.lock"))
+            guard case .failure(.configWriteFailure) = result else {
+                expect(false, "写路径也必须拒绝已存在父目录的祖先链接，got \(result)")
+                return
+            }
+            let muteResult = setEventEnabled(
+                .stop, enabled: false, configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"))
+            guard case .failure(.configWriteFailure) = muteResult else {
+                expect(false, "failClosed 写者也必须拒绝祖先链接，got \(muteResult)")
+                return
+            }
+            expect(
+                (try? String(contentsOf: targetConfig, encoding: .utf8)) == original,
+                "链接目标里的 config 必须逐字不变")
+        }
+    }
+
+    suite("selectPack: 交换窗口中的外部替换保留已发布失败身份") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            writeFixture(#"{"selected_pack":"old"}"#, to: configFile)
+            let userPacks = root.appendingPathComponent("packs")
+            makePackDirectory(at: userPacks.appendingPathComponent("psyduck"))
+            let external = Data(#"{"selected_pack":"external"}"#.utf8)
+
+            let result = selectPack(
+                "psyduck", configFile: configFile, userPacksDirectory: userPacks,
+                lockFile: root.appendingPathComponent("config.lock"),
+                testingBeforeConfigRename: {
+                    try! external.write(to: configFile, options: .atomic)
+                })
+            guard case .failure(.configPublishedButFailed(let reason)) = result else {
+                expect(false, "发布后的冲突必须有独立失败类型，got \(result)")
+                return
+            }
+            expect(reason.contains("已发布"), "错误应提示已发布事实")
+            let current =
+                try! JSONSerialization.jsonObject(with: Data(contentsOf: configFile))
+                as! [String: Any]
+            expect(current["selected_pack"] as? String == "psyduck", "失败时新选择也可能已在磁盘")
+            let recovered =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: root, includingPropertiesForKeys: nil))?
+                .filter { $0.lastPathComponent.hasPrefix(".claudio-stage-") }
+            expect(recovered?.count == 1, "外部替换应保留一份恢复文件")
+            if let recovery = recovered?.first {
+                expect((try? Data(contentsOf: recovery)) == external, "恢复文件应保存外部版本")
+            }
+        }
+    }
+
+    suite("selectPack: 发布后父目录换位仍报告磁盘已变") {
+        withTempDirectory { root in
+            let configRoot = root.appendingPathComponent("config-root")
+            let moved = root.appendingPathComponent("moved-config-root")
+            let configFile = configRoot.appendingPathComponent("config.json")
+            writeFixture(#"{"selected_pack":"old"}"#, to: configFile)
+            let userPacks = root.appendingPathComponent("packs")
+            makePackDirectory(at: userPacks.appendingPathComponent("psyduck"))
+
+            let result = selectPack(
+                "psyduck", configFile: configFile, userPacksDirectory: userPacks,
+                lockFile: root.appendingPathComponent("config.lock"),
+                testingBeforeConfigRename: {
+                    try! FileManager.default.moveItem(at: configRoot, to: moved)
+                    try! FileManager.default.createDirectory(
+                        at: configRoot, withIntermediateDirectories: false)
+                })
+            guard case .failure(.configPublishedButFailed(let reason)) = result else {
+                expect(false, "目录换位后已发布必须仍有独立身份，got \(result)")
+                return
+            }
+            expect(reason.contains("已发布"), "应说明已发布到固定目录")
+            let movedConfig = moved.appendingPathComponent("config.json")
+            let current =
+                try! JSONSerialization.jsonObject(with: Data(contentsOf: movedConfig))
+                as! [String: Any]
+            expect(current["selected_pack"] as? String == "psyduck", "新选择应保留在固定目录")
+            expect(!FileManager.default.fileExists(atPath: configFile.path), "换位后的旧路径不得被误写")
+        }
+    }
 }

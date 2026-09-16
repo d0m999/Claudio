@@ -27,6 +27,7 @@ public enum SetEventEnabledOutcome: Sendable, Equatable {
 public enum SetEventEnabledError: Error, Sendable, Equatable, CustomStringConvertible {
     case configReadFailure(reason: String)
     case configWriteFailure(reason: String)
+    case configPublishedButFailed(reason: String)
     case lockBusy
     case lockFailed(errno: Int32)
     /// `config.json` doesn't exist yet — fail closed rather than fabricate one (D23 定稿①,
@@ -41,6 +42,8 @@ public enum SetEventEnabledError: Error, Sendable, Equatable, CustomStringConver
             "config.json 读取失败，已中止（未修改文件）：\(reason)"
         case .configWriteFailure(let reason):
             "config.json 写入失败：\(reason)"
+        case .configPublishedButFailed(let reason):
+            reason
         case .lockBusy:
             "config.json 当前被占用（另一个 claudio 进程正在读写），请稍后重试"
         case .lockFailed(let errno):
@@ -131,7 +134,14 @@ private func performSetEventEnabled(
     case .failure(.writeFailed(let reason)):
         return .failure(.configWriteFailure(reason: reason))
     case .failure(.postPublishConflict(let recoveryPath)):
-        return .failure(.configWriteFailure(reason: "发布后冲突；外部文件保留在 \(recoveryPath)，请重新读取配置"))
+        return .failure(
+            .configPublishedButFailed(
+                reason: ConfigMutationFailure.postPublishConflict(recoveryPath: recoveryPath).reason
+            ))
+    case .failure(.postPublishPathChanged(let location)):
+        return .failure(
+            .configPublishedButFailed(
+                reason: ConfigMutationFailure.postPublishPathChanged(location: location).reason))
     case .failure(.mutationRejected):
         return .failure(.configWriteFailure(reason: "配置变更被调用方拒绝"))
     }

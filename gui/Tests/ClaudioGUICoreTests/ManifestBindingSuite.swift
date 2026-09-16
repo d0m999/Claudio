@@ -1420,6 +1420,67 @@ func runManifestBindingSuites() async {
         }
     }
 
+    suite("mutateManifestJSON: 交换后冲突保留已发布失败和外部恢复文件") {
+        withTempDirectory { root in
+            let pack = root.appendingPathComponent("packs/my-pack")
+            let manifest = pack.appendingPathComponent("manifest.json")
+            writeFixture(#"{"id":"my-pack","events":{}}"#, to: manifest)
+            let external = Data(#"{"id":"my-pack","events":{"stop":"external.wav"}}"#.utf8)
+            let result = mutateManifestJSON(
+                at: pack, lockFile: injectedPacksLock(under: root),
+                testingBeforeRename: { try! external.write(to: manifest, options: .atomic) }
+            ) { json in
+                json["events"] = ["stop": "ours.wav"]
+            }
+            guard case .failure(.publishedButFailed) = result else {
+                expect(false, "发布后冲突必须保留独立失败类型，got \(result)")
+                return
+            }
+            let current =
+                try! JSONSerialization.jsonObject(with: Data(contentsOf: manifest))
+                as! [String: Any]
+            expect((current["events"] as? [String: String])?["stop"] == "ours.wav", "磁盘可能已含新绑定")
+            let entries = try! FileManager.default.contentsOfDirectory(
+                at: pack, includingPropertiesForKeys: nil)
+            let recovery = entries.first { $0.lastPathComponent.hasPrefix(".claudio-stage-") }
+            expect(recovery != nil, "外部对象应留在恢复文件")
+            if let recovery {
+                expect((try? Data(contentsOf: recovery)) == external, "恢复文件应保留外部字节")
+            }
+        }
+    }
+
+    suite("mutateManifestJSON: 发布后包目录换位仍保留已发布失败") {
+        withTempDirectory { root in
+            let pack = root.appendingPathComponent("packs/my-pack")
+            let moved = root.appendingPathComponent("moved-pack")
+            let manifest = pack.appendingPathComponent("manifest.json")
+            writeFixture(#"{"id":"my-pack","events":{}}"#, to: manifest)
+
+            let result = mutateManifestJSON(
+                at: pack, lockFile: injectedPacksLock(under: root),
+                testingBeforeRename: {
+                    try! FileManager.default.moveItem(at: pack, to: moved)
+                    try! FileManager.default.createDirectory(
+                        at: pack, withIntermediateDirectories: false)
+                }
+            ) { json in
+                json["events"] = ["stop": "ours.wav"]
+            }
+            guard case .failure(.publishedButFailed(let reason)) = result else {
+                expect(false, "目录换位后的已发布错误必须有独立身份，got \(result)")
+                return
+            }
+            expect(reason.contains("已发布"), "应说明写入已落在固定目录")
+            let movedManifest = moved.appendingPathComponent("manifest.json")
+            let current =
+                try! JSONSerialization.jsonObject(with: Data(contentsOf: movedManifest))
+                as! [String: Any]
+            expect((current["events"] as? [String: String])?["stop"] == "ours.wav", "固定目录应保留新绑定")
+            expect(!FileManager.default.fileExists(atPath: manifest.path), "新路径不能接收误写")
+        }
+    }
+
     suite("mutateManifestJSON: events 存在但不是 JSON 对象 → .manifestUnreadable，transform 从不被调用，字节不变") {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")

@@ -742,6 +742,37 @@ func runAudioImportSuites() {
         }
     }
 
+    suite("importAudioFile: 分配后、锚定前出现同名符号链接时重试下一个名称") {
+        withTempDirectory { root in
+            let packs = root.appendingPathComponent("packs")
+            let pack = packs.appendingPathComponent("my-pack")
+            let target = root.appendingPathComponent("external/keep.wav")
+            let original = Data("external".utf8)
+            writeFixture(original, to: target)
+            let source = root.appendingPathComponent("source/chime.wav")
+            let importedBytes = validWAVData()
+            writeFixture(importedBytes, to: source)
+            let occupier = OneShotSymlinkOccupier(targetURL: target)
+            var environment = makeAudioImportEnvironment(userPacksDirectory: packs)
+            environment.beforeDestinationAnchor = { occupier.occupy($0) }
+
+            let outcome = importAudioFile(
+                sourceURL: source, suggestedFileName: "chime.wav", packID: "my-pack",
+                environment: environment)
+            guard case .success(let imported) = outcome else {
+                expect(false, "应重试同名链接碰撞，got \(outcome)")
+                return
+            }
+            expect(imported.fileName == "chime-2.wav", "碰撞后应分配 -2 名称")
+            expect(
+                (try? FileManager.default.destinationOfSymbolicLink(
+                    atPath: pack.appendingPathComponent("chime.wav").path)) == target.path,
+                "同名链接必须保留")
+            expect((try? Data(contentsOf: target)) == original, "链接目标必须不变")
+            expect((try? Data(contentsOf: imported.destinationURL)) == importedBytes, "新名称应收到导入字节")
+        }
+    }
+
     suite(
         "importAudioFile: pack directory replacement after allocation cannot redirect publication"
     ) {

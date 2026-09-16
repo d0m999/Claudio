@@ -51,6 +51,8 @@ public enum ManifestBindError: Error, Sendable, Equatable {
     /// The updated JSON couldn't be serialized or written back to disk. Also produced by
     /// ``mutateManifestJSON(at:_:)``.
     case writeFailed(reason: String)
+    /// The new manifest reached disk before a conflict or path move was detected.
+    case publishedButFailed(reason: String)
     /// 另一个写者此刻正持有 `~/.claudio/packs.lock` —— 这次读-改-写**一个字节都没跑**。
     ///
     /// `manifest.json` 有两个写者：这里（bind/clear，字节级）与 `performFirstRunSetup` 的包发布
@@ -82,13 +84,16 @@ public enum ManifestEventBindingExpectation: Sendable, Equatable {
 private final class LockedManifestTransform {
     private let expectedEventBinding: (event: Event, binding: ManifestEventBindingExpectation)?
     private let body: (inout [String: Any]) -> Void
+    fileprivate let testingBeforeRename: (() -> Void)?
     private(set) var failure: ManifestBindError?
 
     init(
         expectedEventBinding: (event: Event, binding: ManifestEventBindingExpectation)?,
+        testingBeforeRename: (() -> Void)?,
         body: @escaping (inout [String: Any]) -> Void
     ) {
         self.expectedEventBinding = expectedEventBinding
+        self.testingBeforeRename = testingBeforeRename
         self.body = body
     }
 
@@ -179,6 +184,7 @@ public func mutateManifestJSON(
     lockFile: URL,
     expectedManifestID: String? = nil,
     expectedEventBinding: (event: Event, binding: ManifestEventBindingExpectation)? = nil,
+    testingBeforeRename: (() -> Void)? = nil,
     _ transform: (inout [String: Any]) -> Void
 ) -> Result<Void, ManifestBindError> {
     // 整段读-改-写都在锁里。**别把锁收窄到只包最后那次 `write`** —— 那样两个写者仍然可以各自
@@ -194,6 +200,7 @@ public func mutateManifestJSON(
     return withoutActuallyEscaping(transform) { body in
         let transform = LockedManifestTransform(
             expectedEventBinding: expectedEventBinding,
+            testingBeforeRename: testingBeforeRename,
             body: body)
         let outcome = withNonBlockingLock(path: lockFile.path) {
             performManifestMutation(
@@ -298,7 +305,18 @@ private func performManifestMutation(
     }
 
     do {
-        try anchored.publish(updatedData, expected: snapshot)
+        try anchored.publish(
+            updatedData, expected: snapshot,
+            testingBeforeRename: transform.testingBeforeRename ?? {})
+    } catch AnchoredFileError.publishedWithConflict(let recoveryPath) {
+        return .failure(
+            .publishedButFailed(
+                reason: AnchoredFileError.publishedWithConflict(recoveryPath: recoveryPath)
+                    .description))
+    } catch AnchoredFileError.publishedButPathChanged(let location) {
+        return .failure(
+            .publishedButFailed(
+                reason: AnchoredFileError.publishedButPathChanged(location: location).description))
     } catch {
         return .failure(.writeFailed(reason: String(describing: error)))
     }

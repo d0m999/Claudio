@@ -2309,8 +2309,10 @@ extension SoundPackLibraryPresentation {
 
 extension PanelPackSwitchOutcome {
     fileprivate var refreshesEditor: Bool {
-        if case .succeeded = self { return true }
-        return false
+        switch self {
+        case .succeeded, .failed(.configPublishedButFailed): return true
+        case .failed: return false
+        }
     }
 }
 

@@ -216,4 +216,15 @@ func runPanelWriteFailuresSuites() {
                 == [.configReadFailure(reason: "master_volume is a string")],
             "配置失败卡只应去掉同一 reason 的操作错误，其他 reason 仍需显示")
     }
+
+    suite("panelWriteFailureItems：三个写者的已发布失败保留同一类型原因") {
+        let reason = "config.json 已发布，但随后发现外部替换"
+        let items = panelWriteFailureItems(
+            muteError: .configPublishedButFailed(reason: reason),
+            packSwitchError: .configPublishedButFailed(reason: reason),
+            masterVolumeError: .configPublishedButFailed(reason: reason))
+        expect(
+            items.map(\.reason) == [.configPublishedButFailed(reason: reason)],
+            "相同已发布失败须作为一个可见原因保留")
+    }
 }

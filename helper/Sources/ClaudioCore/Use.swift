@@ -28,6 +28,7 @@ public enum UseError: Error, Sendable, Equatable, CustomStringConvertible {
     case manifestUnreadable(packID: String, reason: String)
     case configReadFailure(reason: String)
     case configWriteFailure(reason: String)
+    case configPublishedButFailed(reason: String)
     case lockBusy
     case lockFailed(errno: Int32)
 
@@ -43,6 +44,8 @@ public enum UseError: Error, Sendable, Equatable, CustomStringConvertible {
             "config.json 读取失败，已中止（未修改文件）：\(reason)"
         case .configWriteFailure(let reason):
             "config.json 写入失败：\(reason)"
+        case .configPublishedButFailed(let reason):
+            reason
         case .lockBusy:
             "config.json 当前被占用（另一个 claudio 进程正在读写），请稍后重试"
         case .lockFailed(let errno):
@@ -71,7 +74,8 @@ public func selectPack(
     configFile: URL = ClaudioPaths.configFile,
     userPacksDirectory: URL = ClaudioPaths.packsDirectory,
     bundledPacksDirectory: URL? = nil,
-    lockFile: URL = ClaudioPaths.configLockFile
+    lockFile: URL = ClaudioPaths.configLockFile,
+    testingBeforeConfigRename: (() -> Void)? = nil
 ) -> Result<UseOutcome, UseError> {
     guard isSafePackID(packID) else { return .failure(.invalidPackID(packID)) }
     guard
@@ -87,7 +91,9 @@ public func selectPack(
     }
 
     let outcome = withNonBlockingLock(path: lockFile.path) {
-        performSelectPack(packID, configFile: configFile)
+        performSelectPack(
+            packID, configFile: configFile,
+            testingBeforeConfigRename: testingBeforeConfigRename)
     }
 
     switch outcome {
@@ -106,12 +112,16 @@ public func selectPack(
 /// 的数据丢失 bug（只写已建模键 + 宽松解码把坏值静默换成默认值），只是触发频率低——切包比点静音少。
 /// 见 `ConfigMutation.swift` 的类型注释。
 private func performSelectPack(
-    _ packID: String, configFile: URL
+    _ packID: String, configFile: URL,
+    testingBeforeConfigRename: (() -> Void)?
 ) -> Result<UseOutcome, UseError> {
     // 全仓**唯一**有资格从无到有建出一份 config 的写者——因为它是唯一手上握着真实 pack id 的那个
     // （而且这个 id 上面刚刚校验过）。没有 pack 上下文的写者（静音钮、主音量、星标）一律 `.failClosed`：
     // 凭空新建等于伪造一次谁也没做过的选择（D23 定稿①）。
-    let result = updateConfigJSON(at: configFile, onMissing: .createFresh(selectedPack: packID)) {
+    let result = updateConfigJSON(
+        at: configFile, onMissing: .createFresh(selectedPack: packID),
+        testingBeforeRename: testingBeforeConfigRename
+    ) {
         json in
         json["selected_pack"] = packID
         return .success(())
@@ -129,7 +139,14 @@ private func performSelectPack(
     case .failure(.writeFailed(let reason)):
         return .failure(.configWriteFailure(reason: reason))
     case .failure(.postPublishConflict(let recoveryPath)):
-        return .failure(.configWriteFailure(reason: "发布后冲突；外部文件保留在 \(recoveryPath)，请重新读取配置"))
+        return .failure(
+            .configPublishedButFailed(
+                reason: ConfigMutationFailure.postPublishConflict(recoveryPath: recoveryPath).reason
+            ))
+    case .failure(.postPublishPathChanged(let location)):
+        return .failure(
+            .configPublishedButFailed(
+                reason: ConfigMutationFailure.postPublishPathChanged(location: location).reason))
     case .failure(.mutationRejected):
         return .failure(.configWriteFailure(reason: "配置变更被调用方拒绝"))
     }

@@ -72,6 +72,7 @@ enum ConfigMutationFailure: Error, Sendable, Equatable {
     /// The replacement was published, then an uncoordinated external replacement was found.
     /// Its displaced bytes remain at `recoveryPath`; callers must not claim zero mutation.
     case postPublishConflict(recoveryPath: String)
+    case postPublishPathChanged(location: String)
     /// 调用方在同一把锁、同一份已验证 JSON 上发现自己的业务前置条件不成立。这个 case 只让
     /// ``updateConfigJSON(at:onMissing:mutate:)`` 在编码/写盘之前中止；公共写者必须把它映射回自己的
     /// 领域错误，不能把内部占位文案漏给用户。
@@ -85,6 +86,8 @@ enum ConfigMutationFailure: Error, Sendable, Equatable {
         case .writeFailed(let reason): reason
         case .postPublishConflict(let recoveryPath):
             "config.json 已发布，但随后发现外部替换；原文件保留在 \(recoveryPath)。请重新读取当前配置并手工恢复"
+        case .postPublishPathChanged(let location):
+            AnchoredFileError.publishedButPathChanged(location: location).description
         case .mutationRejected: "配置变更被调用方拒绝"
         }
     }
@@ -397,20 +400,22 @@ public func probeConfigRewritable(configFile: URL = ClaudioPaths.configFile) -> 
 func updateConfigJSON(
     at configFile: URL,
     onMissing: MissingConfigPolicy,
+    testingBeforeRename: (() -> Void)? = nil,
     mutate: (inout [String: Any]) -> Result<Void, ConfigMutationFailure>
 ) -> Result<Void, ConfigMutationFailure> {
     var json: [String: Any]
-    if case .createFresh = onMissing,
-        !FileManager.default.fileExists(atPath: configFile.deletingLastPathComponent().path)
-    {
+    if case .createFresh = onMissing {
+        // Check every lexical ancestor even when the leaf directory already exists.
         do { try ensurePrivateDirectoryExists(at: configFile.deletingLastPathComponent()) } catch {
             return .failure(.writeFailed(reason: error.localizedDescription))
         }
     }
-    if case .failClosed = onMissing,
-        !FileManager.default.fileExists(atPath: configFile.deletingLastPathComponent().path)
-    {
-        return .failure(.missing(reason: "config.json 不存在：\(configFile.path)"))
+    if case .failClosed = onMissing {
+        guard FileManager.default.fileExists(atPath: configFile.deletingLastPathComponent().path)
+        else { return .failure(.missing(reason: "config.json 不存在：\(configFile.path)")) }
+        do {
+            try validateExistingDirectoryComponents(of: configFile.deletingLastPathComponent())
+        } catch { return .failure(.writeFailed(reason: error.localizedDescription)) }
     }
     let anchored: AnchoredFileIO
     let snapshot: AnchoredFileSnapshot
@@ -460,9 +465,12 @@ func updateConfigJSON(
     }
 
     do {
-        try anchored.publish(data, expected: snapshot)
+        try anchored.publish(
+            data, expected: snapshot, testingBeforeRename: testingBeforeRename ?? {})
     } catch AnchoredFileError.publishedWithConflict(let recoveryPath) {
         return .failure(.postPublishConflict(recoveryPath: recoveryPath))
+    } catch AnchoredFileError.publishedButPathChanged(let location) {
+        return .failure(.postPublishPathChanged(location: location))
     } catch {
         return .failure(.writeFailed(reason: String(describing: error)))
     }

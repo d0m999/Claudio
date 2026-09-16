@@ -113,7 +113,10 @@ public final class SoundPacksRefreshCoordinator: ObservableObject {
     public func completePanelPackSwitch(
         _ outcome: PanelPackSwitchOutcome
     ) {
-        guard outcome == .succeeded else { return }
+        switch outcome {
+        case .succeeded, .failed(.configPublishedButFailed): break
+        case .failed: return
+        }
         windowReloadRequiresLibraryRefresh = false
         windowReloadRevision += 1
     }

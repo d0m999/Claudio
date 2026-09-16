@@ -638,6 +638,41 @@ func runSoundPacksRefreshSuites() async {
         }
     }
 
+    suite("SoundPacksWindowModel：manifest 已发布后报冲突仍重读窗口并通知面板") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs")
+            let manifest = packs.appendingPathComponent("pack-a/manifest.json")
+            writeFixture(#"{"selected_pack":"pack-a","events":{}}"#, to: configFile)
+            writeFixture(#"{"id":"pack-a","events":{"stop":"old.mp3"}}"#, to: manifest)
+            writeFixture("audio", to: packs.appendingPathComponent("pack-a/old.mp3"))
+            writeFixture("audio", to: packs.appendingPathComponent("pack-a/new.mp3"))
+            let coordinator = SoundPacksRefreshCoordinator()
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: soundPacksEnvironment(packs),
+                refreshCoordinator: coordinator)
+            expect(
+                model.selectedEventRows.first(where: { $0.event == .stop })?.coverage
+                    == .present(fileName: "old.mp3"), "前提：窗口持有旧映射")
+
+            writeFixture(#"{"id":"pack-a","events":{"stop":"new.mp3"}}"#, to: manifest)
+            let result = model.finishAudioActionForTesting(
+                .failure(.bind(.publishedButFailed(reason: "发布后冲突"))),
+                invalidatingPackID: "pack-a")
+            guard case .failure(.bind(.publishedButFailed)) = result else {
+                expect(false, "用户仍应看到失败，got \(result)")
+                return
+            }
+            expect(coordinator.panelReloadRevision == 1, "磁盘已变时必须通知面板重投影")
+            expect(
+                model.selectedEventRows.first(where: { $0.event == .stop })?.coverage
+                    == .present(fileName: "new.mp3"), "窗口必须重读已发布映射")
+            expect(model.audioActionError != nil, "刷新不得抹掉失败提示")
+        }
+    }
+
     suite("SoundPacksWindowModel：安全拒删会重读确认期间漂移的音频清单，不发布假写刷新") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
@@ -1449,6 +1484,41 @@ func runSoundPacksRefreshSuites() async {
                 "路由目标未进入 retained model 时必须明确返回失败")
             expect(model.selectedPackID == "pack-a", "失败选择不得改到其他包")
             expect(model.selectedEventRows == originalRows, "失败选择不得重算成其他包的同名事件")
+        }
+    }
+
+    suite("SoundPacksWindowModel：切包已发布后报冲突仍重读配置并通知面板") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs")
+            writeFixture(#"{"selected_pack":"pack-a","events":{}}"#, to: configFile)
+            for id in ["pack-a", "pack-b"] {
+                writeFixture(
+                    "{\"id\":\"\(id)\",\"events\":{}}",
+                    to: packs.appendingPathComponent("\(id)/manifest.json"))
+            }
+            let coordinator = SoundPacksRefreshCoordinator()
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: soundPacksEnvironment(packs),
+                refreshCoordinator: coordinator)
+            expect(model.config.selectedPack == "pack-a", "前提：窗口持有旧选择")
+
+            writeFixture(#"{"selected_pack":"pack-b","events":{}}"#, to: configFile)
+            let result = model.finishPackUse(
+                .failure(.use(.configPublishedButFailed(reason: "发布后冲突"))))
+            guard case .failure(.use(.configPublishedButFailed)) = result else {
+                expect(false, "用户仍应看到失败，got \(result)")
+                return
+            }
+            expect(model.config.selectedPack == "pack-b", "窗口须重读磁盘上的当前选择")
+            expect(coordinator.panelReloadRevision == 1, "必须通知面板重读选择")
+            expect(model.packUseActionError != nil, "失败提示须保留")
+
+            coordinator.completePanelPackSwitch(
+                .failed(.configPublishedButFailed(reason: "发布后冲突")))
+            expect(coordinator.windowReloadRevision == 1, "面板侧同类失败须通知窗口")
         }
     }
 

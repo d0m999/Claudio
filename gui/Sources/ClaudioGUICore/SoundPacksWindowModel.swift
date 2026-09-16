@@ -354,6 +354,8 @@ private func soundPacksWindowBindErrorText(
         return .localized(.soundPacksBindErrorManifestUnreadable, reason)
     case .writeFailed(let reason):
         return .localized(.soundPacksBindErrorWriteFailed, reason)
+    case .publishedButFailed(let reason):
+        return .localized(.soundPacksBindErrorWriteFailed, reason)
     case .lockBusy:
         return .localized(.soundPacksBindErrorLockBusy)
     case .lockFailed(let errno):
@@ -1310,7 +1312,11 @@ package final class SoundPacksWindowModel {
                 severity: .failure,
                 actionText: .localized(.soundPacksStatusUpdateStars),
                 messageText: messageText)
-            completeSynchronousWrite(.failed)
+            if case .configPublishedButFailed = error {
+                completeSynchronousWrite(.changedDespiteFailure)
+            } else {
+                completeSynchronousWrite(.failed)
+            }
         }
         return result
     }
@@ -2193,7 +2199,7 @@ package final class SoundPacksWindowModel {
                 let issue: ManifestRecoveryIssue?
                 switch bindError {
                 case .manifestUnreadable: issue = .unreadable
-                case .writeFailed: issue = .writeFailed
+                case .writeFailed, .publishedButFailed: issue = .writeFailed
                 default: issue = nil
                 }
                 recovery = issue.map {
@@ -2214,13 +2220,34 @@ package final class SoundPacksWindowModel {
                 messageText: error.statusText,
                 packID: invalidatingPackID ?? selectedPackID,
                 recovery: recovery)
-            completeSynchronousWrite(.failed, mutation: mutation)
-            if invalidatingPackID != nil, refreshAfterFailure {
+            let publishedDespiteFailure: Bool
+            if case .bind(.publishedButFailed) = error {
+                publishedDespiteFailure = true
+            } else {
+                publishedDespiteFailure = false
+            }
+            completeSynchronousWrite(
+                publishedDespiteFailure ? .changedDespiteFailure : .failed,
+                invalidatingPackIDs: publishedDespiteFailure
+                    ? Set(invalidatingPackID.map { [$0] } ?? []) : [],
+                mutation: mutation)
+            if invalidatingPackID != nil, refreshAfterFailure && !publishedDespiteFailure {
                 reload(followActivePack: false)
             }
         }
         return result
     }
+
+    #if DEBUG
+    package func finishAudioActionForTesting(
+        _ result: Result<Void, SoundPacksWindowAudioActionError>,
+        invalidatingPackID: String
+    ) -> Result<Void, SoundPacksWindowAudioActionError> {
+        let mutation = beginSoundPackMutation(packIDs: [invalidatingPackID])
+        return finishAudioAction(
+            result, invalidatingPackID: invalidatingPackID, mutation: mutation)
+    }
+    #endif
 
     private func finishFactoryRestore(
         _ result: Result<
@@ -2329,7 +2356,7 @@ package final class SoundPacksWindowModel {
         return result
     }
 
-    private func finishPackUse(
+    package func finishPackUse(
         _ result: Result<UseOutcome, SoundPacksWindowPackUseActionError>
     ) -> Result<UseOutcome, SoundPacksWindowPackUseActionError> {
         switch result {
@@ -2352,7 +2379,12 @@ package final class SoundPacksWindowModel {
                 actionText: .localized(.soundPacksStatusUsePack),
                 messageText: error.statusText,
                 packID: selectedPackID)
-            completeSynchronousWrite(.failed)
+            switch error {
+            case .use(.configPublishedButFailed), .surface(.configPublishedButFailed):
+                completeSynchronousWrite(.changedDespiteFailure)
+            default:
+                completeSynchronousWrite(.failed)
+            }
         }
         return result
     }
@@ -2498,7 +2530,8 @@ package final class SoundPacksWindowModel {
         _ error: ManifestBindError
     ) -> Bool {
         switch error {
-        case .packNotFound, .fileNotFound, .manifestUnreadable, .targetChanged:
+        case .packNotFound, .fileNotFound, .manifestUnreadable, .publishedButFailed,
+            .targetChanged:
             return true
         case .unsafeFileName, .writeFailed, .lockBusy, .lockFailed:
             return false

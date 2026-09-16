@@ -143,6 +143,42 @@ func runSoundPackLibraryMutationTransactionSuites() async {
             "idle changed 必须携带 exact affected IDs，不能退化为 full invalidation")
     }
 
+    await suite("manifest 已发布后报冲突须结束 mutation 并刷新共享声音包库") {
+        await withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs")
+            writeFixture(#"{"selected_pack":"pack-a","events":{}}"#, to: configFile)
+            writeFixture(
+                #"{"id":"pack-a","events":{}}"#,
+                to: packs.appendingPathComponent("pack-a/manifest.json"))
+            let scanner = MutationTransactionScanner()
+            let library = SoundPackLibrary(
+                scanner: SoundPackLibraryScanner(operation: scanner.scan))
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: makeAudioImportEnvironment(userPacksDirectory: packs),
+                soundPackLibrary: library,
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+
+            let result = model.finishAudioActionForTesting(
+                .failure(.bind(.publishedButFailed(reason: "发布后冲突"))),
+                invalidatingPackID: "pack-a")
+            guard case .failure(.bind(.publishedButFailed)) = result else {
+                expect(false, "用户仍应收到失败，got \(result)")
+                return
+            }
+            expect(
+                await waitForMutationScanCount(scanner, 1),
+                "已发布失败必须启动共享库 completion scan")
+            await drainMutationNotifications(library)
+            expect(scanner.requests.count == 1, "一次已发布失败只应启动一次 scan")
+            expect(
+                scanner.requests.first?.invalidatedPackIDs == ["pack-a"],
+                "共享库必须只失效受影响包")
+        }
+    }
+
     await suite("SoundPackLibrary transaction：old in-flight + noChange 只追加一次 follow-up") {
         let scanner = MutationTransactionScanner(blocksFirstScan: true)
         let deferral = MutationTerminalDeferralProbe()

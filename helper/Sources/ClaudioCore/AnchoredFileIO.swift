@@ -249,14 +249,13 @@ public final class AnchoredFileIO {
         }
     }
 
-    #if DEBUG
+    /// Synchronous test seam for a non-cooperating writer at the final rename boundary.
     public func publish(
         _ bytes: Data, expected: AnchoredFileSnapshot,
         testingBeforeRename: () -> Void
     ) throws {
         try publish(bytes, expected: expected, beforeRename: testingBeforeRename)
     }
-    #endif
 
     func publish(
         _ bytes: Data, expected: AnchoredFileSnapshot, beforeRename: () throws -> Void

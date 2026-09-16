@@ -40,6 +40,7 @@ import Foundation
 public enum PanelWriteFailureReason: Sendable, Equatable, Hashable {
     case configReadFailure(reason: String)
     case configWriteFailure(reason: String)
+    case configPublishedButFailed(reason: String)
     case lockBusy
     case lockFailed(errno: Int32)
     case invalidPackID(String)
@@ -133,6 +134,10 @@ private extension PanelWriteFailure {
             self.init(
                 reason: .configWriteFailure(reason: reason),
                 message: error.description)
+        case .configPublishedButFailed(let reason):
+            self.init(
+                reason: .configPublishedButFailed(reason: reason),
+                message: error.description)
         case .lockBusy:
             self.init(reason: .lockBusy, message: error.description)
         case .lockFailed(let errno):
@@ -151,6 +156,10 @@ private extension PanelWriteFailure {
         case .configWriteFailure(let reason):
             self.init(
                 reason: .configWriteFailure(reason: reason),
+                message: error.description)
+        case .configPublishedButFailed(let reason):
+            self.init(
+                reason: .configPublishedButFailed(reason: reason),
                 message: error.description)
         case .lockBusy:
             self.init(reason: .lockBusy, message: error.description)
@@ -176,6 +185,10 @@ private extension PanelWriteFailure {
         case .configWriteFailure(let reason):
             self.init(
                 reason: .configWriteFailure(reason: reason),
+                message: error.description)
+        case .configPublishedButFailed(let reason):
+            self.init(
+                reason: .configPublishedButFailed(reason: reason),
                 message: error.description)
         case .lockBusy:
             self.init(reason: .lockBusy, message: error.description)

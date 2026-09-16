@@ -258,11 +258,21 @@ public func importAudioFile(
                     return .rejected(.copyFailed(reason: "无法生成唯一文件名"))
                 }
 
+                environment.beforeDestinationAnchor?(uniqueDestinationURL)
                 let anchored: AnchoredFileIO
                 do {
                     anchored = try AnchoredFileIO(
                         file: uniqueDestinationURL, preserveFinalSymlink: false,
                         rootDirectory: environment.userPacksDirectory)
+                } catch AnchoredFileError.unsafePath(let path)
+                    where path == uniqueDestinationURL.standardizedFileURL.path
+                {
+                    // A final symlink can appear after allocation but before the anchor opens.
+                    // Only that occupied final entry is a retryable name collision.
+                    var entry = stat()
+                    if lstat(uniqueDestinationURL.path, &entry) == 0 { continue }
+                    return .rejected(
+                        .copyFailed(reason: AnchoredFileError.unsafePath(path).description))
                 } catch {
                     return .rejected(.copyFailed(reason: String(describing: error)))
                 }

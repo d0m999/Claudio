@@ -255,4 +255,22 @@ func runPanelRefreshRouteSuites() {
                     + "\(panelRefreshRoute(muteSucceeded: succeeded, error: controller.lastError))")
         }
     }
+
+    suite("发布后失败的三个 config 写者都只重读配置，不扫描包库") {
+        let reason = "config.json 已发布，但随后发现外部替换"
+        expect(
+            panelRefreshRoute(
+                muteSucceeded: false, error: .configPublishedButFailed(reason: reason))
+                == .configOnly,
+            "事件开关须重读配置")
+        expect(
+            masterVolumeRefreshRoute(
+                succeeded: false, error: .configPublishedButFailed(reason: reason))
+                == .configOnly,
+            "主音量须重读配置")
+        expect(
+            packSwitchRefreshRoute(after: .configPublishedButFailed(reason: reason))
+                == .configOnly,
+            "切包须重读配置")
+    }
 }

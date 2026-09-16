@@ -142,7 +142,8 @@ public func panelRefreshRoute(muteSucceeded: Bool, error: SetEventEnabledError?)
     case .configMissing?:
         // config.json 被删了 → .needsPack，而自救的入口是画廊 → 它必须新鲜。
         return .full
-    case .lockFailed?, .configReadFailure?, .configWriteFailure?, nil:
+    case .lockFailed?, .configReadFailure?, .configWriteFailure?,
+        .configPublishedButFailed?, nil:
         // config.json / 它的目录**可能**变了，但包库没理由变。.lockFailed 是一袋未知 errno、nil 是本不该
         // 出现的空失败 —— 两者都「证明不了没变」。不知道 = 去读盘，但只读便宜的那一半。
         return .configOnly
@@ -169,7 +170,8 @@ public func masterVolumeRefreshRoute(succeeded: Bool, error: SetMasterVolumeErro
         return .noRefresh
     case .configMissing?:
         return .full
-    case .lockFailed?, .configReadFailure?, .configWriteFailure?, nil:
+    case .lockFailed?, .configReadFailure?, .configWriteFailure?,
+        .configPublishedButFailed?, nil:
         return .configOnly
     }
 }
@@ -197,7 +199,7 @@ public func packSwitchRefreshRoute(after error: UseError) -> PanelRefreshRoute {
     switch error {
     case .lockBusy, .invalidPackID:
         return .noRefresh
-    case .lockFailed, .configReadFailure, .configWriteFailure:
+    case .lockFailed, .configReadFailure, .configWriteFailure, .configPublishedButFailed:
         return .configOnly
     case .packNotFound, .manifestUnreadable:
         return .full

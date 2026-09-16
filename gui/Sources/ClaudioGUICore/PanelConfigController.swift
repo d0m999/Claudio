@@ -333,6 +333,10 @@ public final class PanelConfigController: ObservableObject {
             case .failure(let error):
                 surfaceSoundIssue = error.description
                 reloadConfigOnly(origin: .writeAction)
+                if case .configPublishedButFailed = error {
+                    soundPacksRefreshCoordinator?.completePanelConfigChange(
+                        .changed, source: configProjectionToken)
+                }
             }
             return
         }
@@ -345,7 +349,13 @@ public final class PanelConfigController: ObservableObject {
         case .full: reload(origin: .writeAction, refreshSoundPackLibrary: true)
         case .noRefresh: break
         }
-        if succeeded {
+        let publishedDespiteFailure: Bool
+        if case .configPublishedButFailed? = muteController.lastError {
+            publishedDespiteFailure = true
+        } else {
+            publishedDespiteFailure = false
+        }
+        if succeeded || publishedDespiteFailure {
             soundPacksRefreshCoordinator?.completePanelConfigChange(
                 .changed,
                 source: configProjectionToken)
@@ -377,7 +387,13 @@ public final class PanelConfigController: ObservableObject {
         case .full: reload(origin: .writeAction, refreshSoundPackLibrary: true)
         case .noRefresh: break
         }
-        if landed != nil {
+        let publishedDespiteFailure: Bool
+        if case .configPublishedButFailed? = masterVolumeController.lastError {
+            publishedDespiteFailure = true
+        } else {
+            publishedDespiteFailure = false
+        }
+        if landed != nil || publishedDespiteFailure {
             soundPacksRefreshCoordinator?.completePanelConfigChange(
                 .changed,
                 source: configProjectionToken)
@@ -424,6 +440,11 @@ public final class PanelConfigController: ObservableObject {
                 // surface 专属错误由 `surfaceSoundIssue` 单一呈现；不要同时塞进全局切包错误，
                 // 否则同一失败会在 popup 连续渲染两次。
                 packSwitchError = nil
+                if case .configPublishedButFailed = error {
+                    reload(origin: .writeAction, refreshSoundPackLibrary: false)
+                    soundPacksRefreshCoordinator?.completeConfigFactChange(
+                        .changed, source: configProjectionToken)
+                }
                 return .failed(mapped)
             }
         }
@@ -446,6 +467,10 @@ public final class PanelConfigController: ObservableObject {
             case .configOnly: reloadConfigOnly(origin: .writeAction)
             case .full: reload(origin: .writeAction, refreshSoundPackLibrary: true)
             case .noRefresh: break
+            }
+            if case .configPublishedButFailed = error {
+                soundPacksRefreshCoordinator?.completeConfigFactChange(
+                    .changed, source: configProjectionToken)
             }
             return .failed(error)
         }
@@ -795,6 +820,7 @@ private func surfaceUseError(_ error: SurfaceSoundMutationError) -> UseError {
         .manifestUnreadable(packID: id, reason: reason)
     case .configReadFailure(let reason): .configReadFailure(reason: reason)
     case .configWriteFailure(let reason): .configWriteFailure(reason: reason)
+    case .configPublishedButFailed(let reason): .configPublishedButFailed(reason: reason)
     case .configMissing: .configReadFailure(reason: error.description)
     case .lockBusy: .lockBusy
     case .lockFailed(let errno): .lockFailed(errno: errno)

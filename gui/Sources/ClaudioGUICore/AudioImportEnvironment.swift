@@ -165,6 +165,9 @@ public struct AudioImportEnvironment: Sendable {
     /// 覆盖该项。回调是同步的，且必须自行满足 `Sendable`。
     public var beforeExclusivePublish: (@Sendable (URL) -> Void)?
 
+    /// Test seam between name allocation and opening the destination anchor.
+    public var beforeDestinationAnchor: (@Sendable (URL) -> Void)?
+
     /// `forkPack` 已完成 factory copy 与 manifest rewrite、但尚未执行最终独占目录发布时调用。
     /// 与音频导入的 ``beforeExclusivePublish`` 分开：两者处于不同写路径，复用同一个 hook 会让
     /// 测试注入的语义随调用者漂移。生产默认 `nil`；测试可在这里抢占 final URL，或抛错验证
@@ -200,6 +203,7 @@ public struct AudioImportEnvironment: Sendable {
         limits: AudioImportLimits = AudioImportLimits(),
         packsLockFile: URL,
         beforeExclusivePublish: (@Sendable (URL) -> Void)? = nil,
+        beforeDestinationAnchor: (@Sendable (URL) -> Void)? = nil,
         beforeForkPackPublish: (@Sendable (URL) throws -> Void)? = nil,
         beforeFactoryPackRestorePublish: (@Sendable () throws -> Void)? = nil,
         beforeFactoryPackRestoreSalvage: (@Sendable () throws -> Void)? = nil
@@ -211,6 +215,7 @@ public struct AudioImportEnvironment: Sendable {
         self.limits = limits
         self.packsLockFile = packsLockFile
         self.beforeExclusivePublish = beforeExclusivePublish
+        self.beforeDestinationAnchor = beforeDestinationAnchor
         self.beforeForkPackPublish = beforeForkPackPublish
         self.beforeFactoryPackRestorePublish = beforeFactoryPackRestorePublish
         self.beforeFactoryPackRestoreSalvage = beforeFactoryPackRestoreSalvage
