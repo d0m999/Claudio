@@ -37,7 +37,10 @@ _Avoid_: 用产品名代替具体 surface
 _Avoid_: App、来源行、把 Chat 与 Codex view 合并
 
 **事件绑定（Host Event Binding）**:
-一个来源的原生事件到 claudi0 公共 `Event` 的稳定、可版本化映射，由 `HostEventBindingID` 标识；接口声明、当前实现和真实激活是三个独立事实。
+一个来源的原生事件到 claudi0 公共 `Event` 的稳定、可版本化映射，由 `HostEventBindingID` 标识；
+`HostCapabilityBinding` 投影的来源支持、当前实现和真实激活是三个独立事实。「声音」页的三来源
+对照只说明该公共事件的能力，不承诺当前一定播放；实际能否听到声音还取决于选用的声音包、连接、
+静音及该事件是否已有音频。
 _Avoid_: 只用原生事件字符串作为身份
 
 **当前激活（Current Activation）**:
@@ -150,9 +153,9 @@ _Avoid_: 把实测值称为官方确认、一次成功即稳定合同、任意 H
 _Avoid_: release candidate、生产构建、可公开下载的测试版
 
 **提示音采用目标（Cue Adoption Target）**:
-一次采用操作捕获的 `HostSurfaceID`、公共 `Event` 和用户声音包 ID。三者在导入和绑定前必须重新验证，避免生成期间 UI 选择变化导致写入错误来源或声音包。
-_Avoid_: 只传 Event、当前 UI 隐式选择、全局目标
+一次采用操作显式捕获的用户声音包 `packID` 与公共 `Event`。导入和绑定前重新验证包与事件、候选集合和候选身份；选用该包的 Global/Surface 是应用层事实，不是采用目标。依据 ADR 0016。
+_Avoid_: 只传 Event、当前 UI 隐式选择、把 HostSurfaceID 当作包级写入目标
 
 **用户声音包（User Sound Pack）**:
-可编辑且已安装的普通声音包，由用户拥有其 manifest 与音频。AI 提示音采用后只成为其中一个常规资产；「我的提示音」是可变的展示名称，不是独立数据库或特殊持久化层。
+可编辑且已安装的普通声音包，由用户拥有其 manifest 与音频。AI 提示音采用后只成为其中一个常规资产；「提示音组」只是普通包的界面称呼。新建空组直到首个音成功采纳才发布为已安装用户包。
 _Avoid_: AI 资产库、虚拟声音包、临时候选目录
