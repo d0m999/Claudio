@@ -12,8 +12,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Test and build
+  helper:
+    name: Helper
     runs-on: macos-15
     timeout-minutes: 15
     env:
@@ -26,6 +26,7 @@ jobs:
           fetch-depth: 0
 
       - name: Toolchain
+        id: toolchain
         shell: bash
         run: |
           set -euo pipefail
@@ -35,6 +36,14 @@ jobs:
             echo "::error::Swift 6 is required; selected toolchain reported: $SWIFT_VERSION"
             exit 1
           fi
+          FINGERPRINT="$( { swift --version; xcodebuild -version; } | shasum -a 256 | awk '{ print $1 }' )"
+          echo "fingerprint=$FINGERPRINT" >> "$GITHUB_OUTPUT"
+
+      - name: Restore SwiftPM build cache
+        uses: actions/cache@v5
+        with:
+          path: helper/.build
+          key: helper-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('helper/Package.resolved', 'helper/Package.swift') }}-v1
 
       - name: Check patch whitespace
         shell: bash
@@ -66,9 +75,6 @@ jobs:
             git diff --check "$base" "$head"
           fi
 
-      - name: Validate string catalog JSON
-        run: jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings
-
       - name: Verify development version
         shell: bash
         run: |
@@ -81,6 +87,43 @@ jobs:
 
       - name: Run helper harness
         run: swift run --package-path helper claudio-tests
+
+  gui:
+    name: GUI and bundle
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      NSUnbufferedIO: YES
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain
+        id: toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          SWIFT_VERSION="$(swift --version)"
+          printf '%s\n' "$SWIFT_VERSION"
+          if [[ ! "$SWIFT_VERSION" =~ Apple\ Swift\ version\ 6\. ]]; then
+            echo "::error::Swift 6 is required; selected toolchain reported: $SWIFT_VERSION"
+            exit 1
+          fi
+          FINGERPRINT="$( { swift --version; xcodebuild -version; } | shasum -a 256 | awk '{ print $1 }' )"
+          echo "fingerprint=$FINGERPRINT" >> "$GITHUB_OUTPUT"
+
+      - name: Restore SwiftPM build cache
+        id: swiftpm-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            gui/.build
+            helper/.build
+          key: gui-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('helper/Package.resolved', 'helper/Package.swift', 'gui/Package.swift') }}-v1
+
+      - name: Validate string catalog JSON
+        run: jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings
 
       - name: Diagnose event-attention harness
         shell: bash
@@ -120,8 +163,31 @@ jobs:
       - name: Build ClaudioGUI (Release)
         run: swift build -c release --package-path gui --product ClaudioGUI -Xswiftc -Osize
 
+      - name: Save SwiftPM build cache
+        if: steps.swiftpm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            gui/.build
+            helper/.build
+          key: gui-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('helper/Package.resolved', 'helper/Package.swift', 'gui/Package.swift') }}-v1
+
       - name: Assemble local release-layout app
         run: bash scripts/dev-bundle.sh
 
       - name: Verify release size budget
         run: bash scripts/check-release-size.sh dist/claudi0.app
+
+  verify:
+    name: Test and build
+    if: ${{ !cancelled() }}
+    needs: [helper, gui]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require both lanes
+        env:
+          HELPER_RESULT: ${{ needs.helper.result }}
+          GUI_RESULT: ${{ needs.gui.result }}
+        run: |
+          test "$HELPER_RESULT" = success
+          test "$GUI_RESULT" = success
