@@ -120,7 +120,7 @@ jobs:
           path: |
             gui/.build
             helper/.build
-          key: gui-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('helper/Package.resolved', 'helper/Package.swift', 'gui/Package.swift') }}-v1
+          key: gui-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('helper/Package.resolved', 'helper/Package.swift', 'gui/Package.swift') }}-v2
 
       - name: Validate string catalog JSON
         run: jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings
@@ -163,6 +163,12 @@ jobs:
       - name: Build ClaudioGUI (Release)
         run: swift build -c release --package-path gui --product ClaudioGUI -Xswiftc -Osize
 
+      - name: Assemble local release-layout app
+        run: bash scripts/dev-bundle.sh
+
+      - name: Verify release size budget
+        run: bash scripts/check-release-size.sh dist/claudi0.app
+
       - name: Save SwiftPM build cache
         if: steps.swiftpm-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
@@ -170,13 +176,7 @@ jobs:
           path: |
             gui/.build
             helper/.build
-          key: gui-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('helper/Package.resolved', 'helper/Package.swift', 'gui/Package.swift') }}-v1
-
-      - name: Assemble local release-layout app
-        run: bash scripts/dev-bundle.sh
-
-      - name: Verify release size budget
-        run: bash scripts/check-release-size.sh dist/claudi0.app
+          key: gui-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('helper/Package.resolved', 'helper/Package.swift', 'gui/Package.swift') }}-v2
 
   verify:
     name: Test and build

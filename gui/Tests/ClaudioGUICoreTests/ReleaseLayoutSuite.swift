@@ -679,6 +679,38 @@ func runReleaseLayoutSuites() {
                 + exportContractViolations.joined(separator: "；"))
     }
 
+    suite("CI 在 bundle 构建完成后保存 GUI SwiftPM 缓存") {
+        let ciURL = guiTestRepositoryRoot().appendingPathComponent(".github/workflows/ci.yml")
+        guard let ci = try? String(contentsOf: ciURL, encoding: .utf8),
+            let guiStart = ci.range(of: "\n  gui:\n")?.upperBound,
+            let guiEnd = ci.range(of: "\n  verify:\n")?.lowerBound,
+            guiStart < guiEnd
+        else {
+            expect(false, "读不到 CI GUI job")
+            return
+        }
+
+        let lines = ci[guiStart..<guiEnd].components(separatedBy: "\n")
+        guard let restore = lines.firstIndex(of: "      - name: Restore SwiftPM build cache"),
+            let assemble = lines.firstIndex(of: "      - name: Assemble local release-layout app"),
+            let sizeCheck = lines.firstIndex(of: "      - name: Verify release size budget"),
+            let save = lines.firstIndex(of: "      - name: Save SwiftPM build cache")
+        else {
+            expect(false, "CI GUI job 必须包含缓存恢复、bundle、体积检查与缓存保存步骤")
+            return
+        }
+        expect(
+            restore < assemble && assemble < sizeCheck && sizeCheck < save,
+            "GUI 缓存只能在 dev-bundle.sh 完成且体积检查通过后保存，才能包含 LoginItem/helper Release 产物")
+        let restoreKey = lines[(restore + 1)..<assemble].first {
+            $0.hasPrefix("          key: gui-")
+        }
+        let saveKey = lines[(save + 1)...].first { $0.hasPrefix("          key: gui-") }
+        expect(
+            restoreKey != nil && restoreKey == saveKey,
+            "GUI 缓存恢复和保存必须使用同一非空 key")
+    }
+
     suite("体积优化合同跨行与参数调序仍会拒绝错误目标") {
         let commands = logicalCommandLines(
             in: """
