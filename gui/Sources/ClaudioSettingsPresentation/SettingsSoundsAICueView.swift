@@ -5,6 +5,32 @@ import ClaudioLocalization
 import SoundPacksWindow
 import SwiftUI
 
+package enum AICuePackDraftNameEdit: Equatable {
+    case noDraft
+    case unchanged
+    case pending(AICuePackName)
+    case invalid
+
+    package var needsSave: Bool {
+        switch self {
+        case .pending, .invalid: true
+        case .noDraft, .unchanged: false
+        }
+    }
+
+    package var savableName: AICuePackName? {
+        guard case .pending(let name) = self else { return nil }
+        return name
+    }
+}
+
+package func aiCuePackDraftNameEdit(draftName: String?, input: String) -> AICuePackDraftNameEdit {
+    guard let draftName else { return .noDraft }
+    guard let name = try? AICuePackName(input) else { return .invalid }
+    if name.value == draftName { return .unchanged }
+    return .pending(name)
+}
+
 /// Package-scoped AI cue generation belongs to the Sounds destination. Events & Sounds keeps its
 /// source facts and missing-sound deep links, while this view owns the visible package/event
 /// composer and the one-shot adoption permit that the retained editor owner signs.
@@ -21,6 +47,8 @@ struct SettingsSoundsAICueView: View {
     @FocusState private var focusedEvent: Event?
     @State private var credentialSheetIsPresented = false
     @State private var playingCandidateID: UUID?
+    @State private var pendingRouteSession: AICueComposerSession?
+    @State private var draftNameInput = ""
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
 
@@ -31,8 +59,12 @@ struct SettingsSoundsAICueView: View {
 
     private var selectedPack: SoundPackEditorPackPresentation? { sounds?.selectedPack }
 
+    private var draftNameEdit: AICuePackDraftNameEdit {
+        aiCuePackDraftNameEdit(draftName: sounds?.draft?.name, input: draftNameInput)
+    }
+
     private var activePackID: String? {
-        viewModel.session?.packID ?? sounds?.draft?.packID ?? selectedPack?.id
+        sounds?.draft?.packID ?? selectedPack?.id
     }
 
     private var activeEvent: Event? {
@@ -55,6 +87,8 @@ struct SettingsSoundsAICueView: View {
             }
         }
         .onAppear {
+            pendingRouteSession = routeSession
+            draftNameInput = sounds?.draft?.name ?? ""
             beginRouteSessionIfNeeded()
             syncOwnerComposer()
             Task { await viewModel.refreshCredentialStatus() }
@@ -63,7 +97,20 @@ struct SettingsSoundsAICueView: View {
             stopCandidatePreview()
             viewModel.endSession()
             editorOwner.updateAICueComposer(session: nil, generation: nil)
+            pendingRouteSession = routeSession
             beginRouteSessionIfNeeded()
+        }
+        .onChange(of: sounds?.routeState) { _ in beginRouteSessionIfNeeded() }
+        .onChange(of: selectedPack?.id) { selectedID in
+            if let session = viewModel.session, session.packID != activePackID {
+                stopCandidatePreview()
+                viewModel.endSession()
+                syncOwnerComposer()
+            }
+            if selectedID != nil { beginRouteSessionIfNeeded() }
+        }
+        .onChange(of: sounds?.draft?.name) { name in
+            draftNameInput = name ?? ""
         }
         .onChange(of: viewModel.session) { _ in syncOwnerComposer() }
         .onChange(of: viewModel.generation) { _ in syncOwnerComposer() }
@@ -96,8 +143,21 @@ struct SettingsSoundsAICueView: View {
                     Image(systemName: "square.and.pencil")
                         .foregroundColor(ClaudioTheme.clay(colorScheme))
                         .accessibilityHidden(true)
-                    Text(draft.name)
-                        .font(.headline)
+                    TextField(l10n.text(.settingsSoundsAICuePackName), text: $draftNameInput)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 240)
+                        .disabled(viewModel.phase == .adopting)
+                        .accessibilityIdentifier("settings.sounds.ai-cue.draft-name")
+                    Button(l10n.text(.settingsSoundsAICueSaveName)) {
+                        guard let name = draftNameEdit.savableName else { return }
+                        _ = editorOwner.renameAICuePackDraft(name)
+                    }
+                    .disabled(
+                        viewModel.phase == .adopting
+                            || draft.cancelAction == nil
+                            || draftNameEdit.savableName == nil
+                    )
+                    .accessibilityIdentifier("settings.sounds.ai-cue.save-draft-name")
                     Text(l10n.text(.settingsSoundsAICueDraft))
                         .font(.caption.weight(.semibold))
                         .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
@@ -106,6 +166,11 @@ struct SettingsSoundsAICueView: View {
                     .font(.caption)
                     .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
+                if draftNameEdit == .invalid {
+                    Text(l10n.text(.settingsSoundsAICueInvalidName))
+                        .font(.caption)
+                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                }
                 if let cancelAction = draft.cancelAction {
                     Button(l10n.text(.commonCancel)) {
                         invoke(cancelAction)
@@ -139,6 +204,22 @@ struct SettingsSoundsAICueView: View {
                     .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("settings.sounds.ai-cue.scope-incomplete")
+                }
+                if !selectedPack.usage.consumers.isEmpty {
+                    Text(l10n.text(.settingsSoundsAICueUsage))
+                        .font(.caption.weight(.semibold))
+                    ForEach(Array(selectedPack.usage.consumers.enumerated()), id: \.offset) {
+                        _, consumer in
+                        Text(usageLabel(consumer))
+                            .font(.caption)
+                            .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                    }
+                }
+                if selectedPack.copyAction != nil || selectedPack.copyAndApplyAction != nil {
+                    Text(l10n.text(.settingsSoundsAICueCopyAttribution))
+                        .font(.caption)
+                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if route.isCopyAndApply, let copyAction = selectedPack.copyAndApplyAction {
                     Button(copyAndApplyTitle) {
@@ -232,7 +313,11 @@ struct SettingsSoundsAICueView: View {
         .focused($focusedEvent, equals: event)
         .accessibilityLabel(localizedEventName(event, language: languageStore.language))
         .accessibilityValue(row?.audioDisplayName ?? l10n.text(.soundPacksCoverageUnmapped))
-        .accessibilityHint(l10n.text(.aiCueGenerateHint))
+        .accessibilityHint(
+            adoptionHint(
+                row?.aiCueAdoptionAvailability
+                    ?? .ineligible(.configurationUnavailable))
+        )
         .accessibilityIdentifier("settings.sounds.ai-cue.event.\(event.rawValue)")
     }
 
@@ -246,8 +331,18 @@ struct SettingsSoundsAICueView: View {
             languageStore: languageStore,
             eventTitle: localizedEventName(event, language: languageStore.language),
             playingCandidateID: playingCandidateID,
-            adoptionEnabled: row?.aiCueAdoptionPermit != nil,
-            adoptionUnavailableHint: adoptionHint(availability),
+            adoptionEnabled: row?.aiCueAdoptionPermit != nil
+                && !draftNameEdit.needsSave,
+            generationEnabled: canGenerate(packID: packID, event: event),
+            onGenerate: {
+                guard canGenerate(packID: packID, event: event) else { return }
+                viewModel.startGeneration(locale: languageStore.language.rawValue)
+            },
+            attributionDisclosure: selectedPack?.isBuiltinReadOnly == false
+                ? l10n.text(.settingsSoundsAICueAdoptAttribution) : nil,
+            adoptionUnavailableHint: draftNameEdit.needsSave
+                ? l10n.text(.settingsSoundsAICueSaveNameBeforeAdopting)
+                : adoptionHint(availability),
             onConfigureCredential: { credentialSheetIsPresented = true },
             onPreviewCandidate: previewCandidate,
             onAdoptCandidate: {
@@ -268,20 +363,30 @@ struct SettingsSoundsAICueView: View {
         return l10n.format(.settingsSoundsAICueCopyAndApply, target as NSString)
     }
 
+    private var routeSession: AICueComposerSession? {
+        guard !route.isCopyAndApply, let target = route.editTarget else { return nil }
+        return AICueComposerSession(packID: target.packID, event: target.event)
+    }
+
     private func beginRouteSessionIfNeeded() {
-        guard !route.isCopyAndApply, let target = route.editTarget,
-            sounds?.packs.contains(where: { $0.id == target.packID }) == true
-        else { return }
-        if viewModel.session != AICueComposerSession(packID: target.packID, event: target.event) {
-            beginSession(for: target.event, packID: target.packID)
-        }
-        DispatchQueue.main.async {
-            focusedEvent = target.event
+        guard let pendingRouteSession, let sounds else { return }
+        switch soundsAICueRouteStep(pendingRouteSession, route: route, sounds: sounds) {
+        case .pending:
+            return
+        case .inspect(let action):
+            invoke(action)
+        case .begin(let target):
+            self.pendingRouteSession = nil
+            guard let packID = target.packID else { return }
+            beginSession(for: target.event, packID: packID)
+        case .unavailable:
+            self.pendingRouteSession = nil
         }
     }
 
     private func beginSession(for event: Event) {
         guard let packID = activePackID else { return }
+        pendingRouteSession = nil
         beginSession(for: event, packID: packID)
     }
 
@@ -354,6 +459,7 @@ struct SettingsSoundsAICueView: View {
     private func adoptCandidate(candidateID: UUID, packID: String, event: Event) {
         stopCandidatePreview()
         guard
+            !draftNameEdit.needsSave,
             let permit = sounds?.eventRows.first(where: { $0.event == event })?
                 .aiCueAdoptionPermit,
             viewModel.session == AICueComposerSession(packID: packID, event: event)
@@ -389,5 +495,31 @@ struct SettingsSoundsAICueView: View {
         case .ineligible:
             return l10n.text(.aiCueEligibilityUnavailable)
         }
+    }
+
+    private func usageLabel(_ usage: AICuePackUsageConsumer) -> String {
+        let name: String
+        switch usage.consumer {
+        case .global:
+            name = l10n.text(.panelGlobalName)
+        case .surface(let surface):
+            name =
+                HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?
+                .displayName ?? surface.rawValue
+        }
+        return usage.inherited
+            ? l10n.format(.settingsSoundsAICueInheritedUsage, name as NSString)
+            : name
+    }
+
+    private func canGenerate(packID: String, event: Event) -> Bool {
+        guard viewModel.session == AICueComposerSession(packID: packID, event: event) else {
+            return false
+        }
+        return soundsAICueGenerationIsAllowed(
+            sounds: sounds,
+            library: editorOwner.presentation.library,
+            session: viewModel.session,
+            event: event)
     }
 }

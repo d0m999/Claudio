@@ -369,6 +369,10 @@ package final class SoundPacksEditorOwner: ObservableObject {
     package func cancelAICuePackDraft() {
         guard let draft = currentAICueDraft else { return }
         currentAICueDraft = nil
+        for (operationID, operation) in operationStates
+        where operation.phase == .busy && operation.packID == draft.packID {
+            operationCancellations[operationID]?.cancel()
+        }
         actionEpoch &+= 1
         if currentAICueSession?.packID == draft.packID || currentAICueSession != nil {
             currentAICueSession = nil
@@ -379,6 +383,16 @@ package final class SoundPacksEditorOwner: ObservableObject {
             candidateGenerationEpoch &+= 1
         }
         publish(from: model.editorProjectionSeed())
+    }
+
+    @discardableResult
+    package func renameAICuePackDraft(_ name: AICuePackName) -> Bool {
+        guard context.isSounds, let draft = currentAICueDraft, !hasBusyOperation,
+            let renamed = try? AICuePackDraft(packID: draft.packID, name: name)
+        else { return false }
+        currentAICueDraft = renamed
+        publish(from: model.editorProjectionSeed())
+        return true
     }
 
     package func perform(
@@ -805,11 +819,19 @@ package final class SoundPacksEditorOwner: ObservableObject {
             return .rejected(.cancelled)
         case .completed(let batch, let cancellationRequested):
             let cancellationRequested = cancellationRequested || cancellation.isCancelled
-            guard let imported = batch.accepted.first, !cancellationRequested else {
+            let draftIsCurrent =
+                context.isSounds
+                && packScopedAdoptionTargetIsCurrent(
+                    binding: binding,
+                    freshness: freshness,
+                    seed: model.editorProjectionSeed())
+            guard let imported = batch.accepted.first, !cancellationRequested,
+                draftIsCurrent
+            else {
                 if let stage { discardAICuePackDraftStage(stage) }
                 let failure: SoundPackEditorFailure =
                     cancellationRequested
-                    ? .cancelled : .importRejected
+                    ? .cancelled : (draftIsCurrent ? .importRejected : .targetChanged)
                 settleAsyncOperation(
                     operationID,
                     phase: cancellationRequested
@@ -841,6 +863,19 @@ package final class SoundPacksEditorOwner: ObservableObject {
                     seed: model.editorProjectionSeed())
                 return .rejected(.mutationFailed)
             case .success(let bindingOutcome):
+                guard !cancellation.isCancelled, context.isSounds,
+                    packScopedAdoptionTargetIsCurrent(
+                        binding: binding,
+                        freshness: freshness,
+                        seed: model.editorProjectionSeed())
+                else {
+                    discardAICuePackDraftStage(stage)
+                    settleAsyncOperation(
+                        operationID,
+                        phase: .failed(.targetChanged),
+                        seed: model.editorProjectionSeed())
+                    return .rejected(.targetChanged)
+                }
                 switch publishAICuePackDraft(
                     stage,
                     importedFile: imported,
@@ -1331,6 +1366,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
 
         switch binding.intent {
         case .inspect(let packID):
+            if currentAICueDraft != nil { cancelAICuePackDraft() }
             let applied = withModelTransition { model.selectPackForInspection(packID) }
             return applied ? .applied : .rejected(.packUnavailable)
         case .use(let packID):
@@ -2024,6 +2060,9 @@ package final class SoundPacksEditorOwner: ObservableObject {
         event: Event,
         seed: SoundPacksEditorModelSeed
     ) -> SoundPackEditorAdoptionAvailability {
+        guard !hasBusyOperation else {
+            return .ineligible(.writesStopped)
+        }
         if currentAICueDraft?.packID == packID {
             return .eligible
         }

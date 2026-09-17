@@ -200,6 +200,9 @@ struct EventSettingsAICueComposerView: View {
     let eventTitle: String
     let playingCandidateID: UUID?
     let adoptionEnabled: Bool
+    let generationEnabled: Bool
+    let onGenerate: (() -> Void)?
+    let attributionDisclosure: String?
     let adoptionUnavailableHint: String
     let onConfigureCredential: () -> Void
     let onPreviewCandidate: (AICueCandidate) -> Void
@@ -217,6 +220,9 @@ struct EventSettingsAICueComposerView: View {
         eventTitle: String,
         playingCandidateID: UUID?,
         adoptionEnabled: Bool,
+        generationEnabled: Bool = true,
+        onGenerate: (() -> Void)? = nil,
+        attributionDisclosure: String? = nil,
         adoptionUnavailableHint: String,
         onConfigureCredential: @escaping () -> Void,
         onPreviewCandidate: @escaping (AICueCandidate) -> Void,
@@ -228,6 +234,9 @@ struct EventSettingsAICueComposerView: View {
         self.eventTitle = eventTitle
         self.playingCandidateID = playingCandidateID
         self.adoptionEnabled = adoptionEnabled
+        self.generationEnabled = generationEnabled
+        self.onGenerate = onGenerate
+        self.attributionDisclosure = attributionDisclosure
         self.adoptionUnavailableHint = adoptionUnavailableHint
         self.onConfigureCredential = onConfigureCredential
         self.onPreviewCandidate = onPreviewCandidate
@@ -398,9 +407,16 @@ struct EventSettingsAICueComposerView: View {
                         .accessibilityIdentifier("event-settings.ai-cue.cancel-generation")
                 } else {
                     Button(l10n.text(.aiCueGenerateCandidates)) {
-                        viewModel.startGeneration(locale: languageStore.language.rawValue)
+                        if generationEnabled {
+                            if let onGenerate {
+                                onGenerate()
+                            } else {
+                                viewModel.startGeneration(locale: languageStore.language.rawValue)
+                            }
+                        }
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(!generationEnabled)
                     .accessibilityLabel(l10n.text(.aiCueGenerateCandidates))
                     .accessibilityHint(l10n.text(.aiCueGenerateHint))
                     .accessibilityIdentifier("event-settings.ai-cue.generate")
@@ -483,6 +499,12 @@ struct EventSettingsAICueComposerView: View {
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
 
             if let generation = viewModel.generation {
+                if let attributionDisclosure {
+                    Text(attributionDisclosure)
+                        .font(ClaudioTheme.font(.caption))
+                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if generation.completion == .partial {
                     partialCandidateNotice(count: generation.candidates.count)
                 }
@@ -500,9 +522,15 @@ struct EventSettingsAICueComposerView: View {
                     .accessibilityHidden(true)
                 Spacer()
                 Button(l10n.text(.aiCueRegenerate)) {
-                    viewModel.startGeneration(locale: languageStore.language.rawValue)
+                    if generationEnabled {
+                        if let onGenerate {
+                            onGenerate()
+                        } else {
+                            viewModel.startGeneration(locale: languageStore.language.rawValue)
+                        }
+                    }
                 }
-                .disabled(viewModel.phase == .adopting)
+                .disabled(viewModel.phase == .adopting || !generationEnabled)
                 .accessibilityLabel(l10n.text(.aiCueRegenerate))
                 .accessibilityHint(l10n.text(.aiCueGenerateHint))
                 .accessibilityIdentifier("event-settings.ai-cue.regenerate")

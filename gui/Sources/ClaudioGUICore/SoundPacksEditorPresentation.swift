@@ -70,6 +70,49 @@ package struct SoundsEditorPresentation: Equatable {
     package let manifestRecoveryActions: [SoundPackEditorManifestRecoveryPresentation]
 }
 
+/// Resolves a pending Sounds deep link only against a fresh, matching library projection.
+/// Inspection is a separate step because the target's rows and adoption eligibility are derived
+/// from the selected pack, not from the route string alone.
+package enum SoundsAICueRouteStep {
+    case pending
+    case inspect(SoundPackEditorAction)
+    case begin(AICueComposerSession)
+    case unavailable
+}
+
+package func soundsAICueRouteStep(
+    _ pending: AICueComposerSession,
+    route: SoundPacksWindowRoute,
+    sounds: SoundsEditorPresentation
+) -> SoundsAICueRouteStep {
+    guard sounds.route == route, sounds.routeState == .resolved(route) else {
+        return .pending
+    }
+    guard let packID = pending.packID,
+        let pack = sounds.packs.first(where: { $0.id == packID })
+    else { return .unavailable }
+    if sounds.selectedPack?.id != packID { return .inspect(pack.inspectAction) }
+    return .begin(pending)
+}
+
+/// Last synchronous gate before a possibly billable Provider call. A selected pack, draft and
+/// session must agree on the same identity and the owner must report that this event can be
+/// adopted into the current target.
+package func soundsAICueGenerationIsAllowed(
+    sounds: SoundsEditorPresentation?,
+    library: SoundPackLibraryPresentation,
+    session: AICueComposerSession?,
+    event: Event
+) -> Bool {
+    guard let sounds, library.isFresh, let session, let packID = session.packID,
+        session.event == event,
+        (sounds.draft?.packID ?? sounds.selectedPack?.id) == packID,
+        sounds.eventRows.first(where: { $0.event == event })?
+            .aiCueAdoptionAvailability == .eligible
+    else { return false }
+    return true
+}
+
 /// Empty-state recovery is explicit so a view cannot infer filesystem or factory facts. The
 /// reveal target remains sealed in its owner capability; a display-only path crosses separately
 /// so native accessibility can preserve the Finder destination without reconstructing a URL.

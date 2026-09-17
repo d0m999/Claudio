@@ -1976,7 +1976,7 @@ private final class GatedSoundEditorDurationProbe: AudioDurationProbing, @unchec
     }
 }
 
-private final class SoundEditorPostSampleGate: @unchecked Sendable {
+final class SoundEditorPostSampleGate: @unchecked Sendable {
     private let condition = NSCondition()
     private var entered = false
     private var released = false

@@ -596,9 +596,19 @@ private struct SoundPacksWindowContentView: View {
                 }
                 if let card = selectedCard {
                     Divider()
-                    packActionBar(card, stacks: stacksDetail)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
+                    VStack(alignment: .leading, spacing: 6) {
+                        if card.copyAction != nil || card.copyAndApplyAction != nil
+                            || card.forkAction != nil
+                        {
+                            Text(l10n.text(.settingsSoundsAICueCopyAttribution))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        packActionBar(card, stacks: stacksDetail)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
                 }
             }
         }

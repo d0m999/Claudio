@@ -123,6 +123,7 @@ if CommandLine.arguments.contains("--ai-cue-local-credentials") {
 
 if CommandLine.arguments.contains("--ai-cue-pack-scoped") {
     runAICuePackScopedSuites()
+    await runAICuePackScopedAsyncSuites()
     print("AI cue pack scoped: \(totalChecks) checks, \(failures) failures")
     exit(failures == 0 ? 0 : 1)
 }
@@ -183,6 +184,7 @@ await runAICueGenerationDispatcherSuites()
 await runAICueAdoptionSuites()
 await runAICueGenerationViewModelSuites()
 runAICuePackScopedSuites()
+await runAICuePackScopedAsyncSuites()
 await runSenseAudioIsolationSuites()
 runAudioImportSuites()
 runAudioImportBatchSuites()

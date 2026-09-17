@@ -10211,6 +10211,74 @@
         }
       }
     },
+    "settings.sounds.ai-cue.copy-attribution": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "If this pack has whole-pack license or author claims, the copy will omit them. The original pack and separate attribution files remain unchanged."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "若此包带有整包许可或作者声明，副本将不保留这些声明；原包及独立归属文件不变。"
+          }
+        }
+      }
+    },
+    "settings.sounds.ai-cue.adopt-attribution": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adopting this cue will remove any whole-pack license and author claims from the edited pack. Separate attribution files remain unchanged."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "采纳此提示音会移除目标包现有的整包许可和作者声明；独立归属文件不变。"
+          }
+        }
+      }
+    },
+    "settings.sounds.ai-cue.pack-name": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Cue pack name" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "提示音组名称" } }
+      }
+    },
+    "settings.sounds.ai-cue.save-name": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Save name" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "保存名称" } }
+      }
+    },
+    "settings.sounds.ai-cue.save-name-before-adopting": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Save the cue pack name before adopting this sound." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "采纳此声音前请先保存提示音组名称。" } }
+      }
+    },
+    "settings.sounds.ai-cue.invalid-name": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Enter a name of 1–64 characters without control characters." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "请输入 1–64 个字符且不含控制字符的名称。" } }
+      }
+    },
+    "settings.sounds.ai-cue.usage": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Sound scopes using this pack:" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "正在使用此包的声音作用域：" } }
+      }
+    },
+    "settings.sounds.ai-cue.inherited-usage": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%@ (inherits Global)" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "%@（继承全局默认）" } }
+      }
+    },
     "settings.sounds.ai-cue.description": {
       "localizations": {
         "en": {

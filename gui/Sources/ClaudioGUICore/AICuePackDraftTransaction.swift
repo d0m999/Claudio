@@ -151,6 +151,7 @@ package func publishAICuePackDraft(
             let finalFile = stage.finalDirectoryURL.appendingPathComponent(
                 importedFile.fileName,
                 isDirectory: false)
+            discardAICuePackDraftStage(stage)
             return .success(
                 ImportedAudioFile(
                     packID: importedFile.packID,

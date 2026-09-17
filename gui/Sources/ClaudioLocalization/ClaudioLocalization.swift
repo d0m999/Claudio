@@ -480,6 +480,18 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let settingsSoundsAICueDescription: Self = "settings.sounds.ai-cue.description"
     public static let settingsSoundsAICueNewPack: Self = "settings.sounds.ai-cue.new-pack"
     public static let settingsSoundsAICueDraft: Self = "settings.sounds.ai-cue.draft"
+    public static let settingsSoundsAICuePackName: Self = "settings.sounds.ai-cue.pack-name"
+    public static let settingsSoundsAICueSaveName: Self = "settings.sounds.ai-cue.save-name"
+    public static let settingsSoundsAICueSaveNameBeforeAdopting: Self =
+        "settings.sounds.ai-cue.save-name-before-adopting"
+    public static let settingsSoundsAICueInvalidName: Self = "settings.sounds.ai-cue.invalid-name"
+    public static let settingsSoundsAICueUsage: Self = "settings.sounds.ai-cue.usage"
+    public static let settingsSoundsAICueInheritedUsage: Self =
+        "settings.sounds.ai-cue.inherited-usage"
+    public static let settingsSoundsAICueCopyAttribution: Self =
+        "settings.sounds.ai-cue.copy-attribution"
+    public static let settingsSoundsAICueAdoptAttribution: Self =
+        "settings.sounds.ai-cue.adopt-attribution"
     public static let settingsSoundsAICueScopeIncomplete: Self =
         "settings.sounds.ai-cue.scope-incomplete"
     public static let settingsSoundsAICueShared: Self = "settings.sounds.ai-cue.shared"
@@ -1272,6 +1284,11 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .settingsDestinationEventsAndSounds, .settingsDestinationNotifications,
         .settingsDestinationDisplay, .settingsDestinationSounds, .settingsSoundsAICueTitle,
         .settingsSoundsAICueDescription, .settingsSoundsAICueNewPack, .settingsSoundsAICueDraft,
+        .settingsSoundsAICuePackName, .settingsSoundsAICueSaveName,
+        .settingsSoundsAICueSaveNameBeforeAdopting,
+        .settingsSoundsAICueInvalidName, .settingsSoundsAICueUsage,
+        .settingsSoundsAICueInheritedUsage, .settingsSoundsAICueCopyAttribution,
+        .settingsSoundsAICueAdoptAttribution,
         .settingsSoundsAICueScopeIncomplete, .settingsSoundsAICueShared,
         .settingsSoundsAICueCopyAndApply, .settingsDestinationUsage,
         .settingsDestinationShortcuts, .settingsDestinationAbout,
