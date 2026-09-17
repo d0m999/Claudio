@@ -101,20 +101,30 @@ package final class SettingsPresentationSession: ObservableObject {
                 }
             }
         aiGenerationCancellable = dependencies.aiCueViewModel.$session
-            .combineLatest(dependencies.aiCueViewModel.$generation.map { $0?.id })
+            .combineLatest(dependencies.aiCueViewModel.$generation)
             .removeDuplicates { lhs, rhs in
                 lhs.0 == rhs.0 && lhs.1 == rhs.1
             }
             .dropFirst()
             .sink { [weak self] projection in
                 MainActor.assumeIsolated {
-                    guard let self, !self.isPerformingTransaction,
-                        self.lifecycleDestination == .eventsAndSounds
-                    else { return }
-                    self.activateEventsEditor(
-                        eventPresentation: self.eventPresentation,
-                        aiSession: projection.0,
-                        candidateGenerationID: projection.1)
+                    guard let self, !self.isPerformingTransaction else { return }
+                    switch self.lifecycleDestination {
+                    case .sounds:
+                        self.dependencies.soundPacksEditorOwner.updateAICueComposer(
+                            session: projection.0,
+                            generation: projection.1)
+                    case .eventsAndSounds:
+                        // The old Events route remains a compatibility seam for already-open
+                        // legacy sessions. Package-scoped sessions belong exclusively to Sounds.
+                        guard projection.0?.packID == nil else { return }
+                        self.activateEventsEditor(
+                            eventPresentation: self.eventPresentation,
+                            aiSession: projection.0,
+                            candidateGenerationID: projection.1?.id)
+                    default:
+                        break
+                    }
                 }
             }
         eventPresentationCancellable = eventSettingsSelection.$presentationState
@@ -317,6 +327,9 @@ package final class SettingsPresentationSession: ObservableObject {
                 dependencies.soundPacksEditorNativeEffects.stopPreview(
                     owner: dependencies.soundPacksEditorOwner)
                 dependencies.aiCueViewModel.endSession()
+                dependencies.soundPacksEditorOwner.updateAICueComposer(
+                    session: nil,
+                    generation: nil)
             }
             if eventRoute.unavailableRequestedScopeStoredValue == nil {
                 dependencies.eventSettingsModel.selectSoundSurface(eventRoute.surface)
@@ -329,9 +342,38 @@ package final class SettingsPresentationSession: ObservableObject {
                     dependencies.soundPacksEditorNativeEffects.stopPreview(
                         owner: dependencies.soundPacksEditorOwner)
                     dependencies.aiCueViewModel.endSession()
+                    dependencies.soundPacksEditorOwner.updateAICueComposer(
+                        session: nil,
+                        generation: nil)
                 }
             }
-        case .destination, .sounds:
+        case .sounds(let soundRoute):
+            let requestedTarget = soundRoute.editTarget
+            let currentSession = dependencies.aiCueViewModel.session
+            let sessionMatches: Bool = {
+                guard let currentSession, let requestedTarget else { return false }
+                return currentSession.packID == requestedTarget.packID
+                    && currentSession.event == requestedTarget.event
+            }()
+            let hasDraft: Bool = {
+                guard
+                    case .sounds(let sounds) = dependencies.soundPacksEditorOwner.presentation.mode
+                else { return false }
+                return sounds.draft != nil
+            }()
+            let routeRequiresCopyGuidance = soundRoute.isCopyAndApply
+            if (currentSession != nil || hasDraft)
+                && (!sessionMatches || routeRequiresCopyGuidance)
+            {
+                dependencies.soundPacksEditorNativeEffects.stopPreview(
+                    owner: dependencies.soundPacksEditorOwner)
+                dependencies.aiCueViewModel.endSession()
+                dependencies.soundPacksEditorOwner.cancelAICuePackDraft()
+                dependencies.soundPacksEditorOwner.updateAICueComposer(
+                    session: nil,
+                    generation: nil)
+            }
+        case .destination:
             break
         }
     }
@@ -360,6 +402,9 @@ package final class SettingsPresentationSession: ObservableObject {
                     .sounds(
                         route: soundRoute,
                         requestRevision: explicitRouteRequestRevision + (requestsFocus ? 1 : 0))))
+            dependencies.soundPacksEditorOwner.updateAICueComposer(
+                session: dependencies.aiCueViewModel.session,
+                generation: dependencies.aiCueViewModel.generation)
         case .general, .notifications, .display, .usage, .shortcuts, .about:
             break
         }
@@ -416,10 +461,18 @@ package final class SettingsPresentationSession: ObservableObject {
                 windowIsClosing ? .settingsWindowWillClose : .eventsViewDisappeared,
                 owner: dependencies.soundPacksEditorOwner)
             dependencies.aiCueViewModel.endSession()
+            dependencies.soundPacksEditorOwner.updateAICueComposer(
+                session: nil,
+                generation: nil)
         case .sounds:
             dependencies.soundPacksEditorNativeEffects.handleLifecycle(
                 windowIsClosing ? .settingsWindowWillClose : .soundsViewDisappeared,
                 owner: dependencies.soundPacksEditorOwner)
+            dependencies.aiCueViewModel.endSession()
+            dependencies.soundPacksEditorOwner.cancelAICuePackDraft()
+            dependencies.soundPacksEditorOwner.updateAICueComposer(
+                session: nil,
+                generation: nil)
         case .general, .notifications, .display, .usage, .shortcuts, .about:
             break
         }

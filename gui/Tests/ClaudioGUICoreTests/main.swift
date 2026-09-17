@@ -121,6 +121,12 @@ if CommandLine.arguments.contains("--ai-cue-local-credentials") {
     exit(failures == 0 ? 0 : 1)
 }
 
+if CommandLine.arguments.contains("--ai-cue-pack-scoped") {
+    runAICuePackScopedSuites()
+    print("AI cue pack scoped: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
 if CommandLine.arguments.contains("--ai-cue-provider-contracts") {
     runAICueProviderContractsSuites()
     print("AI cue provider contracts: \(totalChecks) checks, \(failures) failures")
@@ -176,6 +182,7 @@ await runAICueGenerationEngineSuites()
 await runAICueGenerationDispatcherSuites()
 await runAICueAdoptionSuites()
 await runAICueGenerationViewModelSuites()
+runAICuePackScopedSuites()
 await runSenseAudioIsolationSuites()
 runAudioImportSuites()
 runAudioImportBatchSuites()

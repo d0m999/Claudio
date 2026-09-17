@@ -574,6 +574,11 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     "gui/Sources/ClaudioGUICore/AudioImport.swift": [
         ".write(", "open(",
     ],
+    // 包级 AI 提示音草稿先在隐藏暂存树创建最小 manifest；`.atomic` 只发布暂存树内的
+    // 新文件，最终包目录仍由 AICuePackDraftTransaction 的同卷 `RENAME_EXCL` 排他发布。
+    "gui/Sources/ClaudioGUICore/AICuePackDraftTransaction.swift": [
+        ".write(", "renameatx_np(",
+    ],
     // AI 提示音候选只在随机、私有 generation 目录中首次创建：O_EXCL + O_NOFOLLOW 禁止覆盖，
     // 完整短写循环后把 fd 固定为 0600；任一步失败立即 unlink。`.atomic` 单独会替换已有路径，
     // 与 `.withoutOverwriting` 组合则会 fatalError，不能替代这里的不可覆盖首次创建；具体形状由
@@ -624,6 +629,7 @@ private let contentReplacingWriteSites: [String: Int] = [
     "helper/Sources/ClaudioCore/Play.swift": 1,
     "helper/Sources/ClaudioCore/ConcreteHostIntegrationAdapters.swift": 1,
     "gui/Sources/ClaudioGUICore/AudioImport.swift": 1,
+    "gui/Sources/ClaudioGUICore/AICuePackDraftTransaction.swift": 1,
     "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationFixtures.swift": 1,
 ]
 

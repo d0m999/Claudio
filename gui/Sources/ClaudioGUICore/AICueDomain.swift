@@ -262,9 +262,11 @@ public struct AICueSoundPlanner: Sendable {
         if let spokenContent {
             return limitedName(spokenContent)
         }
-        let firstClause = description.split(whereSeparator: { "，,。；;\n".contains($0) }).first
+        let firstClause =
+            description.split(whereSeparator: { "，,。；;\n".contains($0) }).first
             .map { String($0) } ?? description
-        let cleaned = firstClause
+        let cleaned =
+            firstClause
             .replacingOccurrences(of: "不要背景音乐", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if !cleaned.isEmpty { return limitedName(cleaned) }
@@ -282,14 +284,26 @@ public struct AICueSoundPlanner: Sendable {
     }
 }
 
+/// The immutable package-level identity used by the Sounds page. `surface` remains an optional
+/// compatibility projection for the pre-ADR-0016 Events flow; new callers must construct this
+/// value with `init(packID:event:)`, which deliberately carries no scope.
 public struct AICueAdoptionTarget: Sendable, Equatable, Hashable {
-    public let surface: HostSurfaceID
+    public let surface: HostSurfaceID?
     public let event: Event
     public let packID: String
 
     public init(surface: HostSurfaceID, event: Event, packID: String) throws {
         guard isSafePackID(packID) else { throw AICueValidationError.unsafePackID }
         self.surface = surface
+        self.event = event
+        self.packID = packID
+    }
+
+    /// ADR 0016 target: a user-owned package and one public Event. Global/Surface selection is
+    /// an application concern and is intentionally absent from this identity.
+    public init(packID: String, event: Event) throws {
+        guard isSafePackID(packID) else { throw AICueValidationError.unsafePackID }
+        self.surface = nil
         self.event = event
         self.packID = packID
     }

@@ -476,6 +476,15 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "settings.destination.notifications"
     public static let settingsDestinationDisplay: Self = "settings.destination.display"
     public static let settingsDestinationSounds: Self = "settings.destination.sounds"
+    public static let settingsSoundsAICueTitle: Self = "settings.sounds.ai-cue.title"
+    public static let settingsSoundsAICueDescription: Self = "settings.sounds.ai-cue.description"
+    public static let settingsSoundsAICueNewPack: Self = "settings.sounds.ai-cue.new-pack"
+    public static let settingsSoundsAICueDraft: Self = "settings.sounds.ai-cue.draft"
+    public static let settingsSoundsAICueScopeIncomplete: Self =
+        "settings.sounds.ai-cue.scope-incomplete"
+    public static let settingsSoundsAICueShared: Self = "settings.sounds.ai-cue.shared"
+    public static let settingsSoundsAICueCopyAndApply: Self =
+        "settings.sounds.ai-cue.copy-and-apply"
     public static let settingsDestinationUsage: Self = "settings.destination.usage"
     public static let settingsDestinationShortcuts: Self = "settings.destination.shortcuts"
     public static let settingsDestinationAbout: Self = "settings.destination.about"
@@ -1124,6 +1133,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let soundPacksStatusFactoryRestoredWithSalvage: Self =
         "sound-packs.status.factory-restored.salvage"
     public static let soundPacksStatusPackCopied: Self = "sound-packs.status.pack-copied"
+    public static let soundPacksStatusSourcePackCopied: Self =
+        "sound-packs.status.source-pack-copied"
     public static let soundPacksStatusPackUsed: Self = "sound-packs.status.pack-used"
     public static let soundPacksStatusPackTrashed: Self = "sound-packs.status.pack-trashed"
 
@@ -1259,7 +1270,10 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .integrationsWindowTitle,
         .settingsWindowTitle, .settingsDestinationGeneral, .settingsDestinationIntegrations,
         .settingsDestinationEventsAndSounds, .settingsDestinationNotifications,
-        .settingsDestinationDisplay, .settingsDestinationSounds, .settingsDestinationUsage,
+        .settingsDestinationDisplay, .settingsDestinationSounds, .settingsSoundsAICueTitle,
+        .settingsSoundsAICueDescription, .settingsSoundsAICueNewPack, .settingsSoundsAICueDraft,
+        .settingsSoundsAICueScopeIncomplete, .settingsSoundsAICueShared,
+        .settingsSoundsAICueCopyAndApply, .settingsDestinationUsage,
         .settingsDestinationShortcuts, .settingsDestinationAbout,
         .settingsSidebarAdvanced, .settingsSidebarProduct, .settingsSidebarLocalFirst,
         .settingsAnnouncementValue,
@@ -1427,7 +1441,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .soundPacksStatusBatchRestored, .soundPacksStatusBatchRestoredWithSalvage,
         .soundPacksStatusBatchPartial, .soundPacksStatusBatchPartialWithSalvage,
         .soundPacksStatusFactoryRestored, .soundPacksStatusFactoryRestoredWithSalvage,
-        .soundPacksStatusPackCopied, .soundPacksStatusPackUsed,
+        .soundPacksStatusPackCopied, .soundPacksStatusSourcePackCopied,
+        .soundPacksStatusPackUsed,
         .soundPacksStatusPackTrashed,
         .hostReady, .hostConfigured, .hostLegacy, .hostNotConnected, .hostNeedsAttention,
         .hostCodexReadyDetail, .hostCodexAwaitingDetail,

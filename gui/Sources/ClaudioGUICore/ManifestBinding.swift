@@ -444,7 +444,8 @@ public func bindAICueToManifest(
     displayName: AICueDisplayName,
     packID: String,
     environment: AudioImportEnvironment,
-    expectedEventBinding: ManifestEventBindingExpectation? = nil
+    expectedEventBinding: ManifestEventBindingExpectation? = nil,
+    removePackAttribution: Bool = false
 ) -> Result<AICueManifestBindingOutcome, ManifestBindError> {
     let userPackDirectory: URL
     switch resolveUserPackDirectory(packID: packID, environment: environment) {
@@ -478,6 +479,13 @@ public func bindAICueToManifest(
         audioNames[fileName] = finalDisplayName
         json["events"] = events
         json["audio_names"] = audioNames
+        if removePackAttribution {
+            // AI adoption turns the manifest into user-owned metadata. Remove the complete
+            // attribution claims in this same atomic transform; never publish a cue first and
+            // repair license/author in a second write.
+            json.removeValue(forKey: "license")
+            json.removeValue(forKey: "author")
+        }
     }
     switch result {
     case .success:

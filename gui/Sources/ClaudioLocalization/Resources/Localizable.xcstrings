@@ -7955,6 +7955,22 @@
         }
       }
     },
+    "sound-packs.status.source-pack-copied": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Created and selected “%@”. The source pack is unchanged; choose Use This Pack when needed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已创建并选中「%@」。原声音包未更改；需要时可点「用这个包」。"
+          }
+        }
+      }
+    },
     "sound-packs.status.pack-used": {
       "localizations": {
         "en": {
@@ -10175,6 +10191,118 @@
           "stringUnit": {
             "state": "translated",
             "value": "声音"
+          }
+        }
+      }
+    },
+    "settings.sounds.ai-cue.copy-and-apply": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy this pack and apply it to %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制此包并应用到 %@"
+          }
+        }
+      }
+    },
+    "settings.sounds.ai-cue.description": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Generate a cue for an installed pack, or create a private draft that publishes with its first adopted sound."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "为已安装声音包生成提示音，或创建一个在首个采纳声音时才发布的私有草稿。"
+          }
+        }
+      }
+    },
+    "settings.sounds.ai-cue.draft": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unpublished draft"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未发布草稿"
+          }
+        }
+      }
+    },
+    "settings.sounds.ai-cue.new-pack": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New cue pack"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新建提示音组"
+          }
+        }
+      }
+    },
+    "settings.sounds.ai-cue.scope-incomplete": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some sound-scope usage could not be determined because configuration is damaged."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "声音作用域配置已损坏，无法完整判断此包的使用范围。"
+          }
+        }
+      }
+    },
+    "settings.sounds.ai-cue.shared": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Used by more than one sound scope"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "多个声音作用域正在使用"
+          }
+        }
+      }
+    },
+    "settings.sounds.ai-cue.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI cue generation"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 提示音生成"
           }
         }
       }

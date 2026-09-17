@@ -68,6 +68,12 @@ func runLocalizationSuites() {
                     == "Created and selected “Example”. The built-in pack is unchanged; choose Use This Pack when needed.",
             "copy completion must not direct users to a removed star control")
         expect(
+            chinese.format(.soundPacksStatusSourcePackCopied, "示例")
+                == "已创建并选中「示例」。原声音包未更改；需要时可点「用这个包」。"
+                && english.format(.soundPacksStatusSourcePackCopied, "Example")
+                    == "Created and selected “Example”. The source pack is unchanged; choose Use This Pack when needed.",
+            "installed-pack copy completion must describe any source pack")
+        expect(
             chinese.format(.soundPacksStatusPackUsed, "示例") == "现在使用「示例」。"
                 && english.format(.soundPacksStatusPackUsed, "Example")
                     == "Now using “Example”.",

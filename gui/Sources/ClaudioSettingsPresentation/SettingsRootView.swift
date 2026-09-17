@@ -277,12 +277,14 @@ package struct SettingsRootView: View {
                     destinationTitle
 
                     SettingsSoundsDestinationView(
+                        aiCueViewModel: aiCueViewModel,
                         editorOwner: soundPacksEditorOwner,
                         route: soundsRoute,
                         routeRequestRevision:
                             settingsPresentationSession.state.explicitRouteRequestRevision,
                         languageStore: preferences,
-                        nativeEffects: soundPacksEditorNativeEffects)
+                        nativeEffects: soundPacksEditorNativeEffects,
+                        onAnnouncement: onAnnouncement)
                 }
                 .padding(.horizontal, 28)
                 .padding(.top, 28)
@@ -754,20 +756,31 @@ package struct SettingsRootView: View {
 
 @MainActor
 private struct SettingsSoundsDestinationView: View {
+    let aiCueViewModel: AICueGenerationViewModel
     let editorOwner: SoundPacksEditorOwner
     let route: SoundPacksWindowRoute
     let routeRequestRevision: UInt64
     let languageStore: ClaudioPreferences
     let nativeEffects: SoundPacksEditorNativeEffectsDispatcher
+    let onAnnouncement: @MainActor (String) -> Void
 
     var body: some View {
-        EmbeddedSoundPacksEditorView(
-            editorOwner: editorOwner,
-            route: route,
-            routeRequestRevision: routeRequestRevision,
-            languageStore: languageStore,
-            nativeEffects: nativeEffects
-        )
+        VStack(alignment: .leading, spacing: 16) {
+            SettingsSoundsAICueView(
+                viewModel: aiCueViewModel,
+                editorOwner: editorOwner,
+                languageStore: languageStore,
+                nativeEffects: nativeEffects,
+                route: route,
+                onAnnouncement: onAnnouncement)
+
+            EmbeddedSoundPacksEditorView(
+                editorOwner: editorOwner,
+                route: route,
+                routeRequestRevision: routeRequestRevision,
+                languageStore: languageStore,
+                nativeEffects: nativeEffects)
+        }
         .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.sounds))
     }
 }

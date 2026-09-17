@@ -80,6 +80,8 @@ package func soundPacksEditorOperationAnnouncement(
         actionKey = .soundPacksStatusUpdateStars
     case .fork:
         actionKey = .soundPacksStatusCopyPack
+    case .copy:
+        actionKey = .soundPacksStatusCopyPack
     case .importAudio:
         actionKey = .soundPacksStatusAddAudio
     case .assign:

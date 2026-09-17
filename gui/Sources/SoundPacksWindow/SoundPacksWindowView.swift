@@ -523,6 +523,19 @@ private struct SoundPacksWindowContentView: View {
                                         builtinCopyExplanation(card)
                                     }
 
+                                    if activeSounds.route.isCopyAndApply {
+                                        Text(
+                                            l10n.format(
+                                                .settingsSoundsAICueCopyAndApply,
+                                                copyAndApplyScopeName as NSString)
+                                        )
+                                        .font(.callout)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .accessibilityIdentifier(
+                                            "sound-packs.copy-and-apply-explanation")
+                                    }
+
                                     Divider()
 
                                     VStack(alignment: .leading, spacing: 10) {
@@ -765,6 +778,35 @@ private struct SoundPacksWindowContentView: View {
             )
             .accessibilityHint(l10n.text(.soundPacksPackDeleteHint))
             .accessibilityIdentifier("sound-packs.delete-selected-pack")
+
+            if let copyAction = card.copyAction {
+                Button(l10n.text(.commonCopy)) {
+                    invoke(copyAction)
+                }
+                .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
+                .accessibilityLabel(
+                    l10n.format(.soundPacksCopyLabel, displayName)
+                )
+                .accessibilityHint(l10n.text(.soundPacksCardHint))
+                .accessibilityIdentifier("sound-packs.copy-selected-pack")
+            }
+        }
+
+        if let copyAndApplyAction = card.copyAndApplyAction {
+            Button(l10n.format(.settingsSoundsAICueCopyAndApply, copyAndApplyScopeName as NSString))
+            {
+                invoke(copyAndApplyAction)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(ClaudioSharedColor.clay(colorScheme))
+            .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(
+                l10n.format(
+                    .settingsSoundsAICueCopyAndApply,
+                    copyAndApplyScopeName as NSString)
+            )
+            .accessibilityIdentifier("sound-packs.copy-and-apply")
         }
 
         if includeFlexibleSpace {
@@ -811,6 +853,12 @@ private struct SoundPacksWindowContentView: View {
         case .partial, .broken:
             return l10n.text(.soundPacksBuiltinCopyHelp)
         }
+    }
+
+    private var copyAndApplyScopeName: String {
+        activeSounds.route.surface.flatMap { surface in
+            HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?.displayName
+        } ?? l10n.text(.panelGlobalName)
     }
 
     private func invoke(_ action: SoundPackEditorAction?) {
@@ -1462,7 +1510,7 @@ private struct SoundPacksWindowContentView: View {
         switch requestedRoute.destination {
         case .overview:
             focusedTarget = soundPacksWindowFirstFocusTarget(focusScope)
-        case .editEvent(_, let event):
+        case .editEvent(_, let event), .copyAndApply(_, let event):
             if canEditSelectedPack {
                 focusedTarget = .eventAudio(event)
             } else if focusScope.previewableEvents.contains(event) {

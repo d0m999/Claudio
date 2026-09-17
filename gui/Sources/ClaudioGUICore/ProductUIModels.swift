@@ -226,6 +226,9 @@ public struct SoundPacksWindowRoute: Sendable, Equatable, Hashable {
     public enum Destination: Sendable, Equatable, Hashable {
         case overview
         case editEvent(packID: String, event: Event)
+        /// Missing-sound entry from Events. The route carries the same explicit scope as the
+        /// outer route, so the copy flow can apply the new user pack only to that target.
+        case copyAndApply(packID: String, event: Event)
     }
 
     public let surface: HostSurfaceID?
@@ -257,12 +260,37 @@ public struct SoundPacksWindowRoute: Sendable, Equatable, Hashable {
             destination: .editEvent(packID: packID, event: event))
     }
 
+    public static func copyAndApply(
+        packID: String,
+        event: Event
+    ) -> SoundPacksWindowRoute {
+        copyAndApply(surface: nil, packID: packID, event: event)
+    }
+
+    public static func copyAndApply(
+        surface: HostSurfaceID?,
+        packID: String,
+        event: Event
+    ) -> SoundPacksWindowRoute {
+        SoundPacksWindowRoute(
+            surface: surface,
+            destination: .copyAndApply(packID: packID, event: event))
+    }
+
     public var editTarget: (packID: String, event: Event)? {
-        guard case .editEvent(let packID, let event) = destination else { return nil }
-        return (packID, event)
+        switch destination {
+        case .editEvent(let packID, let event), .copyAndApply(let packID, let event):
+            return (packID, event)
+        case .overview:
+            return nil
+        }
     }
 
     public var isOverview: Bool { destination == .overview }
+    public var isCopyAndApply: Bool {
+        if case .copyAndApply = destination { return true }
+        return false
+    }
 }
 
 public enum SoundPacksWindowRouteResolution: Sendable, Equatable {

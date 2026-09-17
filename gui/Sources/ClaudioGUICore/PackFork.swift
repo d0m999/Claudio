@@ -34,6 +34,10 @@ public enum PackForkError: Error, Sendable, Equatable {
     /// The named factory entry exists only through a symbolic link (or is not a real directory).
     /// Forking it would let the manifest rewrite escape into an external tree.
     case unsafeFactorySource(fromID: String)
+    /// The installed source resolved through the user/bundled lookup roots but is not a real
+    /// directory entry (for example a terminal symlink). Copying it would make the staging tree
+    /// depend on an external filesystem location.
+    case unsafeInstalledSource(fromID: String)
     /// Copying `environment.factoryPacksDirectory!/fromID` into staging failed after the source
     /// was verified as a real directory. Always fails closed — never a crash or substitution.
     case copyFailed(reason: String)
@@ -215,11 +219,60 @@ public func forkPack(
         return .failure(.unsafeFactorySource(fromID: fromID))
     }
 
+    return forkPackFromSourceDirectory(
+        fromID: fromID,
+        newID: newID,
+        sourceDirectory: sourceDirectory,
+        destination: destination,
+        environment: environment)
+}
+
+/// Copies any already-installed healthy pack. Unlike the legacy `forkPack` entry point, the
+/// source is resolved with the normal user-first lookup order, so a user-edited installation is
+/// copied as it is currently used. The destination is still published through the same hidden
+/// staging and manifest-before-rename transaction.
+@MainActor
+public func forkInstalledPack(
+    fromID: String,
+    newID: String,
+    environment: AudioImportEnvironment
+) -> Result<Void, PackForkError> {
+    guard isSafePackID(newID) else { return .failure(.unsafeNewID(newID: newID)) }
+    guard isSafePackID(fromID) else { return .failure(.unsafeSourceID(fromID: fromID)) }
+
+    let destination = environment.userPacksDirectory.appendingPathComponent(
+        newID, isDirectory: true)
+    if (try? FileManager.default.attributesOfItem(atPath: destination.path)) != nil {
+        return .failure(.destinationAlreadyExists(newID: newID))
+    }
+    guard
+        let sourceDirectory = resolvePackDirectory(
+            id: fromID,
+            userPacksDirectory: environment.userPacksDirectory,
+            bundledPacksDirectory: environment.bundledPacksDirectory),
+        isRealForkSourceDirectory(at: sourceDirectory)
+    else {
+        return .failure(.unsafeInstalledSource(fromID: fromID))
+    }
+    return forkPackFromSourceDirectory(
+        fromID: fromID,
+        newID: newID,
+        sourceDirectory: sourceDirectory,
+        destination: destination,
+        environment: environment)
+}
+
+@MainActor
+private func forkPackFromSourceDirectory(
+    fromID: String,
+    newID: String,
+    sourceDirectory: URL,
+    destination: URL,
+    environment: AudioImportEnvironment
+) -> Result<Void, PackForkError> {
     do {
-        // Idempotent — a no-op if it already exists. Mirrors `publishBundledPacks` hoisting the
-        // same call ahead of its copy loop: `forkPack` may run before the user has ever
-        // imported anything of their own, in which case `userPacksDirectory` might not exist
-        // yet at all.
+        // Idempotent — a no-op if it already exists. A first copy is allowed before any user
+        // pack has been created, so the user root itself may not exist yet.
         try ensurePrivateDirectoryTree(at: environment.userPacksDirectory)
     } catch {
         return .failure(.copyFailed(reason: error.localizedDescription))
@@ -230,8 +283,6 @@ public func forkPack(
     case .success(let createdRoot): stagingRoot = createdRoot
     case .failure(let error): return .failure(error)
     }
-    // `stagingRoot` was atomically created by this invocation. No path is removed until ownership
-    // is established, and cleanup never escapes this root even if another process guesses newID.
     defer { try? FileManager.default.removeItem(at: stagingRoot) }
     let staging = stagingRoot.appendingPathComponent("payload", isDirectory: true)
 
@@ -240,32 +291,15 @@ public func forkPack(
     } catch {
         return .failure(.copyFailed(reason: error.localizedDescription))
     }
-
-    // `copyItem` carries `com.apple.quarantine` across (see `Quarantine.swift`) — strip it from
-    // the fresh copy before it's ever exposed under a visible name, same reasoning
-    // `publishBundledPacks` documents for the identical call.
     stripQuarantineAttribute(at: staging)
 
-    // The staging directory is STILL dot-prefixed here — see this function's own doc comment
-    // on why the manifest rewrite must happen before, never after, the rename into place.
     let mutationResult = mutateManifestJSON(at: staging, lockFile: environment.packsLockFile) {
         json in
-        // Read the OLD name from the very `json` this closure was handed — never a second,
-        // separate manifest read (PLAN-SOUND-MANAGER.md §2.2's explicit instruction: the
-        // primitive already handed us the full top-level dictionary, re-reading it a second
-        // time would be exactly the duplicate JSON-surgery path `mutateManifestJSON` exists to
-        // eliminate).
         let oldName = (json["name"] as? String) ?? fromID
         json["id"] = newID
         json["name"] = "\(oldName) 的副本"
-        // Whole-key removal, not a new value: `license`/`author` absent means "we make no
-        // claim either way" — see `PackCard.isCC0`'s own doc comment ("false — not 'unknown' —
-        // when license is absent") and PLAN-SOUND-MANAGER.md §2.2's reasoning for why this is
-        // deliberate and why no new license identifier is invented here.
         json.removeValue(forKey: "license")
         json.removeValue(forKey: "author")
-        // `schema` / `events` / any other unknown top-level key: untouched, passed through
-        // by `mutateManifestJSON` itself (this transform never touches them).
     }
     switch mutationResult {
     case .success:
@@ -279,7 +313,6 @@ public func forkPack(
     } catch {
         return .failure(.renameFailed(reason: error.localizedDescription))
     }
-
     let renameResult = renameatx_np(
         AT_FDCWD, staging.path, AT_FDCWD, destination.path, UInt32(RENAME_EXCL))
     if renameResult != 0 {
@@ -292,6 +325,5 @@ public func forkPack(
                 reason: "renameatx_np errno \(renameErrno): "
                     + String(cString: strerror(renameErrno))))
     }
-
     return .success(())
 }

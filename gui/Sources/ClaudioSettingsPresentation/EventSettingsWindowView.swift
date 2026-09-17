@@ -336,19 +336,21 @@ struct EventSettingsWindowView: View {
                     .padding(.bottom, 18)
                     .accessibilityIdentifier("event-settings.preview-all-failure")
             }
-            EventSettingsAICueServiceCard(
-                viewModel: aiCueViewModel,
-                languageStore: languageStore,
-                onManageCredential: { selection.presentCredentialSheet() }
-            )
-            .padding(.horizontal, 24)
-            .padding(.bottom, 18)
-            if let eligibility = aiCuePageEligibility,
-                case .ineligible = eligibility
-            {
-                aiCueAvailabilityNotice(eligibility)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 18)
+            if legacyAICueSessionIsActive {
+                EventSettingsAICueServiceCard(
+                    viewModel: aiCueViewModel,
+                    languageStore: languageStore,
+                    onManageCredential: { selection.presentCredentialSheet() }
+                )
+                .padding(.horizontal, 24)
+                .padding(.bottom, 18)
+                if let eligibility = aiCuePageEligibility,
+                    case .ineligible = eligibility
+                {
+                    aiCueAvailabilityNotice(eligibility)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 18)
+                }
             }
             Divider()
             GeometryReader { geometry in
@@ -426,6 +428,7 @@ struct EventSettingsWindowView: View {
 
     private var aiCuePageEligibility: SoundPackEditorAdoptionAvailability? {
         guard
+            legacyAICueSessionIsActive,
             scopeProjectionIsAligned,
             case .events = model.configState.topContent,
             editorLibraryHasUsableSnapshot,
@@ -434,6 +437,63 @@ struct EventSettingsWindowView: View {
             })
         else { return nil }
         return access.adoptionAvailability
+    }
+
+    private var legacyAICueSessionIsActive: Bool {
+        guard let session = aiCueViewModel.session else { return false }
+        return session.packID == nil
+    }
+
+    /// Events & Sounds may offer a missing-sound entry only when the current source can actually
+    /// host the event. Package generation itself remains available from Sounds independently.
+    private func eventSourceCapabilityIsUnavailable(_ event: PanelEventPresentation) -> Bool {
+        event.implementation == .notImplemented || event.support == .unsupported
+    }
+
+    private func packageAICueRoute(
+        for event: Event,
+        previewAvailability: EventPreviewAvailability?
+    ) -> SoundPacksWindowRoute? {
+        guard
+            !model.config.selectedPack.isEmpty,
+            let selectedPack = eventsEditorPresentation?.selectedPack,
+            selectedPack.id == model.config.selectedPack,
+            selectedPack.availability == .installed,
+            !isBroken(selectedPack.state)
+        else { return nil }
+
+        if selectedPack.isBuiltinReadOnly {
+            guard isMissingSound(previewAvailability) else { return nil }
+            return EventSettingsWindowRoute(scope: selectedScope.scope)
+                .soundPacksCopyAndApplyRoute(packID: selectedPack.id, event: event)
+        }
+        return EventSettingsWindowRoute(scope: selectedScope.scope)
+            .soundPacksRoute(packID: selectedPack.id, event: event)
+    }
+
+    private func packageEntryHint(for route: SoundPacksWindowRoute) -> String {
+        guard route.isCopyAndApply else { return l10n.text(.aiCueGenerateHint) }
+        let target =
+            route.surface.map { surface in
+                HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?.displayName
+                    ?? surface.rawValue
+            } ?? l10n.text(.panelGlobalName)
+        return l10n.format(.settingsSoundsAICueCopyAndApply, target as NSString)
+    }
+
+    private func isMissingSound(_ availability: EventPreviewAvailability?) -> Bool {
+        guard let availability else { return false }
+        switch availability {
+        case .unmapped, .missingOrDamaged:
+            return true
+        case .available, .masterVolumeZero, .unsafeOrUnreadable:
+            return false
+        }
+    }
+
+    private func isBroken(_ state: PackCardState) -> Bool {
+        if case .broken = state { return true }
+        return false
     }
 
     private func aiCueAvailabilityNotice(
@@ -667,6 +727,12 @@ struct EventSettingsWindowView: View {
                                     let eligibility =
                                         editorAccess?.adoptionAvailability
                                         ?? .ineligible(.writesStopped)
+                                    let packageRoute = packageAICueRoute(
+                                        for: event.event,
+                                        previewAvailability: editorAccess?.previewAvailability)
+                                    let packageEntryEnabled =
+                                        packageRoute != nil
+                                        && !eventSourceCapabilityIsUnavailable(event)
                                     EventSettingsEventRow(
                                         presentation: event,
                                         previewAvailability: editorAccess?.previewAvailability,
@@ -679,7 +745,9 @@ struct EventSettingsWindowView: View {
                                         onGenerateAICue: {
                                             openAICueComposer(
                                                 eligibility,
-                                                event: event.event)
+                                                event: event.event,
+                                                previewAvailability:
+                                                    editorAccess?.previewAvailability)
                                         },
                                         onPreview: { playPreview(event.event) },
                                         onToggleMute: {
@@ -694,9 +762,11 @@ struct EventSettingsWindowView: View {
                                                         event: event.event))
                                         },
                                         inheritanceText: eventInheritanceText(event.event),
-                                        aiCueGenerationEnabled: aiCueGenerationIsEnabled(
-                                            eligibility),
-                                        aiCueGenerationHint: aiCueEligibilityHint(eligibility),
+                                        aiCueGenerationEnabled: packageEntryEnabled
+                                            || aiCueGenerationIsEnabled(eligibility),
+                                        aiCueGenerationHint: packageEntryEnabled
+                                            ? packageEntryHint(for: packageRoute!)
+                                            : aiCueEligibilityHint(eligibility),
                                         soundEditingEnabled: !model.config.selectedPack.isEmpty
                                             && model.surfaceSoundIssue == nil,
                                         writeDisabledReason: model.surfaceSoundIssue)
@@ -895,8 +965,18 @@ struct EventSettingsWindowView: View {
 
     private func openAICueComposer(
         _ eligibility: SoundPackEditorAdoptionAvailability,
-        event: Event
+        event: Event,
+        previewAvailability: EventPreviewAvailability?
     ) {
+        if let route = packageAICueRoute(
+            for: event,
+            previewAvailability: previewAvailability)
+        {
+            soundPacksEditorNativeEffects.stopPreview(owner: soundPacksEditorOwner)
+            selection.noteCandidatePreviewStopped()
+            onConfigureSound(route)
+            return
+        }
         guard case .eligible = eligibility else { return }
         soundPacksEditorNativeEffects.stopPreview(owner: soundPacksEditorOwner)
         selection.noteCandidatePreviewStopped()

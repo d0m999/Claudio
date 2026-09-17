@@ -184,6 +184,10 @@ public struct AudioImportEnvironment: Sendable {
     /// 用户原目录，并且不会发布一次假刷新。
     public var beforeFactoryPackRestoreSalvage: (@Sendable () throws -> Void)?
 
+    /// First-cue draft publication hook. A draft remains hidden until this final exclusive rename;
+    /// tests can fail precisely here and verify that no selectable package is left behind.
+    public var beforeAICueDraftPublish: (@Sendable (URL) throws -> Void)?
+
     #if DEBUG
     /// Replaces only the final system-Trash adapter in deletion tests. The real config/packs
     /// locks, isolation rename, identity checks, rollback, and typed outcome remain unchanged.
@@ -206,7 +210,8 @@ public struct AudioImportEnvironment: Sendable {
         beforeDestinationAnchor: (@Sendable (URL) -> Void)? = nil,
         beforeForkPackPublish: (@Sendable (URL) throws -> Void)? = nil,
         beforeFactoryPackRestorePublish: (@Sendable () throws -> Void)? = nil,
-        beforeFactoryPackRestoreSalvage: (@Sendable () throws -> Void)? = nil
+        beforeFactoryPackRestoreSalvage: (@Sendable () throws -> Void)? = nil,
+        beforeAICueDraftPublish: (@Sendable (URL) throws -> Void)? = nil
     ) {
         self.userPacksDirectory = userPacksDirectory
         self.bundledPacksDirectory = bundledPacksDirectory
@@ -219,6 +224,7 @@ public struct AudioImportEnvironment: Sendable {
         self.beforeForkPackPublish = beforeForkPackPublish
         self.beforeFactoryPackRestorePublish = beforeFactoryPackRestorePublish
         self.beforeFactoryPackRestoreSalvage = beforeFactoryPackRestoreSalvage
+        self.beforeAICueDraftPublish = beforeAICueDraftPublish
         #if DEBUG
         moveUserPackToTrashForTesting = nil
         afterUserPackIsolationForTesting = nil

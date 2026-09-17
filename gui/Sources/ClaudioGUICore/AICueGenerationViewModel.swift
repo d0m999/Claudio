@@ -36,11 +36,22 @@ public enum AICueComposerAdoptionFailure: Sendable, Equatable {
 }
 
 public struct AICueComposerSession: Sendable, Equatable {
+    /// Legacy Events-page scope. Package-scoped sessions leave this as `.global` only for source
+    /// compatibility; all adoption identity is taken from `packID`.
     public let scope: PanelSoundScopeID
+    /// ADR 0016 identity. `nil` means this is an older Events-page session.
+    public let packID: String?
     public let event: Event
 
     public init(scope: PanelSoundScopeID, event: Event) {
         self.scope = scope
+        self.packID = nil
+        self.event = event
+    }
+
+    public init(packID: String, event: Event) {
+        self.scope = .global
+        self.packID = packID
         self.event = event
     }
 }
@@ -153,6 +164,15 @@ public final class AICueGenerationViewModel: ObservableObject {
     /// current pack and signing a permit; this UI state stores only navigation identity.
     public func begin(scope: PanelSoundScopeID, event: Event) {
         let session = AICueComposerSession(scope: scope, event: event)
+        guard self.session != session else { return }
+        resetComposer(clearSession: true)
+        self.session = session
+    }
+
+    /// Opens the package-level composer used by the Sounds destination. No scope is inferred or
+    /// written here; the editor owner signs the package/event adoption permit later.
+    public func begin(packID: String, event: Event) {
+        let session = AICueComposerSession(packID: packID, event: event)
         guard self.session != session else { return }
         resetComposer(clearSession: true)
         self.session = session

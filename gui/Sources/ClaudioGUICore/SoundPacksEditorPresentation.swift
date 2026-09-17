@@ -52,9 +52,11 @@ package struct SoundsEditorPresentation: Equatable {
     package let requestRevision: UInt64
     package let routeState: SoundPacksEditorRouteState
     package let scope: SoundPackEditorScopeAvailability
+    package let masterVolume: Double
     package let packs: [SoundPackEditorPackPresentation]
     package let selectedPack: SoundPackEditorPackPresentation?
     package let eventRows: [SoundPackEditorEventPresentation]
+    package let draft: AICuePackDraftPresentation?
     package let inventory: SoundPackEditorInventoryPresentation
     package let requestImportAction: SoundPackEditorAction?
     package let stopPreviewAction: SoundPackEditorAction
@@ -112,6 +114,7 @@ package struct SoundPackEditorPackPresentation: Identifiable, Equatable {
     package let isInspected: Bool
     package let isActiveForScope: Bool
     package let isReferencedByAnyScope: Bool
+    package let usage: AICuePackUsage
     package let isStarred: Bool
     package let isBuiltinReadOnly: Bool
     package let isCC0: Bool
@@ -120,6 +123,12 @@ package struct SoundPackEditorPackPresentation: Identifiable, Equatable {
     package let useAction: SoundPackEditorAction?
     package let toggleStarAction: SoundPackEditorAction?
     package let forkAction: SoundPackEditorAction?
+    /// Copy is available for every healthy installed pack in the Sounds destination. `forkAction`
+    /// remains the legacy built-in-only capability used by the retained window surface.
+    package let copyAction: SoundPackEditorAction?
+    /// A missing-sound deep link exposes a separate capability whose apply target is sealed in
+    /// the route (`.global` or `.surface`); copying alone never mutates configuration.
+    package let copyAndApplyAction: SoundPackEditorAction?
     package let deleteAction: SoundPackEditorAction?
     package let restoreAction: SoundPackEditorAction?
     package let revealAction: SoundPackEditorAction?
@@ -136,6 +145,24 @@ package struct SoundPackEditorEventPresentation: Identifiable, Equatable {
     package let importAction: SoundPackEditorAction?
     package let previewAction: SoundPackEditorAction?
     package let clearAction: SoundPackEditorAction?
+    package let aiCueAdoptionAvailability: SoundPackEditorAdoptionAvailability?
+    package let aiCueAdoptionPermit: SoundPackAdoptionPermit?
+}
+
+package struct AICuePackDraftPresentation: Equatable, Sendable {
+    package let packID: String
+    package let name: String
+    package let cancelAction: SoundPackEditorAction?
+
+    package init(
+        packID: String,
+        name: String,
+        cancelAction: SoundPackEditorAction? = nil
+    ) {
+        self.packID = packID
+        self.name = name
+        self.cancelAction = cancelAction
+    }
 }
 
 package enum SoundPackEditorInventoryPresentation: Equatable, Sendable {
@@ -198,6 +225,9 @@ package struct SoundPackEditorAction: Hashable, Sendable {
         case use
         case toggleStar
         case fork
+        case copy
+        case copyAndApply
+        case cancelDraft
         case requestImport
         case assign
         case clear
@@ -268,6 +298,7 @@ package enum SoundPackEditorActivityKind: String, Equatable, Sendable {
     case use
     case toggleStar
     case fork
+    case copy
     case importAudio
     case assign
     case clear
@@ -471,6 +502,8 @@ struct SoundPacksEditorModelSeed: Equatable {
     let writesAllowed: Bool
     let config: ClaudioConfig
     let packCards: [PackCard]
+    let packUsageByID: [String: AICuePackUsage]
+    let eventCoverageByPackID: [String: [Event: CoverageState]]
     let nativeTargetsByPackID: [String: SoundPackNativeTargets]
     let referencedPackIDs: Set<String>
     let selectedPackID: String?

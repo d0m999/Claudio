@@ -197,6 +197,7 @@ public enum SoundPacksWindowPackForkActionError: Error, Sendable, Equatable {
     case writesStopped(statusText: SoundPacksWindowStatusText)
     case noSelectedPack
     case notBuiltin(packID: String)
+    case packUnavailable(packID: String)
     case occupancyReadFailed(reason: String)
     case allocation(PackForkIDAllocationError)
     case fork(PackForkError)
@@ -211,6 +212,8 @@ public enum SoundPacksWindowPackForkActionError: Error, Sendable, Equatable {
             return "没有选中的内置声音包，未创建任何副本。"
         case .notBuiltin:
             return "只有内置声音包需要复制；当前包已经可以直接编辑。"
+        case .packUnavailable(let packID):
+            return "声音包「\(packID)」当前不可安全复制，未创建任何副本。"
         case .occupancyReadFailed(let reason):
             return "无法安全检查已有声音包名称，未创建任何副本：\(reason)"
         case .allocation(let error):
@@ -244,6 +247,8 @@ private func packForkFailureMessage(_ error: PackForkError) -> String {
         return "当前构建没有可复制的出厂声音，请重新安装 claudi0 后再试。"
     case .unsafeFactorySource:
         return "出厂声音来源不是安全的真实目录；未创建副本，请重新安装 claudi0。"
+    case .unsafeInstalledSource:
+        return "当前声音包来源不是安全的真实目录；未创建副本，请先修复声音包。"
     case .copyFailed(let reason):
         return "准备完整副本失败，未发布半成品：\(reason)"
     case .manifestRewriteFailed(let reason):
@@ -999,6 +1004,14 @@ package final class SoundPacksWindowModel {
             writesAllowed: writesAllowed && configAllowsWrites,
             config: config,
             packCards: packCards,
+            packUsageByID: Dictionary(
+                uniqueKeysWithValues: packCards.map { card in
+                    (
+                        card.id,
+                        ClaudioGUICore.aiCuePackUsage(packID: card.id, config: baseConfig)
+                    )
+                }),
+            eventCoverageByPackID: eventCoverageByPackIDForEditorSeed(),
             nativeTargetsByPackID: Dictionary(
                 uniqueKeysWithValues: (librarySnapshot?.facts ?? []).compactMap { fact in
                     fact.nativeTargets.map { (fact.id, $0) }
@@ -1011,6 +1024,20 @@ package final class SoundPacksWindowModel {
             builtinPackIDs: builtinPackIDs,
             factoryRestoreRetryPackIDs: factoryRestoreRetryPackIDs,
             windowStatuses: windowStatuses)
+    }
+
+    private func eventCoverageByPackIDForEditorSeed() -> [String: [Event: CoverageState]] {
+        if let librarySnapshot {
+            return Dictionary(
+                uniqueKeysWithValues: librarySnapshot.facts.map {
+                    ($0.id, $0.eventCoverage)
+                })
+        }
+        guard let selectedPackID else { return [:] }
+        return [
+            selectedPackID: Dictionary(
+                uniqueKeysWithValues: selectedEventRows.map { ($0.event, $0.coverage) })
+        ]
     }
 
     private func markEditorStateSettled() {
@@ -1073,7 +1100,9 @@ package final class SoundPacksWindowModel {
                         .succeeded,
                         invalidatingPackIDs: [newPackID],
                         mutation: mutation)
-                    return finishPackFork(.success(outcome), publishCompletion: false)
+                    return finishPackFork(
+                        .success(outcome),
+                        publishCompletion: false)
                 }
                 completeSynchronousWrite(.succeeded, mutation: mutation)
                 guard
@@ -1090,7 +1119,101 @@ package final class SoundPacksWindowModel {
                     sourcePackID: sourcePackID,
                     newPackID: newPackID,
                     displayName: SelectedPackMetadata(id: card.id, name: card.name).displayName)
-                return finishPackFork(.success(outcome), publishCompletion: false)
+                return finishPackFork(
+                    .success(outcome),
+                    publishCompletion: false)
+            case .failure(.destinationAlreadyExists):
+                finishSoundPackMutation(mutation)
+                occupied.insert(newPackID)
+                if attempt == attemptLimit {
+                    return finishPackFork(
+                        .failure(.destinationAllocationExhausted(attempts: attemptLimit)))
+                }
+            case .failure(let error):
+                finishSoundPackMutation(mutation)
+                return finishPackFork(.failure(.fork(error)))
+            }
+        }
+        return finishPackFork(
+            .failure(.destinationAllocationExhausted(attempts: attemptLimit)))
+    }
+
+    /// Copies the currently inspected installed pack, regardless of whether it is built-in or
+    /// user-owned. This operation only publishes and inspects the copy; applying it to Global or
+    /// a Surface is a separate explicit configuration mutation owned by the caller.
+    @discardableResult
+    package func copySelectedPack(
+        maximumPublishCollisions: Int = 8
+    ) -> Result<PackForkOutcome, SoundPacksWindowPackForkActionError> {
+        packForkNotice = nil
+        packForkActionError = nil
+        clearWindowStatus(.packFork)
+
+        guard let sourcePackID = selectedPackID else {
+            return finishPackFork(.failure(.noSelectedPack))
+        }
+        guard
+            let sourceCard = packCards.first(where: { $0.id == sourcePackID }),
+            sourceCard.availability == .installed,
+            !sourceCard.isBrokenPackCard
+        else {
+            return finishPackFork(.failure(.packUnavailable(packID: sourcePackID)))
+        }
+
+        var occupied: Set<String>
+        do {
+            occupied = try occupiedPackBasenames(in: environment.userPacksDirectory)
+        } catch {
+            return finishPackFork(
+                .failure(.occupancyReadFailed(reason: error.localizedDescription)))
+        }
+
+        let attemptLimit = max(1, maximumPublishCollisions)
+        for attempt in 1...attemptLimit {
+            let newPackID: String
+            switch nextForkPackID(for: sourcePackID, occupiedBasenames: occupied) {
+            case .success(let candidate): newPackID = candidate
+            case .failure(let error): return finishPackFork(.failure(.allocation(error)))
+            }
+
+            let mutation = beginSoundPackMutation(packIDs: [newPackID])
+            switch forkInstalledPack(
+                fromID: sourcePackID,
+                newID: newPackID,
+                environment: environment)
+            {
+            case .success:
+                let outcome = PackForkOutcome(
+                    sourcePackID: sourcePackID,
+                    newPackID: newPackID,
+                    displayName: copiedPackDisplayName(
+                        id: sourceCard.id,
+                        name: sourceCard.name))
+                if readSource.readsSharedSnapshot {
+                    pendingInspectionPackID = newPackID
+                    suppressedSelectionAnnouncementPackID = newPackID
+                    completeSynchronousWrite(
+                        .succeeded,
+                        invalidatingPackIDs: [newPackID],
+                        mutation: mutation)
+                    return finishPackFork(
+                        .success(outcome),
+                        publishCompletion: false,
+                        successMessageKey: .soundPacksStatusSourcePackCopied)
+                }
+                completeSynchronousWrite(.succeeded, mutation: mutation)
+                guard packCards.contains(where: { $0.id == newPackID }) else {
+                    return finishPackFork(
+                        .failure(.publishedButUnavailable(newID: newPackID)),
+                        publishCompletion: false)
+                }
+                _ = selectPackForInspection(
+                    newPackID,
+                    selectionAnnouncementSuppression: newPackID)
+                return finishPackFork(
+                    .success(outcome),
+                    publishCompletion: false,
+                    successMessageKey: .soundPacksStatusSourcePackCopied)
             case .failure(.destinationAlreadyExists):
                 finishSoundPackMutation(mutation)
                 occupied.insert(newPackID)
@@ -1145,6 +1268,67 @@ package final class SoundPacksWindowModel {
             case .success(let outcome): return finishPackUse(.success(outcome))
             case .failure(let error): return finishPackUse(.failure(.use(error)))
             }
+        }
+    }
+
+    /// Applies a copied/inspected package to one explicit configuration target. The package copy
+    /// itself is already durable when this is called; a failed config write therefore leaves the
+    /// copy available for later inspection and never silently retries generation.
+    @discardableResult
+    package func applyPackSelection(
+        _ packID: String,
+        to surface: HostSurfaceID?,
+        allowFreshlyPublishedPack: Bool = false
+    ) -> Result<UseOutcome, SoundPacksWindowPackUseActionError> {
+        guard isSafePackID(packID) else {
+            return finishPackUse(.failure(.noSelectedPack))
+        }
+        let isInstalledAndHealthy = packCards.contains(where: {
+            $0.id == packID && $0.availability == .installed && !$0.isBrokenPackCard
+        })
+        let isFreshlyPublishedAndHealthy: Bool
+        if allowFreshlyPublishedPack {
+            let directory = resolvePackDirectory(
+                id: packID,
+                userPacksDirectory: environment.userPacksDirectory,
+                bundledPacksDirectory: environment.bundledPacksDirectory)
+            isFreshlyPublishedAndHealthy = directory.map { isRealDirectory($0) } ?? false
+        } else {
+            isFreshlyPublishedAndHealthy = false
+        }
+        guard isInstalledAndHealthy || isFreshlyPublishedAndHealthy else {
+            return finishPackUse(.failure(.noSelectedPack))
+        }
+        guard isValidSoundPacksWindowSurface(surface) else {
+            return finishPackUse(.failure(.invalidScope(surface!)))
+        }
+        guard writesAllowed else {
+            return finishPackUse(.failure(.writesStopped(statusText: writesStoppedStatusText)))
+        }
+        if let surface {
+            switch setSurfacePack(
+                packID,
+                surface: surface,
+                configFile: configFile,
+                userPacksDirectory: environment.userPacksDirectory,
+                bundledPacksDirectory: environment.bundledPacksDirectory,
+                lockFile: lockFile)
+            {
+            case .success:
+                return finishPackUse(.success(.selected(packID: packID)))
+            case .failure(let error):
+                return finishPackUse(.failure(.surface(error)))
+            }
+        }
+        let result = selectPack(
+            packID,
+            configFile: configFile,
+            userPacksDirectory: environment.userPacksDirectory,
+            bundledPacksDirectory: environment.bundledPacksDirectory,
+            lockFile: lockFile)
+        switch result {
+        case .success(let outcome): return finishPackUse(.success(outcome))
+        case .failure(let error): return finishPackUse(.failure(.use(error)))
         }
     }
 
@@ -1224,18 +1408,22 @@ package final class SoundPacksWindowModel {
         _ importedFile: ImportedAudioFile,
         displayName: AICueDisplayName,
         target: AICueAdoptionTarget,
-        expectedEventBinding: ManifestEventBindingExpectation
+        expectedEventBinding: ManifestEventBindingExpectation,
+        environment bindingEnvironment: AudioImportEnvironment? = nil,
+        removePackAttribution: Bool = false
     ) -> Result<AICueManifestBindingOutcome, ManifestBindError> {
         guard importedFile.packID == target.packID else {
             return .failure(.packNotFound(packID: target.packID))
         }
+        let environment = bindingEnvironment ?? self.environment
         return bindAICueToManifest(
             event: target.event,
             fileName: importedFile.fileName,
             displayName: displayName,
             packID: target.packID,
             environment: environment,
-            expectedEventBinding: expectedEventBinding)
+            expectedEventBinding: expectedEventBinding,
+            removePackAttribution: removePackAttribution)
     }
 
     /// The star state for one full-library sidebar row. Existing stars stay removable even when a
@@ -1662,6 +1850,24 @@ package final class SoundPacksWindowModel {
             config: baseConfig,
             packCards: packCards,
             builtinPackIDs: builtinPackIDs)
+    }
+
+    /// Package-level adoption deliberately ignores the current config write gate. A malformed
+    /// Global/Surface selection must block only that scope's config mutation, not a healthy user
+    /// pack's manifest edit.
+    package func aiCuePackAdoptionEligibility(
+        packID: String,
+        event: Event
+    ) -> AICueAdoptionEligibility {
+        ClaudioGUICore.aiCuePackAdoptionEligibility(
+            packID: packID,
+            event: event,
+            packCards: packCards,
+            builtinPackIDs: builtinPackIDs)
+    }
+
+    package func aiCuePackUsage(for packID: String) -> AICuePackUsage {
+        ClaudioGUICore.aiCuePackUsage(packID: packID, config: baseConfig)
     }
 
     package func captureAICueAdoptionTarget(
@@ -2329,7 +2535,8 @@ package final class SoundPacksWindowModel {
 
     private func finishPackFork(
         _ result: Result<PackForkOutcome, SoundPacksWindowPackForkActionError>,
-        publishCompletion: Bool = true
+        publishCompletion: Bool = true,
+        successMessageKey: ClaudioL10nKey = .soundPacksStatusPackCopied
     ) -> Result<PackForkOutcome, SoundPacksWindowPackForkActionError> {
         switch result {
         case .success(let outcome):
@@ -2340,7 +2547,7 @@ package final class SoundPacksWindowModel {
                 severity: .notice,
                 actionText: .localized(.soundPacksStatusCopyPack),
                 messageText: .localized(
-                    .soundPacksStatusPackCopied,
+                    successMessageKey,
                     outcome.displayName),
                 packID: outcome.newPackID)
         case .failure(let error):
@@ -2438,6 +2645,10 @@ package final class SoundPacksWindowModel {
     private func displayName(for packID: String) -> String {
         guard let card = packCards.first(where: { $0.id == packID }) else { return packID }
         return SelectedPackMetadata(id: card.id, name: card.name).displayName
+    }
+
+    private func copiedPackDisplayName(id: String, name: String?) -> String {
+        SelectedPackMetadata(id: id, name: name).displayName + " 的副本"
     }
 
     private func setWindowStatus(
@@ -2685,6 +2896,21 @@ extension SoundPackLibraryState {
             snapshot.revision
         }
     }
+}
+
+extension PackCard {
+    fileprivate var isBrokenPackCard: Bool {
+        if case .broken = state { return true }
+        return false
+    }
+}
+
+private func isRealDirectory(_ url: URL) -> Bool {
+    guard
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+        let type = attributes[.type] as? FileAttributeType
+    else { return false }
+    return type == .typeDirectory
 }
 
 private func factoryRestorePackID(
