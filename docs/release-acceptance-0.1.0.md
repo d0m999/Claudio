@@ -55,8 +55,9 @@ bash scripts/check-release-size.sh dist/claudi0.app
 |---|---|---|
 | Automated | `passed` at `6fda317c59a217ec86fdf492a89ba4f50a62fc37` | harness、Debug build、localization 与静态 wiring/model contracts |
 | Local dev-bundle | `passed`；macOS `26.6.2`、`arm64`、ad-hoc | 只有当前架构开发包；universal 与 Developer ID 为 `not_satisfied` |
-| Real callback | Issue #15 历史闭环已记录；2026-08-31 当前 installation 的 2/5 Current Activation 为 `recorded` | 当前回调只证明 WorkBuddy 2/5，不升级为 RC |
-| WorkBuddy 2/5 持久连接验收 | `passed`；保持连接 | 只批准本机当前 installation 的 2/5 连接与激活，不批准 5/5、RC 或发布 |
+| Real callback | Issue #15 的 2/5 历史闭环已记录；2026-09-18 在 `90517e4948066730e677c925cf83c524d998020f` 上只读复核，WorkBuddy 3/5 Current Activation 为 `recorded` | 三条同代次回执均为 `muted`；不证明实际听音或 RC |
+| WorkBuddy 2/5 持久连接验收 | 2026-08-31 `passed`；历史窄范围结论保留 | 只批准当时本机 installation 的 2/5 连接与激活，不自动扩展到 3/5 |
+| WorkBuddy 3/5 人工验收 | `not_evaluated` | 原生 GUI、真实听音与可逆 Disconnect 现场结果尚未验收 |
 | Signed RC | `not_evaluated`；Issue #18 `OPEN` | 未生成、下载或复验签名 universal RC |
 | Release manual acceptance | `not_evaluated`；Issues #19–#22 `OPEN` | 双架构真机、视觉、键盘/VoiceOver 与发布批准均未完成 |
 
@@ -235,6 +236,21 @@ response。两次 `muted` 是当前有效声音配置的真实播放结果，不
 **正式结论：本机当前 WorkBuddy installation 的持久连接与 2/5 Current Activation 验收通过。**
 本结论不批准 WorkBuddy 5/5、肉耳听音、双架构、VoiceOver、签名、公证、RC、生产或发布；账本顶部
 `0.1.0` 整体状态继续为“未通过”，Issues #18–#22 继续保持开放和 `not_evaluated`。
+
+## WorkBuddy SubagentStop 当前激活快照（2026-09-18）
+
+Issue #196 的实现提交为 `90517e4948066730e677c925cf83c524d998020f`。本节只记录该源码身份下的
+自动门禁和本机只读 preflight；不改变上节 2/5 人工验收的历史范围，也不授予 3/5 正式验收。
+不保存 installation UUID、scope fingerprint、原始回执、WorkBuddy 配置、prompt 或 response。
+
+| 项目 | 结果 | 证据边界 |
+|---|---|---|
+| 自动门禁 | helper `3485/3485`、GUI `10101/10101`；CLI hook 子进程合同、GUI Debug/Release 产品构建、本地化 JSON、`git diff --check` 均通过 | 自动化和编译，不证明原生呈现或听音 |
+| 本地 bundle | `scripts/dev-bundle.sh` 与体积检查通过；本机 arm64、ad-hoc 签名 | 非 universal、Developer ID 或公证 RC |
+| 只读 preflight | WorkBuddy Desktop `5.5.6`；`Inspect` 与 `integrations status` 一致；`UserPromptSubmit`、`Stop`、`SubagentStop` 三条当前 binding 为 `current_activation`，总体 `recorded` | 当前 installation 的脱敏回执证据；没有触发新的宿主事件 |
+| 声音结果 | 三条回执均为 `muted` | 证明策略结果，不证明实际可听播放 |
+| 其余能力 | `StopFailure`、`Notification` 仍为 `not_implemented` | 不能推断 WorkBuddy 5/5 |
+| 人工与发布 | GUI 原生、可逆 Disconnect 现场、实际听音、RC 与正式验收均为 `not_evaluated` | `0.1.0` 整体仍未通过；Issues #18–#22 不变 |
 
 ## 自动化与分发门禁
 
