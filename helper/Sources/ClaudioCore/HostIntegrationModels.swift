@@ -249,8 +249,7 @@ public enum HostCapabilityCatalog {
                     qualification: .interfacePartiallySupportedNotImplemented),
                 HostCapabilityBinding(
                     host: host, event: .subagentStop, nativeEvent: "SubagentStop",
-                    support: .supported, implementation: .notImplemented,
-                    qualification: .interfaceSupportedNotImplemented),
+                    support: .supported),
             ]
         case .chatGPTDesktopAX, .claudeDesktopAX:
             return Event.allCases.map { event in

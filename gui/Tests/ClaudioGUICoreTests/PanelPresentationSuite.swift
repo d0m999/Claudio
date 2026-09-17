@@ -304,7 +304,7 @@ func runPanelPresentationSuites() async {
             ])
         let scopes = panelSoundScopePresentations(
             sourceRows: [
-                panelPresentationRow(.workBuddy, status: .awaitingActivation, supported: 2),
+                panelPresentationRow(.workBuddy, status: .awaitingActivation, supported: 3),
                 panelPresentationRow(.claudeCode, status: .notConnected, supported: 5),
                 panelPresentationRow(.codex, status: .ready, supported: 4),
             ],
@@ -325,7 +325,7 @@ func runPanelPresentationSuites() async {
             "Codex 必须显示 4/5 与当前激活事实")
         expect(
             scopes[2].status == .awaitingActivation && scopes[2].stateText == "待回执"
-                && scopes[2].summaryText == "2/5 · 待回执",
+                && scopes[2].summaryText == "3/5 · 待回执",
             "WorkBuddy 必须保留 awaitingActivation 语义并使用面板专属待回执文案")
         expect(
             !scopes.contains(where: { $0.scope == .surface(.claudeCode) }),
@@ -393,7 +393,7 @@ func runPanelPresentationSuites() async {
     suite("面板作用域文案：英文同样分离覆盖数与状态，不回退共享 readiness 文案") {
         let scopes = panelSoundScopePresentations(
             sourceRows: [
-                panelPresentationRow(.workBuddy, status: .awaitingActivation, supported: 2)
+                panelPresentationRow(.workBuddy, status: .awaitingActivation, supported: 3)
             ],
             config: ClaudioConfig(selectedPack: "pack"),
             language: .english)
@@ -401,7 +401,7 @@ func runPanelPresentationSuites() async {
         expect(scopes[0].name == "Global defaults", "英文 Global 必须使用完整名称")
         expect(scopes[0].summaryText == "5 events · Default", "英文 Global 摘要错误")
         expect(
-            scopes[1].summaryText == "2/5 · Awaiting receipt",
+            scopes[1].summaryText == "3/5 · Awaiting receipt",
             "英文等待态不得继续显示 configured")
         expect(
             scopes[1].accessibilityLabel.contains("Awaiting receipt"),
@@ -473,7 +473,7 @@ func runPanelPresentationSuites() async {
             "首个可用来源到达后才应把首次自动选择持久化")
     }
 
-    suite("WorkBuddy 五行：仅 UserPromptSubmit/Stop 可操作，其余显式未实现") {
+    suite("WorkBuddy 五行：三项已实现，两项显式未实现") {
         let events = panelEventPresentations(
             rows: panelPresentationEventRows(),
             scope: .surface(.workBuddy),
@@ -490,7 +490,7 @@ func runPanelPresentationSuites() async {
             events.map(\.nativeEventText)
                 == ["UserPromptSubmit", "Stop", "StopFailure", "Notification", "SubagentStop"],
             "WorkBuddy 原生事件名必须来自 catalog")
-        for event in events.prefix(2) {
+        for event in events.filter({ [.taskStart, .stop, .subagentStop].contains($0.event) }) {
             expect(event.implementation == .implemented, "\(event.event) 必须已实现")
             expect(event.capabilityText.contains("Implemented"), "能力标签必须说出已实现")
             expect(
@@ -498,9 +498,10 @@ func runPanelPresentationSuites() async {
                 "\(event.event) 必须同时允许试听与静音")
         }
         expect(
-            chineseEvents.prefix(2).allSatisfy { $0.capabilityText.contains("已实现") },
+            chineseEvents.filter({ [.taskStart, .stop, .subagentStop].contains($0.event) })
+                .allSatisfy { $0.capabilityText.contains("已实现") },
             "简体中文能力标签也必须说出已实现")
-        for event in events.suffix(3) {
+        for event in events.filter({ [.stopFailure, .notification].contains($0.event) }) {
             expect(event.implementation == .notImplemented, "\(event.event) 必须显式未实现")
             expect(event.capabilityText.contains("Not implemented"), "能力标签必须说出未实现")
             expect(

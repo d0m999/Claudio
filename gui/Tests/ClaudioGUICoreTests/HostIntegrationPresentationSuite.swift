@@ -84,7 +84,7 @@ func runHostIntegrationPresentationSuites() {
         let rows = hostSourceRowPresentations(from: hostPresentationMatrix())
         expect(rows.map(\.host) == [.codex, .claudeCode, .workBuddy], "共享来源仍保持 Product 分组顺序")
         expect(
-            rows.map(\.supportedCount) == [4, 5, 2]
+            rows.map(\.supportedCount) == [4, 5, 3]
                 && rows.allSatisfy { $0.totalCount == Event.allCases.count },
             "能力数量必须来自 adapter/catalog 事实")
         expect(

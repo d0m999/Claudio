@@ -311,7 +311,7 @@ N 个已发布来源 · 5 个声音事件
 [ glyph  本轮结束   Stop              已实现  stop.aiff         ▶   ))) ]
 [ glyph  执行中断   StopFailure       未实现                    —    —  ]
 [ glyph  待响应     Notification      接口限定 · 未实现          —    —  ]
-[ glyph  子任务结束 SubagentStop      未实现                    —    —  ]
+[ glyph  子任务结束 SubagentStop      已实现  subagent_stop.aiff ▶ ))) ]
 [ 主音量 · 说明                                      Slider       80% ]
 ───────────────────────────────────────────────────────────────────────
 [ 声音包 · effective pack · Global/覆盖说明        打开设置 / 重置 ]
@@ -352,8 +352,9 @@ N 个已发布来源 · 5 个声音事件
   可选作用域数代替。事件区标题显示「当前作用域名称 · 事件」，右侧显示其覆盖数；全局默认显示
   `5 个事件`，Surface 显示 `supported/total 可映射`。
 - **单来源五事件**：列表永远按 `Event.allCases` 显示五行。Global 显示 claudi0 事件 ID 与
-  「全局默认」，不伪造宿主原生名；Surface 显示原生事件、接口支持与当前实现。WorkBuddy 必须
-  诚实呈现 `2/5`：`UserPromptSubmit`、`Stop` 可试听/静音，其余三项标为未实现且两个动作都禁用。
+  「全局默认」，不伪造宿主原生名；Surface 显示原生事件、接口支持与当前实现。WorkBuddy 覆盖数
+  从能力目录计算：`UserPromptSubmit`、`Stop`、`SubagentStop` 可试听/静音；`StopFailure`、
+  `Notification` 标为未实现且两个动作都禁用。当前代次回执逐项显示，不从覆盖数推断激活。
   Codex 的 `4/5` 同样是正常能力事实。
 - **动作资格**：视图与焦点顺序共同消费 `PanelEventControlAvailability`。未实现/不支持事件禁用
   试听与静音；缺失或损坏声音、主音量为零只禁用试听，已实现事件仍可切换静音。事件行没有
@@ -383,7 +384,7 @@ N 个已发布来源 · 5 个声音事件
 | 本轮结束 | `stop` | `Stop` | `Stop` | `Stop` / 已实现 |
 | 执行中断 | `stop_failure` | `StopFailure` | 不支持 | `StopFailure` / 未实现 |
 | 待响应 | `notification` | `Notification` | `PermissionRequest`，**仅授权请求** | `Notification` / 接口限定、未实现 |
-| 子任务结束 | `subagent_stop` | `SubagentStop` | `SubagentStop` | `SubagentStop` / 未实现 |
+| 子任务结束 | `subagent_stop` | `SubagentStop` | `SubagentStop` | `SubagentStop` / 已实现 |
 
 `Stop` 只表示一轮停止；特别是 Codex `Stop` hook 之后仍可能要求 Codex 继续，因此所有可见文案不得写成「任务完成」。`UserPromptSubmit` 只映射稳定语义「任务开始」，不得冒充「待响应」。
 
@@ -510,7 +511,7 @@ N 个已发布来源 · 5 个声音事件
 - **页头与 Agent 组**：标题为「集成」，副标题为「管理 claudi0 连接的应用、连接方式和事件能力。」。
   Agent 固定按 `HostID.productVisibleCases` 显示 Claude Code → Codex → WorkBuddy；不显示宿主 Logo。
   每行独立提供名称选择、状态 badge、`supported/total` 覆盖率和真实 Toggle，选中背景只标识当前
-  Surface。`4/5`、`2/5` 是中性能力事实，不是错误。
+  Surface。覆盖数是能力目录中的中性事实，不是错误或当前回执的替代。
 - **选中宿主的四行连接组**：严格按「连接状态 → 接入方式 → 事件与提示音 → 脱敏回执历史」渲染。
   连接状态同时说明配置、当前 installation 回执和 manager 诊断；没有回执时明确显示「暂无当前安装实例
   回执」。接入方式来自 `HostIntegrationDescriptor.mechanism`，只有 manager 提供配置来源时才显示

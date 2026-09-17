@@ -153,4 +153,23 @@ run_silent_hook unsupported "$MISSING_ROOT" \
 run_silent_hook stale-installation "$MISSING_ROOT" \
   claude-code UserPromptSubmit --installation-id "$STALE_ID"
 
+WORKBUDDY_ROOT="$TEST_ROOT/workbuddy"
+prepare_root "$WORKBUDDY_ROOT" workbuddy muted
+cat > "$WORKBUDDY_ROOT/config.json" <<'JSON'
+{"selected_pack":"minimal-chime","master_volume":0,"events":{"subagent_stop":false}}
+JSON
+WORKBUDDY_RECEIPT="$WORKBUDDY_ROOT/integrations/receipts/workbuddy/SubagentStop.json"
+printf '%s' '{"hook_event_name":"Stop"}' | run_silent_hook workbuddy-wrong-event \
+  "$WORKBUDDY_ROOT" workbuddy SubagentStop --installation-id "$INSTALLATION_ID"
+if [[ -e "$WORKBUDDY_RECEIPT" ]]; then
+  echo "FAIL: WorkBuddy 错位 stdin 不得写 SubagentStop 回执" >&2
+  exit 1
+fi
+printf '%s' '{"hook_event_name":"SubagentStop"}' | run_silent_hook workbuddy-subagent \
+  "$WORKBUDDY_ROOT" workbuddy SubagentStop --installation-id "$INSTALLATION_ID"
+if [[ "$(receipt_result "$WORKBUDDY_RECEIPT")" != "muted" ]]; then
+  echo "FAIL: WorkBuddy 有效 stdin 未形成 SubagentStop muted 回执" >&2
+  exit 1
+fi
+
 echo "PASS: claudi0 hook 真实子进程 exit/stdout/stderr 与 Debug-only root 契约"

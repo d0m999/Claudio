@@ -1,8 +1,8 @@
 # PLAN — 非 TTS 宿主提示音：状态与决策索引
 
-> 状态：**pre-RC 自动化基线已收口；AX 技术 no-go；WorkBuddy 2/5 当前激活与持久连接窄验收通过**
+> 状态：**pre-RC 自动化基线已收口；AX 技术 no-go；WorkBuddy 3/5 当前激活已记录；历史 2/5 窄验收保留**
 >
-> 更新：2026-08-31
+> 更新：2026-09-18
 >
 > 本文件只维护跨宿主结论、状态、决策门和权威证据入口。每个新 Host Surface 或剩余事件
 > 必须使用独立计划/Issue；不得在本索引里顺带授权实现、宿主写入或真实验收。
@@ -16,11 +16,12 @@
    ChatGPT 集成可用。
 3. Issue #17 在当前 ChatGPT `26.818.31338` / `6892` 上无法形成稳定 surface identity，
    observer 启动次数为 0，结论是 fail-closed 技术 no-go。AX 不进入可用、发布或生产阶段。
-4. WorkBuddy 在 `5.4.4` 上保持连接；`UserPromptSubmit → task_start`、`Stop → stop` 两条
-   当前 binding 均有匹配当前 installation/scope 的 schema 2 回执，Current Activation 为
-   `recorded`。本机持久连接与 2/5 当前激活已获用户正式批准；未执行 Disconnect。
-5. WorkBuddy 剩余三个事件逐事件进入独立 evidence-first 计划/Issue；在真实宿主证据成立前，
-   不实现、不接线，也不承诺 5/5。
+4. 2026-08-31 在 WorkBuddy `5.4.4` 上取得 `UserPromptSubmit → task_start`、`Stop → stop`
+   两条同代次 schema 2 回执，2/5 持久连接窄验收当时获用户正式批准；该结论是历史记录。
+5. 2026-09-18 的 Desktop `5.5.6` 已重复发出 `SubagentStop` 探针回调，因此该项独立接入；
+   显式 Repair 已轮换 installation 并配置三条 hook，同一当前 installation 的三条 schema 2
+   回执已逐项核对。三条声音结果均为 `muted`，不构成实际听音或正式验收。
+   `Notification`、`StopFailure` 缺完整证据，继续保留 `notImplemented`，不承诺 5/5。
 6. Issues #64–#66 的自动化、状态模型与 wiring 基线已聚合验证；结论仅为 `pre_rc_only`。
    本次 2/5 持久连接窄验收不改变 Issues #18–#22 的 RC、双架构、视觉、VoiceOver 与发布状态；
    精确 commit 与计数只维护在唯一验收账本。
@@ -31,7 +32,7 @@
 |---|---|---|---|---|---|
 | Claude Code | 五个正式 hook 事件 | 5/5 native adapter | 本计划不重验，见发布验收账本 | 本计划未采集当前回执，不推断 | 未通过 |
 | Codex | 4/5；无 `StopFailure`，`PermissionRequest` 仅部分覆盖 Notification | 4/5 native adapter | 本计划不重验，见发布验收账本 | 本计划未采集当前回执，不推断 | 未通过 |
-| WorkBuddy | 五个事件已声明；Notification 为 partial | 2/5 native adapter | Issue #15 历史闭环；2026-08-31 当前 installation 再次取得两条真实回执 | `recorded`；保持连接 | 本机 2/5 持久连接窄验收通过；RC/生产未通过 |
+| WorkBuddy | 五个事件已声明；Notification 为 partial | 3/5 native adapter | Issue #15 的两条历史回执；2026-09-17 两次 `SubagentStop` Desktop 探针回调 | 2026-09-18 Repair 后同代次三条 schema 2 回执已核对，均 `muted` | 历史 2/5 持久连接窄验收通过；新 3/5 尚未正式验收，RC/生产未通过 |
 | ChatGPT Desktop AX | Issue #17 当前版本无法形成稳定 surface identity | 仅有隔离 `DEBUG` tracer；无 adapter、权限 UX 或生产声音链 | 无真实生命周期回执；其余场景 `not_evaluated` | 不适用 | 技术 no-go |
 | Claude Desktop AX | 本计划未验证任何可用接口 | 仅保留诊断 identity，无产品实现 | 无 | 无 | 未评估且不在路线图中 |
 
@@ -43,7 +44,7 @@
   AX token 继续可解码，以免删除历史偏好或诊断证据。
 - `HostID.productVisibleCases` 是正常产品 registry 的唯一真相源；manager、Core 矩阵、GUI 默认值、
   preview 与回执反馈只消费这三个表面。
-- WorkBuddy adapter 已外科式管理当前 installation 的两条 command hook，并复用配置锁、备份、CAS、
+- WorkBuddy adapter 外科式管理能力目录中已实现的 command hook，并复用配置锁、备份、CAS、
   symlink 与未知 JSON 保留契约。
 - schema 2 current receipt、历史回执、installation/scope fingerprint 和 Disconnect 保留规则已经存在；
   历史证据不会重新点亮 Current Activation。
@@ -64,7 +65,7 @@ HostID.allCases（5 个兼容/诊断 identity）
 
 用户打开 Apps/集成窗口
 └── 只看到 Claude Code / Codex / WorkBuddy
-    ├── WorkBuddy 仍诚实显示 2/5
+    ├── WorkBuddy 按能力目录诚实显示当前覆盖数
     └── 不出现 ChatGPT/Claude Desktop AX 占位或假连接动作
 ```
 

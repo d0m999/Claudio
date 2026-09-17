@@ -372,7 +372,7 @@ public enum HostEventSourceParser {
 
     /// `JSONSerialization` collapses duplicate keys. Scan only the top-level object so the
     /// allowlisted source fields cannot be given two competing values by an untrusted hook.
-    private static func duplicateTopLevelKeys(_ data: Data) -> Set<String> {
+    public static func duplicateTopLevelKeys(_ data: Data) -> Set<String> {
         let bytes = Array(data)
         var duplicates = Set<String>()
         var index = 0

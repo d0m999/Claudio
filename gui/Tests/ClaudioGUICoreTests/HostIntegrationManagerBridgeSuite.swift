@@ -264,8 +264,8 @@ func runHostIntegrationManagerBridgeSuites() async {
                 "Connect 不得隐式创建、重写或删除 Surface 声音覆盖")
             expect(
                 connected?.state.matrix.summary(for: .workBuddy)
-                    == .awaitingActivation(supported: 2, total: 5),
-                "Connect 后 WorkBuddy 必须进入 2/5 awaiting，不得伪造真实回执")
+                    == .awaitingActivation(supported: 3, total: 5),
+                "Connect 后 WorkBuddy 必须进入 3/5 awaiting，不得伪造真实回执")
 
             let repaired = try? await fixture.bridge.perform(.repair(.workBuddy))
             workBuddyCounts = await fixture.workBuddy.counts()
@@ -312,8 +312,8 @@ func runHostIntegrationManagerBridgeSuites() async {
                 "Disconnect 不得删除既有 Surface 声音覆盖或未来字段")
             expect(
                 disconnected?.state.matrix.summary(for: .workBuddy)
-                    == .notConnected(supported: 2, total: 5),
-                "Disconnect 后必须回到 WorkBuddy 2/5 未连接态")
+                    == .notConnected(supported: 3, total: 5),
+                "Disconnect 后必须回到 WorkBuddy 3/5 未连接态")
         }
     }
 

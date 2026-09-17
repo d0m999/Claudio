@@ -3,7 +3,7 @@ import Foundation
 
 @MainActor
 func runWorkBuddyIntegrationAdapterSuites() async {
-    await asyncSuite("WorkBuddy adapter：两事件连接、逐 binding 回执与断开边界") {
+    await asyncSuite("WorkBuddy adapter：三事件连接、逐 binding 回执与断开边界") {
         await withWorkBuddyAsyncTempDirectory { root in
             let claudioRoot = root.appendingPathComponent(".claudio", isDirectory: true)
             let settings = root.appendingPathComponent(".workbuddy/settings.json")
@@ -43,7 +43,9 @@ func runWorkBuddyIntegrationAdapterSuites() async {
                 try! JSONSerialization.jsonObject(
                     with: Data(contentsOf: settings)) as! [String: Any]
             let hooks = object["hooks"] as! [String: Any]
-            expect(Set(hooks.keys) == ["UserPromptSubmit", "Stop"], "首发只能管理两种原生事件")
+            expect(
+                Set(hooks.keys) == ["UserPromptSubmit", "Stop", "SubagentStop"],
+                "只能管理三种已验证的原生事件")
             expect(
                 (object["enabledPlugins"] as? [String: Any])?["keep"] as? Bool == true, "未知配置必须保留")
 

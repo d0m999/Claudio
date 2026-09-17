@@ -8,8 +8,7 @@ public enum WorkBuddyHooksInspection: Sendable, Equatable {
     case conflict(reason: String)
 }
 
-/// WorkBuddy 首发只安装 catalog 中标为 implemented 的两条 command hook。官方接口中其余
-/// binding 继续用于能力展示，但不会被这个变换悄悄写进用户配置。
+/// 只安装 catalog 中已实现的 binding；未获得 Desktop 回调证据的事件不写入用户配置。
 public func inspectWorkBuddyHooks(
     root: [String: Any],
     claudioBinaryPath: String
@@ -25,11 +24,13 @@ public func inspectWorkBuddyHooks(
     var matchedByEvent: [String: [MatchedHostHookCommand]] = [:]
     var ownedCount = 0
     var misplaced = false
+    var wrongMatcher = false
 
     for (nativeEvent, rawGroups) in hooks {
         guard let groups = rawGroups as? [Any] else { continue }
         for group in groups {
-            let entries = ((group as? [String: Any])?["hooks"] as? [Any]) ?? []
+            let group = (group as? [String: Any]) ?? [:]
+            let entries = (group["hooks"] as? [Any]) ?? []
             for entry in entries {
                 guard let command = (entry as? [String: Any])?["command"] as? String,
                     let match = matchedCurrentHostHookCommand(
@@ -39,6 +40,7 @@ public func inspectWorkBuddyHooks(
                 ownedCount += 1
                 matchedByEvent[nativeEvent, default: []].append(match)
                 misplaced = misplaced || match.nativeEvent != nativeEvent
+                wrongMatcher = wrongMatcher || group["matcher"] != nil
             }
         }
     }
@@ -46,6 +48,9 @@ public func inspectWorkBuddyHooks(
     guard ownedCount > 0 else { return .success(.notConfigured) }
     guard !misplaced else {
         return .success(.conflict(reason: "WorkBuddy hook 的事件位置与命令不一致"))
+    }
+    guard !wrongMatcher else {
+        return .success(.conflict(reason: "WorkBuddy hook 的 matcher 与事件不一致"))
     }
     let matches = matchedByEvent.values.flatMap { $0 }
     let ids = Set(matches.map(\.installationID))

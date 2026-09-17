@@ -343,7 +343,7 @@ private struct SettingsWindowRouteFrame: View {
 // MARK: - Production Agent panel (2 languages × 4 sizes × critical states)
 
 private enum ProductionPanelGalleryScenario: String, CaseIterable, Identifiable {
-    case workBuddy = "WorkBuddy 2/5 operational"
+    case workBuddy = "WorkBuddy operational"
     case workBuddyAwaitingExpanded = "WorkBuddy awaiting · scope expanded"
     case needsPack = "needsPack recovery"
     case configFailure = "config failure"

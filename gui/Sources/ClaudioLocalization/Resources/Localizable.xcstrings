@@ -982,13 +982,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "2/5 events are implemented in this version; the others are not enabled"
+            "value": "Some events are not yet enabled"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当前版本已实现 2/5；其余能力尚未启用"
+            "value": "其余能力尚未启用"
           }
         }
       }

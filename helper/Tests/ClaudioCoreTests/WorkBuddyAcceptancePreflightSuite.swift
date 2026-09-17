@@ -165,7 +165,7 @@ func runWorkBuddyAcceptancePreflightSuites() async {
             workBuddyDoctor: .warning,
             overallDoctor: .warning,
             scopeFingerprint:
-                "surface=workbuddy;host=app=short=1.2.3;build=456;claudio=0.0.0-dev;bindings=workbuddy:UserPromptSubmit:task_start:none:v1,workbuddy:Stop:stop:none:v1",
+                "surface=workbuddy;host=app=short=1.2.3;build=456;claudio=0.0.0-dev;bindings=workbuddy:UserPromptSubmit:task_start:none:v1,workbuddy:Stop:stop:none:v1,workbuddy:SubagentStop:subagent_stop:none:v1",
             collectedAt: Date(timeIntervalSince1970: 1))
 
         expect(report.inspect.available == .available, "Inspect 必须记录 WorkBuddy available")
@@ -174,15 +174,15 @@ func runWorkBuddyAcceptancePreflightSuites() async {
         expect(report.inspect.configuration == .notConfigured, "Inspect 必须记录未配置基线")
         expect(report.inspect.activation == .none, "Inspect 必须记录 activation none")
         expect(
-            report.scope.implementedBindingIDs.count == 2
+            report.scope.implementedBindingIDs.count == 3
                 && report.scope.hostSurface == "workbuddy",
-            "scope 必须绑定 WorkBuddy surface 与两条已实现 binding")
+            "scope 必须绑定 WorkBuddy surface 与三条已实现 binding")
         expect(
-            report.bindings.filter { $0.implementation == .implemented }.count == 2,
-            "账本必须保留两条 implemented binding")
+            report.bindings.filter { $0.implementation == .implemented }.count == 3,
+            "账本必须保留三条 implemented binding")
         expect(
-            report.bindings.filter { $0.state == .notImplemented }.count == 3,
-            "其余三条 binding 必须明确为 notImplemented")
+            report.bindings.filter { $0.state == .notImplemented }.count == 2,
+            "缺实证的两条 binding 必须明确为 notImplemented")
         expect(
             report.soundResults.allSatisfy { $0.result == .notTested },
             "只读 preflight 不得自动试听")
@@ -240,6 +240,8 @@ func runWorkBuddyAcceptancePreflightSuites() async {
         let taskStart = HostCapabilityCatalog.binding(
             host: .workBuddy, nativeEvent: "UserPromptSubmit")!
         let stop = HostCapabilityCatalog.binding(host: .workBuddy, nativeEvent: "Stop")!
+        let subagent = HostCapabilityCatalog.binding(
+            host: .workBuddy, nativeEvent: "SubagentStop")!
         let taskEvidence = HostReceiptEvidence(
             bindingID: taskStart.id,
             installationID: installationID,
@@ -264,6 +266,7 @@ func runWorkBuddyAcceptancePreflightSuites() async {
             bindingActivations: [
                 taskStart.id: .observed(taskEvidence),
                 stop.id: .observed(stopEvidence),
+                subagent.id: .awaitingReceipt(installationID: installationID),
             ],
             latestReceipt: stopEvidence,
             installationID: installationID)
@@ -285,15 +288,57 @@ func runWorkBuddyAcceptancePreflightSuites() async {
             collectedAt: Date(timeIntervalSince1970: 4))
 
         expect(
-            report.evidence.currentActivation == .recorded,
-            "两条 current binding 都有回执时才可记录 Current Activation")
+            report.evidence.currentActivation == .partial,
+            "三条已实现 binding 只得两条回执时必须保持 partial")
         expect(
             report.bindings.filter { $0.state == .currentActivation }.count == 2,
-            "当前 activation 必须逐 binding 记录两条回执")
+            "当前 activation 必须逐 binding 记录已取得的两条回执")
         expect(
-            report.soundResults.map(\.result) == [.played, .muted],
+            report.soundResults.map(\.result) == [.played, .muted, .notTested],
             "声音结果必须来自脱敏回执且保留 played/muted 语义")
         expect(report.scope.installationID == installationID, "scope 必须绑定当前 installation")
+
+        let subagentEvidence = HostReceiptEvidence(
+            bindingID: subagent.id,
+            installationID: installationID,
+            nativeEvent: "SubagentStop",
+            event: .subagentStop,
+            timestamp: Date(timeIntervalSince1970: 4),
+            playbackResult: .muted)
+        let complete = HostIntegrationSnapshot(
+            host: .workBuddy,
+            runtime: .ready,
+            availability: .available,
+            configuration: .configured,
+            writability: .writable,
+            activation: .observed(taskEvidence),
+            bindingActivations: [
+                taskStart.id: .observed(taskEvidence),
+                stop.id: .observed(stopEvidence),
+                subagent.id: .observed(subagentEvidence),
+            ],
+            latestReceipt: subagentEvidence,
+            installationID: installationID)
+        let completeReport = WorkBuddyAcceptancePreflight(
+            commitSHA: "0123456789abcdef0123456789abcdef01234567",
+            claudioVersion: "0.1.0",
+            workBuddy: WorkBuddyApplicationIdentity(
+                path: "/Applications/WorkBuddy.app",
+                bundleID: "com.tencent.WorkBuddy",
+                version: "1.2.3",
+                build: "456",
+                available: true),
+            machine: WorkBuddyMachineIdentity(macOSVersion: "26.0.1", cpuArchitecture: "arm64"),
+            inspectedSnapshot: complete,
+            statusSnapshot: complete,
+            workBuddyDoctor: .ok,
+            overallDoctor: .ok,
+            scopeFingerprint: "scope-v1",
+            collectedAt: Date(timeIntervalSince1970: 5))
+        expect(
+            completeReport.evidence.currentActivation == .recorded
+                && completeReport.bindings.filter { $0.state == .currentActivation }.count == 3,
+            "三条同代次回执齐全才可记录当前激活")
     }
 
     suite("WorkBuddy 只读 preflight：doctor 总体等级由 Core 统一归类") {

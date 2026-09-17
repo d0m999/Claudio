@@ -1,5 +1,6 @@
 import ArgumentParser
 import ClaudioCore
+import ClaudioHookInput
 import Foundation
 
 extension Claudio {
@@ -18,11 +19,21 @@ extension Claudio {
             guard let parsedHost = HostID(rawValue: host),
                 let parsedID = UUID(uuidString: installationID)
             else { return }
-            // Source input is opt-in to an already validated, GUI-owned descriptor.  A missing
-            // or unsafe descriptor deliberately means stdin is untouched.
-            let channel = EventNoticeTransport.loadDescriptor().map { descriptor in
+            // One bounded read serves both the WorkBuddy input contract and the optional GUI
+            // notice. Existing hooks without either consumer leave stdin untouched.
+            let descriptor = EventNoticeTransport.loadDescriptor()
+            let needsInput =
+                parsedHost == .workBuddy
+                && WorkBuddyHookPayloadPolicy.requiresValidation(nativeEvent: nativeEvent)
+            let hookInput = descriptor != nil || needsInput ? HookInputReader.read() : nil
+            guard
+                !needsInput
+                    || WorkBuddyHookPayloadPolicy.accepts(
+                        nativeEvent: nativeEvent, input: hookInput)
+            else { return }
+            let channel = descriptor.map { descriptor in
                 HostEventNoticeChannel(
-                    sourcePayload: HookInputReader.read().data,
+                    sourcePayload: hookInput?.data,
                     receiverEpoch: descriptor.epoch,
                     observedUptime: observedUptime,
                     sender: { notice in EventNoticeTransport.send(notice, to: descriptor) })

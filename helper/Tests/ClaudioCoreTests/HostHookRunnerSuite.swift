@@ -63,6 +63,33 @@ func runHostHookRunnerSuites() {
         }
     }
 
+    suite("WorkBuddy SubagentStop：真实回调只激活当前 binding") {
+        withTempDirectory { root in
+            let id = UUID()
+            let spawner = HostHookRunnerSpawner()
+            let environment = makeHostHookRunnerEnvironment(
+                root: root, host: .workBuddy, spawner: spawner,
+                fixtureIsReady: true, activeInstallationID: id)
+            let observed = handleHostHook(
+                host: .workBuddy, nativeEvent: "SubagentStop", installationID: id,
+                environment: environment)
+            expect(observed?.receiptWritten == true, "匹配的真实事件应写当前代次回执")
+            let evidence = environment.receiptStore.receiptEvidence(
+                host: .workBuddy, nativeEvent: "SubagentStop", installationID: id,
+                scopeFingerprint: hostHookRunnerTestScope)
+            expect(
+                evidence?.bindingID
+                    == HostCapabilityCatalog.binding(host: .workBuddy, nativeEvent: "SubagentStop")?
+                    .id,
+                "回执必须绑定当前 SubagentStop binding")
+            expect(
+                environment.receiptStore.receiptEvidence(
+                    host: .workBuddy, nativeEvent: "SubagentStop", installationID: UUID(),
+                    scopeFingerprint: hostHookRunnerTestScope) == nil,
+                "旧代次回执不得激活当前安装")
+        }
+    }
+
     suite("host hook：真实事件即使静音、未就绪或播放失败也留下脱敏回执") {
         withTempDirectory { root in
             let id = UUID(uuidString: "99999999-8888-4777-8666-555555555555")!

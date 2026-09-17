@@ -133,7 +133,8 @@ private func hostSourceRowPresentation(
         switch host {
         case .claudeCode: detailText = nil
         case .codex: detailText = "执行中断暂无事件"
-        case .workBuddy: detailText = "当前版本已实现 2/5；其余能力尚未启用"
+        case .workBuddy:
+            detailText = "其余能力尚未启用"
         case .chatGPTDesktopAX, .claudeDesktopAX: detailText = nil
         }
         status = .ready

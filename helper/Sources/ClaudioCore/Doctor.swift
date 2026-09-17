@@ -678,7 +678,7 @@ private func doctorHostResult(
         let qualifier =
             switch host {
             case .codex: "；执行中断暂无事件，待响应仅授权请求"
-            case .workBuddy: "；当前仅 task_start 与 stop 已实现"
+            case .workBuddy: ""
             case .claudeCode: ""
             case .chatGPTDesktopAX, .claudeDesktopAX: "；Beta 候选尚未实现"
             }

@@ -13,7 +13,7 @@ func runWorkBuddyVisualStateBaselineSuites() {
         expect(
             scenarios.map(\.id) == [
                 "workbuddy.disconnected", "workbuddy.awaiting", "workbuddy.task-start-current",
-                "workbuddy.two-bindings-current", "workbuddy.conflict",
+                "workbuddy.all-bindings-current", "workbuddy.conflict",
                 "workbuddy.repaired-awaiting",
                 "workbuddy.disconnected-after-action",
             ],
@@ -28,8 +28,8 @@ func runWorkBuddyVisualStateBaselineSuites() {
                 continue
             }
             expect(
-                facts.coverageText == "2/5",
-                "\(scenario.id) 必须保留中性的 2/5 能力事实")
+                facts.coverageText == "3/5",
+                "\(scenario.id) 必须保留中性的 3/5 能力事实")
             guard let section = content.connectionSection(for: .workBuddy) else {
                 expect(false, "\(scenario.id) 缺少 WorkBuddy 四行连接组")
                 continue
@@ -40,7 +40,7 @@ func runWorkBuddyVisualStateBaselineSuites() {
         }
     }
 
-    suite("WorkBuddy 七态 status：2/5 不被错误化，连接 Badge 和 Toggle 只由事实决定") {
+    suite("WorkBuddy 七态 status：3/5 不被错误化，连接 Badge 和 Toggle 只由事实决定") {
         let expected: [(PreviewFixtures.WorkBuddyVisualPhase, HostSourceRowStatus, Bool)] = [
             (.disconnected, .notConnected, false),
             (.awaitingActivation, .awaitingActivation, true),
@@ -62,9 +62,9 @@ func runWorkBuddyVisualStateBaselineSuites() {
             let agent = integrationDestinationContent(state: scenario.state).agent(for: .workBuddy)
             expect(agent?.status == status, "\(phase) 必须投影为 \(status)")
             expect(
-                agent?.coverageText == "2/5" && agent?.isOn == isOn, "\(phase) Toggle/coverage 必须诚实"
+                agent?.coverageText == "3/5" && agent?.isOn == isOn, "\(phase) Toggle/coverage 必须诚实"
             )
-            expect(agent?.badgeText != "错误", "2/5 本身不得渲染成错误")
+            expect(agent?.badgeText != "错误", "3/5 本身不得渲染成错误")
         }
     }
 
@@ -81,9 +81,9 @@ func runWorkBuddyVisualStateBaselineSuites() {
             let chinese = localizedHostSourceRow(row, language: .zhHans)
             expect(
                 english.title == "WorkBuddy"
-                    && english.readinessText.contains("2/5")
-                    && chinese.readinessText.contains("2/5"),
-                "\(scenario.id) 双语行必须保留 2/5")
+                    && english.readinessText.contains("3/5")
+                    && chinese.readinessText.contains("3/5"),
+                "\(scenario.id) 双语行必须保留 3/5")
             if let detail = row.detailText {
                 expect(
                     localizedHostSourceRow(

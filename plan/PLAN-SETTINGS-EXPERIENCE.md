@@ -257,7 +257,7 @@ macOS 13+ 的主 app 登录项入口见 Apple 的
   `HostCapabilityMatrixPresentation` 继续服务 Panel/Events/diagnostics，但不再由集成目的页渲染。
 
 验收：迁移前后 manager action、receipt transition、错误恢复和 accessibility label 保持等价；
-Codex `4/5` 与 WorkBuddy `2/5` 是诚实正常能力，不得为了填满原型显示假支持。
+Codex `4/5` 与 WorkBuddy 从能力目录计算的覆盖数是诚实正常能力，不得为了填满原型显示假支持。
 
 ### 5.3 事件与提示音
 

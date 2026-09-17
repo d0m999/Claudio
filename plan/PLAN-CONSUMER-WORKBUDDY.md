@@ -1,8 +1,8 @@
 # PLAN — WorkBuddy 正式集成与 surface 声音配置
 
-> 状态：**2/5 pre-RC 自动化已收口；当前持久连接与 Current Activation 已获本机窄验收；RC/发布未通过**
+> 状态：**SubagentStop 已取得 Desktop 回调并接入；3/5 同代次当前激活已记录，实际听音与正式验收未通过；RC/发布未通过**
 >
-> 更新：2026-08-31
+> 更新：2026-09-18
 >
 > 本文件本身不构成 commit、push、发布或真实宿主写入授权；2026-08-31 的连接、验收记录、
 > commit 与 push 均来自当次独立用户授权。
@@ -11,7 +11,7 @@
 
 - Apps/集成窗口永久列出 Claude Code、Codex、WorkBuddy 三个产品可见 native adapter；未安装不等于
   消失。AX identity 只保留兼容解码和隔离 `DEBUG` tracer，不进入正常产品 registry 或普通 UI。
-- WorkBuddy 永久显示五个公共事件，首发诚实标为 2/5 已实现，不用接口声明伪造 5/5。
+- WorkBuddy 永久显示五个公共事件，覆盖数从能力目录计算，不用接口声明伪造 5/5。
 - popup 只显示当前已配置或可用的事件来源，并允许选择全局默认或某个 surface 的声音配置。
 - Events/popup 可编辑已实现事件的 pack 和静音；未实现/不支持事件禁用，不提供假按钮。
 - 连接、声音可播放性与真实回执分别呈现；配置完成但尚无回执为 awaiting，不是假绿。
@@ -27,7 +27,7 @@ mechanism、maturity 和 control surface。每条能力使用稳定 `HostEventBi
 - claudi0 当前实现：implemented / notImplemented；
 - 当前 installation 的真实 activation evidence。
 
-WorkBuddy 首发绑定：
+WorkBuddy 当前绑定（首发的 2/5 与历史验收见第 5 节）：
 
 | 原生事件 | 公共 Event | 接口 | 当前实现 | 控件 |
 |---|---|---|---|---|
@@ -35,7 +35,7 @@ WorkBuddy 首发绑定：
 | Stop | stop | supported | implemented | 可配置、可试听 |
 | StopFailure | stop_failure | supported | notImplemented | 禁用 |
 | Notification | notification | partial | notImplemented | 禁用 |
-| SubagentStop | subagent_stop | supported | notImplemented | 禁用 |
+| SubagentStop | subagent_stop | supported | implemented | 可配置、可试听 |
 
 ### 2.2 配置事务
 
@@ -72,8 +72,8 @@ WorkBuddy 首发绑定：
   两行播放设置组与固定退出 footer；标准宽 312pt、maximum 360pt、高度 400–560pt，并继续支持
   系统浅色/深色。生产面板不再挂载三张来源卡片、紧凑 `Picker`、宿主 chips、声音包画廊或旧
   「管理声音包」行。
-- WorkBuddy 作用域稳定显示五行：`UserPromptSubmit`、`Stop` 为已实现且可配置/试听；
-  `StopFailure`、`Notification`、`SubagentStop` 显式标为未实现，试听与静音均禁用。Global 行显示
+- WorkBuddy 作用域稳定显示五行：`UserPromptSubmit`、`Stop`、`SubagentStop` 为已实现且可配置/试听；
+  `StopFailure`、`Notification` 显式标为未实现，试听与静音均禁用。Global 行显示
   claudi0 事件 ID 与「全局默认」，不得伪造宿主原生事件名或全局假 `3/5`。
 - popup 的「打开设置」携带 `PanelSoundScopeID` 进入保留的「事件与提示音」窗口；该窗口对应
   HTML 原型 `page=events&app=<scope>`，继续显示五事件、能力、当前声音与试听/静音。逐事件编辑再携带
@@ -94,9 +94,9 @@ openSoundSettings → resetSurface（条件）→ quitApplication`。打开集�
 
 ## 4. 本地验收
 
-- helper 测试覆盖 transform 幂等、未知字段、第三方 hook、错位/冲突、两条 binding、版本 scope、
+- helper 测试覆盖 transform 幂等、未知字段、第三方 hook、错位/冲突、当前 binding、版本 scope、
   disconnect、surface 解析/写入、回执历史边界与 doctor 三行。
-- GUI 测试覆盖动态三 surface 矩阵与 Product → Surface 分组、WorkBuddy 2/5、AX 不进入普通 UI、
+- GUI 测试覆盖动态三 surface 矩阵与 Product → Surface 分组、WorkBuddy 目录覆盖数、AX 不进入普通 UI、
   历史 AX token 可解码、surface effective profile、定向写、reset、全局音量、本地化、焦点与
   destructive confirmation 接线；既有 AX tracer 隔离测试继续执行。
 - 必须通过：
@@ -158,9 +158,21 @@ git diff --check
 完整脱敏证据与时间线只记录在
 [0.1.0 验收账本](../docs/release-acceptance-0.1.0.md#workbuddy-持久连接与-25-当前激活正式验收2026-08-31)。
 
-## 6. 剩余三个事件的 evidence-first 门
+## 6. 剩余事件的 evidence-first 门
 
-`StopFailure`、`Notification`、`SubagentStop` 必须分别创建独立计划/Issue。每项在实现前都要取得
+`StopFailure`、`Notification`、`SubagentStop` 已分别建立 Issue #198、#197、#196。每项在实现前都要取得
 当前 WorkBuddy 版本的可重复触发证据、最小且不含用户内容的 callback contract、负向/重复触发结果和
 fail-closed 停止条件；实现后再分别验证 binding、installation、scope、GUI/声音和可逆 Disconnect。
 任一事件通过都不能把 WorkBuddy 状态提前写成 5/5。
+
+2026-09-17 的 WorkBuddy Desktop `5.5.6` 探针两次捕获 `SubagentStop` 回调，因此实现其第三条
+binding。`Notification` 仅三次捕获 `idle_prompt`；`permission_prompt` 未获回调，因此保留
+`notImplemented`；其两种独立 matcher 的配置接线须在取得完整证据后实施，当前仅测试
+`auth_success` 拒绝合同。两次短时断网
+未取得 `StopFailure` 回调，故也保留 `notImplemented`。探针已从用户级配置精确移除；历史
+2/5 回执不能证明新 scope 的当前激活。2026-09-18 的显式 Repair 已轮换 installation 并安装三条
+自有 hook，9 条第三方 hook 保留。Desktop 随后一轮真实子代理任务产生
+`UserPromptSubmit`、`SubagentStop`、`Stop` 三份同代次 schema 2 回执；每份 binding ID 和
+installation ID 与当前 scope 匹配，preflight 为 `current_activation: recorded`。由于本机
+WorkBuddy 事件开关关闭，三份 `playback_result` 均为 `muted`，只证明触发，不证明实际听音。
+GUI 原生呈现、可逆 Disconnect 的现场结果与正式验收仍未验证。

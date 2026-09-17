@@ -19,7 +19,7 @@ private func workBuddyOwnedCommands(_ root: [String: Any]) -> [MatchedHostHookCo
 
 @MainActor
 func runWorkBuddyHooksTransformSuites() {
-    suite("WorkBuddy connect：首发只写两条已实现 binding，并保留未知配置") {
+    suite("WorkBuddy connect：只写三条已实现 binding，并保留未知配置") {
         let original: [String: Any] = [
             "claw": ["opaque": true],
             "hooks": [
@@ -28,7 +28,10 @@ func runWorkBuddyHooksTransformSuites() {
                         "matcher": "third",
                         "hooks": [["type": "command", "command": "echo keep"]],
                     ]
-                ]
+                ],
+                "SubagentStop": [
+                    ["hooks": [["type": "command", "command": "echo third-agent"]]]
+                ],
             ],
         ]
         guard
@@ -44,12 +47,15 @@ func runWorkBuddyHooksTransformSuites() {
         expect(mutation.changed, "首次连接必须产生写入")
         let owned = workBuddyOwnedCommands(mutation.root)
         expect(
-            Set(owned.map(\.nativeEvent)) == ["UserPromptSubmit", "Stop"],
-            "只能安装 task_start/stop，got \(owned.map(\.nativeEvent))")
-        expect(owned.allSatisfy { $0.installationID == workBuddyTransformID }, "两条 hook 必须同代次")
+            Set(owned.map(\.nativeEvent)) == ["UserPromptSubmit", "Stop", "SubagentStop"],
+            "只能安装三条已证明的事件，got \(owned.map(\.nativeEvent))")
+        expect(owned.allSatisfy { $0.installationID == workBuddyTransformID }, "三条 hook 必须同代次")
         expect((mutation.root["claw"] as? [String: Any])?["opaque"] as? Bool == true, "未知顶层键必须保留")
         let stopGroups = ((mutation.root["hooks"] as? [String: Any])?["Stop"] as? [Any]) ?? []
         expect(stopGroups.count == 2, "第三方 Stop group 必须保留并追加 Claudio group")
+        let subagentGroups =
+            ((mutation.root["hooks"] as? [String: Any])?["SubagentStop"] as? [Any]) ?? []
+        expect(subagentGroups.count == 2, "第三方 SubagentStop group 必须保留")
         expect(
             hostIntegrationHookCommand(
                 host: .workBuddy,
@@ -57,6 +63,54 @@ func runWorkBuddyHooksTransformSuites() {
                 installationID: workBuddyTransformID,
                 claudioBinaryPath: workBuddyTransformBinary) == nil,
             "未实现的官方 binding 不得生成可执行命令")
+    }
+
+    suite("WorkBuddy inspect：新增 binding 的缺失、重复与错误 matcher 失败关闭") {
+        guard
+            case .success(let connected) = connectWorkBuddyHooks(
+                root: [:], claudioRoot: workBuddyTransformRoot,
+                claudioBinaryPath: workBuddyTransformBinary,
+                installationID: workBuddyTransformID)
+        else {
+            expect(false, "测试前提：三条 WorkBuddy hook 可生成")
+            return
+        }
+        var root = connected.root
+        var hooks = root["hooks"] as! [String: Any]
+        let subagent = hooks["SubagentStop"] as! [Any]
+        hooks.removeValue(forKey: "SubagentStop")
+        root["hooks"] = hooks
+        expect(
+            inspectWorkBuddyHooks(root: root, claudioBinaryPath: workBuddyTransformBinary)
+                == .success(
+                    .partial(
+                        installationID: workBuddyTransformID,
+                        missingNativeEvents: ["SubagentStop"])),
+            "缺少 SubagentStop 必须显式呈现 incomplete")
+
+        hooks["SubagentStop"] = subagent + subagent
+        root["hooks"] = hooks
+        guard
+            case .success(.conflict(let duplicateReason)) = inspectWorkBuddyHooks(
+                root: root, claudioBinaryPath: workBuddyTransformBinary)
+        else {
+            expect(false, "重复自有 SubagentStop 必须冲突")
+            return
+        }
+        expect(duplicateReason.contains("重复"), "重复冲突应可诊断")
+
+        var wrong = subagent[0] as! [String: Any]
+        wrong["matcher"] = "permission_prompt"
+        hooks["SubagentStop"] = [wrong]
+        root["hooks"] = hooks
+        guard
+            case .success(.conflict(let matcherReason)) = inspectWorkBuddyHooks(
+                root: root, claudioBinaryPath: workBuddyTransformBinary)
+        else {
+            expect(false, "非 Notification 自有 hook 的 matcher 必须冲突")
+            return
+        }
+        expect(matcherReason.contains("matcher"), "matcher 冲突应可诊断")
     }
 
     suite("WorkBuddy connect：完整 current 配置幂等，旧 helper 路径会归一") {
@@ -94,7 +148,7 @@ func runWorkBuddyHooksTransformSuites() {
             return
         }
         expect(repaired.changed, "旧 helper 路径必须被归一")
-        expect(workBuddyOwnedCommands(repaired.root).count == 2, "归一后只能保留两条 canonical hook")
+        expect(workBuddyOwnedCommands(repaired.root).count == 3, "归一后只能保留三条 canonical hook")
     }
 
     suite("WorkBuddy inspect/disconnect：错位失败关闭，断开只删自有条目") {
@@ -156,7 +210,7 @@ func runWorkBuddyHooksTransformSuites() {
             expect(false, "精确断开 fixture 必须成功")
             return
         }
-        expect(disconnected.removedCount == 2, "断开必须精确移除两条自有 hook")
+        expect(disconnected.removedCount == 3, "断开必须精确移除三条自有 hook")
         expect(
             workBuddyOwnedCommands(disconnected.root).map(\.installationID) == [staleID],
             "断开只能删除当前 binary/host/installation，必须保留其它代次")

@@ -66,7 +66,7 @@ func runPanelFocusOrderSuites() {
                     hasResetSurface: false)) == .soundScope, "打开必须落声音作用域")
     }
 
-    suite("panelFocusOrder：WorkBuddy 三条未实现事件不产生试听或静音焦点") {
+    suite("panelFocusOrder：WorkBuddy 未实现事件不产生试听或静音焦点") {
         let events = focusEventPresentations(scope: .surface(.workBuddy))
         let order = panelFocusOrder(
             .operational(
@@ -74,11 +74,11 @@ func runPanelFocusOrderSuites() {
                 hasMasterVolume: true,
                 hasOpenSoundSettings: true,
                 hasResetSurface: true))
-        for event in [Event.stopFailure, .notification, .subagentStop] {
+        for event in [Event.stopFailure, .notification] {
             expect(!order.contains(.eventPreview(event)), "\(event) 不得有试听焦点")
             expect(!order.contains(.eventMute(event)), "\(event) 不得有静音焦点")
         }
-        for event in [Event.taskStart, .stop] {
+        for event in [Event.taskStart, .stop, .subagentStop] {
             expect(order.contains(.eventPreview(event)), "\(event) 必须有试听焦点")
             expect(order.contains(.eventMute(event)), "\(event) 必须有静音焦点")
         }
