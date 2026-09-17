@@ -67,19 +67,25 @@ package struct SettingsRootView: View {
             HStack(spacing: 0) {
                 sidebar
                     .frame(
-                        width: CGFloat(
-                            settingsSidebarWidth(windowWidth: geometry.size.width))
+                        width: CGFloat(settingsSidebarWidth(windowWidth: geometry.size.width)),
+                        height: geometry.size.height,
+                        alignment: .top
                     )
-                    .frame(maxHeight: .infinity)
                     .background(ClaudioTheme.elevated(colorScheme))
+                    .soundPacksLayoutProbe("settings.sidebar")
                 Rectangle()
                     .fill(ClaudioTheme.hairline(colorScheme))
                     .frame(width: ClaudioTheme.Metrics.hairline)
                     .accessibilityHidden(true)
                 routeSlot
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(
+                        maxWidth: .infinity,
+                        maxHeight: geometry.size.height,
+                        alignment: .topLeading
+                    )
                     .background(ClaudioTheme.panel(colorScheme))
             }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
         .frame(
             minWidth: SettingsWindowGeometry.minimumWidth,
@@ -284,8 +290,12 @@ package struct SettingsRootView: View {
                             settingsPresentationSession.state.explicitRouteRequestRevision,
                         languageStore: preferences,
                         nativeEffects: soundPacksEditorNativeEffects,
-                        onAnnouncement: onAnnouncement)
+                        onAnnouncement: onAnnouncement
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .soundPacksLayoutProbe("settings.sounds.editor-slot")
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .padding(.horizontal, 28)
                 .padding(.top, 28)
                 .padding(.bottom, 20)
@@ -342,6 +352,7 @@ package struct SettingsRootView: View {
                 equals: SettingsWindowFocusTarget.title(destination)
             )
             .accessibilityIdentifier("settings.title.\(destination.rawValue)")
+            .soundPacksLayoutProbe("settings.title.\(destination.rawValue)")
     }
 
     private var soundsRoute: SoundPacksWindowRoute {
@@ -765,22 +776,15 @@ private struct SettingsSoundsDestinationView: View {
     let onAnnouncement: @MainActor (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SettingsSoundsAICueView(
-                viewModel: aiCueViewModel,
-                editorOwner: editorOwner,
-                languageStore: languageStore,
-                nativeEffects: nativeEffects,
-                route: route,
-                onAnnouncement: onAnnouncement)
-
-            EmbeddedSoundPacksEditorView(
-                editorOwner: editorOwner,
-                route: route,
-                routeRequestRevision: routeRequestRevision,
-                languageStore: languageStore,
-                nativeEffects: nativeEffects)
-        }
+        SettingsSoundsAICueView(
+            viewModel: aiCueViewModel,
+            editorOwner: editorOwner,
+            languageStore: languageStore,
+            nativeEffects: nativeEffects,
+            route: route,
+            routeRequestRevision: routeRequestRevision,
+            onAnnouncement: onAnnouncement
+        )
         .settingsMountIdentity(SettingsPresentationAccessibilityID.destination(.sounds))
     }
 }

@@ -41,6 +41,7 @@ struct SettingsSoundsAICueView: View {
     @ObservedObject var languageStore: ClaudioPreferences
     let nativeEffects: SoundPacksEditorNativeEffectsDispatcher
     let route: SoundPacksWindowRoute
+    let routeRequestRevision: UInt64
     let onAnnouncement: @MainActor (String) -> Void
 
     @Environment(\.colorScheme) private var colorScheme
@@ -73,19 +74,17 @@ struct SettingsSoundsAICueView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(l10n.text(.settingsSoundsAICueTitle))
-                .font(ClaudioTheme.font(.sectionTitle).weight(.bold))
-                .foregroundColor(ClaudioTheme.text(colorScheme))
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("settings.sounds.ai-cue.title")
-            serviceCard
-            packContext
-            eventList
-            if let event = activeEvent, let packID = activePackID {
-                composer(packID: packID, event: event)
-            }
-        }
+        EmbeddedSoundPacksEditorView(
+            editorOwner: editorOwner,
+            route: route,
+            routeRequestRevision: routeRequestRevision,
+            languageStore: languageStore,
+            nativeEffects: nativeEffects,
+            supplement: SoundPacksEditorSupplement(
+                sidebarHeader: AnyView(newPackButton),
+                detailHeader: AnyView(detailIntroduction),
+                eventContent: { event in AnyView(eventGenerationContent(event)) })
+        )
         .onAppear {
             pendingRouteSession = routeSession
             draftNameInput = sounds?.draft?.name ?? ""
@@ -106,6 +105,7 @@ struct SettingsSoundsAICueView: View {
                 stopCandidatePreview()
                 viewModel.endSession()
                 syncOwnerComposer()
+                focusedEvent = nil
             }
             if selectedID != nil { beginRouteSessionIfNeeded() }
         }
@@ -126,6 +126,27 @@ struct SettingsSoundsAICueView: View {
         .accessibilityIdentifier("settings.sounds.ai-cue")
     }
 
+    private var detailIntroduction: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(l10n.text(.settingsSoundsAICueTitle))
+                .font(ClaudioTheme.font(.sectionTitle).weight(.bold))
+                .foregroundColor(ClaudioTheme.text(colorScheme))
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("settings.sounds.ai-cue.title")
+            serviceCard
+            packContext
+        }
+    }
+
+    private var newPackButton: some View {
+        Button(l10n.text(.settingsSoundsAICueNewPack)) {
+            beginDraft()
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(viewModel.isBusy || sounds?.draft != nil)
+        .accessibilityIdentifier("settings.sounds.ai-cue.new-pack")
+    }
+
     private var serviceCard: some View {
         EventSettingsAICueServiceCard(
             viewModel: viewModel,
@@ -133,6 +154,7 @@ struct SettingsSoundsAICueView: View {
             onManageCredential: { credentialSheetIsPresented = true }
         )
         .accessibilityIdentifier("settings.sounds.ai-cue.service")
+        .soundPacksLayoutProbe("settings.sounds.ai-cue.service")
     }
 
     @ViewBuilder
@@ -183,17 +205,10 @@ struct SettingsSoundsAICueView: View {
             .accessibilityIdentifier("settings.sounds.ai-cue.draft")
         } else if let selectedPack {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Text(
-                        SelectedPackMetadata(id: selectedPack.id, name: selectedPack.name)
-                            .displayName
-                    )
-                    .font(.headline)
-                    if selectedPack.usage.isShared {
-                        Text(l10n.text(.settingsSoundsAICueShared))
-                            .font(.caption.weight(.semibold))
-                            .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                    }
+                if selectedPack.usage.isShared {
+                    Text(l10n.text(.settingsSoundsAICueShared))
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 }
                 if selectedPack.usage.usageIsIncomplete {
                     Label(
@@ -205,43 +220,21 @@ struct SettingsSoundsAICueView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("settings.sounds.ai-cue.scope-incomplete")
                 }
-                if !selectedPack.usage.consumers.isEmpty {
-                    Text(l10n.text(.settingsSoundsAICueUsage))
-                        .font(.caption.weight(.semibold))
+                Text(l10n.text(.settingsSoundsAICueUsage))
+                    .font(.caption.weight(.semibold))
+                if selectedPack.usage.consumers.isEmpty
+                    && !selectedPack.usage.usageIsIncomplete
+                {
+                    Text(l10n.text(.soundPacksPackNotUsed))
+                        .font(.caption)
+                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                } else {
                     ForEach(Array(selectedPack.usage.consumers.enumerated()), id: \.offset) {
                         _, consumer in
                         Text(usageLabel(consumer))
                             .font(.caption)
                             .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                     }
-                }
-                if selectedPack.copyAction != nil || selectedPack.copyAndApplyAction != nil {
-                    Text(l10n.text(.settingsSoundsAICueCopyAttribution))
-                        .font(.caption)
-                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if route.isCopyAndApply, let copyAction = selectedPack.copyAndApplyAction {
-                    Button(copyAndApplyTitle) {
-                        invoke(copyAction)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(ClaudioTheme.clay(colorScheme))
-                    .accessibilityLabel(copyAndApplyTitle)
-                    .accessibilityIdentifier("settings.sounds.ai-cue.copy-and-apply")
-                }
-                if let copyAction = selectedPack.copyAction {
-                    Button(l10n.text(.commonCopy)) {
-                        invoke(copyAction)
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel(
-                        l10n.format(
-                            .soundPacksCopyLabel,
-                            SelectedPackMetadata(id: selectedPack.id, name: selectedPack.name)
-                                .displayName)
-                    )
-                    .accessibilityIdentifier("settings.sounds.ai-cue.copy")
                 }
             }
             .accessibilityElement(children: .contain)
@@ -254,71 +247,62 @@ struct SettingsSoundsAICueView: View {
         }
     }
 
-    private var eventList: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(l10n.text(.panelEventsTitle))
-                    .font(.headline)
-                Spacer(minLength: 8)
-                Button(l10n.text(.settingsSoundsAICueNewPack)) {
-                    beginDraft()
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isBusy || sounds?.draft != nil)
-                .accessibilityLabel(l10n.text(.settingsSoundsAICueNewPack))
-                .accessibilityIdentifier("settings.sounds.ai-cue.new-pack")
+    private func eventGenerationContent(_ event: Event) -> some View {
+        let row = sounds?.eventRows.first(where: { $0.event == event })
+        return VStack(alignment: .leading, spacing: 8) {
+            Button(l10n.text(.aiCueGenerateAction)) {
+                beginSession(for: event)
             }
-            ForEach(Event.allCases, id: \.self) { event in
-                eventButton(event)
+            .buttonStyle(.bordered)
+            .disabled(activePackID == nil || row == nil)
+            .focused($focusedEvent, equals: event)
+            .accessibilityLabel(
+                l10n.text(.aiCueGenerateAction) + " "
+                    + localizedEventName(event, language: languageStore.language)
+            )
+            .accessibilityHint(
+                adoptionHint(
+                    row?.aiCueAdoptionAvailability
+                        ?? .ineligible(.configurationUnavailable))
+            )
+            .accessibilityIdentifier("settings.sounds.ai-cue.event.\(event.rawValue)")
+            .soundPacksLayoutProbe("settings.sounds.ai-cue.event.\(event.rawValue)")
+
+            if activeEvent == event {
+                if selectedPack?.isBuiltinReadOnly == true {
+                    readOnlyCopyGuidance
+                } else if let packID = activePackID {
+                    composer(packID: packID, event: event)
+                }
             }
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("settings.sounds.ai-cue.events")
     }
 
-    private func eventButton(_ event: Event) -> some View {
-        let isExpanded = activeEvent == event
-        let row = sounds?.eventRows.first(where: { $0.event == event })
-        return Button {
-            beginSession(for: event)
-        } label: {
-            HStack(spacing: 8) {
-                ClaudioEventGlyph(event: event, size: 22)
-                    .accessibilityHidden(true)
-                Text(localizedEventName(event, language: languageStore.language))
-                    .font(.body.weight(.medium))
-                Spacer(minLength: 8)
-                if let displayName = row?.audioDisplayName, !displayName.isEmpty {
-                    Text(displayName)
-                        .font(.caption)
-                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                        .lineLimit(1)
-                }
-                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                    .accessibilityHidden(true)
+    private var readOnlyCopyGuidance: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(l10n.text(.aiCueEligibilityBuiltin))
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(l10n.text(.settingsSoundsAICueCopyAttribution))
+                .font(.caption)
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+            if route.isCopyAndApply, let action = selectedPack?.copyAndApplyAction {
+                Button(copyAndApplyTitle) { invoke(action) }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("settings.sounds.ai-cue.copy-and-apply")
+            } else if let action = selectedPack?.copyAction {
+                Button(l10n.text(.commonCopy)) { invoke(action) }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("settings.sounds.ai-cue.copy")
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row)
-                    .fill(
-                        isExpanded
-                            ? ClaudioTheme.claySoft(colorScheme)
-                            : ClaudioTheme.elevated(colorScheme)))
         }
-        .buttonStyle(.plain)
-        .focused($focusedEvent, equals: event)
-        .accessibilityLabel(localizedEventName(event, language: languageStore.language))
-        .accessibilityValue(row?.audioDisplayName ?? l10n.text(.soundPacksCoverageUnmapped))
-        .accessibilityHint(
-            adoptionHint(
-                row?.aiCueAdoptionAvailability
-                    ?? .ineligible(.configurationUnavailable))
-        )
-        .accessibilityIdentifier("settings.sounds.ai-cue.event.\(event.rawValue)")
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ClaudioTheme.elevated(colorScheme))
+        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row))
+        .accessibilityIdentifier("settings.sounds.ai-cue.readonly-guidance")
+        .soundPacksLayoutProbe("settings.sounds.ai-cue.readonly-guidance")
     }
 
     private func composer(packID: String, event: Event) -> some View {
@@ -352,6 +336,7 @@ struct SettingsSoundsAICueView: View {
             onClose: closeComposer
         )
         .accessibilityIdentifier("settings.sounds.ai-cue.composer.\(event.rawValue)")
+        .soundPacksLayoutProbe("settings.sounds.ai-cue.composer.\(event.rawValue)")
     }
 
     private var copyAndApplyTitle: String {
@@ -364,7 +349,7 @@ struct SettingsSoundsAICueView: View {
     }
 
     private var routeSession: AICueComposerSession? {
-        guard !route.isCopyAndApply, let target = route.editTarget else { return nil }
+        guard let target = route.editTarget else { return nil }
         return AICueComposerSession(packID: target.packID, event: target.event)
     }
 

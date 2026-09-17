@@ -118,6 +118,7 @@ package enum SettingsPresentationFixtures {
         availability: SettingsRouteAvailability? = nil,
         textSize: ClaudioCompactPreviewDensity = .standard,
         experienceProfile: PreviewFixtures.SettingsExperienceProfile? = nil,
+        builtinPackIDs: Set<String> = [],
         aiCueViewModel injectedAICueViewModel: AICueGenerationViewModel? = nil,
         aiCueScenario: PreviewFixtures.AICueGalleryScenario? = nil,
         integrationScenario: PreviewFixtures.HostIntegrationScenario? = nil,
@@ -197,6 +198,7 @@ package enum SettingsPresentationFixtures {
                     coverage: .present(fileName: "\($0.cliName).mp3"),
                     enabled: true)
             },
+            builtinPackIDs: builtinPackIDs,
             environment: AudioImportEnvironment(
                 userPacksDirectory: temporaryRoot.appendingPathComponent(
                     "packs", isDirectory: true),

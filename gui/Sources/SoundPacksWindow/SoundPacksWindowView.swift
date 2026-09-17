@@ -6,6 +6,48 @@ import ClaudioLocalization
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Presentation-only content supplied by the Sounds destination. The editor keeps ownership of
+/// pack selection, mapping controls, scrolling, and the fixed action bar.
+@MainActor
+package struct SoundPacksEditorSupplement {
+    package let sidebarHeader: AnyView
+    package let detailHeader: AnyView
+    package let eventContent: (Event) -> AnyView
+    package let isEmpty: Bool
+
+    package init(
+        sidebarHeader: AnyView,
+        detailHeader: AnyView,
+        eventContent: @escaping (Event) -> AnyView
+    ) {
+        self.sidebarHeader = sidebarHeader
+        self.detailHeader = detailHeader
+        self.eventContent = eventContent
+        isEmpty = false
+    }
+
+    package static var empty: Self {
+        Self(
+            sidebarHeader: AnyView(EmptyView()),
+            detailHeader: AnyView(EmptyView()),
+            eventContent: { _ in AnyView(EmptyView()) },
+            isEmpty: true)
+    }
+
+    private init(
+        sidebarHeader: AnyView,
+        detailHeader: AnyView,
+        eventContent: @escaping (Event) -> AnyView,
+        isEmpty: Bool
+    ) {
+        self.sidebarHeader = sidebarHeader
+        self.detailHeader = detailHeader
+        self.eventContent = eventContent
+        self.isEmpty = isEmpty
+    }
+
+}
+
 /// Unified Settings presentation of the app-lifetime editor owner. Route/focus state is local to
 /// the embedded destination; every disk/config mutation stays behind `SoundPacksEditorOwner`.
 @MainActor
@@ -14,6 +56,7 @@ public struct EmbeddedSoundPacksEditorView: View {
     private let route: SoundPacksWindowRoute
     private let routeRequestRevision: UInt64
     private let nativeEffects: SoundPacksEditorNativeEffectsDispatcher
+    private let supplement: SoundPacksEditorSupplement
     @ObservedObject private var languageStore: ClaudioPreferences
     @StateObject private var focusCoordinator = SoundPacksWindowFocusCoordinator()
     @State private var focusApplicationTracker = SoundPacksEditorFocusApplicationTracker()
@@ -23,13 +66,15 @@ public struct EmbeddedSoundPacksEditorView: View {
         route: SoundPacksWindowRoute,
         routeRequestRevision: UInt64,
         languageStore: ClaudioPreferences,
-        nativeEffects: SoundPacksEditorNativeEffectsDispatcher
+        nativeEffects: SoundPacksEditorNativeEffectsDispatcher,
+        supplement: SoundPacksEditorSupplement = .empty
     ) {
         self.editorOwner = editorOwner
         self.route = route
         self.routeRequestRevision = routeRequestRevision
         self.languageStore = languageStore
         self.nativeEffects = nativeEffects
+        self.supplement = supplement
     }
 
     public var body: some View {
@@ -37,7 +82,8 @@ public struct EmbeddedSoundPacksEditorView: View {
             editorOwner: editorOwner,
             focusCoordinator: focusCoordinator,
             languageStore: languageStore,
-            nativeEffects: nativeEffects
+            nativeEffects: nativeEffects,
+            supplement: supplement
         )
         .onAppear {
             applyFocusFromPresentation(requestsInitialFocus: true)
@@ -108,7 +154,7 @@ package struct SoundPacksEditorFocusApplicationTracker {
     }
 }
 
-/// Standard-window surface: full pack sidebar plus the selected pack's four mappings.
+/// Standard-window surface: full pack sidebar plus the selected pack's five mappings.
 ///
 /// T9 adds a window-owned focus/VoiceOver/Dynamic Type layer. T11 adds selected-pack audio
 /// inventory, existing-audio assignment, and explicit confirmed orphan deletion.
@@ -118,17 +164,20 @@ package struct SoundPacksWindowView: View {
     private let focusCoordinator: SoundPacksWindowFocusCoordinator
     @ObservedObject private var languageStore: ClaudioPreferences
     private let nativeEffects: SoundPacksEditorNativeEffectsDispatcher
+    private let supplement: SoundPacksEditorSupplement
 
     package init(
         editorOwner: SoundPacksEditorOwner,
         focusCoordinator: SoundPacksWindowFocusCoordinator,
         languageStore: ClaudioPreferences,
-        nativeEffects: SoundPacksEditorNativeEffectsDispatcher
+        nativeEffects: SoundPacksEditorNativeEffectsDispatcher,
+        supplement: SoundPacksEditorSupplement = .empty
     ) {
         self.editorOwner = editorOwner
         self.focusCoordinator = focusCoordinator
         self.languageStore = languageStore
         self.nativeEffects = nativeEffects
+        self.supplement = supplement
     }
 
     package var body: some View {
@@ -141,7 +190,8 @@ package struct SoundPacksWindowView: View {
                     sounds: sounds,
                     focusCoordinator: focusCoordinator,
                     languageStore: languageStore,
-                    nativeEffects: nativeEffects)
+                    nativeEffects: nativeEffects,
+                    supplement: supplement)
             } else {
                 ProgressView()
                     .frame(minWidth: 640, minHeight: 480)
@@ -161,6 +211,7 @@ private struct SoundPacksWindowContentView: View {
     @ObservedObject var focusCoordinator: SoundPacksWindowFocusCoordinator
     @ObservedObject var languageStore: ClaudioPreferences
     private let nativeEffects: SoundPacksEditorNativeEffectsDispatcher
+    private let supplement: SoundPacksEditorSupplement
 
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedTarget: SoundPacksWindowFocusTarget?
@@ -174,7 +225,8 @@ private struct SoundPacksWindowContentView: View {
         sounds: SoundsEditorPresentation,
         focusCoordinator: SoundPacksWindowFocusCoordinator,
         languageStore: ClaudioPreferences,
-        nativeEffects: SoundPacksEditorNativeEffectsDispatcher
+        nativeEffects: SoundPacksEditorNativeEffectsDispatcher,
+        supplement: SoundPacksEditorSupplement
     ) {
         self.editorOwner = editorOwner
         self.presentation = presentation
@@ -182,6 +234,7 @@ private struct SoundPacksWindowContentView: View {
         self.focusCoordinator = focusCoordinator
         self.languageStore = languageStore
         self.nativeEffects = nativeEffects
+        self.supplement = supplement
     }
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
@@ -223,6 +276,7 @@ private struct SoundPacksWindowContentView: View {
             }
         }
         .frame(minWidth: 640, minHeight: 480)
+        .soundPacksLayoutProbe("sound-packs.editor")
         .background(ClaudioTheme.panel(colorScheme))
         .onReceive(focusCoordinator.$requestRevision) { revision in
             guard revision > handledFocusRequestRevision else { return }
@@ -458,6 +512,10 @@ private struct SoundPacksWindowContentView: View {
                 .padding(.horizontal, 10)
                 .padding(.top, 10)
 
+            supplement.sidebarHeader
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+
             List(selection: selection) {
                 ForEach(activeSounds.packs) { card in
                     HStack(spacing: 6) {
@@ -483,6 +541,7 @@ private struct SoundPacksWindowContentView: View {
                         card.isInspected ? .isSelected : [])
                 }
             }
+            .soundPacksLayoutProbe("sound-packs.pack-list")
             .focusable(!activeSounds.packs.isEmpty)
             .focused($focusedTarget, equals: .packList)
             .accessibilityLabel(l10n.text(.soundPacksSidebarLabel))
@@ -509,6 +568,10 @@ private struct SoundPacksWindowContentView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
                             Color.clear.frame(height: 0).id("detail-top")
+                            supplement.detailHeader
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 20)
+                                .padding(.top, supplement.isEmpty ? 0 : 20)
                             if !activeSounds.windowStatuses.isEmpty {
                                 windowStatusRegion
                                     .padding(.horizontal, 20)
@@ -538,16 +601,7 @@ private struct SoundPacksWindowContentView: View {
 
                                     Divider()
 
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        ForEach(activeSounds.eventRows) { row in
-                                            eventMappingRow(
-                                                row,
-                                                stacks: layoutAdaptation.stacksEventRows
-                                                    || stacksDetail
-                                            )
-                                            .id("event-\(row.event.rawValue)")
-                                        }
-                                    }
+                                    eventRowsSection(stacks: stacksDetail)
 
                                     if inventoryIsLoading {
                                         HStack(spacing: 8) {
@@ -571,6 +625,11 @@ private struct SoundPacksWindowContentView: View {
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(20)
+                            } else if activeSounds.draft != nil {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    eventRowsSection(stacks: stacksDetail)
+                                }
+                                .padding(20)
                             } else {
                                 emptyState
                             }
@@ -593,6 +652,7 @@ private struct SoundPacksWindowContentView: View {
                             }
                         }
                     }
+                    .soundPacksLayoutProbe("sound-packs.detail-scroll")
                 }
                 if let card = selectedCard {
                     Divider()
@@ -609,10 +669,24 @@ private struct SoundPacksWindowContentView: View {
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
+                    .soundPacksLayoutProbe("sound-packs.action-bar")
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func eventRowsSection(stacks: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(activeSounds.eventRows) { row in
+                eventMappingRow(row, stacks: layoutAdaptation.stacksEventRows || stacks)
+                    .id("event-\(row.event.rawValue)")
+                supplement.eventContent(row.event)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 8)
+                    .padding(.bottom, supplement.isEmpty ? 0 : 8)
+            }
+        }
     }
 
     private var windowStatusRegion: some View {
@@ -1097,6 +1171,7 @@ private struct SoundPacksWindowContentView: View {
                 : l10n.text(.soundPacksBuiltinLabel)
         )
         .accessibilityIdentifier("sound-packs.event.\(row.event.rawValue)")
+        .soundPacksLayoutProbe("sound-packs.event.\(row.event.rawValue)")
     }
 
     private func eventIdentity(_ row: SoundPackEditorEventPresentation) -> some View {
