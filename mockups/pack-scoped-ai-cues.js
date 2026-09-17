@@ -22,25 +22,6 @@ const HOSTS = {
     notification:['Notification','接口部分支持 · 未实现'],
     subagent_stop:['SubagentStop','接口已声明 · 未实现']}},
 };
-// 三来源对照是现有 HostCapabilityBinding 的演示投影；它只说明事件能力，不门控包级生成。
-function capabilityView(binding){
-  const exact=binding[1];
-  if(exact==='不支持')return {label:'不可用，这个来源没有此类事件',tone:'unavailable'};
-  if(exact.includes('仅授权请求'))return {label:'仅授权请求可用',tone:'authorized'};
-  if(exact.includes('未实现'))return {label:'暂不可用，尚未接入',tone:'pending'};
-  return {label:'支持',tone:'supported'};
-}
-function capabilityComparison(event){
-  const rows=Object.values(HOSTS).map(host=>{
-    const binding=host.bindings[event.key],view=capabilityView(binding);
-    return `<div class="capability-row"><span class="capability-source">${host.name}</span><span class="capability-status ${view.tone}">${view.label}</span></div>`;
-  }).join('');
-  const technical=Object.values(HOSTS).map(host=>{
-    const binding=host.bindings[event.key];
-    return `<div class="technical-row"><strong>${host.name}</strong><span>原生事件：<span class="mono">${esc(binding[0])}</span> · 精确能力状态：${esc(binding[1])} · 来源当前激活：${esc(host.status)}</span></div>`;
-  }).join('');
-  return `<div class="capability-panel" aria-label="${event.zh} 的三来源能力对照"><div class="capability-head"><strong>来源能力对照</strong><span>只说明这个事件的来源能力</span></div>${rows}<p class="capability-note">来源对照不承诺当前一定播放。实际能否听到声音还取决于是否选用此包、连接、静音及该事件是否已有音频。</p><details class="technical-info"><summary>技术信息</summary>${technical}</details></div>`;
-}
 const PROFILES = [
   {id:'elevenlabs-global',label:'ElevenLabs · 全球',routes:['speech','mixed','animal','soundEffect'],kind:'styled',storage:'Keychain',validation:'只读探针'},
   {id:'minimax-global',label:'MiniMax · 全球',routes:['speech'],kind:'numbered',storage:'Keychain',validation:'只读探针'},
@@ -62,7 +43,7 @@ function initialState(){return {
     {id:'licensed-remix',name:'Licensed Remix',builtin:false,license:'CC-BY-4.0',author:'Original Artist',events:{stop:'bell.mp3'},identity:4},
   ],
   selected:{global:'pikachu',claude:null,codex:null,workbuddy:'pikachu'},
-  selPack:'pikachu',draft:null,composer:null,gate:null,selectedEvent:'task_start',targetEvent:null,
+  selPack:'pikachu',draft:null,composer:null,gate:null,
   notice:null,badConfig:false,brokenPack:false,partial:false,failNext:'',
   muted:{},volume:80,serial:5,generation:0,playingKey:null,qwenPrevious:{},
 };}
@@ -97,7 +78,7 @@ function previewCand(i){previewEvent(S.composer.event,'candidate-'+i);}
 const DESTS=[['通用','⚙️'],['集成','🔌'],['事件与提示音','🔔','events'],['通知','🔕'],['显示','🖥'],['声音','🔊','sounds'],['用量','📊'],['快捷键','⌘'],['关于','ℹ️']];
 function renderSidebar(){$('#sidebar').innerHTML=DESTS.map(([name,icon,page])=>`<button class="dest ${page?(S.page===page?'active':''):'dim'}" ${page?`onclick="goPage('${page}')"`:'disabled'}><span class="ic">${icon}</span>${name}</button>`).join('');}
 function leaveDraft(){if(S.draft){S.draft=null;S.selPack=S.packs[0].id;setNotice('空提示音组草稿已取消，声音包库没有新增条目。');}}
-function goPage(page){if(page!=='sounds')leaveDraft();S.page=page;S.composer=null;S.gate=null;S.targetEvent=null;render();}
+function goPage(page){if(page!=='sounds')leaveDraft();S.page=page;S.composer=null;S.gate=null;render();}
 function scopeSummary(scope){const r=effectiveSelection(scope);if(r.error)return '配置/声音不可用 · 已停止播放';if(scope==='global')return '默认值 · 未覆盖来源继承';return `${HOSTS[scope].status} · ${r.inherited?'继承全局默认':'显式选包：'+r.pack.name}`;}
 function renderEvents(){
   const r=effectiveSelection(S.scope),p=r.pack;
@@ -117,43 +98,41 @@ function setVol(v){S.volume=Number(v);render();}
 function pickPack(id){S.selected[S.scope]=id||null;if(S.scope==='codex')S.badConfig=false;render();}
 function toggleMute(key){const id=S.scope+'.'+key;S.muted[id]=!S.muted[id];render();}
 function manageSounds(){S.selPack=effectiveSelection(S.scope).pack?.id||S.selected.global;S.applyScope=S.scope;goPage('sounds');}
-function gotoGenerate(key){const r=effectiveSelection(S.scope);if(r.error){setNotice(r.error,'error');render();return;}S.selPack=r.pack.id;S.applyScope=S.scope;S.targetEvent=key;S.selectedEvent=key;S.page='sounds';S.gate=null;S.composer=null;if(r.pack.builtin)S.gate={event:key,scope:S.scope};else startGenerate(key);render();revealSelectedEvent();}
+function gotoGenerate(key){const r=effectiveSelection(S.scope);if(r.error){setNotice(r.error,'error');render();return;}S.selPack=r.pack.id;S.applyScope=S.scope;S.page='sounds';S.gate=null;S.composer=null;if(r.pack.builtin){S.gate={event:key,scope:S.scope};render();revealEvent(key,'.readonly-gate button');}else startGenerate(key);}
 function renderSounds(){
   const p=packById(S.selPack)||S.packs[0],profile=currentProfile(),credential=S.credential[profile.id],usage=p.id==='draft'?{names:[],incomplete:S.badConfig}:consumersOf(p.id);
   const status={verified:'✓ 已保存 · 已验证',deferred:'已保存 · 待首次显式生成验证',pending:'新 Key 待首次显式生成验证',missing:'未配置'}[credential];
   const list=S.packs.map(pk=>{const u=consumersOf(pk.id);return `<button class="pack-item ${pk.id===p.id?'active':''}" onclick="selPack('${pk.id}')"><span class="pn">${esc(pk.name)}${pk.builtin?'<span class="tag">内置 · 只读</span>':''}${u.names.length?`<span class="capsule">使用中 ${u.names.length}</span>`:''}</span><span class="meta"><span class="pi mono">${esc(pk.id)}</span><span class="pi mono">${coverage(pk)}/5</span>${track(pk,true)}</span></button>`;}).join('');
   const svc=`<div class="card" style="margin-bottom:12px"><div class="svc-head"><span class="svc-ic">✨</span><div><div class="t1">AI 声音生成服务</div><div class="t2">只选择已注册的固定 profile · 此原型不接入真实服务</div></div></div><div class="hairline"></div><div class="svc-row"><span class="lbl">生成服务与地区</span><select class="wide-select" onchange="pickProfile(this.value)">${PROFILES.map(q=>`<option value="${q.id}" ${q.id===profile.id?'selected':''}>${esc(q.label)}</option>`).join('')}</select></div><div class="svc-row"><span class="lbl">支持能力</span><span>${profile.routes.map(k=>MODALITIES[k]).join('、')}</span></div><div class="svc-row"><span class="lbl">候选政策</span><span>${profile.kind==='styled'?'3 个真实风格候选':'3 个编号候选'}${profile.id==='senseaudio-cn'?'；音效可显示 1–2/3 部分候选':''}</span></div><div class="svc-status"><span class="${credential==='missing'?'bad':'ok'}">${status}</span><span style="flex:1"></span><span style="font-size:11px;color:var(--muted)">${esc(profile.storage)} · ${profile.validation}</span>${credential==='pending'?'<button class="btn small" onclick="cancelPending()">取消替换</button>':''}<button class="btn small" onclick="openSheet()">${credential==='missing'?'配置假 Key':'管理演示状态'}</button></div></div>`;
   const rows=EVENTS.map(e=>{
-    const file=p.events[e.key],selected=S.selectedEvent===e.key;
-    const gate=S.gate?.event===e.key?`<div class="notice warn" style="margin:4px 0 8px 34px"><span class="ic">⚠</span><span class="grow">内置包只读。可新建空组；来自缺声深链时可复制并用于 ${scopeName(S.gate.scope)}。复制成功后才应用。</span><button class="btn small" onclick="gateNew('${e.key}')">新建空组</button><button class="btn small" onclick="gateFork('${e.key}')">${S.gate.scope?'复制并用于'+(S.gate.scope==='global'?'全局默认':'此来源'):'复制此包'}</button></div>`:'';
+    const file=p.events[e.key];
+    const gate=S.gate?.event===e.key?`<div class="notice warn readonly-gate" style="margin:4px 0 8px 34px"><span class="ic">⚠</span><span class="grow">内置包只读。${S.gate.scope?`可新建空组，或复制并用于${scopeName(S.gate.scope)}；复制成功后才应用。`:'可新建空组，或复制此包后在副本中生成。'}</span><button class="btn small" onclick="gateNew('${e.key}')">新建空组</button><button class="btn small" onclick="gateFork('${e.key}')">${S.gate.scope?'复制并用于'+(S.gate.scope==='global'?'全局默认':'此来源'):'复制此包'}</button></div>`:'';
     const fileCell=!p.builtin&&file?`<select aria-label="${e.zh} 声音文件" onchange="onFileSel('${e.key}',this.value)"><option value="${esc(file)}">${esc(file)}</option><option value="__clear">清除绑定（静默）</option></select>`:`<span class="file mono">${esc(file||'—')}</span>`;
-    const comparison=selected?capabilityComparison(e):'';
-    return `<div style="padding:2px 0"><div class="evrow ${selected?'selected':''}">${tile(e)}<div class="mid"><button class="event-select" aria-pressed="${selected}" onclick="selectEvent('${e.key}')"><span class="name">${e.zh}</span><span class="sub mono">${e.key}</span></button></div>${fileCell}<div class="acts"><button class="iconbtn" aria-label="试听 ${e.zh}" ${file?`onclick="previewEvent('${e.key}','sp-${e.key}')"`:'disabled'}>▶</button><button class="btn small" onclick="startGenerate('${e.key}')">✨ 描述生成</button></div></div>${comparison}${gate}${S.composer?.event===e.key?composerHTML():''}</div>`;
+    return `<div class="sound-event" id="sound-event-${e.key}"><div class="evrow">${tile(e)}<div class="mid"><span class="name">${e.zh}</span><span class="sub mono">${e.key}</span></div>${fileCell}<div class="acts"><button class="iconbtn" aria-label="试听 ${e.zh}" ${file?`onclick="previewEvent('${e.key}','sp-${e.key}')"`:'disabled'}>▶</button><button class="btn small generate-event" aria-label="为${e.zh}描述生成" onclick="startGenerate('${e.key}')">✨ 描述生成</button></div></div>${gate}${S.composer?.event===e.key?composerHTML():''}</div>`;
   }).join('');
   const scopeOpts=['global',...Object.keys(HOSTS)].map(id=>`<option value="${id}" ${S.applyScope===id?'selected':''}>${scopeName(id)}</option>`).join('');
   const metadata=p.license||p.author?`<div class="notice warn"><span class="ic">⚠</span><span class="grow">整包声明：${esc(p.license||'—')} / ${esc(p.author||'—')}。${p.builtin?'复制后，副本':'复制副本或采纳 AI 音频后，修改后的包'}会移除整包 license/author；原包与独立许可材料保留。</span></div>`:'';
   $('#content').innerHTML=`<div class="page-head"><h1>声音</h1><p>向用户包生成与采纳；在 Global 或 Surface 选择使用哪个包。</p></div><div class="sp-layout"><div class="pack-rail"><div class="rail-head"><button class="btn primary" onclick="newPack()">＋ 新建提示音组</button><span style="font-size:10.5px;color:var(--muted)">复制任意健康包可做底子</span>${S.draft?`<div class="draft-note">未发布草稿「${esc(S.draft.name)}」· 首音采纳成功才进入下方列表</div>`:''}</div><div class="pack-list">${list}</div></div><div class="sp-main"><div class="sp-detail">${svc}${S.notice?`<div class="notice ${S.notice.type==='error'?'error':S.notice.type==='warn'?'warn':''}"><span class="ic">${S.notice.type==='error'?'✕':'ⓘ'}</span><span class="grow">${esc(S.notice.text)}</span></div>`:''}<div class="sp-head"><span class="name">${esc(p.name)}</span>${p.id==='draft'?'<span class="tag dashed">未发布草稿</span>':p.builtin?'<span class="tag">内置 · 只读</span>':'<span class="tag">用户包</span>'}<span class="cov mono">${coverage(p)}/5</span>${track(p)}</div>${p.id==='draft'?`<div style="margin:7px 0"><label>组名 <input class="name-input" value="${esc(p.name)}" oninput="renameDraft(this.value)"></label><button class="btn small" style="margin-left:8px" onclick="cancelDraft()">取消空组</button></div>`:''}<div class="notice ${usage.incomplete?'warn':''}" style="margin:8px 0"><span class="ic">ⓘ</span><span class="grow">${usage.names.length?'使用中：'+esc(usage.names.join('、'))+'。修改此包将立即影响这些有效使用者。':'当前没有可确认的使用者。'}${usage.incomplete?' 使用范围不完整：配置损坏，未将损坏覆盖当作继承。':''}</span></div>${!healthy(p)?'<div class="notice error"><span class="ic">✕</span><span class="grow">此包损坏，不能复制或采纳；请修复或重选。</span></div>':''}${metadata}<div class="card" style="padding-top:4px">${rows}</div></div><div class="sp-actions">${p.id==='draft'?'<span class="draft-note">首音成功前不入库，不可选用</span>':`<button class="btn" onclick="forkCurrent()">复制为我的包</button><span class="draft-note">若有整包 license/author，副本会移除；普通复制不应用</span>`}<span class="spacer"></span><label>选用目标 <select onchange="S.applyScope=this.value;render()">${scopeOpts}</select></label>${p.id==='draft'?'':`<button class="btn primary" onclick="useThisPack()">用于${scopeName(S.applyScope)}</button>`}</div></div></div>`;
 }
 function render(){renderSidebar();S.page==='sounds'?renderSounds():renderEvents();}
-function selPack(id){if(S.draft&&id!=='draft')leaveDraft();S.selPack=id;S.composer=null;S.gate=null;S.notice=null;S.targetEvent=null;render();}
+function selPack(id){if(S.draft&&id!=='draft')leaveDraft();S.selPack=id;S.composer=null;S.gate=null;S.notice=null;render();}
 function onFileSel(key,value){const p=packById(S.selPack);if(value==='__clear'&&healthy(p)&&!p.builtin&&EV[key]){delete p.events[key];if(p.eventNames)delete p.eventNames[key];setNotice(`已清除「${EV[key].zh}」绑定；该事件将静默。`);render();}}
-function revealSelectedEvent(){requestAnimationFrame(()=>document.querySelector('.evrow.selected')?.scrollIntoView({block:'start'}));}
-function selectEvent(key){if(!EV[key])return;S.selectedEvent=key;render();revealSelectedEvent();}
+function revealEvent(key,focusSelector){requestAnimationFrame(()=>{const row=document.getElementById('sound-event-'+key);row?.scrollIntoView({block:'start'});row?.querySelector(focusSelector)?.focus({preventScroll:true});});}
 function renameDraft(name){if(S.draft)S.draft.name=name.slice(0,64);}
-function newPack(){S.composer=null;S.gate=null;S.draft={id:'draft',name:`我的提示音组 ${S.serial}`,builtin:false,events:{},identity:S.serial++};S.selPack='draft';S.targetEvent=null;setNotice('空组只是未发布草稿；取消不入库，首个音采纳成功才发布。');render();}
+function newPack(){S.composer=null;S.gate=null;S.draft={id:'draft',name:`我的提示音组 ${S.serial}`,builtin:false,events:{},identity:S.serial++};S.selPack='draft';setNotice('空组只是未发布草稿；取消不入库，首个音采纳成功才发布。');render();}
 function cancelDraft(){S.draft=null;S.composer=null;S.selPack=S.packs[0].id;setNotice('空组已取消，声音包库未新增条目。');render();}
 function consumeFailure(kind){if(S.failNext!==kind)return false;S.failNext='';$('#demoFail').value='';return true;}
 function forkCurrent(scope=null,event=null){const src=packById(S.selPack);if(!healthy(src)||src.id==='draft'){setNotice('复制失败：源包不健康或尚未发布。','error');render();return false;}if(consumeFailure('copy')){setNotice('复制失败：未创建副本，原包和选包保持不变。','error');render();return false;}
-  const id=`${src.id}-copy-${S.serial++}`;const cp={...src,id,name:src.name+' 副本',builtin:false,events:{...src.events},eventNames:{...src.eventNames},identity:S.serial};delete cp.license;delete cp.author;S.packs.push(cp);S.selPack=id;S.composer=null;S.gate=null;S.selectedEvent=event||S.selectedEvent;S.targetEvent=null;
-  if(scope){if(!applyPack(scope,id)){setNotice(`「${cp.name}」复制成功，但未能用于${scopeName(scope)}；副本已保留在侧栏，可稍后重试。`,'error');render();return true;}setNotice(`「${cp.name}」复制成功，已用于${scopeName(scope)}。现在可为「${EV[event].zh}」显式生成。`);}else setNotice(`「${cp.name}」复制成功并已发布；只查看副本，未改变 Global 或任何 Surface 的选包。`);
-  render();return true;
+  const id=`${src.id}-copy-${S.serial++}`;const cp={...src,id,name:src.name+' 副本',builtin:false,events:{...src.events},eventNames:{...src.eventNames},identity:S.serial};delete cp.license;delete cp.author;S.packs.push(cp);S.selPack=id;S.composer=null;S.gate=null;
+  if(scope){if(!applyPack(scope,id)){setNotice(`「${cp.name}」复制成功，但未能用于${scopeName(scope)}；副本已保留在侧栏，可稍后重试。`,'error');render();if(event)revealEvent(event,'.generate-event');return true;}setNotice(`「${cp.name}」复制成功，已用于${scopeName(scope)}。现在可为「${EV[event].zh}」显式生成。`);}else setNotice(`「${cp.name}」复制成功并已发布；只查看副本，未改变 Global 或任何 Surface 的选包。`);
+  render();if(event)revealEvent(event,'.generate-event');return true;
 }
 function applyPack(scope,id){if(!['global',...Object.keys(HOSTS)].includes(scope)||!healthy(packById(id))||scope==='codex'&&S.badConfig||consumeFailure('apply'))return false;S.selected[scope]=id;return true;}
 function useThisPack(){const p=packById(S.selPack),scope=S.applyScope;if(!applyPack(scope,p?.id)){setNotice(`未能将「${p?.name||'此包'}」用于${scopeName(scope)}；现有选包保持不变。`,'error');render();return;}setNotice(`已将「${p.name}」用于${scopeName(scope)}。`);render();}
 function gateNew(key){newPack();startGenerate(key);}
 function gateFork(key){const scope=S.gate?.scope||null;forkCurrent(scope,key);}
 function pickProfile(id){const profile=PROFILES.find(p=>p.id===id);if(!profile)return;const prior=S.composer;S.profile=id;if(prior)S.composer={...prior,phase:'edit',cands:[],generation:null,profile:id,modality:profile.routes.includes(prior.modality)?prior.modality:profile.routes[0]};S.gate=null;setNotice('已切换固定 profile；旧候选已失效，描述已保留。');render();}
-function startGenerate(key){const p=packById(S.selPack);if(!p||!EV[key]){setNotice('生成目标无效。','error');render();return;}S.selectedEvent=key;if(p.builtin){S.composer=null;S.gate={event:key,scope:S.targetEvent===key?S.applyScope:null};render();revealSelectedEvent();return;}if(!healthy(p)){setNotice('包不健康，不能生成或采纳。','error');render();return;}S.gate=null;S.composer={packId:p.id,packIdentity:p.identity,event:key,profile:S.profile,modality:'soundEffect',phase:'edit',desc:'',name:'',cands:[],generation:null};if(!currentProfile().routes.includes('soundEffect'))S.composer.modality='speech';render();revealSelectedEvent();}
+function startGenerate(key){const p=packById(S.selPack);if(!p||!EV[key]){setNotice('生成目标无效。','error');render();return;}if(p.builtin){S.composer=null;S.gate={event:key,scope:null};render();revealEvent(key,'.readonly-gate button');return;}if(!healthy(p)){setNotice('包不健康，不能生成或采纳。','error');render();return;}S.gate=null;S.composer={packId:p.id,packIdentity:p.identity,event:key,profile:S.profile,modality:'soundEffect',phase:'edit',desc:'',name:'',cands:[],generation:null};if(!currentProfile().routes.includes('soundEffect'))S.composer.modality='speech';render();revealEvent(key,'.composer textarea');}
 function composerHTML(){const c=S.composer,p=packById(c.packId),profile=currentProfile(),usage=p.id==='draft'?{names:[],incomplete:false}:consumersOf(p.id),locked=c.phase==='generating',ready=c.phase==='cands';
   const select=profile.routes.map(k=>`<option value="${k}" ${c.modality===k?'selected':''}>${MODALITIES[k]}</option>`).join('');
   const desc=locked||ready?`<div class="card" style="white-space:pre-wrap;max-height:95px;overflow:auto" aria-label="已锁定声音描述">${esc(c.desc)}</div>`:`<textarea placeholder="${c.modality==='speech'?'例如：清晰地说“任务完成”，短促温暖':'例如：轻快的木鱼声，短促、温暖、不刺耳'}" oninput="S.composer.desc=this.value">${esc(c.desc)}</textarea>`;

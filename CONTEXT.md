@@ -38,9 +38,7 @@ _Avoid_: App、来源行、把 Chat 与 Codex view 合并
 
 **事件绑定（Host Event Binding）**:
 一个来源的原生事件到 claudi0 公共 `Event` 的稳定、可版本化映射，由 `HostEventBindingID` 标识；
-`HostCapabilityBinding` 投影的来源支持、当前实现和真实激活是三个独立事实。「声音」页的三来源
-对照只说明该公共事件的能力，不承诺当前一定播放；实际能否听到声音还取决于选用的声音包、连接、
-静音及该事件是否已有音频。
+`HostCapabilityBinding` 投影的来源支持、当前实现和当前激活是三个独立事实。
 _Avoid_: 只用原生事件字符串作为身份
 
 **当前激活（Current Activation）**:

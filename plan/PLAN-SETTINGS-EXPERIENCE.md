@@ -12,12 +12,17 @@
 >
 > 视觉原型 SoT：
 > `mockups/ai-app-manager-native-macos.html?page=events&app=workbuddy&prototype=tts&profile=elevenlabs-global&stage=applied&credential=verified`
+> 上述链接记录统一设置窗口的历史视觉基线；AI 包级生成与缺声深链的现行交互基线为
+> `mockups/pack-scoped-ai-cues.html`（配套脚本 `pack-scoped-ai-cues.js`）。
 >
 > 本次「集成」目的页的批准原型 SoT：
 > `mockups/ai-app-manager-native-macos.html?page=apps&app=workbuddy&prototype=tts&stage=applied&credential=ready`
 >
 > AI 提示音的 Provider/profile、凭据、候选与采用领域合同由
 > `plan/PLAN-CONSUMER-TTS-EXECUTION.md` 定义；本计划固定其统一设置投影并完成周边页面。
+> 2026-09-17 包作用域现行设计见 ADR 0016、`plan/PLAN-PACK-SCOPED-AI-CUES.md` 与
+> `mockups/pack-scoped-ai-cues.html`。本计划早期事件页行内生成任务保留为历史，不能作为
+> 当前生产 UI 已完成的证据。
 
 > **2026-09-06 当前合同覆盖说明**：本文件早期关于四档界面文字、可变 Panel 宽度、`Aa` 入口及以
 > 每 Surface 最多 20 条 receipt history 推算用量的文字均为历史计划，不再是生产要求。当前 SoT 是
@@ -64,10 +69,10 @@
 |---|---|---|---|
 | 通用 | 登录时打开、语言、窗口行为 | `ClaudioLanguageStore`、UserDefaults | 无统一页面；无系统语言模式；无登录项服务 |
 | 集成 | Agent 列表、状态、开关、检测、连接方式、事件能力与回执 | `IntegrationDestinationModel`、typed presentation、manager bridge/store | 已迁入统一设置；旧 matrix/Inspector 展示退役，原生视觉与真实宿主回调仍需人工门禁 |
-| 事件与提示音 | Surface、五事件、播放设置、BYOK AI 生成 | `EventSettingsWindowView`、`PanelConfigController`、AI cue 闭环 | 独立窗口；外壳、层级、行密度与原型差距大；路由仍跳声音包窗口 |
+| 事件与提示音 | Surface、五事件、播放设置、缺声「去生成」深链 | `EventSettingsWindowView`、`PanelConfigController`、旧 AI cue 闭环 | 旧来源级生成需迁往「声音」；外壳、层级、行密度与原型差距大 |
 | 通知 | 提醒开关、专注/会议静默 | 逐事件开关；暂无系统静默策略 | 原型前三个开关重复事件配置；Focus/Calendar 无权限与跨进程模型 |
 | 显示 | 菜单栏活动状态点、固定紧凑布局说明 | `ClaudioPreferences.showsMenuBarStatusDot`、固定 Panel 几何 | 不再读取或写入字号/宽度旧偏好 |
-| 声音 | 包列表、导入、试听、使用 | 完整 Sound Packs window、共享 `SoundPackLibrary` | 独立窗口；原型只有演示两行，未覆盖真实编辑能力 |
+| 声音 | 包列表、导入、试听、使用和包级 AI 生成 | 完整 Sound Packs window、共享 `SoundPackLibrary` | 独立窗口；新包级采用、未发布空组和深链复制应用仍待 Swift 实现 |
 | 活动与诊断 | 今日/近 7 日活动、来源覆盖、诊断日志 | `LocalActivitySummaryStore`、`ActivityDiagnosticsModel`、共享 `ActivityOverviewProjector` | 真实宿主 callback、VoiceOver 和 native layout 仍需人工门禁 |
 | 快捷键 | 面板、试听、静音快捷键 | 无全局快捷键基础设施 | 原型明确是占位；试听/静音缺少稳定的全局目标语义 |
 | 关于 | 产品信息 | Bundle 与本地许可/资产 | 原型明确是占位；无版本、许可、隐私与复制诊断信息界面 |
@@ -257,38 +262,39 @@ Codex `4/5` 与 WorkBuddy `2/5` 是诚实正常能力，不得为了填满原型
 ### 5.3 事件与提示音
 
 用户结果：在原型批准的层级内切换 Global/Surface，管理五个语义事件、试听、自动播放开关、
-主音量、effective pack，并在合格目标上完成 AI 提示音闭环。
+主音量和 effective pack；缺声时精确深链到「声音」的包与事件。
 
 布局与行为：
 
-- 页面顶部显示标题、说明、页面级 AI 声音生成服务卡和「试听全部」；
+- 页面顶部显示标题、说明和「试听全部」；AI 服务卡位于「声音」；
 - 内层左栏标题使用「声音作用域」，先显示 Global，再按宿主产品显示 Surface；
 - 右侧显示当前 scope、连接/覆盖状态、五个事件行和播放设置组；
 - Global 显示 claudi0 event token，不伪造宿主原生事件；Surface 显示真实 native event、接口支持和实现状态；
 - 行内动作固定为开关、当前声音/文件、试听；不支持、缺声、损坏、主音量零分别显示真实原因；
 - 「管理声音」不再打开第二窗口，路由到 `.sounds(surface, packID, event)`；
 - 主音量保持唯一全局轴；Surface 只写稀疏 pack/event 覆盖；损坏覆盖 fail closed；
-- AI 入口只对明确 Surface、已实现事件和独立可编辑用户包开放；Global、内置/共享/陈旧包显示原因。
+- 缺声「去生成」在用户包定位原包与事件；只读内置包进入明确 Global 或 Surface 目标的
+  「复制并用于全局默认／此来源」流程，复制成功而应用失败时保留可找回副本。
 
-AI 可见流程固定为：
+以下 AI 流程与凭据卡在「声音」目的页完成；早期事件页行内 composer 的位置已被 ADR 0016 取代：
 
 ~~~text
 选择 Provider/profile -> 描述 -> 显式生成 -> 候选集合和命名 -> 显式采用
 ~~~
 
-1. 页面级选择 allowlisted profile，并配置、替换或删除当前 profile 的 BYOK；
+1. 在「声音」页面级选择 allowlisted profile，并配置、替换或删除当前 profile 的 BYOK；
 2. 第一阶段只输入声音描述，不输入名称；保存或替换 API Key 后不自动生成；
 3. 本地隐藏的 `AICueSoundPlan` 按当前 profile 的固定 route 与 candidate-set policy 编译；既有 Provider
    继续顺序请求三个候选，SenseAudio SFX 使用一次 native batch；
    生成中移除描述编辑器，以同外观的只读区域展示原描述；状态层同时拒绝描述修改，不能因输入变动
    取消或重发请求。“取消”是面板内主动取消操作，焦点随生成移到该按钮；取消或失败恢复编辑和原描述。
-   关闭、切换来源/profile、超时及网络失败的终止与清理保护保持不变；
+   关闭、切换包/profile、超时及网络失败的终止与清理保护保持不变；
 4. 候选逐项通过校验后一起显示，不自动播放；complete 恰好 3 个，只有路线明确允许时才显示 1–2 个
    partial 候选并说明实际数量；
 5. 候选阶段建议并允许修改一个最终名称；
 6. 用户明确采用后才进入现有 `AudioImport` + manifest bind；失败保留旧声音。
 
-选择 profile、scope、Event 或离开页面会取消并清理未采用候选，已采用声音不受影响。保存凭据后返回
+选择 profile、包、Event 或离开页面会取消并清理未采用候选，已采用声音不受影响。保存凭据后返回
 原表单并保留描述与 profile；用户必须再次显式点击生成。
 
 #### 5.3.1 首批 Provider/profile 目录
@@ -436,10 +442,11 @@ GUI 把授权后的最小事实发布成 ADR 0009 定义的动态静默快照。
 内容与行为：
 
 - 迁入现有 `SoundPacksWindowView/Model` 能力，复用 app-lifetime `SoundPackLibrary` 和 refresh coordinator；
-- 左侧/顶部 scope 明确显示正在管理 Global 或具体 Surface；
+- 选包应用目标明确显示 Global 或具体 Surface；包级生成与采用本身不带声音作用域；
 - 包列表显示 built-in/user、license、完整/partial/broken、当前选择、只读/可编辑和刷新状态；
 - 支持导入声音包、复制内置包、使用此包、逐事件选文件/清除绑定/试听/在 Finder 显示、恢复出厂、删除用户包；
-- AI 采用继续调用同一个 headless adoption seam，不要求先切到声音页；成功后同一 library revision 更新两页；
+- 包级 AI 采用复用同一安全导入和 manifest bind seam；成功后同一 library revision 更新两页。
+  空组首音成功才发布；普通复制不应用；共用与继承的使用者和不完整范围在动作旁可见；
 - 首次加载、SWR 旧快照、刷新失败、库失败、单包损坏、写入中、锁冲突和恢复 salvage 全部可见；
 - 100 包性能 ADR、浅 inventory、包锁、安全路径和未知字段保留规则不变。
 
@@ -518,7 +525,7 @@ Apple 对全局 `NSEvent` key monitor 的权限说明见
 - Sound library 仍只有一个 refresh owner；其他页面订阅 revision 并使用最新 config 重投影。
 - Integrations action 成功后更新共享 store，Events/Notifications 只消费新事实；失败保留旧事实和 action error。
 - Display/General 的 UserDefaults 变化通过 typed store 发布，不依赖每个 view 自己的 `@AppStorage` 字符串。
-- AI session 在离开 Events 或关闭窗口时清理未采用候选；切到同页其他 Event 也按现有契约失效。
+- AI session 在离开 Sounds 或关闭窗口时清理未采用候选；切换包、Event 或 profile 也按现有契约失效。
 - 任何目的页 write 成功后只刷新受影响 owner；write 失败不得发布假 revision 或清空旧成功状态。
 
 ## 7. 实施任务与依赖图
@@ -558,7 +565,7 @@ S0 文档与契约锁定
 | S4 | S2、S3 | 通用页、macOS 12/13+ 登录项 adapter 与语言模式完整 |
 | S5 | S3 | 集成页迁入且 manager 行为、回执、恢复与 AX 等价 |
 | S6 | S3 | 声音页迁入且完整包编辑、单 owner 与 100 包回归等价 |
-| S7 | S3、S6、既有 TTS 子域 | 事件/AI 页迁入且 profile、scope、候选、命名、采用与回滚等价 |
+| S7（历史任务范围） | S3、S6、既有 TTS 子域 | 旧事件/AI 页迁移记录；包级设计需另按 ADR 0016 验证 profile、候选、命名、采用与回滚 |
 | S8 | S2 | 权限 reducer、动态静默快照与 helper 播放策略独立全绿 |
 | S9 | S3、S8 | 通知页及常驻 observer 完整，不复制事件开关 |
 | S10 | S2、S3 | 显示页和 panel 共同消费文字、宽度、状态点偏好 |
@@ -620,10 +627,11 @@ S0 文档与契约锁定
 - 支持 `.sounds(route)` 精确选择 scope/pack/event；
 - 覆盖完整库状态、写入、恢复、删除、导入和 100 包性能回归。
 
-### S7 — 事件与 AI 提示音页迁入
+### S7 — 事件页与包级 AI 提示音迁移（早期任务记录已调整）
 
-- 把 `EventSettingsWindowView` 重构为 prototype hierarchy；嵌入页面级 BYOK card 和行内 composer；
-- manage sound 使用内部 Sounds route，采用继续走同一个 request；
+- 把 `EventSettingsWindowView` 重构为 prototype hierarchy，保留缺声深链；BYOK card 和 composer
+  移至 Sounds destination；
+- manage sound 使用内部 Sounds route，采用以 `packID + Event` 为目标；
 - 对齐 Provider/profile 选择、逐 profile 凭据策略、所有 AI 阶段、命名位置、候选、失败与清理；
 - 视觉基准覆盖五个 allowlisted profile、verified/missing/deferred/unavailable/rejected/pending、
   unsupported modality/locale 以及 generating/candidates/applied/error。

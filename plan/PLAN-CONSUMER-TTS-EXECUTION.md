@@ -18,6 +18,9 @@
 >
 > 九个设置目的页、统一窗口、路由与视觉迁移的总规格见
 > `plan/PLAN-SETTINGS-EXPERIENCE.md`；本文件只拥有 AI 提示音子域合同。
+> **2026-09-17 现行设计覆盖**：包级生成与采用按 ADR 0016 及
+> `plan/PLAN-PACK-SCOPED-AI-CUES.md`。本文件记录的 T9 Provider 实现/验收不表示该新采用 UI
+> 已有 Swift 实现；旧来源独占任务记录仅作历史。
 > SenseAudio 非分发候选、证据 allowlist、付费预算、Bundle 身份、activation 与回滚的唯一操作台账见
 > `docs/senseaudio-production-acceptance.md`。
 >
@@ -45,7 +48,8 @@
 3 秒、逐项验证的临时候选。通常展示完整的 3 个候选；只有路线政策明确允许时，才可展示 1–2 个
 有效候选并标记 partial。候选集合可展示后，
 系统根据描述提供名称建议；用户试听、确认或修改名称并显式采用一个候选，最终音频才以该名称
-保存到「我的提示音」，再绑定到该事件。
+保存到显式选择的普通用户声音包，并绑定到该包的事件。新建空「提示音组」要等首个音
+完整采纳成功才发布。
 
 完成后的用户结果：
 
@@ -80,13 +84,13 @@
 | provider 选择 | 用户显式选择 Provider/profile；切换会使未采用候选失效，不自动 fallback 或跨供应商重试 |
 | model / voice | 每个 profile 使用应用内固定且可审计的 model/voice；UI 不接受任意 model ID、voice ID |
 | region | 需要区域的 Provider 使用显式 allowlisted region profile；不自动跨区，不把不同区域 key 混用 |
-| 凭据保存 | macOS Keychain only；按 registry-owned credential slot 隔离；配置文件、日志、回执和 manifest 均不保存 key |
+| 凭据保存 | 除 SenseAudio 按 ADR 0015 使用私有本地文件外，其余使用 macOS Keychain；按 registry-owned credential slot 隔离；普通配置、日志、回执和 manifest 均不保存 key |
 | 凭据状态 | “已保存”只表示 Keychain 可读，不等价于在线验证成功；ElevenLabs/MiniMax/SenseAudio 使用只读 probe，Qwen 延迟到用户显式生成时验证 |
 | 旧 Keychain 兼容 | `elevenlabs-global` 继续映射现有 account `elevenlabs`；不复制、不改名、不双写、不删除旧 item |
 | 候选约束 | route policy 唯一决定 styled/numbered、请求数和最少可接受数；complete 恰好 3 个，partial 只能是 1–2 个；每项不超过 3 秒、5 MB且不自动播放 |
 | 网络重试 | 既有逐候选 Provider 保留明确 429 至多一次的兼容行为；SenseAudio TTS/SFX POST 零自动 retry；SFX asset GET 仅对限定瞬态失败最多重试一次 |
 | 时间预算 | 单次 generation 从点击开始默认最多 60 秒；仅 SenseAudio animal/soundEffect 为 route-owned 180 秒；每个子请求和允许的 GET retry 都消耗同一剩余预算 |
-| 采用边界 | 明确 `surface + event + packID`；独立用户包内完整 `AudioImport` + manifest bind 成功后才替换旧绑定 |
+| 采用边界 | 显式 `packID + Event`；健康用户包中完整 `AudioImport` + manifest bind 成功后才替换旧绑定；新空组首音成功才发布；共享与继承的使用者立即受影响 |
 
 ### 0.2 Provider 目录与能力契约
 
@@ -220,12 +224,13 @@ fixture、harness、build、原型或单路线成功都不能取得生产资格�
 AI 提示音只能绑定到已有事件。不得为了补齐声音矩阵而把 session、tool、按钮消失或普通 UI 文案
 伪装成上述事件。
 
-### 0.4 来源与声音包隔离
+### 0.4 包级采用与声音作用域
 
-manifest 的事件映射是 pack-wide。首版入口因此只对明确的非全局 `HostSurfaceID` 开放，并要求
-当前有效声音包为可编辑、已安装且未被全局或其他 surface 有效选择的独立用户包。全局作用域、
-内置包、共享用户包或生成期间发生变化的目标全部 fail closed；不能用一条 pack 级写入承诺
-“其他来源不受影响”。采用时必须重新验证 `surface + event + packID`，详见 ADR 0007。
+manifest 的事件映射是 pack-wide。现行设计允许向任意健康用户包采纳，且必须展示有效选择该包
+的 Global、显式选包 Surface 与继承 Global 的 Surface；修改立即影响这些使用者。配置损坏时
+标明使用范围不完整，不阻止健康包采纳，损坏覆盖仍按 ADR 0005 fail closed。采用前重新验证
+`packID + Event`、包健康状态及候选集合/身份，详见 ADR 0016。ADR 0007 的来源独占边界
+是历史首版，不再是新实现合同。
 
 ## 1. 架构与信任边界
 
@@ -272,8 +277,8 @@ existing AudioImport + manifest bind
 5. `ProviderAdapter` 把 provider-neutral request 编译成自己的 HTTP、SSE 或编码格式；无凭据 asset
    fetcher 只按 registry 固定 policy 下载返回资源；播放器和
    `AudioImport` 永远只接触已落入应用私有临时目录且经过初步校验的本地音频资产。
-6. `AICueAdoptionTarget` 把 `surface + event + packID` 从可变 UI 选择中冻结出来；采用前重新验证目标
-   仍隔离、可编辑且有效，再进入既有发布链。
+6. `AICueAdoptionTarget` 把 `packID + Event` 从可变 UI 选择中冻结出来；采用前重新验证包、事件、
+   generation/profile/route 与候选身份，再进入既有发布链。当前 Swift 类型尚需按 ADR 0016 迁移。
 
 隐藏生成指令是质量机制，不是安全边界。provider 的 models JSON、状态码、MIME 和音频响应体
 一律视为不可信输入，仍需结构校验、流式字节边界和 `AudioImport` 全链防线。
@@ -480,7 +485,6 @@ struct AICueGeneration: Identifiable, Sendable, Equatable {
 }
 
 struct AICueAdoptionTarget: Sendable, Equatable {
-    let surface: HostSurfaceID // 不允许 global / nil
     let event: Event
     let packID: String
 }
@@ -793,7 +797,7 @@ fail closed，不得改成任意 HTTPS、通配 host 或运行时学习 policy�
 
 ### 3.1 页面级凭据流程
 
-1. “事件与提示音”页顶部显示全局“AI 声音生成服务 · 自备 API Key”状态卡。
+1. 「声音」页顶部显示独立的“AI 声音生成服务 · 自备 API Key”状态卡，服务于所有用户包。
 2. 显示已注册的 Provider/profile 列表和当前选择；每项只显示 `missing`、`stored + verification`
    或 `unavailable`，不显示 key 内容。“已保存”与“已验证”必须是两个不同语义。
 3. 默认选择 `elevenlabs-global` 以保持现有行为；用户可以显式切换到已注册的 MiniMax 或 Qwen
@@ -816,7 +820,7 @@ fail closed，不得改成任意 HTTPS、通配 host 或运行时学习 policy�
 
 ### 3.2 单事件生成流程
 
-1. 选择现有事件。
+1. 在「声音」页显式选择健康用户包与现有事件；新空组在首音成功前仅为未发布草稿。
 2. 选择已配置的 Provider/profile；切换 profile 时，任何未采用候选立即失效，但已经采用的提示音
    不受影响。切换会取消当前 generation；旧 profile 的迟到响应以 `generationID + profileID` 不匹配
    为由丢弃并清理，不能覆盖新选择的状态。
@@ -826,7 +830,7 @@ fail closed，不得改成任意 HTTPS、通配 host 或运行时学习 policy�
    的 route、语言和 spoken-content invariant，再读取对应 credential；不显示独立确认表单。
    生成期间描述区域保持原外观并改为可滚动只读展示，不挂载 `TextEditor`；状态层也拒绝任何描述修改，
    不改点击快照、不取消任务、不增加请求。焦点移到“取消”，取消或失败后恢复编辑并保留原描述。
-   面板内主动取消仅由“取消”操作触发；关闭窗口、切换来源/profile、deadline 和网络失败的终止保护
+   面板内主动取消仅由“取消”操作触发；关闭窗口、切换包/profile、deadline 和网络失败的终止保护
    保持不变。取消只保证本地停止和迟到结果丢弃，不承诺远端停止计费。
 5. 如果 modality 不在 `routes.keys`、locale 不在 route allowlist，或 speech/mixed 缺少明确引号台词，
    直接显示可修正的本地错误，不读 key、不发网络；保留描述并允许修改或切换 profile。
@@ -839,8 +843,9 @@ fail closed，不得改成任意 HTTPS、通配 host 或运行时学习 policy�
    但不属于任一候选的生成参数。
 8. 用户可在试听期间直接修改名称；改名不重新生成，“修改描述”或切换 profile 才返回输入态并使旧
    候选失效。
-9. “用于此事件”先校验名称并停止试听，再把候选与最终 `AICueDisplayName` 送入现有导入链。
-10. 只有导入与 manifest bind 都成功才显示完成；失败保留当前声音，不发布假刷新。
+9. “采纳到此包的事件”先校验名称并停止试听，再把候选与最终 `AICueDisplayName` 送入现有导入链。
+10. 只有导入与 manifest bind 都成功才显示完成；新空组此时才发布。失败保留当前声音，
+    不发布假刷新；凭据在生成后消失不使已验证候选失去采纳资格。
 
 凭据状态与生成状态正交，不把配置弹窗塞进 generation state machine：
 
@@ -878,7 +883,8 @@ editing → generating → candidatesReady → adopting → applied
   防止 SSRF、凭据外送和任意网络访问。
 - SenseAudio SFX 是唯一允许消费远端资源 URL 的路线；URL 必须先通过 registry-owned exact-origin
   policy，并由不接收 credential 的 asset fetcher 下载。签名 query 不得进入 UI、错误、日志或 fixture。
-- key 只存 macOS Keychain，且按 registry-owned credential slot 隔离；不得进入 `UserDefaults`、
+- 除 SenseAudio 按 ADR 0015 使用私有本地文件外，key 只存 macOS Keychain，且按 registry-owned
+  credential slot 隔离；不得进入 `UserDefaults`、
   `config.json`、CLI 参数、环境变量、日志、analytics、receipt、crash metadata、生成请求值类型、
   音频 metadata 或 manifest。
 - Qwen 的区域 key 不可互换；选择 `qwen-singapore` 或 `qwen-beijing` 时，只能读取该 profile 的
@@ -918,7 +924,7 @@ provider 输出不得绕过现有 `AudioImport`：
   `candidatesReady`；只有 minimum 为 1 的 SenseAudio SFX route 可展示部分结果；
 - 采用时继续复用 source acquisition、regular-file 检查、唯一文件名、包锁、安全 publication、
   manifest bind 和刷新语义；
-- 内置包仍只读，用户必须先复制为自有包再保存生成结果；
+- 内置包仍只读，用户可复制为自有包或新建空组；来自缺声深链的复制并应用须显式标出目标；
 - 导入成功但绑定失败、绑定成功后刷新失败等部分成功，必须显示真实磁盘状态，不能假装整体完成。
 
 ## 6. 实施顺序
@@ -942,7 +948,8 @@ provider 输出不得绕过现有 `AudioImport`：
 | TTS-SA-4P | 非分发候选、证据身份、首次预算、activation 与回滚协议（#188） | TTS-SA-3 | 台账已按 ADR 0014 修订；绑定候选的正式/原生证据未完成 | `docs/senseaudio-production-acceptance.md` 区分各层证据并绑定 commit/policy/Bundle |
 | TTS-SA-4E | 实测资源 policy、真实 TTS/SFX、听感、键盘与 VoiceOver 验收（#187） | TTS-SA-3、TTS-SA-4P、单独付费授权 | 历史 T8 按台账 §23 `RISK ACCEPTED` 闭合；新实现受影响项见 §24 | 不把三项风险接受写成 PASSED；新凭据/SFX 实现不自动继承旧 smoke |
 | TTS-SA-4A | 固化 production policy、加入 allowlist 并复验最终 Bundle（#189） | TTS-SA-4E 未豁免项通过、有边界风险接受明确、§24 受影响项重验 | `NOT AUTHORIZED` / `NOT VERIFIED` | 单独评审 activation；默认仍 ElevenLabs；相关身份漂移时重验 |
-| TTS-3 | 事件页 Provider/profile 选择、逐 profile 配置/管理 key、能力不支持提示、候选试听/采用 | TTS-MP-2–TTS-MP-5 | 多 Provider production UI 与自动 fixture 已完成；真机 AX `NOT VERIFIED` | 默认 ElevenLabs；切换不自动生成；不支持 modality 在网络前阻止；改名不重新生成；键盘/VoiceOver 可用 |
+| TTS-3（历史入口） | 事件页 Provider/profile 选择、逐 profile 配置/管理 key、能力不支持提示、候选试听/采用 | TTS-MP-2–TTS-MP-5 | 旧来源级 production UI 与自动 fixture 已完成；包级迁移及真机 AX `NOT VERIFIED` | 这项完成记录不证明 ADR 0016 已实施；默认 ElevenLabs、route 门禁、改名不生成等 Provider 合同保留 |
+| TTS-16（现行设计待实施） | 声音页包级生成、`packID + Event` 采纳、空组首音发布、复制并应用深链与使用范围 | ADR 0016、TTS-3、TTS-4 | 文档与 HTML 原型已定稿；Swift、原生验收未实施 | 共享/继承、损坏配置、凭据变化、候选身份、元数据声明、失败保旧绑定均有回归和原生证据 |
 | TTS-4 | 临时候选 acquisition、`AudioImport`、manifest bind、名称投影和清理 | TTS-1–TTS-MP-1 | 已完成 fixture 验证 | 所有 adapter 输出走同一安全导入链；坏音频 fail closed；失败保留旧绑定；仅采用一个 |
 | TTS-5 | 文档、按 Provider 的隐私/费用披露、自动/手工/真实 provider 分层验收 | TTS-MP-0–TTS-4 | 多 Provider 文档与自动交接已完成；原生/真实 Provider/发布层 `NOT VERIFIED` | 不含 key/内容；每个 profile 的能力/地区/费用证据清楚；所有对应门禁通过 |
 
@@ -1141,8 +1148,8 @@ fixture，也不得把真实 key、完整 prompt、响应正文或音频写入�
 - 第一步没有名称字段；候选页可直接修改建议名称且不重新发请求；空名称不能采用；成功后事件行
   显示最终名称，用户包 manifest 保留名称与音频身份的映射。
 - 采用前仍播放旧绑定；采用成功后新名称/音频持久；失败时旧绑定不变。
-- 离开/重开统一设置的事件目的页后，已采用声音正常播放，其余临时候选已清理。
-- 内置包路径要求先 fork；拒绝时原包不变。
+- 离开/重开统一设置的声音目的页后，已采用声音正常播放，其余临时候选已清理。
+- 内置包直接采用须拒绝；缺声深链复制并应用失败时保留可找回副本，原包不变。
 - 键盘和 VoiceOver 完成配置、生成、试听、重命名、采用与错误恢复；焦点顺序与视觉顺序一致。
 
 ### 8.2 真实 provider 证据边界

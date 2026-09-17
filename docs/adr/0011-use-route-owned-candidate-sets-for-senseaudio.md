@@ -7,6 +7,8 @@ status: accepted
 本 ADR 中要求 SenseAudio 官方确认资源合同后才能构造 asset policy 的门禁，已由
 [ADR 0014](0014-accept-observed-senseaudio-asset-contract.md) 部分取代；route-owned 候选集合、
 固定 profile、非分发候选、真实 smoke、人工验收与单独 activation 的其余决定继续有效。
+采用目标和包共享规则现由 [ADR 0016](0016-adopt-ai-cues-into-user-packs.md) 定义；
+本文件中引用 ADR 0007 的语句只保留当时的历史背景。
 SenseAudio 的 Keychain-only 存储要求另由 [ADR 0015](0015-use-local-file-credentials-for-senseaudio.md)
 取代；只读 probe、失败保留旧 Key 和生成授权语义不变。
 
@@ -112,7 +114,8 @@ allowlist 移除 profile 或使用上一版本应用，不自动删除 Keychain 
 
 本 ADR 取代 ADR 0006 中“所有 Provider 都逐候选调用、恰好三个 styled 候选且全有或全无”的相关
 条款，并保留其固定 profile、route-derived capability、Keychain-only、无自定义 endpoint/model/voice、
-无自动 fallback 与真实 smoke 单独授权的其余决策。ADR 0007 的独立用户包与采用目标边界保持不变。
+无自动 fallback 与真实 smoke 单独授权的其余决策。原先 ADR 0007 的独立用户包与采用目标
+边界已由 ADR 0016 取代，不再用于新实现。
 
 详细合同见 `plan/PLAN-CONSUMER-TTS-EXECUTION.md`；候选构造、证据字段、付费预算、激活与回滚台账见
 `docs/senseaudio-production-acceptance.md`。

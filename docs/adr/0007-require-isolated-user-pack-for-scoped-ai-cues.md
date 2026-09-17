@@ -1,8 +1,12 @@
 ---
-status: accepted
+status: superseded
+superseded-by: 0016
 ---
 
 # 为来源级 AI 提示音要求独立用户声音包
+
+> 历史决策：由 [ADR 0016](0016-adopt-ai-cues-into-user-packs.md) 取代。以下记录首版实现边界，
+> 不再作为新生成与采用流程的现行合同；生产代码迁移状态须单独核对。
 
 声音包 manifest 的事件到音频映射是包级事实，不是 per-surface 配置。`surface_overrides` 只稀疏
 选择整个声音包和事件开关；若两个声音作用域解析到同一个包，直接修改该包的事件映射会同时影响
