@@ -211,7 +211,7 @@ func runSettingsSoundsLayoutSuites() {
 
 @MainActor
 private final class SettingsSoundsNativeLayoutProbe {
-    private let window: NSWindow
+    private let window: UnconstrainedProbeWindow
     private let hostingView: NSHostingView<SettingsRootView>
     private let requestedSize: NSSize
 
@@ -223,7 +223,7 @@ private final class SettingsSoundsNativeLayoutProbe {
         _ = NSApplication.shared
         SoundPacksLayoutRecorder.reset()
         requestedSize = size
-        window = NSWindow(
+        window = UnconstrainedProbeWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
@@ -287,5 +287,16 @@ private final class SettingsSoundsNativeLayoutProbe {
     func close() {
         window.orderOut(nil)
         window.close()
+    }
+}
+
+/// 探针窗口只做离屏布局与位图采集，从不需要真正可见。CI runner 的虚拟屏幕不足
+/// 820pt 高时，AppKit 会在 order front／setFrame 路径按可见区压缩窗口（同树在
+/// runner 舰队上已实测 653／668 两种高度），1240×820 的设计合同前提即被破坏。
+/// 因此拒绝屏幕适配，保证请求尺寸；纯测试桩，不进产品。
+@MainActor
+private final class UnconstrainedProbeWindow: NSWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to _: NSScreen?) -> NSRect {
+        frameRect
     }
 }
