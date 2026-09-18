@@ -2,7 +2,7 @@
 
 发布流程在 codesign 前执行 `scripts/check-release-size.sh`。门禁按 Mach-O 架构数线性放大：
 
-- `claudi0-app`：每架构最多 `6,000,000 B`；
+- `claudi0-app`：每架构最多 `6,500,000 B`；
 - `claudi0` helper：每架构最多 `3,250,000 B`；
 - macOS 12 内嵌 `claudi0-login-item`：每架构最多 `500,000 B`；
 - app 内其余正规文件合计预留 `1,500,000 B`；
@@ -161,3 +161,111 @@ GUI 每架构默认预算据此重定为 `6,000,000 B`，为 Xcode 16.4 实测�
 工具链主程序头哨兵与 Claudio 产品导出：只允许精确的 `__mh_execute_header`，并继续对任何
 额外 Swift/业务符号或 `nm` 检查失败关闭。这是工具链兼容性修复，不取消
 `-no_exported_symbols`，也不把未知导出加入允许列表。
+
+## 2026-09-18 GUI 体积重基线（B2，本地实施）
+
+**触发与回执**。`c19bddf` 在 GitHub `macos-15` / Xcode 16.4（Swift 6.1.2）CI 上，以
+Release `-Osize`、完整 `strip`、签名前的共享 `scripts/check-release-size.sh` 口径实测
+arm64 GUI **`6,273,016 B`**，超过 `6,000,000 B` 预算 **`273,016 B`（`+4.55%`）**。回执
+来自 [run 35358455808](https://github.com/d0m999/Claudio/actions/runs/35358455808)（PR #199 临时分支 `rc/size-receipt-c19bddf`，探针分支已按流程
+关闭并删除）；该分支树与 `c19bddf` 的产品部分（`gui/Sources`、helper、manifest、资源、
+脚本）零差异，唯一差别是 `SettingsSoundsLayoutSuite.swift` 的测试探针加固（测试 target
+不进入货运二进制），因此回执记名 `c19bddf`。harness 全绿后失败在 "Assemble local
+release-layout app" 的共享门禁；GUI 先于 helper 检查，helper、LoginItem 与非可执行资源
+未到达该步（本机同源树实测参考：helper `2,970,368 B` / `3,250,000 B`、LoginItem
+`72,192 B` / `500,000 B`、非可执行资源 `680,832 B` / `1,500,000 B`，均在预算内）。
+
+**三组受控 CI↔本机锚点**（回应 2026-09-09 节的开放问题）：
+
+| 锚点提交 | CI 实测（Xcode 16.4） | 本机实测（CLT Swift 6.3.3 / SDK 26.5） | 差值 |
+|---|---:|---:|---:|
+| `6617b5d`（09-16，门禁最后绿回执） | `5,923,048 B` | `5,692,752 B` | `+230,296 B`（`+4.05%`） |
+| `bb7bafa1`（09-17，门禁首红） | `6,206,664 B` | `5,992,864 B` | `+213,800 B`（`+3.57%`） |
+| `c19bddf`（09-18 HEAD） | `6,273,016 B` | `6,059,216 B` / `6,059,224 B`（两次独立测量） | `+213,792 ~ +213,800 B`（约 `+3.53%`） |
+
+`bb7bafa1 → c19bddf` 的批增量在两套工具链上逐字节一致：CI `66,352 B`，本机
+`66,352 ~ 66,360 B`（两次独立测量，±8 B）。源码增量与工具链差值可分离，下述主题归因
+（本机刻度）可平移到 CI 刻度。仍非单机隔离：两侧工具链与 SDK 同时变化，因此与
+2026-09-09 节保持同一克制口径——不把差值进一步归因给编译器或链接器，只确立
+「CI 刻度比本机系统性大 `+3.5% ~ +4.1%`，预算必须画在 CI 刻度上」。
+
+**归因**（本机刻度主题阶梯，`923491e` → `c19bddf` 端到端累积 `+469,280 B`；另一独立
+测量链得 `+469,272 B`，±8 B 属测量噪声，各主题 Δ 在该噪声下稳健）：
+
+| 主题 | 提交 | 本机 Δ | 占累积 |
+|---|---|---:|---:|
+| SenseAudio 集成簇 | `2dbb645` + `8330a3c` + `9f363a4` | `+52,768 B` | `11%` |
+| 事件来源提示 config 恢复 | `6617b5d` | `+50,040 B` | `11%` |
+| 文件事务加固 ×2 | `f74ad9e` + `470e585` | `+116,616 B` | `25%` |
+| 包级 AI cue 落子 | `470e585 → 5ae5bc0`（4 提交，主体为 `5ae5bc0`） | `+150,352 B` | `32%` |
+| AI cue 采纳加固 | `7571521` | `+33,144 B` | `7%` |
+| Sounds 设置布局对齐 | `ae40823` | `+24 B` | ~0 |
+| 面板 UX 修复批（PR①–③ 及收尾） | `5eacc5e..c19bddf` | `+66,336 B` | `14%` |
+
+AI cue 主题合计 `+183,496 B`（`39%`），文件事务与配置恢复簇合计 `+166,656 B`
+（`36%`），两者占累积增长的 `75%`。全部为已评审功能交付（ADR 0006/0007/0011/0014/0015
+链、文件事务加固、面板 UX 修复批），非膨胀性回归；`-no_exported_symbols` 与完整
+`strip` 已生效（`__LINKEDIT` 仅 `294,912 B`，正常水位），无工具性余量可回收。门禁首红
+（`bb7bafa1`，09-17）发生在 UX 修复批开始之前；UX 批净增仅 `+66,336 B`（PR② 的读回
+清除逻辑为零字节成本），不是本次超限的原因。
+
+**新预算**：GUI 每架构默认预算重定为 **`6,500,000 B`**。计算依据：CI 实测
+`6,273,016 B` × 1.03 ≈ `6,461,206 B`（09-13 先例余量率 3.09% 与 3% 相差不足 0.1 个
+百分点，圆整后同值），按仓库既有 `0.1M` 粒度惯例圆整（`5,500,000` / `5,600,000` /
+`6,000,000` 同款），余量 `226,984 B`（`3.62%`）。helper、LoginItem、非可执行资源预算
+不变；app bundle 总量上限为派生值（`check-release-size.sh:136` = 三可执行预算之和 ×
+架构数 + 资源预算），自动跟随为单架构 `11,750,000 B`，无需独立修改。
+
+**配套修改清单**（本地第二笔提交；与 `c88c02a`「align Swift toolchain and
+size budgets」的预算部分同款实践，4 个文件 6 处）：
+
+| 位置 | 现值 | 改为 |
+|---|---|---|
+| `scripts/check-release-size.sh:15` | `6000000` | `6500000` |
+| `docs/ENV.md:13` | ``default `6000000` `` | ``default `6500000` `` |
+| `docs/performance/release-size-budget.md:5` | `6,000,000 B` | `6,500,000 B` |
+| `gui/Tests/ClaudioGUICoreTests/ReleaseLayoutSuite.swift:1188` | `6000000` 字面量 | `6500000` |
+| `ReleaseLayoutSuite.swift:1196` | ``default `6000000` `` | ``default `6500000` `` |
+| `ReleaseLayoutSuite.swift:1202` | `` `6,000,000 B` `` | `` `6,500,000 B` `` |
+
+本文件历史节中的 `6,000,000 B` 为当时的预算与实测记录，不随本次重基线修改。`swift run --package-path gui claudio-gui-tests`
+验证脚本、环境说明与断言的一致性。
+
+**明确排除的做法**：
+
+- 把 GUI 代码挪入 `Contents/Frameworks/*.dylib` 使 GUI slice 缩小、payload 落入非可执行
+  资源预算（现用 `680,832 B` / `1,500,000 B`）——只挪预算名目、不减分发体积，属规避门禁。
+- 按本机刻度画线（如 `6,100,000 B`）——CI 刻度系统性大 `+3.5% ~ +4.1%`，本机尺画线
+  在上述 CI 锚点上仍会失败；上表三组锚点即教训记录。
+- 以「拆 AI cue 两个设置视图的重复」作为转绿手段——本机尺度可回收约 `60,000 B`，回收后
+  CI 仍超约 `213,000 B`。该重构是真实的代码卫生债，定位为预算落地后的独立还债项（带
+  回归测试），不阻塞本次预算重基线、也不被本次重基线豁免。
+
+**CI 布局探针修复**：`c19bddf` 的 GUI harness 在 `SettingsSoundsLayoutSuite` 上失败。
+run 时间线证据：树与 `c19bddf` 相同的空提交 `9d30b21` 失败于 "Run GUI harness"——
+无头 runner 的虚拟屏幕高度不足 820pt 时，AppKit 按可见区压缩探针窗口，破坏
+1240×820 布局合同的前提；加固 1（`706da76`，初始化后 enforce 请求尺寸）单独不够，
+加固 2（`c92fe6b`，`UnconstrainedProbeWindow` 重载 `constrainFrameRect` 拒绝屏幕适配）
+补全后该探针分支的 harness 才绿。本工作分支第一笔提交合并两项测试探针修复，保留
+1240×820 断言，不带入空提交 `9d30b21`，不改产品源码。它与预算提交供同一个 PR 审查；
+该分支的新 CI 结果须在获得推送授权后重新取得，不能借用旧探针分支的通过回执。
+
+**注记（工具链）**：`.github/workflows/ci.yml` 的 Helper 与 GUI job 均通过
+`DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer` 选择 Xcode 16.4，
+并检查 Swift 6；本次三组 CI 锚点使用同一 `Swift 6.1.2`。若将来主动变更 CI
+工具链或 runner 不再提供该 Xcode 路径，须重新测量并锚定预算。
+
+**证据边界**：PR #199 的既有回执为远端 arm64 单架构、签名前共享门禁口径，只作为
+本次重基线依据。本地提交的新分支 CI 尚未验证；原生界面验收、universal 双架构、
+Developer ID 签名、公证与正式 release 验收各需独立证据。
+
+**本地实施验证（仅 arm64）**：本分支使用 CLT Swift 6.3.3 / SDK 26.5，
+helper executable harness `3488/3488`、GUI executable harness `10339/10339` 通过；
+GUI Debug 与 Release 构建、`jq empty` 和 `git diff --check` 通过。无预算环境变量覆盖的
+`bash scripts/dev-bundle.sh` 在签名前通过共享体积门：GUI `6,059,208 / 6,500,000 B`，
+helper `2,969,496 / 3,250,000 B`，LoginItem `54,368 / 500,000 B`，非可执行资源
+`700,939 / 1,500,000 B`，bundle 合计 `9,784,011 / 11,750,000 B`。
+签名后再次运行 `bash scripts/check-release-size.sh dist/claudi0.app` 通过，GUI 为
+`6,042,112 / 6,500,000 B`；`codesign --verify --deep --strict` 与
+`scripts/verify-dev-bundle-signature.sh` 均通过。该本地 ad-hoc app 只提供单架构检验，
+新分支的 Xcode 16.4 CI 和正式分发验收仍需独立回执。
