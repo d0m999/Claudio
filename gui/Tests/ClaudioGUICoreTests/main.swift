@@ -152,6 +152,18 @@ if CommandLine.arguments.contains("--panel-announcement") {
     exit(failures == 0 ? 0 : 1)
 }
 
+if CommandLine.arguments.contains("--release-layout") {
+    runReleaseLayoutSuites()
+    print("Release layout: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
+if CommandLine.arguments.contains("--surface-sound-issue") {
+    runSurfaceSoundIssueLifecycleSuites()
+    print("Surface sound issue: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
 runOnboardingStateSuites()
 runLocalizationSuites()
 runAboutInformationSuites()
@@ -252,6 +264,7 @@ runSoundPacksEditorAccessibilityPostingSuites()
 runSoundPacksWindowStarredPacksSuites()
 runPanelConfigControllerSuites()
 runPanelConfigFailureLifecycleSuites()
+runSurfaceSoundIssueLifecycleSuites()
 runPanelFocusCoordinatorSuites()
 await runSettingsPreferencesSuites()
 runDynamicQuietPolicySuites()

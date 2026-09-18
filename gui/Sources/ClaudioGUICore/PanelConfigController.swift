@@ -8,6 +8,32 @@ private enum PanelRefreshOrigin: Equatable {
     case missingPreview
 }
 
+package enum SurfaceSoundIssue: Equatable {
+    case malformedOverride(message: String)
+    case writeFailure(message: String)
+
+    package var message: String {
+        switch self {
+        case .malformedOverride(let message), .writeFailure(let message): message
+        }
+    }
+}
+
+/// A healthy read of the selected Surface can retire only an override parsing problem.
+/// A write failure remains until an existing write/scope action clears it.
+package func surfaceSoundIssueAfterReadBack(
+    _ issue: SurfaceSoundIssue?,
+    configState: PanelConfigState,
+    selectedSurface: HostSurfaceID?
+) -> SurfaceSoundIssue? {
+    guard case .malformedOverride? = issue,
+        let selectedSurface,
+        case .operational(let config) = configState,
+        case .success = config.resolveSoundProfile(for: selectedSurface)
+    else { return issue }
+    return nil
+}
+
 /// 运行态面板的 **config 读模型 + 流经它的写操作** —— 从 `PanelView` 里抽出来的那一半
 /// （ENGINEERING.md「视图拆进可 import 的 library target」，红队 9cccc9c 兑现）。
 ///
@@ -48,7 +74,9 @@ public final class PanelConfigController: ObservableObject {
     @Published public private(set) var config: ClaudioConfig
     /// `nil` 是全局默认 profile；非 nil 时 `config` 是该 surface 的 effective 投影。
     @Published public private(set) var selectedSurface: HostSurfaceID?
-    @Published public private(set) var surfaceSoundIssue: String?
+    /// The issue's source and message travel together; the views consume only its message.
+    @Published private var surfaceSoundIssueState: SurfaceSoundIssue?
+    public var surfaceSoundIssue: String? { surfaceSoundIssueState?.message }
     public var selectedSurfaceProfileIsMalformed: Bool {
         guard let selectedSurface else { return false }
         return baseConfig.surfaceOverridesMalformed
@@ -141,8 +169,8 @@ public final class PanelConfigController: ObservableObject {
 
     #if DEBUG
     /// Deterministic state-gallery initializer. It never observes or scans a library and uses only
-    /// the injected read model; preview paths should point at `/dev/null` so accidental actions
-    /// fail closed without touching user configuration.
+    /// the injected read model. The default `/dev/null` config path makes accidental actions fail
+    /// closed; a test fixture may supply a temporary file to exercise later readback.
     public init(
         previewConfigState: PanelConfigState,
         effectiveConfig: ClaudioConfig? = nil,
@@ -153,11 +181,14 @@ public final class PanelConfigController: ObservableObject {
         builtinPackIDs: Set<String> = [],
         selectedPackMetadata: SelectedPackMetadata? = nil,
         libraryPresentationState: SoundPackLibraryPresentationState = .ready,
-        environment: AudioImportEnvironment
+        environment: AudioImportEnvironment,
+        previewConfigFile: URL? = nil
     ) {
         let baseConfig = previewConfigState.resolvedConfig
         let config = effectiveConfig ?? baseConfig
-        let configFile = URL(fileURLWithPath: "/dev/null/claudio-panel-preview-config.json")
+        let configFile =
+            previewConfigFile
+            ?? URL(fileURLWithPath: "/dev/null/claudio-panel-preview-config.json")
         let lockFile = URL(fileURLWithPath: "/dev/null/claudio-panel-preview-config.lock")
 
         self.configFile = configFile
@@ -180,7 +211,7 @@ public final class PanelConfigController: ObservableObject {
         self.configState = previewConfigState
         self.config = config
         self.selectedSurface = selectedSurface
-        self.surfaceSoundIssue = surfaceSoundIssue
+        self.surfaceSoundIssueState = surfaceSoundIssue.map { .writeFailure(message: $0) }
         self.eventRows = eventRows
         self.packCards = packCards
         self.packSectionState = packCards.isEmpty ? .noPacks : .pinned(packCards)
@@ -242,7 +273,7 @@ public final class PanelConfigController: ObservableObject {
         self.config = loadedConfig
         self.baseConfig = loadedConfig
         self.selectedSurface = nil
-        self.surfaceSoundIssue = nil
+        self.surfaceSoundIssueState = nil
         if !readSource.readsSharedSnapshot {
             self.eventRows = packCoverage(
                 packID: loadedConfig.selectedPack, config: loadedConfig, environment: environment)
@@ -325,13 +356,13 @@ public final class PanelConfigController: ObservableObject {
             {
             case .success:
                 muteError = nil
-                surfaceSoundIssue = nil
+                surfaceSoundIssueState = nil
                 reloadConfigOnly(origin: .writeAction)
                 soundPacksRefreshCoordinator?.completePanelConfigChange(
                     .changed,
                     source: configProjectionToken)
             case .failure(let error):
-                surfaceSoundIssue = error.description
+                surfaceSoundIssueState = .writeFailure(message: error.description)
                 reloadConfigOnly(origin: .writeAction)
                 if case .configPublishedButFailed = error {
                     soundPacksRefreshCoordinator?.completePanelConfigChange(
@@ -428,14 +459,14 @@ public final class PanelConfigController: ObservableObject {
             {
             case .success:
                 packSwitchError = nil
-                surfaceSoundIssue = nil
+                surfaceSoundIssueState = nil
                 reload(origin: .writeAction, refreshSoundPackLibrary: false)
                 soundPacksRefreshCoordinator?.completeConfigFactChange(
                     .changed,
                     source: configProjectionToken)
                 return .succeeded
             case .failure(let error):
-                surfaceSoundIssue = error.description
+                surfaceSoundIssueState = .writeFailure(message: error.description)
                 let mapped = surfaceUseError(error)
                 // surface 专属错误由 `surfaceSoundIssue` 单一呈现；不要同时塞进全局切包错误，
                 // 否则同一失败会在 popup 连续渲染两次。
@@ -609,7 +640,7 @@ public final class PanelConfigController: ObservableObject {
     public func selectSoundSurface(_ surface: HostSurfaceID?) {
         guard selectedSurface != surface else { return }
         selectedSurface = surface
-        surfaceSoundIssue = nil
+        surfaceSoundIssueState = nil
         applyEffectiveConfig()
         if let librarySnapshot {
             applySnapshot(librarySnapshot)
@@ -652,13 +683,13 @@ public final class PanelConfigController: ObservableObject {
             lockFile: lockFile)
         {
         case .success:
-            surfaceSoundIssue = nil
+            surfaceSoundIssueState = nil
             reload(origin: .writeAction, refreshSoundPackLibrary: false)
             soundPacksRefreshCoordinator?.completePanelConfigChange(
                 .changed,
                 source: configProjectionToken)
         case .failure(let error):
-            surfaceSoundIssue = error.description
+            surfaceSoundIssueState = .writeFailure(message: error.description)
             reloadConfigOnly(origin: .writeAction)
         }
     }
@@ -669,6 +700,10 @@ public final class PanelConfigController: ObservableObject {
         configState = loadedState
         baseConfig = configState.resolvedConfig
         applyEffectiveConfig()
+        surfaceSoundIssueState = surfaceSoundIssueAfterReadBack(
+            surfaceSoundIssueState,
+            configState: loadedState,
+            selectedSurface: selectedSurface)
         #if DEBUG
         guard readSource.readsSharedSnapshot else {
             eventRows = packCoverage(
@@ -711,8 +746,12 @@ public final class PanelConfigController: ObservableObject {
                 eventsEnabled: Dictionary(
                     uniqueKeysWithValues: Event.allCases.map { ($0.cliName, false) }))
             if let selectedSurface {
-                surfaceSoundIssue =
-                    "\(selectedSurface.rawValue) 的声音覆盖已损坏；已停止该来源播放，未回退到全局默认"
+                if case .writeFailure? = surfaceSoundIssueState {
+                    return
+                }
+                surfaceSoundIssueState = .malformedOverride(
+                    message:
+                        "\(selectedSurface.rawValue) 的声音覆盖已损坏；已停止该来源播放，未回退到全局默认")
             }
         }
     }
