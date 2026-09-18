@@ -1556,17 +1556,34 @@ func runReleaseLayoutSuites() {
         let xcodeDeveloperDirectory =
             "DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer"
         let swift6VersionPattern = #"Apple\ Swift\ version\ 6\."#
+        guard let helperJob = ci.range(of: "\n  helper:\n"),
+            let guiJob = ci.range(of: "\n  gui:\n"),
+            let verifyJob = ci.range(of: "\n  verify:\n"),
+            helperJob.upperBound < guiJob.lowerBound,
+            guiJob.upperBound < verifyJob.lowerBound
+        else {
+            expect(false, "CI 必须保留独立的 Helper、GUI 与汇总 job")
+            return
+        }
+        let macOSJobs = [
+            ci[helperJob.upperBound..<guiJob.lowerBound],
+            ci[guiJob.upperBound..<verifyJob.lowerBound],
+        ]
         expect(
-            ci.contains("name: Test and build\n    runs-on: macos-15")
+            macOSJobs.allSatisfy { job in
+                job.contains("runs-on: macos-15")
+                    && job.contains(xcodeDeveloperDirectory)
+                    && job.contains(swift6VersionPattern)
+                    && job.contains("::error::Swift 6 is required")
+            }
+                && ci[verifyJob.lowerBound...].contains("needs: [helper, gui]")
                 && release.contains(
                     "name: Build, sign, notarize, and verify\n    runs-on: macos-15")
-                && ci.contains(xcodeDeveloperDirectory)
                 && release.contains(xcodeDeveloperDirectory)
-                && ci.contains(swift6VersionPattern)
                 && release.contains(swift6VersionPattern)
-                && ci.contains("::error::Swift 6 is required")
                 && release.contains("::error::Swift 6 is required"),
-            "CI 与 release 构建必须固定 macos-15/Xcode 16.4，并在执行 SwiftPM 前失败关闭非 Swift 6 工具链")
+            "CI 的 Helper/GUI 与 release 构建必须固定 macos-15/Xcode 16.4，"
+                + "并在执行 SwiftPM 前失败关闭非 Swift 6 工具链")
     }
 
     suite("Homebrew cask 保持可选、签名分发且卸载不删除用户数据") {
