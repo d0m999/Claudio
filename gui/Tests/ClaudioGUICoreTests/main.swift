@@ -146,6 +146,12 @@ if CommandLine.arguments.contains("--senseaudio-provider") {
     exit(failures == 0 ? 0 : 1)
 }
 
+if CommandLine.arguments.contains("--panel-announcement") {
+    await runPanelAnnouncementSuites()
+    print("Panel announcement: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
 runOnboardingStateSuites()
 runLocalizationSuites()
 runAboutInformationSuites()
@@ -160,7 +166,7 @@ await runPanelAnnouncementLifecycleSuites()
 runOnboardingActionsSuites()
 runOnboardingActionsFixSuites()
 runSetupNoticeSuites()
-runPanelAnnouncementSuites()
+await runPanelAnnouncementSuites()
 runLocalPreRCSuites()
 runReleaseLayoutSuites()
 runReleaseCandidateArtifactSuites()

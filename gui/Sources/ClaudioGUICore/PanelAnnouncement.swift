@@ -278,6 +278,7 @@ public struct PanelLibraryAnnouncementFacts: Sendable {
 @MainActor
 public final class PanelAnnouncer: ObservableObject {
     private var lastOpenCount = -1
+    private var lastAnnouncedOpeningOpenCount = -1
     private var lastSentence = ""
     private var refreshFailureIsActive = false
     private var refreshFailureWasAnnounced = false
@@ -289,11 +290,17 @@ public final class PanelAnnouncer: ObservableObject {
 
     /// Observe each publication, including a quick retry that leaves and re-enters the failure
     /// state before SwiftUI can deliver an `onChange` update.
-    public func observeLibraryTransitions(from model: PanelConfigController) {
+    public func observeLibraryTransitions(
+        from states: Published<SoundPackLibraryPresentationState>.Publisher,
+        facts: @escaping @MainActor () -> PanelLibraryAnnouncementFacts,
+        onAnnounce: @escaping @MainActor (String) -> Void
+    ) {
         guard libraryObservation == nil else { return }
-        libraryObservation = model.$libraryPresentationState.sink { [weak self] state in
+        libraryObservation = states.sink { [weak self] state in
             MainActor.assumeIsolated {
-                self?.observeRefreshFailure(state)
+                guard let self, self.observeRefreshFailure(state) else { return }
+                self.scheduleLibraryUpdate(
+                    opening: false, facts: facts, onAnnounce: onAnnounce)
             }
         }
     }
@@ -305,12 +312,15 @@ public final class PanelAnnouncer: ObservableObject {
 
     /// Record the library transition even when the panel is hidden. A later failure can then be
     /// announced once after a successful read or retry has ended the previous failure period.
-    public func observeRefreshFailure(_ libraryState: SoundPackLibraryPresentationState) {
+    /// Returns true only when a new failure period begins.
+    @discardableResult
+    public func observeRefreshFailure(_ libraryState: SoundPackLibraryPresentationState) -> Bool {
         let isFailed: Bool
         if case .refreshFailed = libraryState { isFailed = true } else { isFailed = false }
-        guard isFailed != refreshFailureIsActive else { return }
+        guard isFailed != refreshFailureIsActive else { return false }
         refreshFailureIsActive = isFailed
         refreshFailureWasAnnounced = false
+        return isFailed
     }
 
     /// The opening header and a newly visible refresh failure share one announcement. A second
@@ -340,6 +350,7 @@ public final class PanelAnnouncer: ObservableObject {
             candidate,
             openCount: facts.openCount,
             allowRepeatedSentence: includesNotice && !opening)
+        if sentence != nil && opening { lastAnnouncedOpeningOpenCount = facts.openCount }
         if sentence != nil && includesNotice { refreshFailureWasAnnounced = true }
         return sentence
     }
@@ -357,10 +368,17 @@ public final class PanelAnnouncer: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let opening = self.pendingOpeningAnnouncement
+                let requestedOpening = self.pendingOpeningAnnouncement
                 self.pendingOpeningAnnouncement = false
                 self.hasScheduledLibraryUpdate = false
-                if let sentence = self.consumeLibraryUpdate(facts(), opening: opening) {
+                let currentFacts = facts()
+                // The library publisher can run after popoverDidShow but before SwiftUI delivers
+                // showCount.onChange. Treat that unannounced show count as the opening; a later
+                // onChange for the same count must not post a second, interrupting sentence.
+                let opening =
+                    currentFacts.openCount > self.lastAnnouncedOpeningOpenCount
+                    && (requestedOpening || currentFacts.panelIsVisible)
+                if let sentence = self.consumeLibraryUpdate(currentFacts, opening: opening) {
                     onAnnounce(sentence)
                 }
             }

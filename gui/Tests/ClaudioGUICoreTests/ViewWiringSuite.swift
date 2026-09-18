@@ -735,9 +735,10 @@ func runViewWiringSuites() {
                 && showHandler.contains("announcePanelSummary()"),
             "每次真实打开必须重读声音控制、恢复首焦点并主动播报当前作用域摘要")
         expect(
-            panel.contains("let summary = headerAccessibilityLabel")
-                && panel.contains("announcer.observeLibraryTransitions(from: panelModel)")
+            panel.contains("Self.headerAccessibilityLabel(language: languageStore.language)")
+                && panel.contains("from: panelModel.$libraryPresentationState")
                 && panel.contains("announcer.scheduleLibraryUpdate(")
+                && panel.contains("Self.libraryAnnouncementFacts(")
                 && panel.contains("panelIsVisible: coordinator.isPanelVisible")
                 && panel.contains("onAnnounce: onAnnounce"),
             "面板播报必须消费当前摘要、合并调度器，并在异步 post 前复核面板可见性")

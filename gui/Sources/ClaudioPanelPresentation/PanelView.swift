@@ -195,7 +195,17 @@ public struct PanelView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.panel))
         .onAppear {
-            announcer.observeLibraryTransitions(from: panelModel)
+            announcer.observeLibraryTransitions(
+                from: panelModel.$libraryPresentationState,
+                facts: {
+                    [
+                        model = panelModel, coordinator = focusCoordinator,
+                        preferences = languageStore
+                    ] in
+                    Self.libraryAnnouncementFacts(
+                        model: model, coordinator: coordinator, preferences: preferences)
+                },
+                onAnnounce: onAnnounce)
             synchronizeSelectedSoundSurface()
             applyFirstFocus()
             if refreshesActivityOnLifecycle {
@@ -280,29 +290,40 @@ public struct PanelView: View {
     }
 
     private var headerAccessibilityLabel: String {
-        l10n.text(.panelTitle)
-            + (languageStore.language == .english ? ", " : "，")
-            + l10n.text(.panelOpenSettings)
-            + (languageStore.language == .english ? ", " : "，")
-            + l10n.text(.eventNoticeRecent)
+        Self.headerAccessibilityLabel(language: languageStore.language)
+    }
+
+    private static func headerAccessibilityLabel(language: ClaudioAppLanguage) -> String {
+        let l10n = ClaudioL10n(language: language)
+        let separator = language == .english ? ", " : "，"
+        return l10n.text(.panelTitle) + separator + l10n.text(.panelOpenSettings)
+            + separator + l10n.text(.eventNoticeRecent)
+    }
+
+    private static func libraryAnnouncementFacts(
+        model: PanelConfigController,
+        coordinator: PanelFocusCoordinator,
+        preferences: ClaudioPreferences
+    ) -> PanelLibraryAnnouncementFacts {
+        PanelLibraryAnnouncementFacts(
+            header: headerAccessibilityLabel(language: preferences.language),
+            refreshFailedNotice: ClaudioL10n(language: preferences.language)
+                .text(.panelLibraryRefreshFailed),
+            topContent: model.configState.topContent,
+            libraryState: model.libraryPresentationState,
+            panelIsVisible: coordinator.isPanelVisible,
+            openCount: coordinator.showCount)
     }
 
     private func announcePanelSummary(opening: Bool = true) {
         let announcer = self.announcer
         let coordinator = focusCoordinator
         let model = panelModel
-        let summary = headerAccessibilityLabel
-        let notice = l10n.text(.panelLibraryRefreshFailed)
         announcer.scheduleLibraryUpdate(
             opening: opening,
             facts: {
-                PanelLibraryAnnouncementFacts(
-                    header: summary,
-                    refreshFailedNotice: notice,
-                    topContent: model.configState.topContent,
-                    libraryState: model.libraryPresentationState,
-                    panelIsVisible: coordinator.isPanelVisible,
-                    openCount: coordinator.showCount)
+                Self.libraryAnnouncementFacts(
+                    model: model, coordinator: coordinator, preferences: languageStore)
             },
             onAnnounce: onAnnounce)
     }

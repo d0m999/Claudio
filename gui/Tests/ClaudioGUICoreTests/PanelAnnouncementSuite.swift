@@ -1,5 +1,6 @@
 import ClaudioCore
 import ClaudioGUICore
+import Combine
 import Foundation
 
 // MARK: - T17g：播报政策的真值表
@@ -26,6 +27,18 @@ import Foundation
 
 private let H = "Claudio 面板，当前声音包 lofi"
 private let libraryFailureNotice = "刷新失败，正在显示上次结果"
+
+@MainActor
+private final class PublishedLibraryState: ObservableObject {
+    @Published var value: SoundPackLibraryPresentationState = .ready
+}
+
+@MainActor
+private func flushPanelAnnouncementQueue() async {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.main.async { continuation.resume() }
+    }
+}
 
 private func libraryFacts(
     _ state: SoundPackLibraryPresentationState,
@@ -84,7 +97,71 @@ private func reachableOpenMoments(for actionState: OnboardingActionState)
 }
 
 @MainActor
-func runPanelAnnouncementSuites() {
+func runPanelAnnouncementSuites() async {
+    await suite("刷新失败播报：快速重试返回相同失败时，逐次发布路径仍会再次调度") {
+        let published = PublishedLibraryState()
+        let announcer = PanelAnnouncer()
+        let failed = SoundPackLibraryPresentationState.refreshFailed(reason: "相同原因")
+        var spoken: [String] = []
+        announcer.observeLibraryTransitions(
+            from: published.$value,
+            facts: { libraryFacts(published.value) },
+            onAnnounce: { spoken.append($0) })
+
+        announcer.scheduleLibraryUpdate(
+            opening: true,
+            facts: { libraryFacts(published.value) },
+            onAnnounce: { spoken.append($0) })
+        await flushPanelAnnouncementQueue()
+        expect(spoken == ["\(H)。"], "先消费当前打开的摘要")
+
+        published.value = failed
+        await flushPanelAnnouncementQueue()
+        expect(spoken == ["\(H)。", "\(libraryFailureNotice)。"], "第一次失败应播报一次")
+
+        // No SwiftUI update pass occurs between these publications; the final value is unchanged.
+        published.value = .refreshing
+        published.value = failed
+        await flushPanelAnnouncementQueue()
+        expect(
+            spoken == ["\(H)。", "\(libraryFailureNotice)。", "\(libraryFailureNotice)。"],
+            "快速重试再次失败，即使最终状态与上一帧相同，也必须再次播报")
+
+        published.value = .refreshFailed(reason: "底层原因变了")
+        await flushPanelAnnouncementQueue()
+        expect(spoken.count == 3, "同一失败期间的后续发布不得重复播报")
+    }
+
+    await suite("刷新失败播报：订阅先于 SwiftUI 打开回调时合成一句") {
+        let published = PublishedLibraryState()
+        let coordinator = PanelFocusCoordinator()
+        let announcer = PanelAnnouncer()
+        let failed = SoundPackLibraryPresentationState.refreshFailed(reason: "扫描失败")
+        var spoken: [String] = []
+        let facts: @MainActor @Sendable () -> PanelLibraryAnnouncementFacts = {
+            libraryFacts(
+                published.value,
+                visible: coordinator.isPanelVisible,
+                openCount: coordinator.showCount)
+        }
+        announcer.observeLibraryTransitions(
+            from: published.$value,
+            facts: facts,
+            onAnnounce: { spoken.append($0) })
+
+        coordinator.requestFocus()  // popoverDidShow; SwiftUI has not handled showCount yet.
+        published.value = failed
+        await flushPanelAnnouncementQueue()
+        expect(
+            spoken == ["\(H)。\(libraryFailureNotice)。"],
+            "新打开期间订阅先收到失败，也必须把摘要与提示合成一条播报")
+
+        announcer.scheduleLibraryUpdate(
+            opening: true, facts: facts, onAnnounce: { spoken.append($0) })
+        await flushPanelAnnouncementQueue()
+        expect(spoken.count == 1, "迟到的打开回调不得再截断刚播报的失败提示")
+    }
+
     suite("刷新失败播报：打开摘要和首次提示合成一句，同一失败期间不重复") {
         let announcer = PanelAnnouncer()
         let failed = SoundPackLibraryPresentationState.refreshFailed(reason: "不应播报的磁盘原因")
