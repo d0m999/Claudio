@@ -105,7 +105,7 @@ public enum SurfaceSoundMutationError: Error, Sendable, Equatable, CustomStringC
     case manifestUnreadable(packID: String, reason: String)
     case configReadFailure(reason: String)
     case configWriteFailure(reason: String)
-    case configPublishedButFailed(reason: String)
+    case configPublishedButFailed(reason: String, recoveryPath: String? = nil)
     case configMissing
     case lockBusy
     case lockFailed(errno: Int32)
@@ -118,7 +118,7 @@ public enum SurfaceSoundMutationError: Error, Sendable, Equatable, CustomStringC
             "声音包 \"\(id)\" 的 manifest.json 无法安全读取或解析：\(reason)"
         case .configReadFailure(let reason): "config.json 读取失败，已中止（未修改文件）：\(reason)"
         case .configWriteFailure(let reason): "config.json 写入失败：\(reason)"
-        case .configPublishedButFailed(let reason): reason
+        case .configPublishedButFailed(let reason, _): reason
         case .configMissing: "config.json 不存在，请先选择全局默认声音包"
         case .lockBusy: "config.json 当前被占用（另一个 claudio 进程正在读写），请稍后重试"
         case .lockFailed(let errno): "无法获取文件锁（errno \(errno)），请稍后重试"
@@ -226,7 +226,9 @@ private func mutateSurfaceSoundOverride(
     case .ran(.failure(.postPublishConflict(let recoveryPath))):
         return .failure(
             .configPublishedButFailed(
-                reason: ConfigMutationFailure.postPublishConflict(recoveryPath: recoveryPath).reason
+                reason: ConfigMutationFailure.postPublishConflict(recoveryPath: recoveryPath)
+                    .reason,
+                recoveryPath: recoveryPath
             ))
     case .ran(.failure(.postPublishPathChanged(let location))):
         return .failure(

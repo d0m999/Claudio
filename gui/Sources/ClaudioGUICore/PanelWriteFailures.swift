@@ -12,7 +12,7 @@ import Foundation
 /// 时该显示一遍还是两遍」。这个纯函数把「该不该显示 / 显示几遍 / 显示顺序」收拢成一个可测的决策点。
 ///
 /// 阶段 D（8771946）落地后**并列的 `if let` 一条都不剩**：`SetMasterVolumeError` 成了第三个写者，面板侧改成
-/// 单条 `ForEach(panelWriteFailures(muteError:packSwitchError:masterVolumeError:))`，只渲染这一个列表。
+/// 单条 `ForEach(panelWriteFailureItems(muteError:packSwitchError:masterVolumeError:))`，只渲染这一个列表。
 ///
 /// （此处原先用现在时写着「今天有两条并列的 `if let`」并附了裸行号 `PanelView.swift:560-564`。两句在阶段 D 当天
 /// 就都成了假话，而裸行号还会静静指向别人的代码 —— `/codex review 8771946`。索引一律用符号名，不用行号。）
@@ -25,8 +25,8 @@ import Foundation
 ///   在场的几个保持相对顺序）。
 /// - **同因按 typed reason 去重**：三个错误类型互不相同（`SetEventEnabledError` / `UseError` /
 ///   `SetMasterVolumeError`），但它们的锁与 config 失败映射到同一个 `PanelWriteFailureReason`。关联的
-///   `reason`/pack ID 保留在 typed identity 中，所以不同磁盘真相不会被误合并；用户看到的 description
-///   只作为渲染文案，不再承担身份判定。
+///   `reason`/pack ID 保留在 typed identity 中，所以不同磁盘真相不会被误合并；底层 description
+///   保留给诊断与兼容调用，面板按类型选择本地化文案。
 ///
 /// ## `.configMissing` 被排除（D43，两个写者，UseError 没有这个 case）
 ///
@@ -40,7 +40,7 @@ import Foundation
 public enum PanelWriteFailureReason: Sendable, Equatable, Hashable {
     case configReadFailure(reason: String)
     case configWriteFailure(reason: String)
-    case configPublishedButFailed(reason: String)
+    case configPublishedButFailed(reason: String, recoveryPath: String? = nil)
     case lockBusy
     case lockFailed(errno: Int32)
     case invalidPackID(String)
@@ -48,16 +48,18 @@ public enum PanelWriteFailureReason: Sendable, Equatable, Hashable {
     case manifestUnreadable(packID: String, reason: String)
 }
 
-/// 一个可渲染的失败项。`id` 是稳定的类型化原因，不依赖语言或文案格式。
+/// 一个可渲染的失败项。`id` 是稳定的类型化原因；恢复文件目标只在发布后冲突时存在。
 public struct PanelWriteFailure: Sendable, Equatable, Identifiable {
     public let reason: PanelWriteFailureReason
     public let message: String
+    public let recoveryFile: URL?
 
     public var id: PanelWriteFailureReason { reason }
 
-    public init(reason: PanelWriteFailureReason, message: String) {
+    public init(reason: PanelWriteFailureReason, message: String, recoveryFile: URL? = nil) {
         self.reason = reason
         self.message = message
+        self.recoveryFile = recoveryFile
     }
 }
 
@@ -84,9 +86,22 @@ public func panelWriteFailureItems(
     let configCardKey = configFailureReason.map { PanelConfigFailureKey($0) }
     var seen: Set<PanelWriteFailureReason> = []
     return candidates.filter { candidate in
-        if let configCardKey, configCardKey.matches(candidate) { return false }
+        if let configCardKey, configCardKey.matches(candidate), candidate.recoveryFile == nil {
+            return false
+        }
         return seen.insert(candidate.reason).inserted
     }
+}
+
+/// Ordered, distinct recovery files from current write failures. A later conflict must not be
+/// hidden just because an earlier writer also retained a different file.
+public func panelWriteFailureRecoveryFiles(
+    items: [PanelWriteFailure],
+    surfaceRecoveryFile: URL?
+) -> [URL] {
+    var seen: Set<URL> = []
+    let candidates = items.compactMap(\.recoveryFile) + [surfaceRecoveryFile].compactMap { $0 }
+    return candidates.map(\.standardizedFileURL).filter { seen.insert($0).inserted }
 }
 
 /// 兼容现有视图调用点的文案投影；真正的去重使用 ``panelWriteFailureItems`` 的 typed reason。
@@ -100,8 +115,9 @@ public func panelWriteFailures(
         muteError: muteError,
         packSwitchError: packSwitchError,
         masterVolumeError: masterVolumeError,
-        configFailureReason: configFailureReason)
-        .map(\.message)
+        configFailureReason: configFailureReason
+    )
+    .map(\.message)
 }
 
 private struct PanelConfigFailureKey {
@@ -121,8 +137,8 @@ private struct PanelConfigFailureKey {
     }
 }
 
-private extension PanelWriteFailure {
-    init?(error: SetEventEnabledError) {
+extension PanelWriteFailure {
+    fileprivate init?(error: SetEventEnabledError) {
         switch error {
         case .configMissing:
             return nil
@@ -134,10 +150,11 @@ private extension PanelWriteFailure {
             self.init(
                 reason: .configWriteFailure(reason: reason),
                 message: error.description)
-        case .configPublishedButFailed(let reason):
+        case .configPublishedButFailed(let reason, let recoveryPath):
             self.init(
-                reason: .configPublishedButFailed(reason: reason),
-                message: error.description)
+                reason: .configPublishedButFailed(reason: reason, recoveryPath: recoveryPath),
+                message: error.description,
+                recoveryFile: recoveryPath.map { URL(fileURLWithPath: $0) })
         case .lockBusy:
             self.init(reason: .lockBusy, message: error.description)
         case .lockFailed(let errno):
@@ -145,7 +162,7 @@ private extension PanelWriteFailure {
         }
     }
 
-    init(error: SetMasterVolumeError) {
+    fileprivate init(error: SetMasterVolumeError) {
         switch error {
         case .configMissing:
             preconditionFailure("configMissing must not become a panel write failure")
@@ -157,10 +174,11 @@ private extension PanelWriteFailure {
             self.init(
                 reason: .configWriteFailure(reason: reason),
                 message: error.description)
-        case .configPublishedButFailed(let reason):
+        case .configPublishedButFailed(let reason, let recoveryPath):
             self.init(
-                reason: .configPublishedButFailed(reason: reason),
-                message: error.description)
+                reason: .configPublishedButFailed(reason: reason, recoveryPath: recoveryPath),
+                message: error.description,
+                recoveryFile: recoveryPath.map { URL(fileURLWithPath: $0) })
         case .lockBusy:
             self.init(reason: .lockBusy, message: error.description)
         case .lockFailed(let errno):
@@ -168,7 +186,7 @@ private extension PanelWriteFailure {
         }
     }
 
-    init(error: UseError) {
+    fileprivate init(error: UseError) {
         switch error {
         case .invalidPackID(let id):
             self.init(reason: .invalidPackID(id), message: error.description)
@@ -186,10 +204,11 @@ private extension PanelWriteFailure {
             self.init(
                 reason: .configWriteFailure(reason: reason),
                 message: error.description)
-        case .configPublishedButFailed(let reason):
+        case .configPublishedButFailed(let reason, let recoveryPath):
             self.init(
-                reason: .configPublishedButFailed(reason: reason),
-                message: error.description)
+                reason: .configPublishedButFailed(reason: reason, recoveryPath: recoveryPath),
+                message: error.description,
+                recoveryFile: recoveryPath.map { URL(fileURLWithPath: $0) })
         case .lockBusy:
             self.init(reason: .lockBusy, message: error.description)
         case .lockFailed(let errno):

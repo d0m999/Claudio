@@ -10,11 +10,28 @@ private enum PanelRefreshOrigin: Equatable {
 
 package enum SurfaceSoundIssue: Equatable {
     case malformedOverride(message: String)
-    case writeFailure(message: String)
+    case writeFailure(
+        message: String,
+        category: PanelErrorCopyCategory = .configWriteFailure,
+        recoveryFile: URL? = nil)
 
     package var message: String {
         switch self {
-        case .malformedOverride(let message), .writeFailure(let message): message
+        case .malformedOverride(let message), .writeFailure(let message, _, _): message
+        }
+    }
+
+    package var copyCategory: PanelErrorCopyCategory {
+        switch self {
+        case .malformedOverride: .surfaceOverrideMalformed
+        case .writeFailure(_, let category, _): category
+        }
+    }
+
+    package var recoveryFile: URL? {
+        switch self {
+        case .malformedOverride: nil
+        case .writeFailure(_, _, let recoveryFile): recoveryFile
         }
     }
 }
@@ -74,9 +91,13 @@ public final class PanelConfigController: ObservableObject {
     @Published public private(set) var config: ClaudioConfig
     /// `nil` 是全局默认 profile；非 nil 时 `config` 是该 surface 的 effective 投影。
     @Published public private(set) var selectedSurface: HostSurfaceID?
-    /// The issue's source and message travel together; the views consume only its message.
+    /// Keep the diagnostic message with its typed UI category; views render the category only.
     @Published private var surfaceSoundIssueState: SurfaceSoundIssue?
     public var surfaceSoundIssue: String? { surfaceSoundIssueState?.message }
+    public var surfaceSoundIssueCopyCategory: PanelErrorCopyCategory? {
+        surfaceSoundIssueState?.copyCategory
+    }
+    public var surfaceSoundIssueRecoveryFile: URL? { surfaceSoundIssueState?.recoveryFile }
     public var selectedSurfaceProfileIsMalformed: Bool {
         guard let selectedSurface else { return false }
         return baseConfig.surfaceOverridesMalformed
@@ -211,7 +232,12 @@ public final class PanelConfigController: ObservableObject {
         self.configState = previewConfigState
         self.config = config
         self.selectedSurface = selectedSurface
-        self.surfaceSoundIssueState = surfaceSoundIssue.map { .writeFailure(message: $0) }
+        self.surfaceSoundIssueState = surfaceSoundIssue.map { message in
+            if case .failure = baseConfig.resolveSoundProfile(for: selectedSurface) {
+                return .malformedOverride(message: message)
+            }
+            return .writeFailure(message: message)
+        }
         self.eventRows = eventRows
         self.packCards = packCards
         self.packSectionState = packCards.isEmpty ? .noPacks : .pinned(packCards)
@@ -362,7 +388,9 @@ public final class PanelConfigController: ObservableObject {
                     .changed,
                     source: configProjectionToken)
             case .failure(let error):
-                surfaceSoundIssueState = .writeFailure(message: error.description)
+                surfaceSoundIssueState = .writeFailure(
+                    message: error.description, category: error.panelCopyCategory,
+                    recoveryFile: error.panelRecoveryFile)
                 reloadConfigOnly(origin: .writeAction)
                 if case .configPublishedButFailed = error {
                     soundPacksRefreshCoordinator?.completePanelConfigChange(
@@ -466,7 +494,9 @@ public final class PanelConfigController: ObservableObject {
                     source: configProjectionToken)
                 return .succeeded
             case .failure(let error):
-                surfaceSoundIssueState = .writeFailure(message: error.description)
+                surfaceSoundIssueState = .writeFailure(
+                    message: error.description, category: error.panelCopyCategory,
+                    recoveryFile: error.panelRecoveryFile)
                 let mapped = surfaceUseError(error)
                 // surface 专属错误由 `surfaceSoundIssue` 单一呈现；不要同时塞进全局切包错误，
                 // 否则同一失败会在 popup 连续渲染两次。
@@ -689,7 +719,9 @@ public final class PanelConfigController: ObservableObject {
                 .changed,
                 source: configProjectionToken)
         case .failure(let error):
-            surfaceSoundIssueState = .writeFailure(message: error.description)
+            surfaceSoundIssueState = .writeFailure(
+                message: error.description, category: error.panelCopyCategory,
+                recoveryFile: error.panelRecoveryFile)
             reloadConfigOnly(origin: .writeAction)
         }
     }
@@ -859,7 +891,8 @@ private func surfaceUseError(_ error: SurfaceSoundMutationError) -> UseError {
         .manifestUnreadable(packID: id, reason: reason)
     case .configReadFailure(let reason): .configReadFailure(reason: reason)
     case .configWriteFailure(let reason): .configWriteFailure(reason: reason)
-    case .configPublishedButFailed(let reason): .configPublishedButFailed(reason: reason)
+    case .configPublishedButFailed(let reason, let recoveryPath):
+        .configPublishedButFailed(reason: reason, recoveryPath: recoveryPath)
     case .configMissing: .configReadFailure(reason: error.description)
     case .lockBusy: .lockBusy
     case .lockFailed(let errno): .lockFailed(errno: errno)

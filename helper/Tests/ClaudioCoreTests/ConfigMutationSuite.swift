@@ -1344,11 +1344,15 @@ func runConfigMutationSuites() {
                 testingBeforeConfigRename: {
                     try! external.write(to: configFile, options: .atomic)
                 })
-            guard case .failure(.configPublishedButFailed(let reason)) = result else {
+            guard case .failure(.configPublishedButFailed(let reason, let recoveryPath)) = result
+            else {
                 expect(false, "发布后的冲突必须有独立失败类型，got \(result)")
                 return
             }
             expect(reason.contains("已发布"), "错误应提示已发布事实")
+            expect(
+                recoveryPath?.hasPrefix(root.path + "/.claudio-stage-") == true,
+                "发布后冲突必须类型化保留恢复文件位置")
             let current =
                 try! JSONSerialization.jsonObject(with: Data(contentsOf: configFile))
                 as! [String: Any]
@@ -1381,11 +1385,13 @@ func runConfigMutationSuites() {
                     try! FileManager.default.createDirectory(
                         at: configRoot, withIntermediateDirectories: false)
                 })
-            guard case .failure(.configPublishedButFailed(let reason)) = result else {
+            guard case .failure(.configPublishedButFailed(let reason, let recoveryPath)) = result
+            else {
                 expect(false, "目录换位后已发布必须仍有独立身份，got \(result)")
                 return
             }
             expect(reason.contains("已发布"), "应说明已发布到固定目录")
+            expect(recoveryPath == nil, "目录换位不可假报可定位的恢复文件")
             let movedConfig = moved.appendingPathComponent("config.json")
             let current =
                 try! JSONSerialization.jsonObject(with: Data(contentsOf: movedConfig))

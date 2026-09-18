@@ -241,6 +241,11 @@ public struct PanelView: View {
             previousTopContent = content
             announcePanelSummary(opening: false)
         }
+        .onChange(of: writeFailureRecoveryFocusTargets) { _ in
+            if isWriteFailureRecoveryTarget(focusedTarget) {
+                applyFocusAfterContentChange()
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(headerAccessibilityLabel)
     }
@@ -641,8 +646,8 @@ public struct PanelView: View {
         case .needsPack:
             needsPackNotice
             playbackSettings(masterVolumeEnabled: false)
-        case .configFailure(let reason):
-            configFailureNotice(reason: reason)
+        case .configFailure:
+            configFailureNotice()
         }
     }
 
@@ -756,9 +761,11 @@ public struct PanelView: View {
         .accessibilityIdentifier("panel.needs-pack")
     }
 
-    private func configFailureNotice(reason: String) -> some View {
+    private func configFailureNotice() -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            FailureRow(message: reason)
+            if let category = panelModel.configState.errorCopyCategory {
+                FailureRow(message: l10n.text(category.key))
+            }
             if let recoveryTarget = panelConfigRecoveryTarget(configFile: configFile) {
                 Button {
                     onRevealConfig(recoveryTarget)
@@ -814,33 +821,70 @@ public struct PanelView: View {
 
     private var writeFailures: some View {
         VStack(alignment: .leading, spacing: 5) {
-            ForEach(
-                Array(
-                    panelWriteFailures(
-                        muteError: panelModel.muteError,
-                        packSwitchError: panelModel.packSwitchError,
-                        masterVolumeError: panelModel.masterVolumeError,
-                        configFailureReason: currentConfigFailureReason
-                    ).enumerated()),
-                id: \.offset
-            ) { _, message in
-                FailureRow(message: message)
+            ForEach(writeFailureItems) { item in
+                FailureRow(message: l10n.text(item.reason.copyCategory.key))
             }
-            if let issue = localizedSurfaceSoundIssue {
-                FailureRow(message: issue)
+            if let category = panelModel.surfaceSoundIssueCopyCategory {
+                FailureRow(message: l10n.text(category.key))
+            }
+            ForEach(Array(writeFailureRecoveryFiles.enumerated()), id: \.element) { index, file in
+                if let recoveryTarget = panelConfigRecoveryTarget(configFile: file) {
+                    Button {
+                        onRevealConfig(recoveryTarget)
+                    } label: {
+                        Label(
+                            writeFailureRecoveryFiles.count == 1
+                                ? l10n.text(.panelRevealRecoveryFile)
+                                : l10n.format(.panelRevealRecoveryFileNumber, Int64(index + 1)),
+                            systemImage: "folder")
+                    }
+                    .buttonStyle(.bordered)
+                    .focused($focusedTarget, equals: .writeFailureRecoveryFile(path: file.path))
+                    .accessibilityHint(l10n.text(.panelRevealRecoveryFileHint))
+                    .accessibilityIdentifier("panel.write-failure.reveal-recovery.\(index + 1)")
+                }
+            }
+            if showsWriteFailureConfigRecovery,
+                let recoveryTarget = panelConfigRecoveryTarget(configFile: configFile)
+            {
+                Button {
+                    onRevealConfig(recoveryTarget)
+                } label: {
+                    Label(l10n.text(.panelRevealConfig), systemImage: "folder")
+                }
+                .buttonStyle(.bordered)
+                .focused($focusedTarget, equals: .writeFailureConfigReveal)
+                .accessibilityLabel(l10n.text(.panelRevealConfig))
+                .accessibilityHint(l10n.text(.panelRevealConfigHint))
+                .accessibilityIdentifier("panel.write-failure.reveal-config")
             }
         }
     }
 
-    private var localizedSurfaceSoundIssue: String? {
-        guard let issue = panelModel.surfaceSoundIssue else { return nil }
-        guard panelModel.selectedSurfaceProfileIsMalformed,
-            let surface = selectedScope.scope.surface
-        else { return issue }
-        let name =
-            HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?.displayName
-            ?? surface.rawValue
-        return l10n.format(.panelSurfaceOverrideDamaged, name)
+    private var writeFailureItems: [PanelWriteFailure] {
+        panelWriteFailureItems(
+            muteError: panelModel.muteError,
+            packSwitchError: panelModel.packSwitchError,
+            masterVolumeError: panelModel.masterVolumeError,
+            configFailureReason: currentConfigFailureReason)
+    }
+
+    private var showsWriteFailureConfigRecovery: Bool {
+        guard !panelModel.configState.topContent.hasConfigFailureNotice else { return false }
+        guard panelConfigRecoveryTarget(configFile: configFile) != nil else { return false }
+        return writeFailureItems.contains(where: { $0.reason.copyCategory.offersConfigRecovery })
+            || panelModel.surfaceSoundIssueCopyCategory?.offersConfigRecovery == true
+    }
+
+    private var writeFailureRecoveryFiles: [URL] {
+        panelWriteFailureRecoveryFiles(
+            items: writeFailureItems,
+            surfaceRecoveryFile: panelModel.surfaceSoundIssueRecoveryFile)
+    }
+
+    private var writeFailureRecoveryFocusTargets: [PanelFocusTarget] {
+        writeFailureRecoveryFiles.map { .writeFailureRecoveryFile(path: $0.path) }
+            + (showsWriteFailureConfigRecovery ? [.writeFailureConfigReveal] : [])
     }
 
     private var currentConfigFailureReason: String? {
@@ -854,10 +898,11 @@ public struct PanelView: View {
 
     private func applyFirstFocus() {
         let content = panelModel.configState.topContent
-        focusedTarget = focusCoordinator.requestedTarget.flatMap { requested in
-            let order = focusOrder(for: content)
-            return order.contains(requested) ? requested : nil
-        } ?? focusOrder(for: content).first(where: { $0 == .soundScope })
+        focusedTarget =
+            focusCoordinator.requestedTarget.flatMap { requested in
+                let order = focusOrder(for: content)
+                return order.contains(requested) ? requested : nil
+            } ?? focusOrder(for: content).first(where: { $0 == .soundScope })
             ?? focusOrder(for: content).first
         previousTopContent = content
     }
@@ -885,13 +930,22 @@ public struct PanelView: View {
                     && panelModel.libraryPresentationState.hasUsableSnapshot,
                 hasConfigFailureNotice: content.hasConfigFailureNotice
                     && panelConfigRecoveryTarget(configFile: configFile) != nil,
-                hasRefreshFailedNotice: showsRefreshFailedNotice))
+                hasRefreshFailedNotice: showsRefreshFailedNotice,
+                writeFailureRecoveryPaths: writeFailureRecoveryFiles.map(\.path),
+                hasWriteFailureConfigRecovery: showsWriteFailureConfigRecovery))
         return order
     }
 
     private func isEventFocusTarget(_ target: PanelFocusTarget?) -> Bool {
         switch target {
         case .eventPreview, .eventMute: true
+        default: false
+        }
+    }
+
+    private func isWriteFailureRecoveryTarget(_ target: PanelFocusTarget?) -> Bool {
+        switch target {
+        case .writeFailureConfigReveal, .writeFailureRecoveryFile: true
         default: false
         }
     }

@@ -205,6 +205,57 @@ func runPanelFocusOrderSuites() {
             "移除提示时仍存在的事件焦点必须保持")
     }
 
+    suite("写失败恢复：按钮位于主音量之后，消失时回到作用域") {
+        let events = focusEventPresentations()
+        let recoveryPaths = ["/tmp/recovery-a", "/tmp/recovery-b"]
+        let withRecovery = panelFocusOrder(
+            .activityOperational(
+                events: events,
+                hasActivityOverview: true,
+                hasMasterVolume: true,
+                writeFailureRecoveryPaths: recoveryPaths,
+                hasWriteFailureConfigRecovery: true))
+        let withoutRecovery = panelFocusOrder(
+            .activityOperational(
+                events: events,
+                hasActivityOverview: true,
+                hasMasterVolume: true))
+        expect(
+            withRecovery.suffix(5).elementsEqual([
+                .masterVolume,
+                .writeFailureRecoveryFile(path: recoveryPaths[0]),
+                .writeFailureRecoveryFile(path: recoveryPaths[1]),
+                .writeFailureConfigReveal,
+                .quitApplication,
+            ]),
+            "多个恢复文件与配置位置按钮的焦点顺序必须与视觉顺序一致")
+        expect(!withoutRecovery.contains(.writeFailureConfigReveal), "恢复按钮消失后不得留幽灵焦点")
+        expect(
+            !withoutRecovery.contains(.writeFailureRecoveryFile(path: recoveryPaths[1])),
+            "恢复文件消失后不得留幽灵焦点")
+        expect(
+            panelFocusAfterTopContentChange(
+                previous: .events,
+                current: .events,
+                focusedTarget: .writeFailureConfigReveal,
+                nextOrder: withoutRecovery) == .soundScope,
+            "恢复按钮消失后焦点须回到声音作用域")
+        expect(
+            panelFocusAfterTopContentChange(
+                previous: .events,
+                current: .events,
+                focusedTarget: .writeFailureRecoveryFile(path: recoveryPaths[1]),
+                nextOrder: withoutRecovery) == .soundScope,
+            "任一恢复文件按钮消失后焦点须回到声音作用域")
+        expect(
+            panelFocusAfterTopContentChange(
+                previous: .events,
+                current: .events,
+                focusedTarget: .eventMute(.stop),
+                nextOrder: withRecovery) == .eventMute(.stop),
+            "新增恢复按钮不应抢走仍存在的事件焦点")
+    }
+
     suite("panelFocusAfterTopContentChange：错误原因文字变化不重置仍存在的控件焦点") {
         let nextOrder: [PanelFocusTarget] = [
             .headerSettings, .recentNotices, .soundScope, .configReveal, .quitApplication,

@@ -13,20 +13,19 @@ import Foundation
 // 收拢成一个可测的决策点。
 //
 // 阶段 D（8771946）落地后主音量成了第三个写者，面板侧的并列 `if let` **一条不剩**，改成单条
-// `ForEach(panelWriteFailures(muteError:packSwitchError:masterVolumeError:))`。（此处原用现在时写「今天有两条
+// `ForEach(panelWriteFailureItems(muteError:packSwitchError:masterVolumeError:))`。（此处原用现在时写「今天有两条
 // 并列的 if let」+「即将成为第三条」，两句在阶段 D 当天就都成了假话 —— `/codex review 8771946`。）
 //
-// ## 为什么 dedupe 按 description 字符串比较，不是按 case
+// ## 为什么 dedupe 按 typed reason，不按本地化文案
 //
-// 三个错误类型互不相同（`SetEventEnabledError` / `UseError` / `SetMasterVolumeError`），编译期没有共同的
-// case 可比。但三者的 `.lockBusy` / `.lockFailed(errno:)` / `.configReadFailure(reason:)` /
-// `.configWriteFailure(reason:)` 逐字共享同一份中文文案（同一把锁、同一份文件，理应说同一句话）——
-// 「同因去重」按这份用户看得到的文案比较，而不是新造一个跨类型的「同因」分类法。
+// 三个错误类型先投影到 `PanelWriteFailureReason`，再按完整关联值去重。下面保留的
+// `panelWriteFailures` 断言覆盖兼容的原始文案投影；面板本身使用类型化条目与双语分类文案。
 
 @MainActor
 func runPanelWriteFailuresSuites() {
     suite("panelWriteFailures：三者皆 nil → 空列表") {
-        let messages = panelWriteFailures(muteError: nil, packSwitchError: nil, masterVolumeError: nil)
+        let messages = panelWriteFailures(
+            muteError: nil, packSwitchError: nil, masterVolumeError: nil)
         expect(messages.isEmpty, "没有任何写者失败时，面板不该渲染任何一条错误行。得到：\(messages)")
     }
 
@@ -37,7 +36,9 @@ func runPanelWriteFailuresSuites() {
     suite("panelWriteFailures：muteError == .configMissing 被排除") {
         let messages = panelWriteFailures(
             muteError: .configMissing, packSwitchError: nil, masterVolumeError: nil)
-        expect(messages.isEmpty, "静音撞上 .configMissing 时，「先选包」空态卡已经是解释——不该再印一条" + "重复的错误行。得到：\(messages)")
+        expect(
+            messages.isEmpty,
+            "静音撞上 .configMissing 时，「先选包」空态卡已经是解释——不该再印一条" + "重复的错误行。得到：\(messages)")
     }
 
     suite("panelWriteFailures：masterVolumeError == .configMissing 被排除") {
@@ -109,7 +110,8 @@ func runPanelWriteFailuresSuites() {
         let mute = SetEventEnabledError.lockBusy
         let pack = UseError.packNotFound("ghost")
         let volume = SetMasterVolumeError.configWriteFailure(reason: "directory not writable")
-        let messages = panelWriteFailures(muteError: mute, packSwitchError: pack, masterVolumeError: volume)
+        let messages = panelWriteFailures(
+            muteError: mute, packSwitchError: pack, masterVolumeError: volume)
         expect(
             messages == [mute.description, pack.description, volume.description],
             "三条失败文案互不相同——一条都不许被另一条顶替，也不许被误判成\"同因\"合并。得到：\(messages)")
@@ -121,19 +123,22 @@ func runPanelWriteFailuresSuites() {
         let pack = UseError.configReadFailure(reason: "pack-reason")
         let volume = SetMasterVolumeError.configReadFailure(reason: "volume-reason")
 
-        let all = panelWriteFailures(muteError: mute, packSwitchError: pack, masterVolumeError: volume)
+        let all = panelWriteFailures(
+            muteError: mute, packSwitchError: pack, masterVolumeError: volume)
         expect(
             all == [mute.description, pack.description, volume.description],
             "三者同时存在时，顺序必须是 静音 → 切包 → 主音量。得到：\(all)")
 
         // 只缺中间那个：剩下两个的相对顺序必须原样保留，不是「谁在就往前挤」的意外副作用。
-        let missingPack = panelWriteFailures(muteError: mute, packSwitchError: nil, masterVolumeError: volume)
+        let missingPack = panelWriteFailures(
+            muteError: mute, packSwitchError: nil, masterVolumeError: volume)
         expect(
             missingPack == [mute.description, volume.description],
             "缺席的写者不留空位，但在场的两个必须保持相对顺序（静音先于主音量）。得到：\(missingPack)")
 
         // 重复调用同一组输入，顺序必须逐次一致——「稳定」不是「这一次凑巧对了」。
-        let repeatCall = panelWriteFailures(muteError: mute, packSwitchError: pack, masterVolumeError: volume)
+        let repeatCall = panelWriteFailures(
+            muteError: mute, packSwitchError: pack, masterVolumeError: volume)
         expect(repeatCall == all, "同一组输入重复调用必须得到完全相同的顺序。得到：\(repeatCall)")
     }
 
@@ -167,7 +172,8 @@ func runPanelWriteFailuresSuites() {
         // 说明它们观测到了不同的磁盘真相，不该被误判成"同一个因"而丢掉一条。
         let mute = SetEventEnabledError.configReadFailure(reason: "master_volume is a string")
         let pack = UseError.configReadFailure(reason: "events is an array")
-        let messages = panelWriteFailures(muteError: mute, packSwitchError: pack, masterVolumeError: nil)
+        let messages = panelWriteFailures(
+            muteError: mute, packSwitchError: pack, masterVolumeError: nil)
         expect(
             messages == [mute.description, pack.description],
             "两个写者的 reason 文本不同——不是同一份文案，去重不该把其中一条吞掉。得到：\(messages)")
@@ -178,7 +184,8 @@ func runPanelWriteFailuresSuites() {
         // 的文案（虽然两者文案逐字相同，这里断言的是"结果只有一条、且等于共享文案"，不依赖具体是谁的实例）。
         let mute = SetEventEnabledError.lockBusy
         let volume = SetMasterVolumeError.lockBusy
-        let messages = panelWriteFailures(muteError: mute, packSwitchError: nil, masterVolumeError: volume)
+        let messages = panelWriteFailures(
+            muteError: mute, packSwitchError: nil, masterVolumeError: volume)
         expect(messages.count == 1, "静音与主音量撞上同一份 .lockBusy 文案——只保留一条。得到：\(messages)")
         expect(messages == [mute.description], "去重后剩下的一条必须等于那份共享文案。得到：\(messages)")
     }
@@ -226,5 +233,26 @@ func runPanelWriteFailuresSuites() {
         expect(
             items.map(\.reason) == [.configPublishedButFailed(reason: reason)],
             "相同已发布失败须作为一个可见原因保留")
+
+        let recoveryPath = "/tmp/.claudio-stage-panel-fixture"
+        let withRecovery = panelWriteFailureItems(
+            muteError: .configPublishedButFailed(reason: reason, recoveryPath: recoveryPath),
+            packSwitchError: .configPublishedButFailed(reason: reason, recoveryPath: recoveryPath),
+            masterVolumeError: .configPublishedButFailed(
+                reason: reason, recoveryPath: recoveryPath))
+        expect(withRecovery.count == 1, "三个写者共享同一发布冲突时仍按 typed reason 去重")
+        expect(
+            withRecovery.first?.recoveryFile?.path == recoveryPath,
+            "去重后的发布失败必须保留恢复文件入口")
+
+        let distinctPaths = panelWriteFailureItems(
+            muteError: .configPublishedButFailed(reason: reason, recoveryPath: recoveryPath),
+            packSwitchError: .configPublishedButFailed(
+                reason: reason, recoveryPath: "/tmp/.claudio-stage-other"),
+            masterVolumeError: nil)
+        expect(
+            distinctPaths.map(\.recoveryFile).compactMap { $0?.path }
+                == [recoveryPath, "/tmp/.claudio-stage-other"],
+            "相同诊断文案但不同恢复文件属于不同 typed identity，均须保留")
     }
 }

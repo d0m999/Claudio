@@ -53,7 +53,7 @@ public enum SetMasterVolumeOutcome: Sendable, Equatable {
 public enum SetMasterVolumeError: Error, Sendable, Equatable, CustomStringConvertible {
     case configReadFailure(reason: String)
     case configWriteFailure(reason: String)
-    case configPublishedButFailed(reason: String)
+    case configPublishedButFailed(reason: String, recoveryPath: String? = nil)
     case lockBusy
     case lockFailed(errno: Int32)
     /// `config.json` doesn't exist yet — fail closed rather than fabricate one, exactly like
@@ -68,7 +68,7 @@ public enum SetMasterVolumeError: Error, Sendable, Equatable, CustomStringConver
             "config.json 读取失败，已中止（未修改文件）：\(reason)"
         case .configWriteFailure(let reason):
             "config.json 写入失败：\(reason)"
-        case .configPublishedButFailed(let reason):
+        case .configPublishedButFailed(let reason, _):
             reason
         case .lockBusy:
             "config.json 当前被占用（另一个 claudio 进程正在读写），请稍后重试"
@@ -141,7 +141,9 @@ private func performSetMasterVolume(
     case .failure(.postPublishConflict(let recoveryPath)):
         return .failure(
             .configPublishedButFailed(
-                reason: ConfigMutationFailure.postPublishConflict(recoveryPath: recoveryPath).reason
+                reason: ConfigMutationFailure.postPublishConflict(recoveryPath: recoveryPath)
+                    .reason,
+                recoveryPath: recoveryPath
             ))
     case .failure(.postPublishPathChanged(let location)):
         return .failure(

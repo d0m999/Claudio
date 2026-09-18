@@ -164,6 +164,13 @@ if CommandLine.arguments.contains("--surface-sound-issue") {
     exit(failures == 0 ? 0 : 1)
 }
 
+if CommandLine.arguments.contains("--panel-error-copy") {
+    runPanelErrorCopySuites()
+    runPanelFocusOrderSuites()
+    print("Panel error copy: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
 runOnboardingStateSuites()
 runLocalizationSuites()
 runAboutInformationSuites()
@@ -281,6 +288,7 @@ runPreviewFixturesSuites()
 runMultiProviderPrototypeContractSuites()
 runVolumeDragSessionSuites()
 runPanelWriteFailuresSuites()
+runPanelErrorCopySuites()
 runPanelPresentationMountSuites()
 runActivityOverviewSuites()
 runAICueDescriptionSuites()

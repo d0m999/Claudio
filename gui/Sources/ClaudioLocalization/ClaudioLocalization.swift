@@ -164,6 +164,24 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "panel.select-pack.message.without-choices"
     public static let panelRevealConfig: Self = "panel.reveal-config"
     public static let panelRevealConfigHint: Self = "panel.reveal-config.hint"
+    public static let panelErrorConfigMalformed: Self = "panel.error.config-malformed"
+    public static let panelErrorConfigUnwritable: Self = "panel.error.config-unwritable"
+    public static let panelErrorConfigMissing: Self = "panel.error.config-missing"
+    public static let panelErrorConfigRead: Self = "panel.error.config-read"
+    public static let panelErrorConfigWrite: Self = "panel.error.config-write"
+    public static let panelErrorConfigPublished: Self = "panel.error.config-published"
+    public static let panelErrorLockBusy: Self = "panel.error.lock-busy"
+    public static let panelErrorLockFailed: Self = "panel.error.lock-failed"
+    public static let panelErrorSurfaceLockBusy: Self = "panel.error.surface-lock-busy"
+    public static let panelErrorSurfaceLockFailed: Self = "panel.error.surface-lock-failed"
+    public static let panelRevealRecoveryFile: Self = "panel.reveal-recovery-file"
+    public static let panelRevealRecoveryFileNumber: Self = "panel.reveal-recovery-file.number"
+    public static let panelRevealRecoveryFileHint: Self = "panel.reveal-recovery-file.hint"
+    public static let panelErrorInvalidPackID: Self = "panel.error.invalid-pack-id"
+    public static let panelErrorPackNotFound: Self = "panel.error.pack-not-found"
+    public static let panelErrorManifestUnreadable: Self = "panel.error.manifest-unreadable"
+    public static let panelErrorSurfaceOverrideMalformed: Self =
+        "panel.error.surface-override-malformed"
     public static let panelMasterVolume: Self = "panel.master-volume"
     public static let panelMasterVolumeDescription: Self = "panel.master-volume.description"
     public static let panelSoundScope: Self = "panel.sound-scope"
@@ -1220,6 +1238,14 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .panelPacksLoading, .panelPacksNoPinnedTitle, .panelPacksNoPinnedMessage,
         .panelPacksNoneTitle, .panelPacksNoneMessage, .panelPacksReadFailed,
         .panelRevealConfig, .panelRevealConfigHint, .panelMasterVolume,
+        .panelErrorConfigMalformed, .panelErrorConfigUnwritable, .panelErrorConfigMissing,
+        .panelErrorConfigRead, .panelErrorConfigWrite, .panelErrorConfigPublished,
+        .panelErrorLockBusy, .panelErrorLockFailed, .panelErrorSurfaceLockBusy,
+        .panelErrorSurfaceLockFailed, .panelRevealRecoveryFile,
+        .panelRevealRecoveryFileNumber, .panelRevealRecoveryFileHint,
+        .panelErrorInvalidPackID,
+        .panelErrorPackNotFound, .panelErrorManifestUnreadable,
+        .panelErrorSurfaceOverrideMalformed,
         .panelMasterVolumeDescription, .panelHeaderSummary,
         .panelCustomSoundOverrides, .panelNeedsPackSettingsMessage, .panelPlaybackSettings,
         .panelSoundPackLabel, .panelOpenSettings, .panelGlobalInheritance,

@@ -718,7 +718,7 @@ func runViewWiringSuites() {
         expect(
             panel.contains("configWritesAllowed: panelModel.surfaceSoundIssue == nil")
                 && panel.contains("libraryUnavailableSection")
-                && panel.contains("configFailureNotice(reason: reason)"),
+                && panel.contains("configFailureNotice()"),
             "损坏 Surface 必须禁用事件写入；声音库与 config 失败必须在当前 Panel 显式呈现")
 
         guard
@@ -2083,9 +2083,9 @@ func runViewWiringSuites() {
                 + "得到的 switch 附近：\(String(panelCollapsed.prefix(0)))（见 PanelView operationalPanel）")
         expect(
             panelCollapsed.contains(
-                "case .configFailure(let reason): configFailureNotice(reason: reason)"),
+                "case .configFailure: configFailureNotice()"),
             "`.configFailure`（= `.malformed`/`.unwritable`，见 `PanelConfigState.topContent`）分支体必须渲染"
-                + "诚实失败态 `configFailureNotice(reason:)` —— 它带可执行修复指令；换成别的（或空）= 写不动的"
+                + "诚实失败态 `configFailureNotice()` —— 它带可执行修复指令；换成别的（或空）= 写不动的"
                 + " config 上顶着五行必败活控件却不说实话")
 
         // 按钮 → handler 的那根线：静音的**行为**（翻转 + 路由 + 刷新）现在住在可测的 `PanelConfigController`
@@ -2101,18 +2101,24 @@ func runViewWiringSuites() {
             "PanelAgentEventRow 必须把 onToggleMute 同时接到写盘与共享可听矩阵刷新")
 
         // D43 的 `.configMissing` 过滤（PLAN-MASTER-VOLUME.md 阶段 D）：过滤逻辑已经搬进纯函数
-        // `panelWriteFailures(muteError:packSwitchError:masterVolumeError:)`（`PanelWriteFailuresSuite`
+        // `panelWriteFailureItems(muteError:packSwitchError:masterVolumeError:)`（`PanelWriteFailuresSuite`
         // 逐条钉死「.configMissing 被排除」），不再是 PanelView.swift 里裸露的 `error != .configMissing`
         // 字面量——这里改守**接线本身**：三个写者的错误必须全部喂给这一个合并函数，一个都不许漏
         // （漏掉 masterVolumeError，主音量的写失败就会从错误列表里悄悄消失，且这条断言此前测不到它）。
         expect(
             collapsingWhitespace(panel).contains(
-                "panelWriteFailures( muteError: panelModel.muteError, packSwitchError:"
+                "panelWriteFailureItems( muteError: panelModel.muteError, packSwitchError:"
                     + " panelModel.packSwitchError, masterVolumeError: panelModel.masterVolumeError"
             ),
-            "operationalPanel 必须把三个写者的错误全部喂给 panelWriteFailures(muteError:packSwitchError:"
+            "operationalPanel 必须把三个写者的错误全部喂给 panelWriteFailureItems(muteError:packSwitchError:"
                 + "masterVolumeError:)（D3 合并列表）—— 少喂一个，那个写者的失败就从错误列表里静默消失。"
                 + ".configMissing 的排除逻辑本身已经下沉进这个纯函数，由 PanelWriteFailuresSuite 钉死")
+        expect(
+            panelCollapsed.contains("panelWriteFailureRecoveryFiles(")
+                && panelCollapsed.contains("ForEach(Array(writeFailureRecoveryFiles.enumerated())")
+                && panelCollapsed.contains("onRevealConfig(recoveryTarget)")
+                && panelCollapsed.contains("configFile: file"),
+            "每个发布冲突恢复文件均须通过既有 onRevealConfig 通道定位，不得只显示第一个")
         expect(
             panel.contains("let visibleEvents"),
             "applyFirstFocus 必须只把**真的被渲染出来**的行送进焦点序 —— 非 .operational 态下"

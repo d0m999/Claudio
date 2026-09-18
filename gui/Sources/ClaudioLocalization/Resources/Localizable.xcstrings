@@ -561,6 +561,278 @@
         }
       }
     },
+    "panel.error.config-malformed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sound configuration cannot be read. Sound settings are unavailable. Check and repair the configuration file in Finder."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "声音配置无法解析。声音设置暂不可用。请在访达中检查并修正配置文件。"
+          }
+        }
+      }
+    },
+    "panel.error.config-unwritable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sound configuration location cannot be written. Sound settings are unavailable. Check write access to that location in Finder."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "声音配置位置无法写入。声音设置暂不可用。请在访达中检查该位置的写入权限。"
+          }
+        }
+      }
+    },
+    "panel.error.config-missing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Global sound pack is selected. This source change was not saved. Select a Global sound pack in Settings first."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未设置全局声音包。此来源的更改未保存。请先在设置中选择全局声音包。"
+          }
+        }
+      }
+    },
+    "panel.error.config-read": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sound configuration could not be read. This change was not saved. Check the configuration file in Finder."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法读取声音配置。此次更改未保存。请在访达中检查配置文件。"
+          }
+        }
+      }
+    },
+    "panel.error.config-write": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sound configuration could not be saved. This change was not saved. Check the configuration location in Finder."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法保存声音配置。此次更改未保存。请在访达中检查配置位置。"
+          }
+        }
+      }
+    },
+    "panel.error.config-published": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An error occurred while saving the sound configuration. The change may have taken effect, but its result is unconfirmed. Check the configuration and any retained recovery file in Finder, then reopen the panel to verify."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存声音配置时报告异常。更改可能已生效，当前结果尚未确认。请在访达中检查配置及可能保留的恢复文件，再重新打开面板核对。"
+          }
+        }
+      }
+    },
+    "panel.error.lock-busy": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sound configuration is busy. This change was not saved. Try again later."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "声音配置正被占用。此次更改未保存。请稍后重试。"
+          }
+        }
+      }
+    },
+    "panel.error.lock-failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sound configuration could not be locked. This change was not saved. Check the configuration location in Finder, then try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法锁定声音配置。此次更改未保存。请在访达中检查配置位置后重试。"
+          }
+        }
+      }
+    },
+    "panel.error.invalid-pack-id": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This sound pack cannot be used. The current sound selection was not changed. Select another sound pack in Settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法使用此声音包。当前声音选择未更改。请在设置中选择其他声音包。"
+          }
+        }
+      }
+    },
+    "panel.error.pack-not-found": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected sound pack could not be found. The current sound selection was not changed. Select an installed sound pack in Settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "找不到所选声音包。当前声音选择未更改。请在设置中选择已安装的声音包。"
+          }
+        }
+      }
+    },
+    "panel.error.manifest-unreadable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sound pack could not be read safely. The current sound selection was not changed. Inspect or replace the sound pack in Settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "声音包无法安全读取。当前声音选择未更改。请在设置中检查或更换声音包。"
+          }
+        }
+      }
+    },
+    "panel.error.surface-lock-busy": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This source’s sound configuration is busy. This change was not saved, and event changes are paused. Switch sound scopes and return to this source before trying again; the next save will confirm whether writing works."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此来源的声音配置正被占用。此次更改未保存，当前事件写入已暂停。请切换声音作用域后返回此来源再尝试；能否写入以实际结果为准。"
+          }
+        }
+      }
+    },
+    "panel.error.surface-lock-failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This source’s sound configuration could not be locked. This change was not saved, and event changes are paused. Check the configuration location in Finder, then switch sound scopes and return to this source to try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法锁定此来源的声音配置。此次更改未保存，当前事件写入已暂停。请先在访达中检查配置位置，再切换声音作用域返回此来源尝试。"
+          }
+        }
+      }
+    },
+    "panel.reveal-recovery-file": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show recovery file in Finder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在访达中显示恢复文件"
+          }
+        }
+      }
+    },
+    "panel.reveal-recovery-file.number": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show recovery file %lld in Finder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在访达中显示恢复文件 %lld"
+          }
+        }
+      }
+    },
+    "panel.reveal-recovery-file.hint": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Locate the file retained after a publishing conflict, or its former directory if it has moved"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "定位发布冲突后保留的恢复文件；如文件已移动，则定位其原目录"
+          }
+        }
+      }
+    },
+    "panel.error.surface-override-malformed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This source’s sound override is damaged. Playback and event changes are stopped for this source without falling back to Global. Check and repair the configuration file in Finder."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此来源的声音覆盖已损坏。该来源的播放与事件写入已停止，且未回退到 Global。请在访达中检查并修正配置文件。"
+          }
+        }
+      }
+    },
     "panel.surface-override-damaged": {
       "localizations": {
         "en": {

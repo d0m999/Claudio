@@ -21,6 +21,8 @@ public enum PanelFocusTarget: Sendable, Hashable {
     case openSoundSettings
     case resetSurface
     case configReveal
+    case writeFailureConfigReveal
+    case writeFailureRecoveryFile(path: String)
     case bootstrapReportRetry(id: String)
     case bootstrapReportDiagnostics(id: String)
     case bootstrapReportReveal(id: String)
@@ -67,7 +69,9 @@ public enum PanelFocusScope: Sendable, Equatable {
         hasActivityOverview: Bool,
         hasMasterVolume: Bool,
         hasConfigFailureNotice: Bool = false,
-        hasRefreshFailedNotice: Bool = false)
+        hasRefreshFailedNotice: Bool = false,
+        writeFailureRecoveryPaths: [String] = [],
+        hasWriteFailureConfigRecovery: Bool = false)
 }
 
 /// 生产顺序与视觉顺序相同：作用域 → 启动/配置恢复 → 每行可用试听/静音 → 播放设置 →
@@ -108,7 +112,9 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         let hasActivityOverview,
         let hasMasterVolume,
         let hasConfigFailureNotice,
-        let hasRefreshFailedNotice):
+        let hasRefreshFailedNotice,
+        let writeFailureRecoveryPaths,
+        let hasWriteFailureConfigRecovery):
         var order: [PanelFocusTarget] = [.headerSettings, .recentNotices, .soundScope]
         if hasActivityOverview {
             order.append(.activityRange)
@@ -121,6 +127,9 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
             if event.controls.muteEnabled { order.append(.eventMute(event.event)) }
         }
         if hasMasterVolume { order.append(.masterVolume) }
+        order.append(
+            contentsOf: writeFailureRecoveryPaths.map { .writeFailureRecoveryFile(path: $0) })
+        if hasWriteFailureConfigRecovery { order.append(.writeFailureConfigReveal) }
         order.append(.quitApplication)
         return order
     }
