@@ -10,6 +10,7 @@ public enum PanelErrorCopyCategory: Sendable, Equatable {
     case configReadFailure
     case configWriteFailure
     case configPublishedButFailed
+    case configPublishedPathChanged
     case lockBusy
     case lockFailed
     case surfaceLockBusy
@@ -27,6 +28,7 @@ public enum PanelErrorCopyCategory: Sendable, Equatable {
         case .configReadFailure: .panelErrorConfigRead
         case .configWriteFailure: .panelErrorConfigWrite
         case .configPublishedButFailed: .panelErrorConfigPublished
+        case .configPublishedPathChanged: .panelErrorConfigPublishedPathChanged
         case .lockBusy: .panelErrorLockBusy
         case .lockFailed: .panelErrorLockFailed
         case .surfaceLockBusy: .panelErrorSurfaceLockBusy
@@ -45,8 +47,8 @@ public enum PanelErrorCopyCategory: Sendable, Equatable {
             .configPublishedButFailed, .lockFailed, .surfaceLockFailed,
             .surfaceOverrideMalformed:
             true
-        case .configMissing, .lockBusy, .surfaceLockBusy, .invalidPackID, .packNotFound,
-            .manifestUnreadable:
+        case .configMissing, .configPublishedPathChanged, .lockBusy, .surfaceLockBusy,
+            .invalidPackID, .packNotFound, .manifestUnreadable:
             false
         }
     }
@@ -67,7 +69,10 @@ extension PanelWriteFailureReason {
         switch self {
         case .configReadFailure: .configReadFailure
         case .configWriteFailure: .configWriteFailure
-        case .configPublishedButFailed: .configPublishedButFailed
+        // A missing recovery path means the published file's original path changed. The
+        // pinned directory may have moved, or the file entry may have been replaced.
+        case .configPublishedButFailed(_, let recoveryPath):
+            recoveryPath == nil ? .configPublishedPathChanged : .configPublishedButFailed
         case .lockBusy: .lockBusy
         case .lockFailed: .lockFailed
         case .invalidPackID: .invalidPackID
@@ -85,7 +90,9 @@ extension SurfaceSoundMutationError {
         case .manifestUnreadable: .manifestUnreadable
         case .configReadFailure: .configReadFailure
         case .configWriteFailure: .configWriteFailure
-        case .configPublishedButFailed: .configPublishedButFailed
+        // Surface writes use the same post-publication recovery-path contract.
+        case .configPublishedButFailed(_, let recoveryPath):
+            recoveryPath == nil ? .configPublishedPathChanged : .configPublishedButFailed
         case .configMissing: .configMissing
         case .lockBusy: .surfaceLockBusy
         case .lockFailed: .surfaceLockFailed
@@ -99,5 +106,40 @@ extension SurfaceSoundMutationError {
             return URL(fileURLWithPath: recoveryPath)
         }
         return nil
+    }
+}
+
+extension PanelWriteFailureSource {
+    public var key: ClaudioL10nKey {
+        switch self {
+        case .mute: .panelWriteFailureMute
+        case .packSwitch: .panelWriteFailurePackSwitch
+        case .masterVolume: .panelWriteFailureMasterVolume
+        }
+    }
+}
+
+public struct PanelWriteFailureRow: Sendable, Identifiable {
+    public let reason: PanelWriteFailureReason
+    public let message: String
+
+    public var id: PanelWriteFailureReason { reason }
+}
+
+/// Preserve each typed failure; name the attempted action when two rows share visible copy.
+public func panelWriteFailureRows(
+    items: [PanelWriteFailure], l10n: ClaudioL10n
+) -> [PanelWriteFailureRow] {
+    let copy = items.map { l10n.text($0.reason.copyCategory.key) }
+    var counts: [String: Int] = [:]
+    for message in copy { counts[message, default: 0] += 1 }
+    return zip(items, copy).map { item, message in
+        let visibleMessage =
+            counts[message, default: 0] > 1
+            ? l10n.format(
+                .panelWriteFailureWithSource,
+                arguments: [l10n.text(item.source.key), message])
+            : message
+        return PanelWriteFailureRow(reason: item.reason, message: visibleMessage)
     }
 }

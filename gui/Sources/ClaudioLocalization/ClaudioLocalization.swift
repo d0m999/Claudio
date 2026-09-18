@@ -170,6 +170,12 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let panelErrorConfigRead: Self = "panel.error.config-read"
     public static let panelErrorConfigWrite: Self = "panel.error.config-write"
     public static let panelErrorConfigPublished: Self = "panel.error.config-published"
+    public static let panelErrorConfigPublishedPathChanged: Self =
+        "panel.error.config-published-path-changed"
+    public static let panelWriteFailureMute: Self = "panel.write-failure.mute"
+    public static let panelWriteFailurePackSwitch: Self = "panel.write-failure.pack-switch"
+    public static let panelWriteFailureMasterVolume: Self = "panel.write-failure.master-volume"
+    public static let panelWriteFailureWithSource: Self = "panel.write-failure.with-source"
     public static let panelErrorLockBusy: Self = "panel.error.lock-busy"
     public static let panelErrorLockFailed: Self = "panel.error.lock-failed"
     public static let panelErrorSurfaceLockBusy: Self = "panel.error.surface-lock-busy"
@@ -1240,6 +1246,9 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .panelRevealConfig, .panelRevealConfigHint, .panelMasterVolume,
         .panelErrorConfigMalformed, .panelErrorConfigUnwritable, .panelErrorConfigMissing,
         .panelErrorConfigRead, .panelErrorConfigWrite, .panelErrorConfigPublished,
+        .panelErrorConfigPublishedPathChanged,
+        .panelWriteFailureMute, .panelWriteFailurePackSwitch,
+        .panelWriteFailureMasterVolume, .panelWriteFailureWithSource,
         .panelErrorLockBusy, .panelErrorLockFailed, .panelErrorSurfaceLockBusy,
         .panelErrorSurfaceLockFailed, .panelRevealRecoveryFile,
         .panelRevealRecoveryFileNumber, .panelRevealRecoveryFileHint,

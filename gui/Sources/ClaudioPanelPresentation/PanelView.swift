@@ -821,8 +821,8 @@ public struct PanelView: View {
 
     private var writeFailures: some View {
         VStack(alignment: .leading, spacing: 5) {
-            ForEach(writeFailureItems) { item in
-                FailureRow(message: l10n.text(item.reason.copyCategory.key))
+            ForEach(panelWriteFailureRows(items: writeFailureItems, l10n: l10n)) { row in
+                FailureRow(message: row.message)
             }
             if let category = panelModel.surfaceSoundIssueCopyCategory {
                 FailureRow(message: l10n.text(category.key))

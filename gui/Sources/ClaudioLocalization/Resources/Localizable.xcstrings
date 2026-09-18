@@ -657,6 +657,86 @@
         }
       }
     },
+    "panel.error.config-published-path-changed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sound configuration was published, but its original path changed during saving. The file currently at that path may differ from the published file. Check the original path in Finder; if the directory moved, find the moved directory too, then reopen the panel to verify."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "声音配置已发布，但原路径在写入期间发生变化。原路径现有文件可能不是此次发布的文件。请在访达中核对原配置位置；若目录被移动，也请查找被移动的目录，然后重新打开面板确认。"
+          }
+        }
+      }
+    },
+    "panel.write-failure.mute": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Event mute"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "事件静音"
+          }
+        }
+      }
+    },
+    "panel.write-failure.pack-switch": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sound pack selection"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "声音包选择"
+          }
+        }
+      }
+    },
+    "panel.write-failure.master-volume": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Master volume"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "主音量"
+          }
+        }
+      }
+    },
+    "panel.write-failure.with-source": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@：%@"
+          }
+        }
+      }
+    },
     "panel.error.lock-busy": {
       "localizations": {
         "en": {

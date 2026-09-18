@@ -9,7 +9,15 @@ func runPanelErrorCopySuites() {
         let reasons: [(PanelWriteFailureReason, PanelErrorCopyCategory)] = [
             (.configReadFailure(reason: "private/path errno 13"), .configReadFailure),
             (.configWriteFailure(reason: "private/path errno 13"), .configWriteFailure),
-            (.configPublishedButFailed(reason: "private/path errno 13"), .configPublishedButFailed),
+            (
+                .configPublishedButFailed(
+                    reason: "private/path errno 13", recoveryPath: "/tmp/recovery"),
+                .configPublishedButFailed
+            ),
+            (
+                .configPublishedButFailed(reason: "private/path errno 13"),
+                .configPublishedPathChanged
+            ),
             (.lockBusy, .lockBusy),
             (.lockFailed(errno: 13), .lockFailed),
             (.invalidPackID("../private"), .invalidPackID),
@@ -57,7 +65,10 @@ func runPanelErrorCopySuites() {
             (.configMissing, .configMissing),
             (.configReadFailure(reason: "secret"), .configReadFailure),
             (.configWriteFailure(reason: "secret"), .configWriteFailure),
-            (.configPublishedButFailed(reason: "secret"), .configPublishedButFailed),
+            (
+                .configPublishedButFailed(reason: "secret", recoveryPath: "/tmp/recovery"),
+                .configPublishedButFailed
+            ),
             (.lockBusy, .surfaceLockBusy),
             (.lockFailed(errno: 13), .surfaceLockFailed),
             (.invalidPackID("secret"), .invalidPackID),
@@ -110,7 +121,8 @@ func runPanelErrorCopySuites() {
         let another = PanelWriteFailure(
             reason: .configPublishedButFailed(reason: "another conflict"),
             message: "another conflict",
-            recoveryFile: URL(fileURLWithPath: "/tmp/.claudio-stage-second"))
+            recoveryFile: URL(fileURLWithPath: "/tmp/.claudio-stage-second"),
+            source: .packSwitch)
         let recoveryFiles = panelWriteFailureRecoveryFiles(
             items: retained + [another],
             surfaceRecoveryFile: URL(fileURLWithPath: "/tmp/.claudio-stage-second"))
@@ -146,5 +158,87 @@ func runPanelErrorCopySuites() {
         ] {
             expect(!category.offersConfigRecovery, "\(category) 不应提供无关的访达动作")
         }
+
+        let moved = panelWriteFailureItems(
+            muteError: nil,
+            packSwitchError: .configPublishedButFailed(reason: "目录已移动"),
+            masterVolumeError: nil)
+        guard let movedItem = moved.first else {
+            expect(false, "目录换位后的失败必须显示")
+            return
+        }
+        expect(
+            !movedItem.reason.copyCategory.offersConfigRecovery,
+            "目录换位后的发布结果位于被移动目录，不能把原配置路径当成恢复入口")
+        for language in ClaudioAppLanguage.allCases {
+            let copy = ClaudioL10n(language: language).text(
+                movedItem.reason.copyCategory.key)
+            expect(
+                copy.contains(language == .zhHans ? "若目录被移动" : "if the directory moved"),
+                "路径变化应给目录移动提供条件式指引，不断言目录一定移动：\(copy)")
+        }
+        let surfaceMoved = SurfaceSoundMutationError.configPublishedButFailed(reason: "入口改为符号链接")
+        expect(
+            !surfaceMoved.panelCopyCategory.offersConfigRecovery,
+            "Surface 写者同样不能指向失效的原路径")
+        let linkChanged = panelWriteFailureItems(
+            muteError: nil,
+            packSwitchError: .configPublishedButFailed(reason: "文件入口改为符号链接"),
+            masterVolumeError: nil)
+        expect(
+            linkChanged.first?.reason.copyCategory == .configPublishedPathChanged,
+            "首次发布后文件入口被替换也属于路径变化，不能预设为目录移动")
+        for language in ClaudioAppLanguage.allCases {
+            let copy = ClaudioL10n(language: language).text(
+                PanelErrorCopyCategory.configPublishedPathChanged.key)
+            expect(
+                copy.contains(language == .zhHans ? "原路径" : "original path"),
+                "入口替换时须提示核对原配置路径：\(copy)")
+        }
+    }
+
+    suite("面板错误文案：不同 typed reason 各自可见，恢复文件仍完整保留") {
+        let recoveryA = "/tmp/.claudio-stage-first"
+        let recoveryB = "/tmp/.claudio-stage-second"
+        let items = panelWriteFailureItems(
+            muteError: .configReadFailure(reason: "events is an array"),
+            packSwitchError: .configReadFailure(reason: "master_volume is a string"),
+            masterVolumeError: nil)
+        expect(items.count == 2, "类型化原因仍须各自保留")
+        for language in ClaudioAppLanguage.allCases {
+            let visible = panelWriteFailureRows(
+                items: items, l10n: ClaudioL10n(language: language))
+            expect(
+                visible.map(\.reason) == items.map(\.reason),
+                "不同 typed reason 必须各自可见并保留写者顺序：\(language)")
+            guard visible.count == 2 else { continue }
+            expect(visible[0].message != visible[1].message, "两个写者的失败行须可区分")
+            expect(
+                visible[0].message.hasPrefix(
+                    language == .zhHans ? "事件静音：" : "Event mute: ")
+                    && visible[1].message.hasPrefix(
+                        language == .zhHans ? "声音包选择：" : "Sound pack selection: "),
+                "相同类别的失败应标明各自的写操作：\(language)")
+            expect(
+                visible.allSatisfy {
+                    !$0.message.contains("events is an array")
+                        && !$0.message.contains("master_volume is a string")
+                },
+                "展示标签不能泄露底层技术原因")
+        }
+
+        let published = panelWriteFailureItems(
+            muteError: .configPublishedButFailed(
+                reason: "first conflict", recoveryPath: recoveryA),
+            packSwitchError: .configPublishedButFailed(
+                reason: "second conflict", recoveryPath: recoveryB),
+            masterVolumeError: nil)
+        let visible = panelWriteFailureRows(
+            items: published, l10n: ClaudioL10n(language: .english))
+        expect(visible.count == 2, "两个不同的发布冲突必须各自可见")
+        expect(
+            panelWriteFailureRecoveryFiles(items: published, surfaceRecoveryFile: nil).map(\.path)
+                == [recoveryA, recoveryB],
+            "保留独立失败行时仍须呈现两个不同的恢复文件入口")
     }
 }

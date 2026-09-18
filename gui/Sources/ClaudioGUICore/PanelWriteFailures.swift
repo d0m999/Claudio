@@ -48,18 +48,29 @@ public enum PanelWriteFailureReason: Sendable, Equatable, Hashable {
     case manifestUnreadable(packID: String, reason: String)
 }
 
+public enum PanelWriteFailureSource: Sendable, Equatable {
+    case mute
+    case packSwitch
+    case masterVolume
+}
+
 /// 一个可渲染的失败项。`id` 是稳定的类型化原因；恢复文件目标只在发布后冲突时存在。
 public struct PanelWriteFailure: Sendable, Equatable, Identifiable {
     public let reason: PanelWriteFailureReason
     public let message: String
     public let recoveryFile: URL?
+    public let source: PanelWriteFailureSource
 
     public var id: PanelWriteFailureReason { reason }
 
-    public init(reason: PanelWriteFailureReason, message: String, recoveryFile: URL? = nil) {
+    public init(
+        reason: PanelWriteFailureReason, message: String, recoveryFile: URL? = nil,
+        source: PanelWriteFailureSource
+    ) {
         self.reason = reason
         self.message = message
         self.recoveryFile = recoveryFile
+        self.source = source
     }
 }
 
@@ -71,15 +82,15 @@ public func panelWriteFailureItems(
 ) -> [PanelWriteFailure] {
     var candidates: [PanelWriteFailure] = []
     if let muteError, muteError != .configMissing,
-        let item = PanelWriteFailure(error: muteError)
+        let item = PanelWriteFailure(error: muteError, source: .mute)
     {
         candidates.append(item)
     }
     if let packSwitchError {
-        candidates.append(PanelWriteFailure(error: packSwitchError))
+        candidates.append(PanelWriteFailure(error: packSwitchError, source: .packSwitch))
     }
     if let masterVolumeError, masterVolumeError != .configMissing {
-        candidates.append(PanelWriteFailure(error: masterVolumeError))
+        candidates.append(PanelWriteFailure(error: masterVolumeError, source: .masterVolume))
     }
 
     // 配置失败卡已经显示当前磁盘原因；只有同一个原因才去掉下面的重复项。
@@ -138,81 +149,81 @@ private struct PanelConfigFailureKey {
 }
 
 extension PanelWriteFailure {
-    fileprivate init?(error: SetEventEnabledError) {
+    fileprivate init?(error: SetEventEnabledError, source: PanelWriteFailureSource) {
         switch error {
         case .configMissing:
             return nil
         case .configReadFailure(let reason):
             self.init(
                 reason: .configReadFailure(reason: reason),
-                message: error.description)
+                message: error.description, source: source)
         case .configWriteFailure(let reason):
             self.init(
                 reason: .configWriteFailure(reason: reason),
-                message: error.description)
+                message: error.description, source: source)
         case .configPublishedButFailed(let reason, let recoveryPath):
             self.init(
                 reason: .configPublishedButFailed(reason: reason, recoveryPath: recoveryPath),
                 message: error.description,
-                recoveryFile: recoveryPath.map { URL(fileURLWithPath: $0) })
+                recoveryFile: recoveryPath.map { URL(fileURLWithPath: $0) }, source: source)
         case .lockBusy:
-            self.init(reason: .lockBusy, message: error.description)
+            self.init(reason: .lockBusy, message: error.description, source: source)
         case .lockFailed(let errno):
-            self.init(reason: .lockFailed(errno: errno), message: error.description)
+            self.init(reason: .lockFailed(errno: errno), message: error.description, source: source)
         }
     }
 
-    fileprivate init(error: SetMasterVolumeError) {
+    fileprivate init(error: SetMasterVolumeError, source: PanelWriteFailureSource) {
         switch error {
         case .configMissing:
             preconditionFailure("configMissing must not become a panel write failure")
         case .configReadFailure(let reason):
             self.init(
                 reason: .configReadFailure(reason: reason),
-                message: error.description)
+                message: error.description, source: source)
         case .configWriteFailure(let reason):
             self.init(
                 reason: .configWriteFailure(reason: reason),
-                message: error.description)
+                message: error.description, source: source)
         case .configPublishedButFailed(let reason, let recoveryPath):
             self.init(
                 reason: .configPublishedButFailed(reason: reason, recoveryPath: recoveryPath),
                 message: error.description,
-                recoveryFile: recoveryPath.map { URL(fileURLWithPath: $0) })
+                recoveryFile: recoveryPath.map { URL(fileURLWithPath: $0) }, source: source)
         case .lockBusy:
-            self.init(reason: .lockBusy, message: error.description)
+            self.init(reason: .lockBusy, message: error.description, source: source)
         case .lockFailed(let errno):
-            self.init(reason: .lockFailed(errno: errno), message: error.description)
+            self.init(reason: .lockFailed(errno: errno), message: error.description, source: source)
         }
     }
 
-    fileprivate init(error: UseError) {
+    fileprivate init(error: UseError, source: PanelWriteFailureSource) {
         switch error {
         case .invalidPackID(let id):
-            self.init(reason: .invalidPackID(id), message: error.description)
+            self.init(reason: .invalidPackID(id), message: error.description, source: source)
         case .packNotFound(let id):
-            self.init(reason: .packNotFound(id), message: error.description)
+            self.init(reason: .packNotFound(id), message: error.description, source: source)
         case .manifestUnreadable(let packID, let reason):
             self.init(
                 reason: .manifestUnreadable(packID: packID, reason: reason),
-                message: error.description)
+                message: error.description, source: source)
         case .configReadFailure(let reason):
             self.init(
                 reason: .configReadFailure(reason: reason),
-                message: error.description)
+                message: error.description, source: source)
         case .configWriteFailure(let reason):
             self.init(
                 reason: .configWriteFailure(reason: reason),
-                message: error.description)
+                message: error.description, source: source)
         case .configPublishedButFailed(let reason, let recoveryPath):
             self.init(
                 reason: .configPublishedButFailed(reason: reason, recoveryPath: recoveryPath),
                 message: error.description,
-                recoveryFile: recoveryPath.map { URL(fileURLWithPath: $0) })
+                recoveryFile: recoveryPath.map { URL(fileURLWithPath: $0) }, source: source)
         case .lockBusy:
-            self.init(reason: .lockBusy, message: error.description)
+            self.init(reason: .lockBusy, message: error.description, source: source)
         case .lockFailed(let errno):
-            self.init(reason: .lockFailed(errno: errno), message: error.description)
+            self.init(reason: .lockFailed(errno: errno), message: error.description, source: source)
         }
     }
 }
