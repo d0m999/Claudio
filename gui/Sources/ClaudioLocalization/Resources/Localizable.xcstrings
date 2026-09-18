@@ -2371,6 +2371,22 @@
         }
       }
     },
+    "panel.library.refreshFailed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh failed, showing the last result"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新失败，正在显示上次结果"
+          }
+        }
+      }
+    },
     "panel.loading-events": {
       "localizations": {
         "en": {

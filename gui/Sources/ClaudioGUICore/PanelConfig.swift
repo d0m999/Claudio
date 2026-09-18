@@ -115,7 +115,8 @@ extension PanelTopContent {
 }
 
 /// 为顶部内容变化保留或迁移当前焦点。当前控件仍在下一份焦点序中时无论内容种类是否变化都
-/// 保留；只有控件消失才优先落到有效的配置恢复按钮，再回到声音作用域或下一项可用控件。
+/// 保留；刷新重试消失时回到声音作用域，其余控件消失才优先落到有效的配置恢复按钮，
+/// 再回到声音作用域或下一项可用控件。
 public func panelFocusAfterTopContentChange(
     previous: PanelTopContent?,
     current: PanelTopContent,
@@ -126,6 +127,9 @@ public func panelFocusAfterTopContentChange(
     guard let focusedTarget else { return nil }
     if nextOrder.contains(focusedTarget) {
         return focusedTarget
+    }
+    if focusedTarget == .libraryRefreshRetry {
+        return nextOrder.first(where: { $0 == .soundScope }) ?? nextOrder.first
     }
     // Only an existing target that disappeared needs a fallback. A reason-only publication
     // must not create focus when the panel had none.

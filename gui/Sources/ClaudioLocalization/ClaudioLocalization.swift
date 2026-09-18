@@ -147,6 +147,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let panelQuitApplicationHint: Self = "panel.quit-application.hint"
     public static let panelRetry: Self = "panel.retry"
     public static let panelRetryHint: Self = "panel.retry.hint"
+    public static let panelLibraryRefreshFailed: Self = "panel.library.refreshFailed"
     public static let panelLoadingEvents: Self = "panel.loading-events"
     public static let panelUnavailableEvents: Self = "panel.unavailable-events"
     public static let panelPacksLoading: Self = "panel.packs.loading"
@@ -1213,6 +1214,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .panelAudibleEventsUnavailable, .panelAudibleEventsCount, .panelEvents, .panelSoundPacks,
         .panelManageSoundPacks, .panelManageSoundPacksHint, .panelQuitApplication,
         .panelQuitApplicationHint, .panelRetry, .panelRetryHint,
+        .panelLibraryRefreshFailed,
         .panelLoadingEvents, .panelUnavailableEvents, .panelSelectPack, .panelSelectPackMessage,
         .panelSelectPackWithChoicesMessage, .panelSelectPackWithoutChoicesMessage,
         .panelPacksLoading, .panelPacksNoPinnedTitle, .panelPacksNoPinnedMessage,

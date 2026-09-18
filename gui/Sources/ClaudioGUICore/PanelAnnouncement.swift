@@ -230,6 +230,33 @@ public func panelAnnouncementIsRedundant(_ next: String, after previous: String)
     !previous.isEmpty && previous.hasSuffix(next)
 }
 
+/// Current operational-panel facts. The library state, rather than the failure text, identifies
+/// one refresh-failure period; the visible notice still uses the shared presentation decision.
+public struct PanelLibraryAnnouncementFacts: Sendable {
+    public let header: String
+    public let refreshFailedNotice: String
+    public let topContent: PanelTopContent
+    public let libraryState: SoundPackLibraryPresentationState
+    public let panelIsVisible: Bool
+    public let openCount: Int
+
+    public init(
+        header: String,
+        refreshFailedNotice: String,
+        topContent: PanelTopContent,
+        libraryState: SoundPackLibraryPresentationState,
+        panelIsVisible: Bool,
+        openCount: Int
+    ) {
+        self.header = header
+        self.refreshFailedNotice = refreshFailedNotice
+        self.topContent = topContent
+        self.libraryState = libraryState
+        self.panelIsVisible = panelIsVisible
+        self.openCount = openCount
+    }
+}
+
 /// 「这一句刚说过」—— 让「一次转变 ≤ 一条播报」在结构上成立的去重器（T17g）。
 ///
 /// ## 为什么光有政策不够
@@ -252,13 +279,101 @@ public func panelAnnouncementIsRedundant(_ next: String, after previous: String)
 public final class PanelAnnouncer: ObservableObject {
     private var lastOpenCount = -1
     private var lastSentence = ""
+    private var refreshFailureIsActive = false
+    private var refreshFailureWasAnnounced = false
+    private var hasScheduledLibraryUpdate = false
+    private var pendingOpeningAnnouncement = false
+    private var libraryObservation: AnyCancellable?
 
     public init() {}
 
+    /// Observe each publication, including a quick retry that leaves and re-enters the failure
+    /// state before SwiftUI can deliver an `onChange` update.
+    public func observeLibraryTransitions(from model: PanelConfigController) {
+        guard libraryObservation == nil else { return }
+        libraryObservation = model.$libraryPresentationState.sink { [weak self] state in
+            MainActor.assumeIsolated {
+                self?.observeRefreshFailure(state)
+            }
+        }
+    }
+
     /// 这一刻真正该 post 出去的那句话（`nil` = 不 post）。
     public func consume(_ candidate: String?, openCount: Int) -> String? {
+        consume(candidate, openCount: openCount, allowRepeatedSentence: false)
+    }
+
+    /// Record the library transition even when the panel is hidden. A later failure can then be
+    /// announced once after a successful read or retry has ended the previous failure period.
+    public func observeRefreshFailure(_ libraryState: SoundPackLibraryPresentationState) {
+        let isFailed: Bool
+        if case .refreshFailed = libraryState { isFailed = true } else { isFailed = false }
+        guard isFailed != refreshFailureIsActive else { return }
+        refreshFailureIsActive = isFailed
+        refreshFailureWasAnnounced = false
+    }
+
+    /// The opening header and a newly visible refresh failure share one announcement. A second
+    /// opening during the same failure still speaks the ordinary header, without repeating notice.
+    public func consumeLibraryUpdate(
+        _ facts: PanelLibraryAnnouncementFacts,
+        opening: Bool
+    ) -> String? {
+        observeRefreshFailure(facts.libraryState)
+        guard facts.panelIsVisible else { return nil }
+
+        let includesNotice =
+            panelShowsRefreshFailedNotice(
+                topContent: facts.topContent,
+                libraryState: facts.libraryState)
+            && !refreshFailureWasAnnounced
+        let candidate: String?
+        if opening {
+            candidate = joinSpokenClauses(
+                [facts.header, includesNotice ? facts.refreshFailedNotice : nil].compactMap { $0 })
+        } else {
+            candidate = includesNotice ? joinSpokenClauses([facts.refreshFailedNotice]) : nil
+        }
+        // A new failure may have identical copy in the same opening. Its episode identity, not
+        // text equality, decides whether it needs a new announcement.
+        let sentence = consume(
+            candidate,
+            openCount: facts.openCount,
+            allowRepeatedSentence: includesNotice && !opening)
+        if sentence != nil && includesNotice { refreshFailureWasAnnounced = true }
+        return sentence
+    }
+
+    /// SwiftUI can deliver the opening and library-state onChange handlers in either order. Queue
+    /// one turn so both use the latest facts and produce one combined accessibility announcement.
+    public func scheduleLibraryUpdate(
+        opening: Bool,
+        facts: @escaping @MainActor () -> PanelLibraryAnnouncementFacts,
+        onAnnounce: @escaping @MainActor (String) -> Void
+    ) {
+        pendingOpeningAnnouncement = pendingOpeningAnnouncement || opening
+        guard !hasScheduledLibraryUpdate else { return }
+        hasScheduledLibraryUpdate = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let opening = self.pendingOpeningAnnouncement
+                self.pendingOpeningAnnouncement = false
+                self.hasScheduledLibraryUpdate = false
+                if let sentence = self.consumeLibraryUpdate(facts(), opening: opening) {
+                    onAnnounce(sentence)
+                }
+            }
+        }
+    }
+
+    private func consume(
+        _ candidate: String?,
+        openCount: Int,
+        allowRepeatedSentence: Bool
+    ) -> String? {
         guard let candidate, !candidate.isEmpty else { return nil }
-        if openCount == lastOpenCount,
+        if !allowRepeatedSentence, openCount == lastOpenCount,
             panelAnnouncementIsRedundant(candidate, after: lastSentence)
         {
             return nil

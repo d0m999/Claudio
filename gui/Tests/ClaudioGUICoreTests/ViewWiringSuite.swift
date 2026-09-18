@@ -265,7 +265,9 @@ private func settingsAnnouncementSurfaceCensus(
     var consumes: [String: Int] = [:]
     for file in sources {
         let postCount = file.code.components(separatedBy: "NSAccessibility.post").count - 1
-        let consumeCount = file.code.components(separatedBy: "announcer.consume(").count - 1
+        let consumeCount =
+            file.code.components(separatedBy: "announcer.consume(").count - 1
+            + file.code.components(separatedBy: "announcer.scheduleLibraryUpdate(").count - 1
         if postCount > 0 { posts[file.path] = postCount }
         if consumeCount > 0 { consumes[file.path] = consumeCount }
     }
@@ -734,10 +736,11 @@ func runViewWiringSuites() {
             "每次真实打开必须重读声音控制、恢复首焦点并主动播报当前作用域摘要")
         expect(
             panel.contains("let summary = headerAccessibilityLabel")
-                && panel.contains("announcer.consume(")
-                && panel.contains("let hideCount = coordinator.hideCount")
-                && panel.contains("guard coordinator.hideCount == hideCount,"),
-            "面板播报必须消费当前摘要、既有去重器，并在异步 post 前复核可见代次")
+                && panel.contains("announcer.observeLibraryTransitions(from: panelModel)")
+                && panel.contains("announcer.scheduleLibraryUpdate(")
+                && panel.contains("panelIsVisible: coordinator.isPanelVisible")
+                && panel.contains("onAnnounce: onAnnounce"),
+            "面板播报必须消费当前摘要、合并调度器，并在异步 post 前复核面板可见性")
 
         guard
             let didShowStart = menu.range(of: "func popoverDidShow")?.lowerBound,

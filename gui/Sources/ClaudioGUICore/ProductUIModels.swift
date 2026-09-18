@@ -61,6 +61,17 @@ public enum SoundPackLibraryPresentationState: Sendable, Equatable {
     }
 }
 
+/// A stale library snapshot remains usable, but the event content must name the failed refresh.
+/// The same decision drives the visible notice and its keyboard focus target.
+public func panelShowsRefreshFailedNotice(
+    topContent: PanelTopContent,
+    libraryState: SoundPackLibraryPresentationState
+) -> Bool {
+    guard topContent.showsEventContent, libraryState.hasUsableSnapshot else { return false }
+    if case .refreshFailed = libraryState { return true }
+    return false
+}
+
 /// Selected-pack inventory has its own asynchronous lifecycle. Library metadata can already be
 /// ready while this one-pack directory read is still in flight, so an empty array alone is not a
 /// truthful presentation state.

@@ -73,4 +73,17 @@ func runPanelFocusCoordinatorSuites() {
             "开-关-开：showCount 该是 2、hideCount 该是 1，得到 \(coordinator.showCount)/\(coordinator.hideCount)"
         )
     }
+
+    suite("PanelFocusCoordinator: 焦点归还可重复计数，但关闭后可见性必须为 false") {
+        let coordinator = PanelFocusCoordinator()
+        expect(!coordinator.isPanelVisible, "初始不可见")
+        coordinator.requestFocus()
+        coordinator.requestFocus(target: .recentNotices)
+        expect(coordinator.isPanelVisible && coordinator.showCount == 2, "焦点归还期间仍可见")
+        coordinator.notePanelHidden()
+        expect(
+            !coordinator.isPanelVisible && coordinator.showCount == 2
+                && coordinator.hideCount == 1,
+            "showCount 大于 hideCount 时面板也可能已关闭")
+    }
 }

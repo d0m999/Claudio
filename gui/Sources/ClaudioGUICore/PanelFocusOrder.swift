@@ -14,6 +14,7 @@ public enum PanelFocusTarget: Sendable, Hashable {
     case soundScope
     case activityRange
     case activityMetric(Event)
+    case libraryRefreshRetry
     case eventPreview(Event)
     case eventMute(Event)
     case masterVolume
@@ -65,7 +66,8 @@ public enum PanelFocusScope: Sendable, Equatable {
         events: [PanelEventPresentation],
         hasActivityOverview: Bool,
         hasMasterVolume: Bool,
-        hasConfigFailureNotice: Bool = false)
+        hasConfigFailureNotice: Bool = false,
+        hasRefreshFailedNotice: Bool = false)
 }
 
 /// 生产顺序与视觉顺序相同：作用域 → 启动/配置恢复 → 每行可用试听/静音 → 播放设置 →
@@ -105,12 +107,14 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         let events,
         let hasActivityOverview,
         let hasMasterVolume,
-        let hasConfigFailureNotice):
+        let hasConfigFailureNotice,
+        let hasRefreshFailedNotice):
         var order: [PanelFocusTarget] = [.headerSettings, .recentNotices, .soundScope]
         if hasActivityOverview {
             order.append(.activityRange)
             order.append(contentsOf: ActivityOverviewBarLayout.events.map { .activityMetric($0) })
         }
+        if hasRefreshFailedNotice { order.append(.libraryRefreshRetry) }
         if hasConfigFailureNotice { order.append(.configReveal) }
         for event in events {
             if event.controls.previewEnabled { order.append(.eventPreview(event.event)) }

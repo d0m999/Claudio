@@ -160,6 +160,9 @@ public struct PanelView: View {
                         }
                     )
                     activityOverview
+                    if showsRefreshFailedNotice {
+                        refreshFailedNotice
+                    }
                     mainContent
                     writeFailures
                 }
@@ -192,6 +195,7 @@ public struct PanelView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.panel))
         .onAppear {
+            announcer.observeLibraryTransitions(from: panelModel)
             synchronizeSelectedSoundSurface()
             applyFirstFocus()
             if refreshesActivityOnLifecycle {
@@ -213,7 +217,10 @@ public struct PanelView: View {
             applyFirstFocus()
         }
         .onChange(of: panelModel.libraryPresentationState) { _ in
-            if isEventFocusTarget(focusedTarget) { applyFocusAfterContentChange() }
+            if isEventFocusTarget(focusedTarget) || focusedTarget == .libraryRefreshRetry {
+                applyFocusAfterContentChange()
+            }
+            announcePanelSummary(opening: false)
         }
         .onChange(of: panelModel.configState.topContent) { content in
             focusedTarget = panelFocusAfterTopContentChange(
@@ -222,6 +229,7 @@ public struct PanelView: View {
                 focusedTarget: focusedTarget,
                 nextOrder: focusOrder(for: content))
             previousTopContent = content
+            announcePanelSummary(opening: false)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(headerAccessibilityLabel)
@@ -279,19 +287,24 @@ public struct PanelView: View {
             + l10n.text(.eventNoticeRecent)
     }
 
-    private func announcePanelSummary() {
+    private func announcePanelSummary(opening: Bool = true) {
         let announcer = self.announcer
         let coordinator = focusCoordinator
-        let hideCount = coordinator.hideCount
+        let model = panelModel
         let summary = headerAccessibilityLabel
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated {
-                guard coordinator.hideCount == hideCount,
-                    let sentence = announcer.consume(summary, openCount: coordinator.showCount)
-                else { return }
-                onAnnounce(sentence)
-            }
-        }
+        let notice = l10n.text(.panelLibraryRefreshFailed)
+        announcer.scheduleLibraryUpdate(
+            opening: opening,
+            facts: {
+                PanelLibraryAnnouncementFacts(
+                    header: summary,
+                    refreshFailedNotice: notice,
+                    topContent: model.configState.topContent,
+                    libraryState: model.libraryPresentationState,
+                    panelIsVisible: coordinator.isPanelVisible,
+                    openCount: coordinator.showCount)
+            },
+            onAnnounce: onAnnounce)
     }
 
     // MARK: - Sound scope
@@ -567,6 +580,32 @@ public struct PanelView: View {
 
     // MARK: - Main content
 
+    private var showsRefreshFailedNotice: Bool {
+        panelShowsRefreshFailedNotice(
+            topContent: panelModel.configState.topContent,
+            libraryState: panelModel.libraryPresentationState)
+    }
+
+    private var refreshFailedNotice: some View {
+        HStack(alignment: .center, spacing: 7) {
+            FailureRow(message: l10n.text(.panelLibraryRefreshFailed))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("panel.library.refreshFailed")
+            Button(l10n.text(.panelRetry)) {
+                panelModel.retrySoundPackLibraryRefresh()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
+            .focused($focusedTarget, equals: .libraryRefreshRetry)
+            .accessibilityLabel(l10n.text(.panelRetry))
+            .accessibilityHint(l10n.text(.panelRetryHint))
+            .accessibilityIdentifier("panel.library.refresh-retry")
+            .help(l10n.text(.panelRetryHint))
+        }
+        .accessibilityElement(children: .contain)
+    }
+
     @ViewBuilder
     private var mainContent: some View {
         switch panelModel.configState.topContent {
@@ -824,7 +863,8 @@ public struct PanelView: View {
                 hasMasterVolume: content.showsEventContent
                     && panelModel.libraryPresentationState.hasUsableSnapshot,
                 hasConfigFailureNotice: content.hasConfigFailureNotice
-                    && panelConfigRecoveryTarget(configFile: configFile) != nil))
+                    && panelConfigRecoveryTarget(configFile: configFile) != nil,
+                hasRefreshFailedNotice: showsRefreshFailedNotice))
         return order
     }
 

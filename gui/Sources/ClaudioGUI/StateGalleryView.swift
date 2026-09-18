@@ -340,7 +340,7 @@ private struct SettingsWindowRouteFrame: View {
 
 }
 
-// MARK: - Production Agent panel (2 languages × 4 sizes × critical states)
+// MARK: - Production Agent panel (2 languages × compact density × critical states)
 
 private enum ProductionPanelGalleryScenario: String, CaseIterable, Identifiable {
     case workBuddy = "WorkBuddy operational"
@@ -348,6 +348,7 @@ private enum ProductionPanelGalleryScenario: String, CaseIterable, Identifiable 
     case needsPack = "needsPack recovery"
     case configFailure = "config failure"
     case libraryFailure = "sound library failure"
+    case libraryRefreshFailed = "sound library refresh failed · stale events"
     case surfaceFailure = "WorkBuddy surface override failure"
 
     var id: String { rawValue }
@@ -356,7 +357,7 @@ private enum ProductionPanelGalleryScenario: String, CaseIterable, Identifiable 
 struct ProductionPanelGalleryView: View {
     var body: some View {
         GallerySection(
-            title: "Production Agent Panel · 2 languages × compact density × 6 critical states"
+            title: "Production Agent Panel · 2 languages × compact density × 7 critical states"
         ) {
             ForEach(ClaudioAppLanguage.allCases) { language in
                 ForEach([ClaudioCompactPreviewDensity.standard]) { textSize in
@@ -650,6 +651,17 @@ private struct ProductionPanelStateFrame: View {
                     reason: language == .english
                         ? "The sound pack library could not be read."
                         : "无法读取声音包库。"),
+                environment: previewAudioImportEnvironment)
+        case .libraryRefreshFailed:
+            selectedScope = .global
+            panelModel = PanelConfigController(
+                previewConfigState: .operational(baseConfig),
+                eventRows: presentRows,
+                selectedPackMetadata: SelectedPackMetadata(
+                    id: "gallery-pack",
+                    name: "Orbit Signals"),
+                libraryPresentationState: .refreshFailed(
+                    reason: "Gallery scan failure; this technical detail must stay hidden."),
                 environment: previewAudioImportEnvironment)
         case .surfaceFailure:
             var invalidBase = baseConfig

@@ -151,6 +151,60 @@ func runPanelFocusOrderSuites() {
             "needsPack 焦点顺序错误：\(order)")
     }
 
+    suite("刷新失败重试：焦点位于活动概览之后、事件之前；消失时回到作用域") {
+        let events = focusEventPresentations()
+        let failedOrder = panelFocusOrder(
+            .activityOperational(
+                events: events,
+                hasActivityOverview: true,
+                hasMasterVolume: true,
+                hasRefreshFailedNotice: true))
+        let readyOrder = panelFocusOrder(
+            .activityOperational(
+                events: events,
+                hasActivityOverview: true,
+                hasMasterVolume: true))
+        let lastActivityEvent = ActivityOverviewBarLayout.events.last!
+        let activityEnd = failedOrder.lastIndex(of: .activityMetric(lastActivityEvent))!
+        let retryIndex = failedOrder.firstIndex(of: .libraryRefreshRetry)!
+        let firstEventIndex = failedOrder.firstIndex(of: .eventPreview(Event.allCases[0]))!
+        expect(
+            activityEnd < retryIndex && retryIndex < firstEventIndex,
+            "重试按钮必须按视觉顺序插在活动控件与事件控件之间")
+        expect(!readyOrder.contains(.libraryRefreshRetry), "提示消失后不得保留幽灵焦点")
+        expect(
+            panelFocusAfterTopContentChange(
+                previous: .events,
+                current: .events,
+                focusedTarget: .libraryRefreshRetry,
+                nextOrder: readyOrder) == .soundScope,
+            "重试按钮消失后，焦点必须回到声音作用域")
+        let configFailureOrder: [PanelFocusTarget] = [
+            .headerSettings, .recentNotices, .soundScope, .configReveal, .quitApplication,
+        ]
+        expect(
+            panelFocusAfterTopContentChange(
+                previous: .events,
+                current: .configFailure(reason: "配置损坏"),
+                focusedTarget: .libraryRefreshRetry,
+                nextOrder: configFailureOrder) == .soundScope,
+            "内容种类切换时，消失的刷新重试按钮也必须回到声音作用域")
+        expect(
+            panelFocusAfterTopContentChange(
+                previous: .events,
+                current: .events,
+                focusedTarget: .eventMute(.stop),
+                nextOrder: failedOrder) == .eventMute(.stop),
+            "新增提示时仍存在的事件焦点必须保持")
+        expect(
+            panelFocusAfterTopContentChange(
+                previous: .events,
+                current: .events,
+                focusedTarget: .eventMute(.stop),
+                nextOrder: readyOrder) == .eventMute(.stop),
+            "移除提示时仍存在的事件焦点必须保持")
+    }
+
     suite("panelFocusAfterTopContentChange：错误原因文字变化不重置仍存在的控件焦点") {
         let nextOrder: [PanelFocusTarget] = [
             .headerSettings, .recentNotices, .soundScope, .configReveal, .quitApplication,

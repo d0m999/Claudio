@@ -25,6 +25,22 @@ import Foundation
 // 下面每一个矩阵都从「× actionStates」变成「× states × actionStates」。
 
 private let H = "Claudio 面板，当前声音包 lofi"
+private let libraryFailureNotice = "刷新失败，正在显示上次结果"
+
+private func libraryFacts(
+    _ state: SoundPackLibraryPresentationState,
+    topContent: PanelTopContent = .events,
+    visible: Bool = true,
+    openCount: Int = 1
+) -> PanelLibraryAnnouncementFacts {
+    PanelLibraryAnnouncementFacts(
+        header: H,
+        refreshFailedNotice: libraryFailureNotice,
+        topContent: topContent,
+        libraryState: state,
+        panelIsVisible: visible,
+        openCount: openCount)
+}
 
 /// **刻意对全部六个态用同一个 `header`。** 真实视图里五个 onboarding 态拿到的正是同一个常量，所以
 /// 这是那条区分性不变式的**更强**版本：它不许 `panelSentence` 去指望 header 帮忙区分两个态。
@@ -69,6 +85,74 @@ private func reachableOpenMoments(for actionState: OnboardingActionState)
 
 @MainActor
 func runPanelAnnouncementSuites() {
+    suite("刷新失败播报：打开摘要和首次提示合成一句，同一失败期间不重复") {
+        let announcer = PanelAnnouncer()
+        let failed = SoundPackLibraryPresentationState.refreshFailed(reason: "不应播报的磁盘原因")
+        let combined = announcer.consumeLibraryUpdate(libraryFacts(failed), opening: true)
+        expect(
+            combined == "\(H)。\(libraryFailureNotice)。",
+            "打开时必须把无 reason 提示接在摘要后，仅播报一次")
+        expect(
+            announcer.consumeLibraryUpdate(libraryFacts(failed), opening: false) == nil,
+            "同一失败期间的重复发布不得重播")
+        expect(
+            announcer.consumeLibraryUpdate(
+                libraryFacts(.refreshFailed(reason: "原因变了")), opening: false) == nil,
+            "底层 reason 变化不能制造新的失败期间")
+        expect(
+            announcer.consumeLibraryUpdate(
+                libraryFacts(failed, openCount: 2), opening: true) == "\(H)。",
+            "重开仍播报面板摘要，但不得重复同一失败提示")
+    }
+
+    suite("刷新失败播报：隐藏时延后，首次可见时才说；被内容门禁挡住时不消费") {
+        let announcer = PanelAnnouncer()
+        let failed = SoundPackLibraryPresentationState.refreshFailed(reason: "私有原因")
+        expect(
+            announcer.consumeLibraryUpdate(
+                libraryFacts(failed, visible: false), opening: false) == nil,
+            "面板隐藏时不得播报")
+        expect(
+            announcer.consumeLibraryUpdate(
+                libraryFacts(failed, topContent: .configFailure(reason: "坏配置")),
+                opening: false) == nil,
+            "没有显示提示的内容态不得提前消费播报")
+        expect(
+            announcer.consumeLibraryUpdate(libraryFacts(failed), opening: false)
+                == "\(libraryFailureNotice)。",
+            "提示首次可见时必须通过播报通道说出")
+        expect(
+            announcer.consumeLibraryUpdate(
+                libraryFacts(failed, visible: false, openCount: 2), opening: true) == nil,
+            "隐藏期间即使收到打开信号也不得播报")
+    }
+
+    suite("刷新失败播报：离开失败态后，相同文案的新失败仍需再播报") {
+        let announcer = PanelAnnouncer()
+        let failed = SoundPackLibraryPresentationState.refreshFailed(reason: "同一个原因")
+        expect(
+            announcer.consumeLibraryUpdate(libraryFacts(.ready), opening: true) == "\(H)。",
+            "正常打开只说摘要")
+        expect(
+            announcer.consumeLibraryUpdate(libraryFacts(failed), opening: false)
+                == "\(libraryFailureNotice)。",
+            "打开后第一次失败要播报")
+        expect(
+            announcer.consumeLibraryUpdate(libraryFacts(.refreshing), opening: false) == nil,
+            "重试刷新中不显示常驻播报，并结束上次失败期间")
+        expect(
+            announcer.consumeLibraryUpdate(libraryFacts(failed), opening: false)
+                == "\(libraryFailureNotice)。",
+            "同一次打开内新失败即使文案相同也必须再播报")
+        expect(
+            announcer.consumeLibraryUpdate(libraryFacts(.ready), opening: false) == nil,
+            "成功后清除失败期间")
+        expect(
+            announcer.consumeLibraryUpdate(libraryFacts(failed), opening: false)
+                == "\(libraryFailureNotice)。",
+            "成功后再失败必须重新播报")
+    }
+
     suite("双宿主面板播报：只消费已组合 header，并规范为一句完整播报") {
         expect(dualHostPanelAnnouncement(header: "") == nil, "空 header 不得打断 VoiceOver")
         expect(

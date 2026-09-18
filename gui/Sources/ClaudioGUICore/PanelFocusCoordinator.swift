@@ -40,12 +40,17 @@ public final class PanelFocusCoordinator: ObservableObject {
     /// 与 ``showCount`` 同样是单调递增的计数器，同样的理由：`onChange(of:)` 得在每一次隐藏上都
     /// 触发，哪怕两次隐藏看起来一模一样。
     @Published public private(set) var hideCount = 0
+    /// Visibility follows the popover delegate's show/close signals. `showCount` can also advance
+    /// for focus handback while the same popover remains open, so counter arithmetic is not a
+    /// reliable visibility test for deferred announcements.
+    @Published public private(set) var isPanelVisible = false
 
     public init() {}
 
     /// Records one more "the popover just showed" event.
     public func requestFocus(target: PanelFocusTarget? = nil) {
         requestedTarget = target
+        if !isPanelVisible { isPanelVisible = true }
         showCount += 1
     }
 
@@ -55,6 +60,7 @@ public final class PanelFocusCoordinator: ObservableObject {
     /// `guard NSApp.isActive` **之前** —— 那句 guard 在「用户切到别的 app 导致 popover 关闭」
     /// 这条路径上会提前 return，而那恰恰是本信号最需要覆盖的一条路径。
     public func notePanelHidden() {
+        if isPanelVisible { isPanelVisible = false }
         hideCount += 1
     }
 }

@@ -65,6 +65,32 @@ func runProductUIModelsSuites() {
             "刷新失败保留 previous snapshot 时必须继续显示可听计数")
     }
 
+    suite("刷新失败提示：只有事件内容和带旧快照的 refreshFailed 显示") {
+        let states: [(SoundPackLibraryPresentationState, Bool)] = [
+            (.loading, false),
+            (.ready, false),
+            (.refreshing, false),
+            (.refreshFailed(reason: "底层原因不得显示"), true),
+            (.loadFailed(reason: "首次加载失败"), false),
+        ]
+        for (state, expected) in states {
+            expect(
+                panelShowsRefreshFailedNotice(topContent: .events, libraryState: state)
+                    == expected,
+                "事件内容的提示门禁与库状态不符：\(state)")
+            expect(
+                !panelShowsRefreshFailedNotice(topContent: .needsPack, libraryState: state),
+                "needsPack 不得显示库刷新失败提示：\(state)")
+            expect(
+                !panelShowsRefreshFailedNotice(
+                    topContent: .configFailure(reason: "坏配置"), libraryState: state),
+                "configFailure 不得显示库刷新失败提示：\(state)")
+        }
+        expect(
+            SoundPackLibraryPresentationState.refreshFailed(reason: "失败").hasUsableSnapshot,
+            "refreshFailed 必须保留本次运行的旧快照")
+    }
+
     suite("按需音频清单：loading/ready/failed 与真实空清单保持可区分") {
         let old = [PackAudioFile(fileName: "old.mp3", isOrphan: true)]
         let loading = SoundPackAudioInventoryPresentationState.loading(previous: old)
