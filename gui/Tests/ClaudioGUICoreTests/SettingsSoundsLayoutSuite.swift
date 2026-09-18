@@ -213,6 +213,7 @@ func runSettingsSoundsLayoutSuites() {
 private final class SettingsSoundsNativeLayoutProbe {
     private let window: NSWindow
     private let hostingView: NSHostingView<SettingsRootView>
+    private let requestedSize: NSSize
 
     init(
         session: SettingsPresentationSession,
@@ -221,6 +222,7 @@ private final class SettingsSoundsNativeLayoutProbe {
     ) {
         _ = NSApplication.shared
         SoundPacksLayoutRecorder.reset()
+        requestedSize = size
         window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .resizable],
@@ -233,6 +235,22 @@ private final class SettingsSoundsNativeLayoutProbe {
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
         refresh()
+        enforceRequestedContentSize()
+    }
+
+    /// DESIGN.md 合同：窗口默认 1240×820、最小 960×640，断言都以请求尺寸为前提。
+    /// 无显示器的 runner 若按可见区压缩窗口，GeometryReader 会随之变矮，后续几何
+    /// 断言就会报神秘数字。这里下令恢复请求尺寸后再布局一次；若环境连这都拒绝，
+    /// 前提断言会直说，而不是让侧栏断言背锅。这是前提加固，不是放宽断言。
+    private func enforceRequestedContentSize() {
+        guard window.contentView?.bounds.size != requestedSize else { return }
+        window.setContentSize(requestedSize)
+        hostingView.frame.size = requestedSize
+        refresh()
+        expect(
+            window.contentView?.bounds.size == requestedSize,
+            "布局探针窗口必须达到请求尺寸 \(requestedSize)，实得 \(window.contentView?.bounds.size as Any)"
+        )
     }
 
     func refresh() {
