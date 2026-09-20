@@ -33,3 +33,6 @@ __pycache__/
 /packs/license-snapshots/kenney-impact-sounds-2026-09-02.html
 /packs/license-snapshots/kenney-impact-sounds-2026-09-02.png
 /packs/license-snapshots/kenney-impact-sounds-package-License-2026-09-02.txt
+
+# WorkBuddy host-local state — never commit
+.workbuddy/
