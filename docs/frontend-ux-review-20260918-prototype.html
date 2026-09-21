@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>claudi0 · 修复交互原型（frontend-ux-review-20260918）</title>
+<style>
+  /* ============================================================
+     Token 层 —— 逐字取自 gui/Sources/ClaudioGUICore/ClaudioColorHex.swift
+     （DESIGN.md 配色表的单一真相源），不新增 DESIGN.md 里没有的颜色。
+     hairline 透明度取自 ClaudioTheme.hairline(_:)：亮 14% / 暗 16%。
+     clay-soft = clay @ 12%（亮）/ 15%（暗），取自 ClaudioTheme.claySoft(_:)。
+     ============================================================ */
+  :root[data-theme="light"] {
+    --text: #2B2620;            /* text */
+    --text-2: #75685A;          /* text-2 */
+    --panel-a: #FFFDFA;         /* panel（渐变浅端）*/
+    --panel-b: #FBF7F1;         /* panel-deep（渐变最深端，亮色最坏底）*/
+    --surface: #FFFFFF;         /* surface（行卡真实底）*/
+    --elevated: #FFFDF7;        /* surface-2（抬升表面）*/
+    --clay: #C4633C;            /* clay */
+    --clay-hover: #D97757;      /* clay-hover */
+    --clay-soft: rgba(196, 99, 60, 0.12);
+    --error: #E0453A;           /* error（真红，只做图标）*/
+    --warning: #B87000;         /* warning */
+    --success: #2FA24E;         /* success */
+    --hairline: rgba(60, 44, 32, 0.14);
+    --backdrop: #ECE9E3;
+    --page-card: #FFFFFF;
+    --page-text: #2B2620;
+    --page-text-2: #75685A;
+    --seg-track: #F1EDE6;
+  }
+  :root[data-theme="dark"] {
+    --text: #F4EBDD;
+    --text-2: #B0AEA5;
+    --panel-a: #1A1815;
+    --panel-b: #262320;
+    --surface: #262320;
+    --elevated: #262320;
+    --clay: #D97757;
+    --clay-hover: #E68A5C;
+    --clay-soft: rgba(217, 119, 87, 0.15);
+    --error: #FF453A;
+    --warning: #FF9F0A;
+    --success: #34C759;
+    --hairline: rgba(245, 235, 221, 0.16);
+    --backdrop: #131110;
+    --page-card: #1E1B18;
+    --page-text: #F4EBDD;
+    --page-text-2: #B0AEA5;
+    --seg-track: #26221E;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    background: var(--backdrop);
+    color: var(--page-text);
+    font-family: ui-rounded, "SF Pro Rounded", -apple-system, "PingFang SC", "Hiragino Sans GB", sans-serif;
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 30px 24px 64px; }
+
+  /* ---------- 顶部工具条 ---------- */
+  .topbar { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+  .topbar h1 { font-size: 17px; font-weight: 600; letter-spacing: 0; }
+  .topbar .sub { font-size: 12px; color: var(--page-text-2); margin-top: 3px; }
+  .topbar .spacer { flex: 1; }
+  .seg {
+    display: inline-flex; background: var(--seg-track);
+    border: 1px solid var(--hairline); border-radius: 6px; padding: 2px; gap: 2px;
+  }
+  .seg button {
+    font-family: inherit; font-size: 12px; font-weight: 500; border: none; cursor: pointer;
+    padding: 4px 12px; border-radius: 5px; background: transparent; color: var(--page-text-2);
+    transition: background 0.12s ease-out, color 0.12s ease-out;
+  }
+  .seg button.on { background: var(--page-card); color: var(--page-text); box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
+  .seg button:focus-visible { outline: 2px solid var(--clay); outline-offset: 1px; }
+
+  /* ---------- 章节骨架 ---------- */
+  .section { margin-top: 40px; }
+  .sec-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .sec-head h2 { font-size: 15px; font-weight: 600; letter-spacing: 0; }
+  .sec-priority {
+    font-size: 10.5px; font-weight: 600; color: var(--clay);
+    background: var(--clay-soft); border-radius: 999px; padding: 2px 9px;
+  }
+  .sec-desc { font-size: 12.5px; color: var(--page-text-2); margin-top: 6px; max-width: 860px; line-height: 1.65; }
+  .compare { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; margin-top: 16px; }
+  .panel-col { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+  .col-chip {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.2px;
+    padding: 3px 10px; border-radius: 999px;
+    background: var(--page-card); border: 1px solid var(--hairline); color: var(--page-text-2);
+  }
+  .col-chip.after { color: var(--clay); border-color: var(--clay-soft); background: var(--clay-soft); }
+
+  /* ---------- 依据卡 ---------- */
+  .note {
+    flex: 1 1 260px; max-width: 330px; min-width: 240px;
+    background: var(--page-card); border: 1px solid var(--hairline);
+    border-left: 3px solid var(--clay); border-radius: 10px; padding: 14px 16px;
+  }
+  .note h3 { font-size: 12.5px; font-weight: 600; margin-bottom: 8px; }
+  .note p { font-size: 12px; color: var(--page-text-2); line-height: 1.7; }
+  .note .ref { font-size: 11px; color: var(--page-text-2); }
+  .note .ref b { color: var(--page-text); font-weight: 600; }
+  .note ul { list-style: none; margin-top: 4px; }
+  .note li { font-size: 12px; color: var(--page-text-2); line-height: 1.7; padding-left: 12px; position: relative; }
+  .note li::before { content: ""; position: absolute; left: 0; top: 9px; width: 4px; height: 4px; border-radius: 2px; background: var(--clay); }
+  .note .mono { font-size: 10.5px; }
+
+  .footnote { margin-top: 48px; font-size: 11.5px; color: var(--page-text-2); line-height: 1.8;
+    border-top: 1px solid var(--hairline); padding-top: 14px; max-width: 900px; }
+
+  /* ============================================================
+     面板复刻层 —— 几何取自 PanelView.swift / ClaudioTheme.swift：
+     宽 312（standardPanelWidth），圆角 18（panel），header padding 13，
+     行卡圆角 13（row），tile 11，控件 6，事件字形 tile 23pt（事件色自染 15% 复合底）。
+     ============================================================ */
+  .panel {
+    width: 312px; border-radius: 18px; overflow: hidden; flex-shrink: 0;
+    background: linear-gradient(180deg, var(--panel-a), var(--panel-b));
+    border: 1px solid var(--hairline);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.10);
+    color: var(--text);
+    transition: background 0.2s ease;
+  }
+  .panel-header { display: flex; align-items: center; gap: 8px; padding: 13px; }
+  .wordmark { display: flex; align-items: center; gap: 5px; font-size: 13.5px; font-weight: 600; letter-spacing: 0; color: var(--text); }
+  .wordmark .orbit { width: 7px; height: 7px; border-radius: 4px; background: var(--clay); box-shadow: 0 0 0 3px var(--clay-soft); }
+  .panel-header .spacer { flex: 1; }
+
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 28px; min-height: 28px; border: none; background: transparent; cursor: pointer;
+    border-radius: 6px; color: var(--text-2); font-family: inherit;
+    transition: background 0.12s ease-out, color 0.12s ease-out, transform 0.10s ease-in;
+  }
+  .icon-btn svg { width: 13px; height: 13px; }
+  .icon-btn:hover { background: var(--clay-soft); color: var(--clay); }
+  :root[data-theme="dark"] .icon-btn:hover { color: var(--clay-hover); }
+  .icon-btn:active { background: var(--elevated); color: var(--clay); transform: scale(0.96); }
+  .icon-btn:focus-visible { outline: 2px solid var(--clay); outline-offset: 1px; }
+  .icon-btn.disabled { color: var(--text-2); opacity: 0.45; pointer-events: none; }
+  .icon-btn .alt { display: none; }
+  .icon-btn.muted .main { display: none; }
+  .icon-btn.muted .alt { display: block; }
+
+  .hairline-h { height: 1px; background: var(--hairline); }
+  .panel-scroll { padding: 13px; display: flex; flex-direction: column; gap: 12px; }
+  .panel-footer { padding: 0 13px 13px; }
+  .footer-row { min-height: 28px; display: flex; align-items: center; font-size: 11px; color: var(--text-2); gap: 6px; }
+
+  /* scope 选择器 —— 按 PanelSoundScopePicker.swift 复刻：区块标题 + 选中作用域卡 + 全宽作用域菜单 */
+  .scope-block { display: flex; flex-direction: column; gap: 4px; }
+  .scope-sec-head { display: flex; align-items: baseline; gap: 8px; }
+  .scope-sec-head .title { font-size: 11px; font-weight: 600; color: var(--text-2); }
+  .scope-sec-head .spacer { flex: 1; }
+  .scope-sec-head .cap { font-size: 8.5px; font-weight: 500; color: var(--text-2); }
+  .scope-card {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    border: 1px solid var(--clay); background: var(--clay-soft);
+    border-radius: 13px; padding: 8px 11px;
+  }
+  .scope-card .spacer, .scope-row .spacer { flex: 1; }
+  .sc-id { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .scope-card .name { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.2; }
+  .scope-card .sub { font-size: 10px; color: var(--text-2); }
+  .scope-menu {
+    background: var(--surface); border: 1px solid var(--hairline);
+    border-radius: 13px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
+  }
+  .scope-row {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    min-height: 29px; padding: 5px 9px; border-radius: 6px; border: 1px solid transparent;
+    transition: background 0.12s ease-out, border-color 0.12s ease-out;
+  }
+  .scope-row.selected { border-color: var(--clay); background: var(--clay-soft); }
+  .scope-row:not(.selected):hover { background: var(--clay-soft); }
+  .scope-row .name { font-size: 12.5px; font-weight: 600; color: var(--text); line-height: 1.2; }
+  .scope-row .sub { font-size: 10px; color: var(--text-2); }
+  .status-ic { width: 13px; height: 13px; color: var(--success); flex-shrink: 0; }
+  .status-ic.attention { color: var(--error); }
+  .state-text { font-size: 10.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    border: 1px solid var(--error); border-radius: 999px; padding: 2px 8px;
+    color: var(--error); font-size: 10.5px; font-weight: 600; white-space: nowrap;
+  }
+  .status-pill svg { width: 10px; height: 10px; }
+  .chev { width: 10px; height: 10px; color: var(--text-2); flex-shrink: 0; transition: transform 0.15s ease; }
+
+  /* 事件区 */
+  .event-section { display: flex; flex-direction: column; gap: 4px; }
+  .event-sec-head { display: flex; align-items: baseline; gap: 8px; }
+  .event-sec-head .title { font-size: 11px; font-weight: 600; color: var(--text-2); }
+  .event-sec-head .spacer { flex: 1; }
+  .event-sec-head .coverage { font-size: 8.5px; font-weight: 500; color: var(--text-2); }
+  .event-card {
+    background: var(--surface); border: 1px solid var(--hairline);
+    border-radius: 13px; padding: 0 8px;
+  }
+  .event-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; }
+  .ev-identity { display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0; }
+  .glyph-tile {
+    width: 23px; height: 23px; border-radius: 11px; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .glyph-tile svg { width: 11.5px; height: 11.5px; }
+  :root[data-theme="light"] .glyph-tile { background: var(--tile-l); color: var(--evc-l); }
+  :root[data-theme="dark"]  .glyph-tile { background: var(--tile-d); color: var(--evc-d); }
+  .ev-texts { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .ev-title { font-size: 12.5px; font-weight: 600; color: var(--text); line-height: 1.2; transition: color 0.2s ease; }
+  .ev-title.dimmed { color: var(--text-2); }
+  .ev-native { font-size: 9.5px; color: var(--text-2); }
+  .ev-meta { display: flex; align-items: center; gap: 5px; }
+  .badge {
+    font-size: 9px; font-weight: 500; color: var(--text-2);
+    background: var(--elevated); border-radius: 5px; padding: 2px 5px;
+  }
+  .ev-file { font-size: 9.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ev-actions { display: flex; gap: 5px; flex-shrink: 0; }
+  .ev-row-hairline { height: 1px; background: var(--hairline); }
+  .ev-actions .icon-btn svg { width: 14px; height: 14px; }
+  @keyframes preview-pulse { 0% { transform: scale(1); } 50% { transform: scale(1.12); } 100% { transform: scale(1); } }
+  .ev-actions .icon-btn.pulsing svg { animation: preview-pulse 0.22s ease-out; }
+
+  /* 播放设置 */
+  .pb-title { font-size: 11px; font-weight: 600; color: var(--text-2); }
+  .pb-card { border: 1px solid var(--hairline); border-radius: 13px; padding: 8px 9px; background: transparent; }
+  .pb-row { display: flex; align-items: center; gap: 10px; min-height: 28px; }
+  .pb-row .label { font-size: 12.5px; color: var(--text); }
+  .pb-track { flex: 1; height: 3px; border-radius: 2px; background: var(--hairline); position: relative; }
+  .pb-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 65%; border-radius: 2px; background: var(--clay); }
+  .pb-value { font-size: 10.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+
+  /* ---------- 修复① 提示行（FailureRow 形态：真红图标 + text-2 文案）---------- */
+  .fix-banner { display: flex; align-items: center; gap: 6px; min-height: 28px; }
+  .fix-banner .xicon { width: 11px; height: 11px; color: var(--error); flex-shrink: 0; }
+  .fix-banner .msg { font-size: 11px; color: var(--text-2); line-height: 1.45; }
+  .fix-banner .spacer { flex: 1; }
+  .btn-small {
+    font-family: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
+    color: var(--clay); background: var(--elevated);
+    border: 1px solid var(--hairline); border-radius: 6px;
+    padding: 4px 10px; min-height: 24px;
+    display: inline-flex; align-items: center; gap: 5px;
+    transition: background 0.12s ease-out;
+  }
+  .btn-small:hover { background: var(--clay-soft); }
+  .btn-small:focus-visible { outline: 2px solid var(--clay); outline-offset: 1px; }
+  .btn-small svg { width: 10px; height: 10px; }
+  /* 修改前：refreshFailed 时呈现「缺席」标注 */
+  .empty-placeholder {
+    border: 1.5px dashed var(--hairline); border-radius: 10px;
+    padding: 12px 14px; display: none; align-items: center; gap: 10px;
+  }
+  .empty-placeholder.show { display: flex; }
+  .empty-placeholder .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--error); }
+  .empty-placeholder .cap { font-size: 11px; color: var(--text-2); line-height: 1.5; }
+
+  /* ---------- 场景切换 ---------- */
+  .scenario-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .scenario-label { font-size: 12px; color: var(--page-text-2); }
+
+  /* ---------- 修复②/③ 状态标注 ---------- */
+  .state-note {
+    display: none; font-size: 11.5px; line-height: 1.6; color: var(--page-text-2);
+    border: 1px solid var(--hairline); border-radius: 8px; padding: 8px 12px; margin-top: 2px;
+    background: var(--page-card); max-width: 312px;
+  }
+  .state-note.show { display: block; }
+  .state-note b { color: var(--page-text); font-weight: 600; }
+  .state-note .mono { font-size: 10.5px; }
+
+  .action-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+  .btn-action {
+    font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+    color: var(--page-card); background: var(--clay); border: none; border-radius: 6px;
+    padding: 6px 14px; transition: background 0.12s ease-out;
+  }
+  .btn-action:hover { background: var(--clay-hover); }
+  .btn-action.ghost { color: var(--page-text-2); background: transparent; border: 1px solid var(--hairline); }
+  .btn-action.ghost:hover { background: var(--page-card); }
+  .btn-action:focus-visible { outline: 2px solid var(--clay); outline-offset: 1px; }
+
+  /* 恢复入口（修复③ after） */
+  .recovery-entry { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; padding-left: 17px; }
+  .recovery-entry .btn-small svg { width: 11px; height: 11px; }
+  .recovery-hint { font-size: 10px; color: var(--text-2); padding-left: 2px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+</style>
+</head>
+<body>
+
+<!-- SF Symbols 近似重绘（字形为近似，token 与几何均取自源码） -->
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-gear" viewBox="0 0 16 16">
+    <circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/>
+    <path d="M8 1.2v2.3M8 12.5v2.3M1.2 8h2.3M12.5 8h2.3M3.2 3.2l1.7 1.7M11.1 11.1l1.7 1.7M12.8 3.2l-1.7 1.7M4.9 11.1l-1.7 1.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-bell-badge" viewBox="0 0 16 16">
+    <path d="M8 2.2a3.8 3.8 0 0 0-3.8 3.8v2.1L3 10.3a.55.55 0 0 0 .46.86h9.08a.55.55 0 0 0 .46-.86l-1.2-2.2V6A3.8 3.8 0 0 0 8 2.2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+    <path d="M6.5 12.4a1.55 1.55 0 0 0 3 0z" fill="currentColor"/>
+    <circle cx="12.6" cy="3.4" r="2.1" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-bell-badge-fill" viewBox="0 0 16 16">
+    <path d="M8 2.2a3.8 3.8 0 0 0-3.8 3.8v2.1L3 10.3a.55.55 0 0 0 .46.86h9.08a.55.55 0 0 0 .46-.86l-1.2-2.2V6A3.8 3.8 0 0 0 8 2.2z" fill="currentColor"/>
+    <path d="M6.5 12.4a1.55 1.55 0 0 0 3 0z" fill="currentColor"/>
+    <circle cx="12.6" cy="3.4" r="2.1" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-x-circle" viewBox="0 0 16 16">
+    <circle cx="8" cy="8" r="7" fill="currentColor"/>
+    <path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="var(--panel-a)" stroke-width="1.5" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-play" viewBox="0 0 16 16">
+    <path d="M4.6 2.9v10.2c0 .5.55.8 1 .55l8-5.1a.65.65 0 0 0 0-1.1l-8-5.1c-.45-.25-1 .05-1 .55z" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-speaker-wave" viewBox="0 0 16 16">
+    <path d="M2.4 6.1v3.8c0 .4.3.7.7.7h1.8l2.7 2.3c.45.4 1.2.07 1.2-.53V3.63c0-.6-.75-.93-1.2-.53L4.9 5.4H3.1c-.4 0-.7.3-.7.7z" fill="currentColor"/>
+    <path d="M11 5.9a2.9 2.9 0 0 1 0 4.2M12.8 4.3a5.1 5.1 0 0 1 0 7.4" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-speaker-slash" viewBox="0 0 16 16">
+    <path d="M2.4 6.1v3.8c0 .4.3.7.7.7h1.8l2.7 2.3c.45.4 1.2.07 1.2-.53V3.63c0-.6-.75-.93-1.2-.53L4.9 5.4H3.1c-.4 0-.7.3-.7.7z" fill="currentColor"/>
+    <path d="M11.2 6.4l3 3.2M14.2 6.4l-3 3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-retry" viewBox="0 0 16 16">
+    <path d="M13.1 8A5.1 5.1 0 1 1 8 2.9c1.85 0 3.45.96 4.35 2.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M12.9 2.2v3.3h-3.3z" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-folder" viewBox="0 0 16 16">
+    <path d="M1.8 4.6c0-.6.45-1.1 1-1.1h3l1.5 1.5h6c.55 0 1 .5 1 1.1v6c0 .6-.45 1.1-1 1.1h-10.5c-.55 0-1-.5-1-1.1v-7.6z" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-paperplane" viewBox="0 0 16 16">
+    <path d="M14.3 1.7L1.8 6.9c-.55.23-.5 1.03.08 1.2l4.4 1.3 1.3 4.4c.17.58.97.63 1.2.08l5.2-12.5c.2-.5-.28-.98-.98-.68z" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-check-fill" viewBox="0 0 16 16">
+    <circle cx="8" cy="8" r="7" fill="currentColor"/>
+    <path d="M4.9 8.3l2.1 2.1 4.2-4.5" stroke="var(--panel-a)" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-pause-fill" viewBox="0 0 16 16">
+    <circle cx="8" cy="8" r="7" fill="currentColor"/>
+    <path d="M6.3 5.6v4.8M9.7 5.6v4.8" stroke="var(--panel-a)" stroke-width="1.6" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-check" viewBox="0 0 16 16">
+    <circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <path d="M5.3 8.3l2 2 3.9-4.2" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-status-check" viewBox="0 0 16 16">
+    <circle cx="8" cy="8" r="7" fill="currentColor"/>
+    <path d="M4.9 8.3l2.1 2.1 4.2-4.5" stroke="#FFFFFF" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-warning-triangle" viewBox="0 0 16 16">
+    <path d="M8 1.6c.5 0 .96.27 1.2.7l6 10.4c.24.42.24.95 0 1.37-.25.42-.7.68-1.2.68H2c-.5 0-.95-.26-1.2-.68a1.42 1.42 0 0 1 0-1.37l6-10.4c.24-.43.7-.7 1.2-.7z" fill="currentColor"/>
+    <path d="M8 5.2v3.8" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round"/>
+    <circle cx="8" cy="11.5" r="0.95" fill="#FFFFFF"/>
+  </symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 16 16">
+    <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 16 16">
+    <path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+</svg>
+
+<div class="wrap">
+
+  <!-- ============ 顶部 ============ -->
+  <div class="topbar">
+    <div>
+      <h1>claudi0 · 面板修复交互原型</h1>
+      <div class="sub" data-zh="frontend-ux-review-20260918 决策记录执行顺序的前三项 · token 逐字取自 ClaudioColorHex.swift，几何取自 ClaudioTheme.swift / PanelView.swift"
+           data-en="Top three fixes from the frontend-ux-review-20260918 decision log · tokens verbatim from ClaudioColorHex.swift, geometry from ClaudioTheme.swift / PanelView.swift">
+        frontend-ux-review-20260918 决策记录执行顺序的前三项 · token 逐字取自 ClaudioColorHex.swift，几何取自 ClaudioTheme.swift / PanelView.swift
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="seg" id="theme-toggle" role="group" aria-label="主题">
+      <button class="on" data-t="light" data-zh="浅色" data-en="Light">浅色</button>
+      <button data-t="dark" data-zh="深色" data-en="Dark">深色</button>
+    </div>
+    <div class="seg" id="lang-toggle" role="group" aria-label="Language">
+      <button class="on" data-l="zh">中文</button>
+      <button data-l="en">EN</button>
+    </div>
+  </div>
+
+  <!-- ============ 修复① 刷新失败提示 ============ -->
+  <div class="section" id="sec1">
+    <div class="sec-head">
+      <h2 data-zh="修复① 刷新失败提示（stale-while-refresh）" data-en="Fix 1: refresh-failed banner (stale-while-refresh)">修复① 刷新失败提示（stale-while-refresh）</h2>
+      <span class="sec-priority" data-zh="优先级 1" data-en="Priority 1">优先级 1</span>
+    </div>
+    <p class="sec-desc" data-zh="刷新失败但已有可用快照时，HEAD 对 .refreshFailed 渲染 EmptyView()，用户无从得知所看到的结果已过期。提案遵循 ADR 0002 的 stale-while-refresh 契约：事件区照常展示上次结果并保持可交互，在其上方增加一条轻量提示行（真红图标 + text-2 文案）与重试入口。切换下方场景对比两个面板的行为。"
+       data-en="When a refresh fails but a usable snapshot exists, HEAD renders EmptyView() for .refreshFailed, so users cannot tell the visible result is stale. The proposal follows the ADR 0002 stale-while-refresh contract: keep showing the last result with full interactivity, and add a lightweight banner (true-red icon + text-2 sentence) with a retry entry above it. Switch scenarios below to compare both panels.">
+      刷新失败但已有可用快照时，HEAD 对 .refreshFailed 渲染 EmptyView()，用户无从得知所看到的结果已过期。提案遵循 ADR 0002 的 stale-while-refresh 契约：事件区照常展示上次结果并保持可交互，在其上方增加一条轻量提示行（真红图标 + text-2 文案）与重试入口。切换下方场景对比两个面板的行为。
+    </p>
+
+    <div class="scenario-row">
+      <span class="scenario-label" data-zh="场景" data-en="Scenario">场景</span>
+      <div class="seg" id="s1-scenario" role="group" aria-label="Scenario">
+        <button class="on" data-s1="ready" data-zh="正常就绪" data-en="Ready">正常就绪</button>
+        <button data-s1="refreshing" data-zh="正在刷新" data-en="Refreshing">正在刷新</button>
+        <button data-s1="refreshFailed" data-zh="刷新失败" data-en="Refresh failed">刷新失败</button>
+      </div>
+    </div>
+
+    <div class="compare">
+      <div class="panel-col">
+        <span class="col-chip" data-zh="修改前 · HEAD" data-en="Before · HEAD">修改前 · HEAD</span>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="wordmark"><span class="orbit"></span>claudi0</span>
+            <span class="spacer"></span>
+            <button class="icon-btn" title="打开设置"><svg><use href="#i-gear"/></svg></button>
+            <button class="icon-btn" title="最近通知"><svg><use href="#i-bell-badge"/></svg></button>
+          </div>
+          <div class="hairline-h"></div>
+          <div class="panel-scroll">
+            <div data-scope-block="expanded"></div>
+            <div data-s1="before-banner"></div>
+            <div class="empty-placeholder" data-s1-empty>
+              <span class="code">EmptyView()</span>
+              <span class="cap" data-zh="HEAD：.refreshFailed 走到这里什么都不渲染——事件区看着和「就绪」一模一样" data-en="HEAD: .refreshFailed renders nothing here — the event section looks identical to “Ready”">HEAD：.refreshFailed 走到这里什么都不渲染——事件区看着和「就绪」一模一样</span>
+            </div>
+            <div class="event-section">
+              <div class="event-sec-head">
+                <span class="title" data-events-title>Codex 事件</span>
+                <span class="spacer"></span>
+                <span class="coverage" data-zh="5/5 可映射" data-en="5/5 mappable">5/5 可映射</span>
+              </div>
+              <div class="event-card" data-event-rows="claude"></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px;">
+              <span class="pb-title" data-zh="播放设置" data-en="Playback">播放设置</span>
+              <div class="pb-card">
+                <div class="pb-row">
+                  <span class="label" data-zh="总音量" data-en="Master Volume">总音量</span>
+                  <div class="pb-track"><div class="pb-fill"></div></div>
+                  <span class="pb-value">65%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="panel-footer">
+            <div class="hairline-h" style="margin-bottom:0;"></div>
+            <div class="footer-row">
+              <svg style="width:11px;height:11px;color:var(--text-2)"><use href="#i-x-circle"/></svg>
+              <span data-zh="退出 claudi0" data-en="Quit claudi0">退出 claudi0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-col">
+        <span class="col-chip after" data-zh="修改后 · 提案" data-en="After · Proposal">修改后 · 提案</span>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="wordmark"><span class="orbit"></span>claudi0</span>
+            <span class="spacer"></span>
+            <button class="icon-btn" title="打开设置"><svg><use href="#i-gear"/></svg></button>
+            <button class="icon-btn" title="最近通知"><svg><use href="#i-bell-badge"/></svg></button>
+          </div>
+          <div class="hairline-h"></div>
+          <div class="panel-scroll">
+            <div data-scope-block="expanded"></div>
+            <div data-s1="after-banner"></div>
+            <div class="event-section">
+              <div class="event-sec-head">
+                <span class="title" data-events-title>Codex 事件</span>
+                <span class="spacer"></span>
+                <span class="coverage" data-zh="5/5 可映射" data-en="5/5 mappable">5/5 可映射</span>
+              </div>
+              <div class="event-card" data-event-rows="claude"></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px;">
+              <span class="pb-title" data-zh="播放设置" data-en="Playback">播放设置</span>
+              <div class="pb-card">
+                <div class="pb-row">
+                  <span class="label" data-zh="总音量" data-en="Master Volume">总音量</span>
+                  <div class="pb-track"><div class="pb-fill"></div></div>
+                  <span class="pb-value">65%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="panel-footer">
+            <div class="hairline-h" style="margin-bottom:0;"></div>
+            <div class="footer-row">
+              <svg style="width:11px;height:11px;color:var(--text-2)"><use href="#i-x-circle"/></svg>
+              <span data-zh="退出 claudi0" data-en="Quit claudi0">退出 claudi0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="note">
+        <h3 data-zh="依据与口径" data-en="Evidence and basis">依据与口径</h3>
+        <ul>
+          <li><span class="ref">现状澄清：面板<b>没有常驻刷新入口</b>——原有「重试」按钮只在 <span class="mono">.loadFailed</span>（加载失败、无可用快照）时出现；刷新本身在面板每次打开时自动触发。提案复用 <span class="mono">panelRetry</span> 文案与 <span class="mono">retrySoundPackLibraryRefresh</span> 动作，在 <span class="mono">.refreshFailed</span>（有旧快照）时提供重试；<span class="mono">.refreshing</span> 不显示常驻指示。</span></li>
+          <li><span class="ref">HEAD 缺口：<b class="mono">PanelView.swift:678</b> —— <span class="mono">case .ready, .refreshing, .refreshFailed: EmptyView()</span>，三态合一，刷新失败无从呈现。</span></li>
+          <li><span class="ref">契约来源：<b>ADR 0002</b> stale-while-refresh —— 有陈旧快照时必须给出「刷新失败，正在显示上次结果」+ 重试。</span></li>
+          <li><span class="ref">形态口径：复用共享 <b class="mono">FailureRow</b>（真红只做图标、文案 text-2），镜像管理窗已有的 <span class="mono">.refreshFailed(reason:)</span> 呈现（<span class="mono">SoundPacksWindowAccessibility.swift:390</span>）。</span></li>
+          <li><span class="ref">非阻塞：提示行不替换事件区，事件行静音/试听保持可用。</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 修复② surfaceSoundIssue 恢复即解除 ============ -->
+  <div class="section" id="sec2">
+    <div class="sec-head">
+      <h2 data-zh="修复② surfaceSoundIssue 恢复即解除（fail-closed 但可恢复）" data-en="Fix 2: clear surfaceSoundIssue on recovery (fail-closed but recoverable)">修复② surfaceSoundIssue 恢复即解除（fail-closed 但可恢复）</h2>
+      <span class="sec-priority" data-zh="优先级 2" data-en="Priority 2">优先级 2</span>
+    </div>
+    <p class="sec-desc" data-zh="写入失败后，surfaceSoundIssue 单一呈现失败行并禁用该来源的静音/试听（fail-closed，保留）。但 HEAD 只在写成功、重置覆盖或切换来源时清除它（PanelConfigController.swift:328 / 431 / 612 / 655）；底层自行恢复后重载配置（reloadConfigReadModel，:668）不会解除——控件持续禁用且没有任何解释。提案：重载时发现条件已恢复即同步清除。点击下方按钮看两个面板的差别。"
+       data-en="After a write failure, surfaceSoundIssue renders a single failure row and disables that source's mute/preview controls (fail-closed — kept). But HEAD only clears it on write success, override reset, or source switch (PanelConfigController.swift:328 / 431 / 612 / 655); reloading config after the underlying issue self-resolves (reloadConfigReadModel, :668) does not clear it — controls stay disabled with no explanation. The proposal: clear it during reload once the condition has recovered. Click the button below to compare.">
+      写入失败后，surfaceSoundIssue 单一呈现失败行并禁用该来源的静音/试听（fail-closed，保留）。但 HEAD 只在写成功、重置覆盖或切换来源时清除它（PanelConfigController.swift:328 / 431 / 612 / 655）；底层自行恢复后重载配置（reloadConfigReadModel，:668）不会解除——控件持续禁用且没有任何解释。提案：重载时发现条件已恢复即同步清除。点击下方按钮看两个面板的差别。
+    </p>
+
+    <div class="action-row">
+      <button class="btn-action" id="s2-recover" data-zh="模拟：底层已恢复，重载配置" data-en="Simulate: underlying issue resolved, reload config">模拟：底层已恢复，重载配置</button>
+      <button class="btn-action ghost" id="s2-reset" data-zh="重置为写入失败" data-en="Reset to write failure">重置为写入失败</button>
+    </div>
+
+    <div class="compare">
+      <div class="panel-col">
+        <span class="col-chip" data-zh="修改前 · HEAD" data-en="Before · HEAD">修改前 · HEAD</span>
+        <div class="panel" data-s2-panel="before">
+          <div class="panel-header">
+            <span class="wordmark"><span class="orbit"></span>claudi0</span>
+            <span class="spacer"></span>
+            <button class="icon-btn" title="打开设置"><svg><use href="#i-gear"/></svg></button>
+            <button class="icon-btn" title="最近通知"><svg><use href="#i-bell-badge"/></svg></button>
+          </div>
+          <div class="hairline-h"></div>
+          <div class="panel-scroll">
+            <div class="event-section">
+              <div class="event-sec-head">
+                <span class="title" data-events-title>Codex 事件</span>
+                <span class="spacer"></span>
+                <span class="coverage" data-zh="5/5 可映射" data-en="5/5 mappable">5/5 可映射</span>
+              </div>
+              <div class="event-card" data-event-rows="claude"></div>
+            </div>
+            <div data-s2="issue-region">
+              <div class="fix-banner">
+                <svg class="xicon"><use href="#i-x-circle"/></svg>
+                <span class="msg" data-zh="Claude 的声音覆盖已损坏；已停止该来源播放，未回退到全局默认" data-en="The Claude sound override is damaged; playback for this source stopped without falling back to Global">Claude 的声音覆盖已损坏；已停止该来源播放，未回退到全局默认</span>
+              </div>
+            </div>
+          </div>
+          <div class="panel-footer">
+            <div class="hairline-h" style="margin-bottom:0;"></div>
+            <div class="footer-row">
+              <svg style="width:11px;height:11px;color:var(--text-2)"><use href="#i-x-circle"/></svg>
+              <span data-zh="退出 claudi0" data-en="Quit claudi0">退出 claudi0</span>
+            </div>
+          </div>
+        </div>
+        <div class="state-note" id="s2-note-before" data-zh="HEAD：重载后 surfaceSoundIssue 仍为旧值（reloadConfigReadModel 不清除它）——失败行还在，控件仍禁用，界面与失败发生时完全一样，无法区分「还在坏」与「已恢复」。"
+             data-en="HEAD: surfaceSoundIssue keeps its stale value after reload (reloadConfigReadModel never clears it) — the failure row remains, controls stay disabled, and the UI is indistinguishable from the moment of failure.">HEAD：重载后 surfaceSoundIssue 仍为旧值（reloadConfigReadModel 不清除它）——失败行还在，控件仍禁用，界面与失败发生时完全一样，无法区分「还在坏」与「已恢复」。</div>
+      </div>
+
+      <div class="panel-col">
+        <span class="col-chip after" data-zh="修改后 · 提案" data-en="After · Proposal">修改后 · 提案</span>
+        <div class="panel" data-s2-panel="after">
+          <div class="panel-header">
+            <span class="wordmark"><span class="orbit"></span>claudi0</span>
+            <span class="spacer"></span>
+            <button class="icon-btn" title="打开设置"><svg><use href="#i-gear"/></svg></button>
+            <button class="icon-btn" title="最近通知"><svg><use href="#i-bell-badge"/></svg></button>
+          </div>
+          <div class="hairline-h"></div>
+          <div class="panel-scroll">
+            <div class="event-section">
+              <div class="event-sec-head">
+                <span class="title" data-events-title>Codex 事件</span>
+                <span class="spacer"></span>
+                <span class="coverage" data-zh="5/5 可映射" data-en="5/5 mappable">5/5 mappable</span>
+              </div>
+              <div class="event-card" data-event-rows="claude"></div>
+            </div>
+            <div data-s2="issue-region">
+              <div class="fix-banner">
+                <svg class="xicon"><use href="#i-x-circle"/></svg>
+                <span class="msg" data-zh="Claude 的声音覆盖已损坏；已停止该来源播放，未回退到全局默认" data-en="The Claude sound override is damaged; playback for this source stopped without falling back to Global">Claude 的声音覆盖已损坏；已停止该来源播放，未回退到全局默认</span>
+              </div>
+            </div>
+          </div>
+          <div class="panel-footer">
+            <div class="hairline-h" style="margin-bottom:0;"></div>
+            <div class="footer-row">
+              <svg style="width:11px;height:11px;color:var(--text-2)"><use href="#i-x-circle"/></svg>
+              <span data-zh="退出 claudi0" data-en="Quit claudi0">退出 claudi0</span>
+            </div>
+          </div>
+        </div>
+        <div class="state-note" id="s2-note-after" data-zh="提案：重载发现条件已恢复 → surfaceSoundIssue 置 nil（与现有清除点 :328 / :431 / :612 / :655 同一口径）——失败行移除，控件恢复可用，标题回到 text 主色。fail-closed 语义不变：恢复检测仍只来自真实读回，不做任何伪装回退。"
+             data-en="Proposal: on reload, once the condition has recovered → surfaceSoundIssue = nil (same semantics as existing clear points :328 / :431 / :612 / :655) — the failure row is removed, controls re-enable, and titles return to the primary text color. Fail-closed semantics are unchanged: recovery is only detected from a real read-back, never faked.">提案：重载发现条件已恢复 → surfaceSoundIssue 置 nil（与现有清除点 :328 / :431 / :612 / :655 同一口径）——失败行移除，控件恢复可用，标题回到 text 主色。fail-closed 语义不变：恢复检测仍只来自真实读回，不做任何伪装回退。</div>
+      </div>
+
+      <div class="note">
+        <h3 data-zh="依据与口径" data-en="Evidence and basis">依据与口径</h3>
+        <ul>
+          <li><span class="ref">生命周期缺口：<b class="mono">PanelConfigController.swift:668</b> <span class="mono">reloadConfigReadModel</span> 重建派生读模型但不触碰 <span class="mono">surfaceSoundIssue</span>。</span></li>
+          <li><span class="ref">现有清除点（口径来源）：写成功 <b class="mono">:328 / :431 / :655</b>、切换来源 <b class="mono">:612</b>；提案把「条件已恢复的重载」加入同一列表，不新增第二条清除语义。</span></li>
+          <li><span class="ref">写允许门：<b class="mono">PanelView.swift:595</b> <span class="mono">configWritesAllowed: panelModel.surfaceSoundIssue == nil</span> —— 清除后控件自动恢复，无需改视图层。</span></li>
+          <li><span class="ref">单一呈现：<b class="mono">PanelView.swift:769-771</b> 失败行走 <span class="mono">FailureRow</span>，置 nil 即整体移除。</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 修复③ 错误文案双语可行动 ============ -->
+  <div class="section" id="sec3">
+    <div class="sec-head">
+      <h2 data-zh="修复③ 错误文案：双语 + 可行动 + 按需恢复入口" data-en="Fix 3: bilingual, actionable error text with on-demand recovery">修复③ 错误文案：双语 + 可行动 + 按需恢复入口</h2>
+      <span class="sec-priority" data-zh="优先级 3" data-en="Priority 3">优先级 3</span>
+    </div>
+    <p class="sec-desc" data-zh="HEAD 把 helper 的 error.description 原样塞进 FailureRow（PanelWriteFailures.swift:124），用户看到的是一条中文技术串：不知道发生了什么、影响是什么、能做什么。提案：写成面向用户的双语文案（发生了什么 + 影响），并附按需恢复入口。右上有语言开关，可切换中英对照。"
+       data-en="HEAD pipes the helper's raw error.description into FailureRow (PanelWriteFailures.swift:124), so users see a technical string: no sense of what happened, what it affects, or what to do. The proposal: rewrite as user-facing bilingual copy (what happened + impact) with an on-demand recovery entry. Use the language toggle at the top to compare both languages.">
+      HEAD 把 helper 的 error.description 原样塞进 FailureRow（PanelWriteFailures.swift:124），用户看到的是一条中文技术串：不知道发生了什么、影响是什么、能做什么。提案：写成面向用户的双语文案（发生了什么 + 影响），并附按需恢复入口。右上有语言开关，可切换中英对照。
+    </p>
+
+    <div class="compare">
+      <div class="panel-col">
+        <span class="col-chip" data-zh="修改前 · HEAD" data-en="Before · HEAD">修改前 · HEAD</span>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="wordmark"><span class="orbit"></span>claudi0</span>
+            <span class="spacer"></span>
+            <button class="icon-btn" title="打开设置"><svg><use href="#i-gear"/></svg></button>
+            <button class="icon-btn" title="最近通知"><svg><use href="#i-bell-badge"/></svg></button>
+          </div>
+          <div class="hairline-h"></div>
+          <div class="panel-scroll">
+            <div data-s3="before-region">
+              <div class="fix-banner">
+                <svg class="xicon"><use href="#i-x-circle"/></svg>
+                <span class="msg mono" data-zh="写入声音配置失败：SoundConfig 并入 settings.json 被拒绝 (underlying: Cocoa 6602)" data-en="Sound config write failed: SoundConfig merge into settings.json rejected (underlying: Cocoa 6602)">写入声音配置失败：SoundConfig 并入 settings.json 被拒绝 (underlying: Cocoa 6602)</span>
+              </div>
+            </div>
+          </div>
+          <div class="panel-footer">
+            <div class="hairline-h" style="margin-bottom:0;"></div>
+            <div class="footer-row">
+              <svg style="width:11px;height:11px;color:var(--text-2)"><use href="#i-x-circle"/></svg>
+              <span data-zh="退出 claudi0" data-en="Quit claudi0">退出 claudi0</span>
+            </div>
+          </div>
+        </div>
+        <div class="state-note show" data-zh="HEAD：一条 helper 抛出的技术串，含内部类型名与底层错误码；没有影响说明，没有恢复入口，用户只能困惑。"
+             data-en="HEAD: a helper-thrown technical string with internal type names and an underlying error code; no impact statement, no recovery entry.">HEAD：一条 helper 抛出的技术串，含内部类型名与底层错误码；没有影响说明，没有恢复入口，用户只能困惑。</div>
+      </div>
+
+      <div class="panel-col">
+        <span class="col-chip after" data-zh="修改后 · 提案" data-en="After · Proposal">修改后 · 提案</span>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="wordmark"><span class="orbit"></span>claudi0</span>
+            <span class="spacer"></span>
+            <button class="icon-btn" title="打开设置"><svg><use href="#i-gear"/></svg></button>
+            <button class="icon-btn" title="最近通知"><svg><use href="#i-bell-badge"/></svg></button>
+          </div>
+          <div class="hairline-h"></div>
+          <div class="panel-scroll">
+            <div data-s3="after-region">
+              <div class="fix-banner" style="align-items:flex-start;">
+                <svg class="xicon" style="margin-top:2px;"><use href="#i-x-circle"/></svg>
+                <div style="flex:1;">
+                  <span class="msg" style="display:block;" data-zh="无法保存声音设置。配置文件可能正被其他程序使用，本次修改没有生效。" data-en="Can't save sound settings. The configuration file may be in use by another program, so this change didn't take effect.">无法保存声音设置。配置文件可能正被其他程序使用，本次修改没有生效。</span>
+                  <div class="recovery-entry">
+                    <div>
+                      <button class="btn-small" title="在访达中显示配置文件">
+                        <svg><use href="#i-folder"/></svg>
+                        <span data-zh="显示配置文件" data-en="Reveal in Finder">显示配置文件</span>
+                      </button>
+                    </div>
+                    <span class="recovery-hint" data-zh="在访达中定位 settings.json，排查文件占用后重试" data-en="Locate settings.json in Finder, resolve the file lock, then retry">在访达中定位 settings.json，排查文件占用后重试</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="panel-footer">
+            <div class="hairline-h" style="margin-bottom:0;"></div>
+            <div class="footer-row">
+              <svg style="width:11px;height:11px;color:var(--text-2)"><use href="#i-x-circle"/></svg>
+              <span data-zh="退出 claudi0" data-en="Quit claudi0">退出 claudi0</span>
+            </div>
+          </div>
+        </div>
+        <div class="state-note show" data-zh="提案：三句式——发生了什么（无法保存）、影响（本次修改没有生效）、怎么办（显示配置文件 + 提示）。技术细节收敛到提示层，主文案面向用户；形态仍是 FailureRow + 恢复入口，与 configFailureNotice 已有的「显示配置文件」按钮先例一致（PanelView.swift:699-716）。"
+             data-en="Proposal: three-part copy — what happened (can't save), impact (change didn't take effect), what to do (Reveal in Finder + hint). Technical detail moves to the hint layer; the form stays FailureRow + recovery entry, consistent with the existing configFailureNotice precedent (PanelView.swift:699-716).">提案：三句式——发生了什么（无法保存）、影响（本次修改没有生效）、怎么办（显示配置文件 + 提示）。技术细节收敛到提示层，主文案面向用户；形态仍是 FailureRow + 恢复入口，与 configFailureNotice 已有的「显示配置文件」按钮先例一致（PanelView.swift:699-716）。</div>
+      </div>
+
+      <div class="note">
+        <h3 data-zh="依据与口径" data-en="Evidence and basis">依据与口径</h3>
+        <ul>
+          <li><span class="ref">HEAD 缺口：<b class="mono">PanelWriteFailures.swift:124</b> —— <span class="mono">message: error.description</span>，helper 中文技术串直达用户。</span></li>
+          <li><span class="ref">先例：<b class="mono">PanelView.swift:699-716</b> configFailureNotice 已是「FailureRow + 恢复入口（folder 图标 + 显示配置文件）」的形态，提案不引入新组件。</span></li>
+          <li><span class="ref">色约束不变：真红只做图标（<b class="mono">errorLight #E0453A</b> 对面板 4.07:1，仅过 ≥3:1），文案一律 <b class="mono">text-2 #75685A</b>（5.54:1）。</span></li>
+          <li><span class="ref">双语：新增文案须同步注册 <span class="mono">Localizable.xcstrings</span>（zh-Hans + en 占位符一致）并入 <span class="mono">ClaudioL10nKey.allKnown</span>。</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="footnote" data-zh="本页为交互提案演示，不是完成证明：未运行 claudio-gui-tests / 构建 / 原生验收；键盘焦点顺序与 VoiceOver 行为仍以仓库验收记录中的「未验证」清单为准。事件字形 tile 的底色为「事件色 @15% 覆在 panel 上」的复合色，已按 compositedHex 口径逐通道预计算（亮/暗各一）；SF Symbols 图形为近似重绘，token 与几何均逐字取自源码。"
+       data-en="This page is an interaction proposal demo, not proof of completion: claudio-gui-tests, builds, and native acceptance were not run; keyboard focus order and VoiceOver behavior remain subject to the repo's unverified list. Event glyph tiles use the composited color of event-color @15% over panel, precomputed per-channel via the compositedHex method (light and dark). SF Symbol glyphs are approximate redraws; tokens and geometry are verbatim from source.">
+    本页为交互提案演示，不是完成证明：未运行 claudio-gui-tests / 构建 / 原生验收；键盘焦点顺序与 VoiceOver 行为仍以仓库验收记录中的「未验证」清单为准。事件字形 tile 的底色为「事件色 @15% 覆在 panel 上」的复合色，已按 compositedHex 口径逐通道预计算（亮/暗各一）；SF Symbols 图形为近似重绘，token 与几何均逐字取自源码。
+  </div>
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+
+  /* ---------- 五事件数据（tile 复合色按 compositedHex 预计算） ---------- */
+  var EVENTS = [
+    { key: 'task_start', zh: '任务开始', en: 'Task Started', glyph: '#i-paperplane',
+      evcL: '#0A72D0', evcD: '#0A84FF', tileL: '#DAEAF8', tileD: '#18283B',
+      file: 'Chime.caf', implemented: true },
+    { key: 'stop', zh: '本轮结束', en: 'Task Stopped', glyph: '#i-check-fill',
+      evcL: '#288B43', evcD: '#34C759', tileL: '#DFEEE3', tileD: '#1E3222',
+      file: 'Success.caf', implemented: true },
+    { key: 'stop_failure', zh: '本轮中断', en: 'Task Interrupted', glyph: '#i-pause-fill',
+      evcL: '#AC6900', evcD: '#FF9F0A', tileL: '#F3E8D9', tileD: '#3C2C16',
+      file: 'Pause.caf', implemented: true },
+    { key: 'notification', zh: '待响应', en: 'Needs Attention', glyph: '#i-bell-badge-fill',
+      evcL: '#C4633C', evcD: '#D97757', tileL: '#F6E8E2', tileD: '#372621',
+      file: 'Notification.caf', implemented: true },
+    { key: 'subagent_stop', zh: '子任务结束', en: 'Subagent Stopped', glyph: '#i-check',
+      evcL: '#5B59D6', evcD: '#5E5CE6', tileL: '#E6E6F9', tileD: '#242237',
+      file: '—', implemented: false }
+  ];
+
+  function lang() { return root.dataset.lang === 'en' ? 'en' : 'zh'; }
+
+  function renderEventRows() {
+    var containers = document.querySelectorAll('[data-event-rows]');
+    var L = lang();
+    containers.forEach(function (container) {
+      container.innerHTML = '';
+      EVENTS.forEach(function (ev, i) {
+        var row = document.createElement('div');
+        row.className = 'event-row';
+        row.dataset.ev = ev.key;
+        var title = L === 'en' ? ev.en : ev.zh;
+        var badge = ev.implemented
+          ? (L === 'en' ? 'Supported' : '已支持')
+          : (L === 'en' ? 'Not implemented' : '未实现');
+        row.innerHTML =
+          '<div class="ev-identity">' +
+            '<span class="glyph-tile" style="--evc-l:' + ev.evcL + ';--evc-d:' + ev.evcD + ';--tile-l:' + ev.tileL + ';--tile-d:' + ev.tileD + ';">' +
+              '<svg aria-hidden="true"><use href="' + ev.glyph + '"/></svg>' +
+            '</span>' +
+            '<div class="ev-texts">' +
+              '<div class="ev-title' + (ev.implemented ? '' : ' dimmed') + '">' + title + '</div>' +
+              '<div class="ev-native mono">' + ev.key + '</div>' +
+              '<div class="ev-meta"><span class="badge">' + badge + '</span><span class="ev-file mono">' + ev.file + '</span></div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="ev-actions">' +
+            '<button class="icon-btn act-play' + (ev.implemented ? '' : ' disabled') + '" title="' + (L === 'en' ? 'Preview' : '试听') + '" aria-label="' + (L === 'en' ? 'Preview ' : '试听 ') + title + '">' +
+              '<svg class="main"><use href="#i-play"/></svg></button>' +
+            '<button class="icon-btn act-mute' + (ev.implemented ? '' : ' disabled') + '" title="' + (L === 'en' ? 'Mute' : '静音') + '" aria-label="' + (L === 'en' ? 'Mute ' : '静音 ') + title + '">' +
+              '<svg class="main"><use href="#i-speaker-wave"/></svg>' +
+              '<svg class="alt"><use href="#i-speaker-slash"/></svg></button>' +
+          '</div>';
+        container.appendChild(row);
+        if (i < EVENTS.length - 1) {
+          var hr = document.createElement('div');
+          hr.className = 'ev-row-hairline';
+          container.appendChild(hr);
+        }
+      });
+    });
+    applyS2State(); /* 行重建后重放修复②的禁用/标题状态 */
+  }
+
+  /* 行内交互：试听脉冲（peakScale 1.12 / halfDuration 0.11）+ 静音切换 */
+  document.addEventListener('click', function (e) {
+    var play = e.target.closest('.act-play');
+    if (play && !play.classList.contains('disabled')) {
+      play.classList.remove('pulsing');
+      void play.offsetWidth;
+      play.classList.add('pulsing');
+    }
+    var mute = e.target.closest('.act-mute');
+    if (mute && !mute.classList.contains('disabled')) {
+      mute.classList.toggle('muted');
+      var L = lang();
+      mute.title = mute.classList.contains('muted') ? (L === 'en' ? 'Unmute' : '取消静音') : (L === 'en' ? 'Mute' : '静音');
+    }
+  });
+
+  /* ---------- 主题 / 语言 ---------- */
+  function syncSeg(seg, attr, value) {
+    seg.querySelectorAll('button').forEach(function (b) {
+      b.classList.toggle('on', b.dataset[attr] === value);
+    });
+  }
+  document.getElementById('theme-toggle').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    root.dataset.theme = b.dataset.t;
+    syncSeg(this, 't', b.dataset.t);
+  });
+  function setLang(l) {
+    root.dataset.lang = l;
+    document.querySelectorAll('[data-zh]').forEach(function (el) {
+      el.textContent = (l === 'en' && el.dataset.en !== undefined) ? el.dataset.en : el.dataset.zh;
+    });
+    renderEventRows();
+    renderScopeBlocks();
+    updateEventTitles();
+  }
+  document.getElementById('lang-toggle').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    setLang(b.dataset.l);
+    syncSeg(this, 'l', b.dataset.l);
+  });
+
+  /* ---------- 修复①：stale-while-refresh 场景 ---------- */
+  var s1State = 'ready';
+  function bannerFailedHTML() {
+    var L = lang();
+    return '<div class="fix-banner">' +
+      '<svg class="xicon"><use href="#i-x-circle"/></svg>' +
+      '<span class="msg">' + (L === 'en' ? 'Refresh failed, showing the last result' : '刷新失败，正在显示上次结果') + '</span>' +
+      '<span class="spacer"></span>' +
+      '<button class="btn-small" data-s1-retry><svg><use href="#i-retry"/></svg>' +
+      (L === 'en' ? 'Retry reading' : '重试读取') + '</button></div>';
+  }
+  function applyS1() {
+    document.querySelectorAll('#s1-scenario button').forEach(function (b) {
+      b.classList.toggle('on', b.dataset.s1 === s1State);
+    });
+    document.querySelectorAll('[data-s1="before-banner"]').forEach(function (el) { el.innerHTML = ''; });
+    document.querySelectorAll('[data-s1-empty]').forEach(function (el) {
+      el.classList.toggle('show', s1State === 'refreshFailed');
+    });
+    document.querySelectorAll('[data-s1="after-banner"]').forEach(function (el) {
+      el.innerHTML = (s1State === 'refreshFailed') ? bannerFailedHTML() : '';
+    });
+  }
+  document.getElementById('s1-scenario').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    s1State = b.dataset.s1;
+    applyS1();
+  });
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('[data-s1-retry]')) return;
+    s1State = 'refreshing';
+    applyS1();
+    setTimeout(function () {
+      if (s1State === 'refreshing') { s1State = 'ready'; applyS1(); }
+    }, 1400);
+  });
+
+  /* ---------- 修复②：surfaceSoundIssue 恢复即解除 ---------- */
+  var s2Issue = true;
+  function applyS2State() {
+    document.querySelectorAll('[data-s2="issue-region"]').forEach(function (el) {
+      el.style.display = s2Issue ? '' : 'none';
+    });
+    document.querySelectorAll('[data-s2-panel] .event-row').forEach(function (row) {
+      var ev = EVENTS.find(function (x) { return x.key === row.dataset.ev; });
+      var title = row.querySelector('.ev-title');
+      if (title) {
+        var dimmed = s2Issue || !ev.implemented;
+        title.classList.toggle('dimmed', dimmed);
+      }
+      row.querySelectorAll('.ev-actions .icon-btn').forEach(function (btn) {
+        btn.classList.toggle('disabled', s2Issue || !ev.implemented);
+      });
+    });
+    var nb = document.getElementById('s2-note-before');
+    var na = document.getElementById('s2-note-after');
+    if (nb) nb.classList.toggle('show', s2Issue);
+    if (na) na.classList.toggle('show', !s2Issue);
+  }
+  document.getElementById('s2-recover').addEventListener('click', function () { s2Issue = false; applyS2State(); });
+  document.getElementById('s2-reset').addEventListener('click', function () { s2Issue = true; applyS2State(); });
+
+  /* ---------- scope 选择器（按 PanelSoundScopePicker.swift / 截图复刻） ---------- */
+  var SCOPES = [
+    { id: 'global', zh: '全局默认', en: 'Global Default',
+      readZh: '5 个事件 · 默认', readEn: '5 events · Default',
+      stateZh: '默认', stateEn: 'Default', status: 'success' },
+    { id: 'codex', zh: 'Codex', en: 'Codex',
+      readZh: '4/5 · 已激活', readEn: '4/5 · Active',
+      stateZh: '已激活', stateEn: 'Active', status: 'success' },
+    { id: 'claude', zh: 'Claude Code', en: 'Claude Code',
+      readZh: '5/5 · 需要处理', readEn: '5/5 · Needs attention',
+      stateZh: '需要处理', stateEn: 'Needs attention', status: 'attention' },
+    { id: 'workbuddy', zh: 'WorkBuddy', en: 'WorkBuddy',
+      readZh: '3/5 · 已激活', readEn: '3/5 · Active',
+      stateZh: '已激活', stateEn: 'Active', status: 'success' }
+  ];
+  var selectedScope = 'codex';
+
+  function scopeStateIcon(s) {
+    return s.status === 'success'
+      ? '<svg class="status-ic"><use href="#i-status-check"/></svg>'
+      : '<svg class="status-ic attention"><use href="#i-warning-triangle"/></svg>';
+  }
+  function renderScopeBlocks() {
+    var L = lang();
+    document.querySelectorAll('[data-scope-block]').forEach(function (el) {
+      var expanded = el.dataset.scopeBlock === 'expanded';
+      if (el.dataset.open === undefined) el.dataset.open = expanded ? '1' : '';
+      var open = el.dataset.open === '1';
+      var sel = SCOPES.find(function (x) { return x.id === selectedScope; });
+      var html = '<div class="scope-sec-head">' +
+        '<span class="title">' + (L === 'en' ? 'Sound Scopes' : '声音作用域') + '</span>' +
+        '<span class="spacer"></span>' +
+        '<span class="cap">' + (L === 'en' ? 'Missing fields inherit Global defaults' : '缺失字段继承全局默认') + '</span></div>';
+      html += '<div class="scope-card" data-scope-toggle>' +
+        '<div class="sc-id"><div class="name">' + (L === 'en' ? sel.en : sel.zh) + '</div>' +
+        '<div class="sub">' + (L === 'en' ? sel.readEn : sel.readZh) + '</div></div>' +
+        '<span class="spacer"></span>' + scopeStateIcon(sel) +
+        '<span class="state-text">' + (L === 'en' ? sel.stateEn : sel.stateZh) + '</span>' +
+        '<svg class="chev" style="' + (open ? '' : 'transform:rotate(-90deg);') + '"><use href="#i-chevron-down"/></svg></div>';
+      if (open) {
+        html += '<div class="scope-menu">' + SCOPES.map(function (s) {
+          var isSel = s.id === selectedScope;
+          var right;
+          if (s.status === 'attention') {
+            right = '<span class="status-pill"><svg><use href="#i-warning-triangle"/></svg>' +
+              (L === 'en' ? s.stateEn : s.stateZh) + '</span>' +
+              '<svg class="chev"><use href="#i-chevron-right"/></svg>';
+          } else {
+            right = scopeStateIcon(s) +
+              '<span class="state-text">' + (L === 'en' ? s.stateEn : s.stateZh) + '</span>';
+          }
+          return '<div class="scope-row' + (isSel ? ' selected' : '') + '" data-scope-row="' + s.id + '">' +
+            '<div class="sc-id"><div class="name">' + (L === 'en' ? s.en : s.zh) + '</div>' +
+            '<div class="sub">' + (L === 'en' ? s.readEn : s.readZh) + '</div></div>' +
+            '<span class="spacer"></span>' + right + '</div>';
+        }).join('') + '</div>';
+      }
+      el.innerHTML = html;
+    });
+  }
+  function updateEventTitles() {
+    var L = lang();
+    var sel = SCOPES.find(function (x) { return x.id === selectedScope; });
+    var name = L === 'en' ? sel.en : sel.zh;
+    document.querySelectorAll('[data-events-title]').forEach(function (el) {
+      el.textContent = name + (L === 'en' ? ' events' : ' 事件');
+    });
+  }
+  document.addEventListener('click', function (e) {
+    var toggle = e.target.closest('[data-scope-toggle]');
+    if (toggle) {
+      var block = toggle.closest('[data-scope-block]');
+      block.dataset.open = block.dataset.open === '1' ? '' : '1';
+      renderScopeBlocks();
+      return;
+    }
+    var row = e.target.closest('[data-scope-row]');
+    if (row) {
+      selectedScope = row.dataset.scopeRow;
+      renderScopeBlocks();
+      updateEventTitles();
+    }
+  });
+
+  /* ---------- 初始 ---------- */
+  renderEventRows();
+  renderScopeBlocks();
+  updateEventTitles();
+  applyS1();
+  applyS2State();
+})();
+</script>
+</body>
+</html>
