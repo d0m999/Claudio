@@ -107,6 +107,18 @@ if CommandLine.arguments.contains("--ai-cue-assets") {
     exit(failures == 0 ? 0 : 1)
 }
 
+if CommandLine.arguments.contains("--user-sound-pack-deletion") {
+    runUserSoundPackDeletionSuites()
+    print("User sound pack deletion: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
+if CommandLine.arguments.contains("--sound-editor-interface") {
+    await runSoundPacksEditorInterfaceSuites()
+    print("Sound editor interface: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
 if CommandLine.arguments.contains("--workspace-sounds") {
     runLocalizationSuites()
     runPanelFocusOrderSuites()

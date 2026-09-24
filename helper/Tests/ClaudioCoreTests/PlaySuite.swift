@@ -139,6 +139,19 @@ private final class FixedClock: @unchecked Sendable {
     }
 }
 
+private final class PlaybackAuthorizationSequence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var results: [Bool]
+
+    init(_ results: [Bool]) { self.results = results }
+
+    func next() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return results.isEmpty ? false : results.removeFirst()
+    }
+}
+
 /// Thread-safe collector for outcomes produced by concurrent `playSoundEvent` calls.
 private final class OutcomeCollector: @unchecked Sendable {
     private let lock = NSLock()
@@ -707,6 +720,78 @@ func runPlaySuites() {
                 "a contended play.lock must report .skippedDebounce, got \(outcome)")
             expect(spawner.callCount == 0, "a skipped debounce must never spawn afplay")
             holder.unlock()
+        }
+    }
+
+    suite("playSoundEvent: stale callback cannot debounce a valid callback after reconnect") {
+        withTempDirectory { root in
+            let packs = root.appendingPathComponent("packs")
+            let configFile = root.appendingPathComponent("config.json")
+            writeFixture(#"{"selected_pack":"pack"}"#, to: configFile)
+            writeFixture(
+                #"{"id":"pack","events":{"stop":"stop.mp3"}}"#,
+                to: packs.appendingPathComponent("pack/manifest.json"))
+            writeFixture("audio", to: packs.appendingPathComponent("pack/stop.mp3"))
+            let stateFile = root.appendingPathComponent("play.state")
+            let spawner = RecordingSpawner()
+            let clock = FixedClock(start: Date(timeIntervalSince1970: 1_000_000))
+
+            func environment(
+                playbackAuthorized: @escaping @Sendable () -> Bool,
+                debounceSilentOutcomes: Bool = false
+            ) -> PlayEnvironment {
+                PlayEnvironment(
+                    playbackAuthorized: playbackAuthorized,
+                    lockFile: root.appendingPathComponent("play.lock"),
+                    configFile: configFile,
+                    userPacksDirectory: packs,
+                    spawner: spawner,
+                    debounceStateFile: stateFile,
+                    debounceInterval: 1.5,
+                    debounceSilentOutcomes: debounceSilentOutcomes,
+                    now: clock.now,
+                    logFile: root.appendingPathComponent("claudio.log"),
+                    logLockFile: root.appendingPathComponent("claudio.log.lock"))
+            }
+
+            expect(
+                playSoundEvent("stop", environment: environment(playbackAuthorized: { false }))
+                    == .notReady,
+                "断开后的旧回调必须静默")
+            expect(
+                !FileManager.default.fileExists(atPath: stateFile.path),
+                "失效回调不得更新宿主共用的去抖时间戳")
+            let disconnectDuringPlay = PlaybackAuthorizationSequence([true, false])
+            expect(
+                playSoundEvent(
+                    "stop",
+                    environment: environment(playbackAuthorized: disconnectDuringPlay.next))
+                    == .notReady,
+                "读取配置后断开也必须静默")
+            expect(
+                !FileManager.default.fileExists(atPath: stateFile.path),
+                "第二次授权检查拒绝的回调也不得更新时间戳")
+            let disconnectDuringSilentStart = PlaybackAuthorizationSequence([true, false])
+            expect(
+                playSoundEvent(
+                    "task_start",
+                    environment: environment(
+                        playbackAuthorized: disconnectDuringSilentStart.next,
+                        debounceSilentOutcomes: true)) == .notReady,
+                "静默的旧任务开始回调必须静默")
+            expect(
+                !FileManager.default.fileExists(atPath: stateFile.path),
+                "旧任务开始回调失效后也不得占用去抖窗口")
+            let current = playSoundEvent(
+                "stop", environment: environment(playbackAuthorized: { true }))
+            expect(
+                current
+                    == .played(
+                        event: .stop,
+                        filePath: packs.appendingPathComponent("pack/stop.mp3").standardizedFileURL
+                            .path),
+                "同一时刻新代次的有效回调必须播放，实得 \(current)")
+            expect(spawner.callCount == 1, "仅有效回调应启动一次音频")
         }
     }
 

@@ -116,41 +116,41 @@ func runUserSoundPackDeletionSuites() {
         }
     }
 
-    suite("User Sound Pack 删除：Global 与任一 Surface 引用都阻止删除") {
+    suite("User Sound Pack 删除：默认组与任一工作区引用都阻止删除") {
         withTempDirectory { root in
             let packs = root.appendingPathComponent("packs", isDirectory: true)
-            let source = packs.appendingPathComponent("surface-pack", isDirectory: true)
+            let source = packs.appendingPathComponent("workspace-pack", isDirectory: true)
             writeFixture("{}", to: source.appendingPathComponent("manifest.json"))
             let environment = makeAudioImportEnvironment(userPacksDirectory: packs)
-            let config = ClaudioConfig(
-                selectedPack: "global-pack",
-                surfaceOverrides: [
-                    HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
-                        selectedPack: "surface-pack"),
-                    HostSurfaceID.codex.rawValue: SurfaceSoundOverride(),
-                ])
+            var config = ClaudioConfig(selectedPack: "default-pack")
+            config.workspaceRules = [
+                WorkspaceSoundRule(
+                    directory: WorkspaceDirectory(kind: .directory, path: root.path),
+                    surfaces: [.codex],
+                    profile: WorkspaceSoundProfile(selectedPack: "workspace-pack", volume: 0.8))
+            ]
             let referenced = referencedSoundPackIDs(in: config)
             let configFixture = makeDeletionConfigFixture(in: root, config: config)
             var trashCalls = 0
 
             expect(
-                referenced == ["global-pack", "surface-pack"],
-                "引用集合必须包含 Global 与显式 Surface；继承项不得制造第三个真相源")
+                referenced == ["default-pack", "workspace-pack"],
+                "引用集合必须包含默认组与所有工作区")
             expect(
                 deleteUserSoundPack(
-                    packID: "surface-pack",
+                    packID: "workspace-pack",
                     configFile: configFixture.file,
                     configLockFile: configFixture.lock,
                     environment: environment,
                     moveToTrash: { _ in
                         trashCalls += 1
                         return nil
-                    }) == .failure(.activePack(packID: "surface-pack")),
-                "非当前编辑 scope 使用的包也必须拒绝删除")
-            expect(trashCalls == 0, "任一 scope 仍引用时不得进入隔离或 Trash")
+                    }) == .failure(.activePack(packID: "workspace-pack")),
+                "其他工作区使用的包也必须拒绝删除")
+            expect(trashCalls == 0, "任一声音作用域仍引用时不得进入隔离或 Trash")
             expect(
                 regularFileExists(at: source.appendingPathComponent("manifest.json")),
-                "跨 scope 拒绝后原声音包必须保持可用")
+                "跨声音作用域拒绝后原声音包必须保持可用")
         }
     }
 
@@ -282,9 +282,26 @@ func runUserSoundPackDeletionSuites() {
             }
             expect(contended == .failure(.lockBusy), "config.lock 争用必须立即失败")
 
+            let validRule = WorkspaceSoundRule(
+                directory: WorkspaceDirectory(kind: .directory, path: root.path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "my-pack", volume: 0.8))
+            let validRuleData = try! JSONEncoder().encode(validRule)
+            let validRuleJSON = try! JSONSerialization.jsonObject(with: validRuleData)
             writeFixture(
-                #"{"selected_pack":"other","surface_overrides":"broken"}"#,
+                try! JSONSerialization.data(withJSONObject: [
+                    "selected_pack": "other",
+                    "workspace_rules": [
+                        validRule.id.uuidString: validRuleJSON,
+                        UUID().uuidString: "broken",
+                    ],
+                ]),
                 to: config.file)
+            let decoded = try! JSONDecoder().decode(
+                ClaudioConfig.self, from: Data(contentsOf: config.file))
+            expect(
+                decoded.workspaceRulesMalformed && decoded.workspaceRules.isEmpty,
+                "一条损坏规则会掩盖同组内有效工作区引用")
             expect(
                 deleteUserSoundPack(
                     packID: "my-pack",
@@ -292,11 +309,82 @@ func runUserSoundPackDeletionSuites() {
                     configLockFile: config.lock,
                     environment: environment,
                     moveToTrash: trash) == .failure(.configUnavailable),
-                "无法穷尽全部 scope 引用时必须失败关闭")
+                "无法穷尽全部工作区引用时必须失败关闭")
             expect(trashCalls == 0, "配置事实不可信时不得进入 Trash")
             expect(
                 FileManager.default.fileExists(atPath: source.path),
                 "所有配置失败路径都必须保留包")
+
+            var incompleteRule = validRuleJSON as! [String: Any]
+            var incompleteProfile = incompleteRule["profile"] as! [String: Any]
+            incompleteProfile["events"] = ["stop": true]
+            incompleteRule["profile"] = incompleteProfile
+            writeFixture(
+                try! JSONSerialization.data(withJSONObject: [
+                    "selected_pack": "other",
+                    "workspace_rules": [validRule.id.uuidString: incompleteRule],
+                ]),
+                to: config.file)
+            let partiallyDecoded = try! JSONDecoder().decode(
+                ClaudioConfig.self, from: Data(contentsOf: config.file))
+            expect(
+                !partiallyDecoded.workspaceRulesMalformed
+                    && partiallyDecoded.workspaceRules.count == 1
+                    && partiallyDecoded.workspaceRules[0].profile == nil,
+                "规则可解码但声音配置损坏时引用仍不可穷尽")
+            expect(
+                deleteUserSoundPack(
+                    packID: "my-pack",
+                    configFile: config.file,
+                    configLockFile: config.lock,
+                    environment: environment,
+                    moveToTrash: trash) == .failure(.configUnavailable),
+                "声音配置损坏的工作区也必须失败关闭")
+            expect(trashCalls == 0, "不完整工作区不得进入 Trash")
+        }
+    }
+
+    suite("User Sound Pack 删除：退役的损坏 Surface 覆盖不阻止删除") {
+        withTempDirectory { root in
+            let packs = root.appendingPathComponent("packs", isDirectory: true)
+            let source = packs.appendingPathComponent("my-pack", isDirectory: true)
+            let trash = root.appendingPathComponent("Trash", isDirectory: true)
+            let trashedPack = trash.appendingPathComponent("my-pack", isDirectory: true)
+            writeFixture("{}", to: source.appendingPathComponent("manifest.json"))
+            let environment = makeAudioImportEnvironment(userPacksDirectory: packs)
+            let legacyConfig = ClaudioConfig(
+                selectedPack: "other",
+                surfaceOverrides: [
+                    HostSurfaceID.codex.rawValue: SurfaceSoundOverride(selectedPack: "my-pack")
+                ])
+            expect(
+                referencedSoundPackIDs(in: legacyConfig) == ["other"],
+                "有效的退役 Surface 覆盖也不再是声音包引用")
+            let config = makeDeletionConfigFixture(in: root)
+            writeFixture(
+                #"{"selected_pack":"other","surface_overrides":"broken"}"#,
+                to: config.file)
+
+            let result = deleteUserSoundPack(
+                packID: "my-pack",
+                configFile: config.file,
+                configLockFile: config.lock,
+                environment: environment,
+                moveToTrash: { isolated in
+                    try FileManager.default.createDirectory(
+                        at: trash, withIntermediateDirectories: true)
+                    try FileManager.default.moveItem(at: isolated, to: trashedPack)
+                    return trashedPack
+                })
+            expect(
+                result
+                    == .success(
+                        UserSoundPackDeletionOutcome(
+                            packID: "my-pack", trashedPath: trashedPack.path)),
+                "旧覆盖已退役，其损坏不应阻止未引用包移入废纸篓")
+            expect(
+                regularFileExists(at: trash.appendingPathComponent("my-pack/manifest.json")),
+                "旧覆盖损坏时仍应保留可恢复的完整包")
         }
     }
 

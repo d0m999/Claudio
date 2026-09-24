@@ -1017,6 +1017,7 @@ package final class SoundPacksWindowModel {
                     fact.nativeTargets.map { (fact.id, $0) }
                 }),
             referencedPackIDs: referencedSoundPackIDs(in: baseConfig),
+            soundPackReferencesComplete: soundPackReferencesAreComplete(in: baseConfig),
             selectedPackID: selectedPackID,
             selectedEventRows: selectedEventRows,
             selectedAudioInventoryState: selectedAudioInventoryState,

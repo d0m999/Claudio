@@ -26,24 +26,27 @@ public enum UserSoundPackDeletionError: Error, Sendable, Equatable {
     case lockFailed(errno: Int32)
 }
 
-/// Every pack id currently selected by Global or an explicit Surface override.
+/// Every pack id currently selected by the Default Group or a Workspace Sound Rule.
 ///
-/// An override with no `selected_pack` inherits Global, which is already present in the result.
 /// Deletion uses this complete set rather than the editor's current effective scope so switching
-/// the Settings scope cannot make a pack referenced elsewhere appear disposable.
+/// the Sound Scope cannot make a pack referenced elsewhere appear disposable.
 @MainActor
 public func referencedSoundPackIDs(in config: ClaudioConfig) -> Set<String> {
     var result = Set([config.selectedPack])
-    result.formUnion(config.surfaceOverrides.values.compactMap(\.selectedPack))
     result.formUnion(config.workspaceRules.compactMap { $0.profile?.selectedPack })
     return result
+}
+
+@MainActor
+public func soundPackReferencesAreComplete(in config: ClaudioConfig) -> Bool {
+    !config.workspaceRulesMalformed && config.workspaceRules.allSatisfy { $0.profile != nil }
 }
 
 /// Moves one explicitly confirmed, inactive user sound pack to the system Trash.
 ///
 /// The destination is revalidated under the shared packs lock as a direct real directory entry;
-/// symlinks and paths outside the user root fail closed. Built-ins and packs referenced by any
-/// Global/Surface scope are never removed. Before invoking the path-based system Trash API, the
+/// symlinks and paths outside the user root fail closed. Built-ins and packs referenced by the
+/// Default Group or any Workspace Sound Rule are never removed. Before invoking the system Trash API, the
 /// verified entry is atomically renamed into a private, hidden sibling directory and its device /
 /// inode identity is checked again. `moveToTrash` and `beforeIsolation` are injectable solely for
 /// hermetic race tests; production uses `FileManager.trashItem`, preserving a recoverable
@@ -72,7 +75,7 @@ public func deleteUserSoundPack(
         return .failure(.unsafePackID(packID: packID))
     }
     // Hold config.lock from the authoritative read through pack isolation. Every Claudio config
-    // writer uses this lock, so a confirmation cannot race a later Global/Surface selection and
+    // writer uses this lock, so a confirmation cannot race a later sound-scope selection and
     // leave config.json pointing at a directory we just moved to Trash.
     let outcome = withNonBlockingLock(path: configLockFile.path) {
         let referencedPackIDs: Set<String>
@@ -123,8 +126,7 @@ private func currentReferencedSoundPackIDs(
     switch readConfigFileBounded(at: configFile) {
     case .success(let data):
         guard let config = try? JSONDecoder().decode(ClaudioConfig.self, from: data),
-            !config.surfaceOverridesMalformed,
-            config.invalidSurfaceOverrideKeys.isEmpty
+            soundPackReferencesAreComplete(in: config)
         else {
             return .failure(.configUnavailable)
         }

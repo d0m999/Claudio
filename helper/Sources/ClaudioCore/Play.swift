@@ -283,14 +283,16 @@ private func performDebouncedPlay(
     // between "read last-played" and "write now" across concurrent `claudio play`
     // processes (ENGINEERING.md「工程落地细节 ⑤ 跨进程并发」's exact race decision 5 calls out).
     let lockResult = withNonBlockingLock(path: environment.lockFile.path) { () -> PlayOutcome in
+        guard environment.playbackAuthorized() else { return .notReady }
         let now = environment.now()
         if let lastPlayed = readLastPlayedTimestamp(from: environment.debounceStateFile),
             now.timeIntervalSince(lastPlayed) < environment.debounceInterval
         {
             return .skippedRecentPlay(event: event)
         }
-        writeLastPlayedTimestamp(now, to: environment.debounceStateFile)
         if case .silent(let outcome) = preparation {
+            guard environment.playbackAuthorized() else { return .notReady }
+            writeLastPlayedTimestamp(now, to: environment.debounceStateFile)
             return outcome
         }
         guard case .ready(let volume, let audioFile) = preparation else {
@@ -301,6 +303,7 @@ private func performDebouncedPlay(
         // entry, so `["-v value", path]` would make afplay see `-v value` as a single
         // malformed argument instead of a flag + its value (T9).
         guard environment.playbackAuthorized() else { return .notReady }
+        writeLastPlayedTimestamp(now, to: environment.debounceStateFile)
         let volumeArgument = AfplayVolume.afplayArgument(forMasterVolume: volume)
         let spawned = environment.spawner.spawn(
             executablePath: environment.afplayPath,

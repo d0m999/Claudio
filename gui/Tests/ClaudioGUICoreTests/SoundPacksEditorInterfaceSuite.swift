@@ -345,7 +345,7 @@ func runSoundPacksEditorInterfaceSuites() async {
         }
     }
 
-    await suite("Sound editor presentation：Surface active、Global reference 与 inspection 分离") {
+    await suite("Sound editor presentation：退役 Surface 覆盖不再构成声音包引用") {
         await withTempDirectory { root in
             let fixture = makeSoundEditorFixture(
                 root: root,
@@ -363,7 +363,7 @@ func runSoundPacksEditorInterfaceSuites() async {
             guard case .sounds(let initial) = owner.presentation.mode,
                 let inspectA = initial.packs.first(where: { $0.id == "pack-a" })?.inspectAction
             else {
-                expect(false, "Surface fixture 必须可 inspect Global 引用的 pack-a")
+                expect(false, "退役 Surface 路由必须可 inspect 默认组引用的 pack-a")
                 return
             }
 
@@ -372,23 +372,66 @@ func runSoundPacksEditorInterfaceSuites() async {
                 let packA = inspected.packs.first(where: { $0.id == "pack-a" }),
                 let packB = inspected.packs.first(where: { $0.id == "pack-b" })
             else {
-                expect(false, "inspect 后必须保留 Global A 与 Surface B presentation")
+                expect(false, "inspect 后必须保留两个安装包的 presentation")
                 return
             }
 
             expect(inspected.selectedPack?.id == "pack-a", "inspection selection 必须指向 pack-a")
             expect(
                 packA.isInspected && !packA.isActiveForScope,
-                "Global A 可被 inspect，但不是 Surface active")
-            expect(packA.isReferencedByAnyScope, "Global selected_pack 必须计入跨 scope reference")
+                "默认组 A 可被 inspect，但退役 Surface 路由没有活动声音包")
+            expect(packA.isReferencedByAnyScope, "默认组 selected_pack 必须计入跨作用域引用")
             expect(packA.useAction == nil, "退役 Surface 不再签发 Use")
-            expect(packA.deleteAction == nil, "被任一 scope 引用的 A 不得签 Delete")
+            expect(packA.deleteAction == nil, "被默认组引用的 A 不得签 Delete")
 
             expect(
-                !packB.isInspected && !packB.isActiveForScope, "Surface B 仍 active，但不是 inspection")
-            expect(packB.isReferencedByAnyScope, "Surface override 必须计入跨 scope reference")
-            expect(packB.useAction == nil, "当前 Surface active B 不得签冗余 Use")
-            expect(packB.deleteAction == nil, "当前 Surface 引用的 B 不得签 Delete")
+                !packB.isInspected && !packB.isActiveForScope, "退役 Surface 的 B 不是活动包或当前检查目标")
+            expect(!packB.isReferencedByAnyScope, "退役 Surface 覆盖不计入声音包引用")
+            expect(packB.useAction == nil, "退役 Surface 路由不签发 Use")
+            expect(packB.deleteAction == nil, "未被 inspect 的 B 不签发 Delete")
+        }
+    }
+
+    await suite("Sound editor presentation：工作区引用不完整时不签发 Delete") {
+        for damagedProfile in [false, true] {
+            await withTempDirectory { root in
+                let configJSON: String
+                if damagedProfile {
+                    var config = ClaudioConfig(selectedPack: "pack-a")
+                    var rule = WorkspaceSoundRule(
+                        directory: WorkspaceDirectory(kind: .directory, path: root.path),
+                        surfaces: [.codex],
+                        profile: WorkspaceSoundProfile(selectedPack: "pack-b", volume: 0.8))
+                    rule.profile = nil
+                    config.workspaceRules = [rule]
+                    configJSON = String(data: try! JSONEncoder().encode(config), encoding: .utf8)!
+                } else {
+                    configJSON =
+                        #"{"selected_pack":"pack-a","workspace_rules":{"broken":"invalid"}}"#
+                }
+                let fixture = makeSoundEditorFixture(
+                    root: root,
+                    packIDs: ["pack-a", "pack-b"],
+                    configJSON: configJSON)
+                let owner = fixture.owner
+                _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 45)))
+                await waitForSoundEditorReady(owner, library: fixture.library)
+                guard case .sounds(let initial) = owner.presentation.mode,
+                    let inspectB = initial.packs.first(where: { $0.id == "pack-b" })?.inspectAction
+                else {
+                    expect(false, "损坏工作区 fixture 必须能检查未确认引用的包")
+                    return
+                }
+                expect(owner.send(.invoke(inspectB)) == .applied, "检查目标必须可切换")
+                guard case .sounds(let inspected) = owner.presentation.mode,
+                    let packB = inspected.packs.first(where: { $0.id == "pack-b" })
+                else {
+                    expect(false, "切换后必须保留 pack-b 投影")
+                    return
+                }
+                expect(packB.isInspected && packB.useAction != nil, "测试前提：编辑器仍可写")
+                expect(packB.deleteAction == nil, "引用未知时不得签发确认后必然失败的 Delete")
+            }
         }
     }
 

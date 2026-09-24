@@ -2276,7 +2276,8 @@ package final class SoundPacksEditorOwner: ObservableObject {
                         applyTarget: copyAndApplyTarget),
                     seed: seed)
                 : nil,
-            deleteAction: writesAllowed && !isBuiltin && isInspected && !isReferencedByAnyScope
+            deleteAction: writesAllowed && seed.soundPackReferencesComplete && !isBuiltin
+                && isInspected && !isReferencedByAnyScope
                 ? makeAction(.deletePack, binding: .requestDeletePack(packID: card.id), seed: seed)
                 : nil,
             restoreAction: writesAllowed && isBuiltin && isInspected

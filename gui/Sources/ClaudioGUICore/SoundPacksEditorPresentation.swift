@@ -549,6 +549,7 @@ struct SoundPacksEditorModelSeed: Equatable {
     let eventCoverageByPackID: [String: [Event: CoverageState]]
     let nativeTargetsByPackID: [String: SoundPackNativeTargets]
     let referencedPackIDs: Set<String>
+    let soundPackReferencesComplete: Bool
     let selectedPackID: String?
     let selectedEventRows: [EventRow]
     let selectedAudioInventoryState: SoundPackAudioInventoryPresentationState
