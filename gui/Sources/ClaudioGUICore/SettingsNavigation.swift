@@ -125,16 +125,14 @@ package struct SettingsSoundPackShellProjection: Equatable {
 
     package init(
         editorPresentation: SoundPacksEditorPresentation,
-        sourceRows: [HostSourceRowPresentation]
+        sourceRows: [HostSourceRowPresentation],
+        config: ClaudioConfig = ClaudioConfig(selectedPack: "")
     ) {
         let publishedSurfaces = Set(sourceRows.map { $0.host.surfaceID })
-        let productScopes = HostID.productVisibleCases.map {
-            PanelSoundScopeID.surface($0.surfaceID)
-        }
         availability = SettingsRouteAvailability(
             integrationSurfaces: publishedSurfaces,
-            eventScopes: Set(panelSoundScopeIDs(sourceRows: sourceRows)),
-            soundScopes: Set([PanelSoundScopeID.global] + productScopes),
+            eventScopes: Set([.global] + config.workspaceRules.map { .workspace($0.id) }),
+            soundScopes: [.global],
             soundPackIDs: editorPresentation.installedPackIDs,
             soundPackSnapshotIsFresh: editorPresentation.library.isFresh,
             events: Set(Event.allCases))
@@ -147,9 +145,20 @@ package struct SettingsSoundPackShellProjection: Equatable {
 @MainActor
 package func settingsSoundPackShellProjections(
     editor: SoundPacksEditorOwner,
-    hostIntegrations: HostIntegrationPresentationStore
+    hostIntegrations: HostIntegrationPresentationStore,
+    configModel: PanelConfigController? = nil
 ) -> AnyPublisher<SettingsSoundPackShellProjection, Never> {
-    editor.$presentation
+    if let configModel {
+        return editor.$presentation.combineLatest(
+            hostIntegrations.$content, configModel.$configState
+        )
+        .map { editor, hosts, configState in
+            SettingsSoundPackShellProjection(
+                editorPresentation: editor, sourceRows: hosts.sourceRows,
+                config: configState.resolvedConfig)
+        }.removeDuplicates().eraseToAnyPublisher()
+    }
+    return editor.$presentation
         .combineLatest(hostIntegrations.$content)
         .map { editorPresentation, integrationContent in
             SettingsSoundPackShellProjection(
@@ -242,7 +251,7 @@ private func settingsScopeFailure(
             surface,
             availableSurfaces: Set(availableScopes.compactMap(\.surface)))
     }
-    return availableScopes.contains(.global) ? nil : .staleSoundScope(.global)
+    return availableScopes.contains(scope) ? nil : .staleSoundScope(scope)
 }
 
 private func settingsSurfaceFailure(

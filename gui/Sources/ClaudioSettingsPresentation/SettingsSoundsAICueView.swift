@@ -487,6 +487,8 @@ struct SettingsSoundsAICueView: View {
         switch usage.consumer {
         case .global:
             name = l10n.text(.panelGlobalName)
+        case .workspace:
+            name = usage.workspaceName ?? l10n.text(.workspaceLabel)
         case .surface(let surface):
             name =
                 HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?

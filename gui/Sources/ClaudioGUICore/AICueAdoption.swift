@@ -3,6 +3,7 @@ import Foundation
 
 public enum AICuePackConsumer: Sendable, Equatable, Hashable {
     case global
+    case workspace(UUID)
     case surface(HostSurfaceID)
 }
 
@@ -35,65 +36,9 @@ public func aiCueAdoptionEligibility(
     packCards: [PackCard],
     builtinPackIDs: Set<String>
 ) -> AICueAdoptionEligibility {
-    guard let surface else { return .ineligible(.surfaceRequired) }
-    guard HostID.productVisibleCases.contains(where: { $0.surfaceID == surface }) else {
-        return .ineligible(.invalidSurface(surface))
-    }
-    guard let packID = selectedPackID else { return .ineligible(.noSelectedPack) }
-    guard isSafePackID(packID) else { return .ineligible(.unsafePackID) }
-    guard
-        let card = packCards.first(where: { $0.id == packID }),
-        card.availability == .installed
-    else {
-        return .ineligible(.packUnavailable(packID: packID))
-    }
-    if case .broken = card.state { return .ineligible(.packBroken(packID: packID)) }
-    guard !builtinPackIDs.contains(packID) else {
-        return .ineligible(.builtinReadOnly(packID: packID))
-    }
+    // Surface-scoped generation/adoption is retired. Pack-scoped editing owns this operation.
+    .ineligible(.writesStopped)
 
-    let targetProfile: ResolvedSoundProfile
-    switch config.resolveSoundProfile(for: surface) {
-    case .success(let profile): targetProfile = profile
-    case .failure: return .ineligible(.configurationUnavailable)
-    }
-    guard targetProfile.selectedPack == packID else {
-        return .ineligible(
-            .targetUsesDifferentPack(
-                expected: packID,
-                actual: targetProfile.selectedPack))
-    }
-
-    var consumers: [AICuePackConsumer] = []
-    switch config.resolveSoundProfile(for: nil) {
-    case .success(let profile):
-        if profile.selectedPack == packID { consumers.append(.global) }
-    case .failure:
-        return .ineligible(.configurationUnavailable)
-    }
-    var consumerSurfaceTokens = Set(HostID.productVisibleCases.map(\.surfaceID.rawValue))
-    consumerSurfaceTokens.formUnion(config.surfaceOverrides.keys)
-    consumerSurfaceTokens.formUnion(config.invalidSurfaceOverrideKeys)
-    for token in consumerSurfaceTokens.sorted() {
-        guard let candidateSurface = HostSurfaceID(rawValue: token) else {
-            return .ineligible(.configurationUnavailable)
-        }
-        switch config.resolveSoundProfile(for: candidateSurface) {
-        case .success(let profile):
-            if candidateSurface != surface, profile.selectedPack == packID {
-                consumers.append(.surface(candidateSurface))
-            }
-        case .failure:
-            return .ineligible(.configurationUnavailable)
-        }
-    }
-    guard consumers.isEmpty else {
-        return .ineligible(.sharedPack(consumers: consumers))
-    }
-
-    guard let target = try? AICueAdoptionTarget(surface: surface, event: event, packID: packID)
-    else { return .ineligible(.unsafePackID) }
-    return .eligible(target)
 }
 
 public struct AICueAdoptionOutcome: Sendable, Equatable {

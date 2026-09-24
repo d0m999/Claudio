@@ -283,56 +283,13 @@ func runSoundPacksEditorMutationSuites() async {
                         route: .overview(surface: .workBuddy),
                         requestRevision: 12)))
             await waitForSoundEditorReady(owner, library: fixture.library)
-            guard case .sounds(let sounds) = owner.presentation.mode,
-                let useB = sounds.packs.first(where: { $0.id == "pack-b" })?.useAction,
-                case .accepted(let operationID) = owner.send(.invoke(useB))
-            else {
-                expect(false, "writable Surface 必须签发并接受 use pack-b")
-                return
-            }
-            let scansBefore = fixture.recorder.requests.count
-            let panelRevisionBefore = fixture.refreshCoordinator.panelReloadRevision
-
-            await waitForSoundEditorOperation(owner, operationID: operationID)
-            let object = soundEditorJSONObject(at: fixture.configFile)
-            let overrides = object?["surface_overrides"] as? [String: Any]
-            let workBuddy = overrides?[HostSurfaceID.workBuddy.rawValue] as? [String: Any]
-            let futureSurface = overrides?["future-surface"] as? [String: Any]
-            expect(
-                owner.presentation.activities.first(where: { $0.operationID == operationID })?
-                    .phase == .succeeded,
-                "Surface use 必须以 typed success settle")
-            expect(
-                object?["selected_pack"] as? String == "pack-a"
-                    && (object?["master_volume"] as? Double) == 0.37
-                    && (object?["events"] as? [String: Bool])?[Event.stop.cliName] == true
-                    && (object?["events"] as? [String: Bool])?[Event.notification.cliName] == false
-                    && object?["starred_packs"] as? [String] == ["pack-a"],
-                "Surface use 不得改 Global selected_pack/master_volume/events/stars")
-            expect(
-                workBuddy?["selected_pack"] as? String == "pack-b"
-                    && (workBuddy?["events"] as? [String: Bool])?[Event.stop.cliName] == false
-                    && workBuddy?["future_surface"] as? Int == 7,
-                "Surface use 只能稀疏替换目标 selected_pack，保留 sibling 与 unknown")
-            expect(
-                (object?["future"] as? [String: Bool])?["keep"] == true
-                    && futureSurface?["selected_pack"] as? String == "pack-c"
-                    && futureSurface?["future_peer"] as? String == "keep",
-                "Surface use 必须保留顶层与未知 Surface bytes")
-            if case .sounds(let settled) = owner.presentation.mode {
-                expect(
-                    settled.scope == .available(.surface(.workBuddy))
-                        && settled.selectedPack?.id == "pack-b",
-                    "Surface use 后 presentation 必须投影目标 scope 与 selection")
+            let before = try! Data(contentsOf: fixture.configFile)
+            if case .sounds(let sounds) = owner.presentation.mode {
+                expect(sounds.packs.allSatisfy { $0.useAction == nil }, "退役 Surface 不签发任何隐藏声音写能力")
             } else {
-                expect(false, "Surface use settle 后必须留在 Sounds mode")
+                expect(false, "必须保留失效详情身份")
             }
-            expect(
-                fixture.recorder.requests.count == scansBefore,
-                "Surface use 是 config-only，不得请求 shared scan")
-            expect(
-                fixture.refreshCoordinator.panelReloadRevision == panelRevisionBefore + 1,
-                "Surface use 必须恰好发布一次 panel refresh")
+            expect((try! Data(contentsOf: fixture.configFile)) == before, "失效详情不修改默认或旧字段")
         }
     }
 
@@ -1084,7 +1041,7 @@ func runSoundPacksEditorMutationSuites() async {
             _ = owner.send(
                 .activate(
                     .sounds(
-                        route: .overview(surface: .workBuddy),
+                        route: .overview,
                         requestRevision: 4)))
             await waitForSoundEditorReady(owner, library: fixture.library)
             await waitForSoundEditorInventory(owner) { inventory in
@@ -1103,12 +1060,12 @@ func runSoundPacksEditorMutationSuites() async {
                 owner.send(
                     .activate(
                         .sounds(
-                            route: .overview(surface: .workBuddy),
+                            route: .overview,
                             requestRevision: 5))) == .applied,
                 "相同语义 route 的新 request revision 必须使旧 confirmation capability stale")
             let validConfig = try? Data(contentsOf: fixture.configFile)
             writeFixture(
-                #"{"selected_pack":"pack-a","surface_overrides":{"workbuddy":"broken"}}"#,
+                #"{"selected_pack":7,"surface_overrides":{"workbuddy":"broken"}}"#,
                 to: fixture.configFile)
             let invalidConfig = try? Data(contentsOf: fixture.configFile)
             let scansBefore = fixture.recorder.requests.count
@@ -1125,7 +1082,7 @@ func runSoundPacksEditorMutationSuites() async {
                 expect(
                     failedScope.scope
                         == .unavailable(
-                            scope: .surface(.workBuddy),
+                            scope: .global,
                             reason: .scopeUnavailable),
                     "malformed Surface config 必须保留 requested Surface 显示身份，且不得借 Global 回落恢复写权")
             } else {

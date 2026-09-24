@@ -43,7 +43,8 @@ func runEventEnabledSuites() {
             let configFile = root.appendingPathComponent("config.json")
             let lockFile = root.appendingPathComponent("config.lock")
 
-            let result = setEventEnabled(.stop, enabled: false, configFile: configFile, lockFile: lockFile)
+            let result = setEventEnabled(
+                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
             expect(
                 result == .failure(.configMissing),
                 "flipping a mute with no config.json must fail closed, got \(result)")
@@ -55,7 +56,9 @@ func runEventEnabledSuites() {
         }
     }
 
-    suite("setEventEnabled: an existing config.json only changes the one event, everything else survives") {
+    suite(
+        "setEventEnabled: an existing config.json only changes the one event, everything else survives"
+    ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
             let lockFile = root.appendingPathComponent("config.lock")
@@ -81,7 +84,8 @@ func runEventEnabledSuites() {
                 config?.isEnabled(.notification) == false,
                 "a sibling event's pre-existing override must survive untouched")
             expect(
-                config?.isEnabled(.stopFailure) == false, "the target event must reflect the new value")
+                config?.isEnabled(.stopFailure) == false,
+                "the target event must reflect the new value")
             expect(
                 config?.isEnabled(.stop) == true,
                 "an event never mentioned in config.json still defaults to enabled")
@@ -93,9 +97,11 @@ func runEventEnabledSuites() {
             let configFile = root.appendingPathComponent("config.json")
             let lockFile = root.appendingPathComponent("config.lock")
             writeFixture(
-                #"{ "selected_pack": "minimal-chime", "events": { "stop": false } }"#, to: configFile)
+                #"{ "selected_pack": "minimal-chime", "events": { "stop": false } }"#,
+                to: configFile)
 
-            let result = setEventEnabled(.stop, enabled: true, configFile: configFile, lockFile: lockFile)
+            let result = setEventEnabled(
+                .stop, enabled: true, configFile: configFile, lockFile: lockFile)
             expect(
                 result == .success(.updated(event: .stop, enabled: true)),
                 "toggling back on should succeed, got \(result)")
@@ -112,9 +118,11 @@ func runEventEnabledSuites() {
             let lockFile = root.appendingPathComponent("config.lock")
             writeFixture("{ not valid json", to: configFile)
 
-            let result = setEventEnabled(.stop, enabled: false, configFile: configFile, lockFile: lockFile)
+            let result = setEventEnabled(
+                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
             guard case .failure(.configReadFailure) = result else {
-                expect(false, "corrupt config.json must fail with .configReadFailure, got \(result)")
+                expect(
+                    false, "corrupt config.json must fail with .configReadFailure, got \(result)")
                 return
             }
             let rawContents = try? String(contentsOf: configFile, encoding: .utf8)
@@ -136,7 +144,8 @@ func runEventEnabledSuites() {
             let holder = FileLock(path: lockFile.path)
             expect(holder.tryLock(), "test setup: holder must acquire config.lock first")
 
-            let result = setEventEnabled(.stop, enabled: false, configFile: configFile, lockFile: lockFile)
+            let result = setEventEnabled(
+                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
             expect(
                 result == .failure(.lockBusy),
                 "a contended lock must report .lockBusy, not silently succeed, got \(result)")
@@ -195,11 +204,15 @@ func runEventEnabledSuites() {
             // takes the "file exists" branch and then fails the `Data(contentsOf:)` read —
             // the read-failure path distinct from the decode-failure one above (they carry
             // different reasons: "无法读取" vs "解析失败").
-            try? FileManager.default.createDirectory(at: configFile, withIntermediateDirectories: true)
+            try? FileManager.default.createDirectory(
+                at: configFile, withIntermediateDirectories: true)
 
-            let result = setEventEnabled(.stop, enabled: false, configFile: configFile, lockFile: lockFile)
+            let result = setEventEnabled(
+                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
             guard case .failure(.configReadFailure(let reason)) = result else {
-                expect(false, "an unreadable config.json must fail with .configReadFailure, got \(result)")
+                expect(
+                    false,
+                    "an unreadable config.json must fail with .configReadFailure, got \(result)")
                 return
             }
             expect(
@@ -209,7 +222,9 @@ func runEventEnabledSuites() {
         }
     }
 
-    suite("setEventEnabled: a write failure is reported as .configWriteFailure, never a silent success") {
+    suite(
+        "setEventEnabled: a write failure is reported as .configWriteFailure, never a silent success"
+    ) {
         // D23 定稿① 之后，一个「文件不存在、且父目录被一个普通文件占位」的 configFile 会先撞上
         // `.configMissing`（文件真的不存在），根本到不了写步骤——那条覆盖率现在属于 `selectPack`
         // 的「新建」路径（`UseSuite.swift` 的 "a configFile whose parent directory is blocked by a
@@ -235,7 +250,8 @@ func runEventEnabledSuites() {
                     [.posixPermissions: 0o700], ofItemAtPath: restrictedDirectory.path)
             }
 
-            let result = setEventEnabled(.stop, enabled: false, configFile: configFile, lockFile: lockFile)
+            let result = setEventEnabled(
+                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
             guard case .failure(.configWriteFailure) = result else {
                 expect(
                     false,
@@ -257,19 +273,26 @@ func runEventEnabledSuites() {
             SetEventEnabledError.configMissing.description,
         ]
         expect(
-            Set(messages).count == 5, "each error case must render a distinct message, got \(messages)")
+            Set(messages).count == 5,
+            "each error case must render a distinct message, got \(messages)")
         expect(
             messages[0].contains("未修改文件"),
             "a read failure must promise the file was left untouched, got \(messages[0])")
         expect(messages[1].contains("写入失败"), "got \(messages[1])")
-        expect(messages[2].contains("请稍后重试"), "a busy lock must tell the user to retry, got \(messages[2])")
-        expect(messages[3].contains("13"), "a lock failure must surface the real errno, got \(messages[3])")
+        expect(
+            messages[2].contains("请稍后重试"),
+            "a busy lock must tell the user to retry, got \(messages[2])")
+        expect(
+            messages[3].contains("13"),
+            "a lock failure must surface the real errno, got \(messages[3])")
         expect(
             messages[4].contains("选") && messages[4].contains("config.json"),
             "a missing-config failure must point the user at picking a pack, got \(messages[4])")
     }
 
-    suite("setEventEnabled: shares config.lock with selectPack — the two calls serialize on the same lock") {
+    suite(
+        "setEventEnabled: shares config.lock with selectPack — the two calls serialize on the same lock"
+    ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
             let userPacks = root.appendingPathComponent("packs", isDirectory: true)
@@ -284,13 +307,16 @@ func runEventEnabledSuites() {
             let selectResult = selectPack(
                 "minimal-chime", configFile: configFile, userPacksDirectory: userPacks,
                 lockFile: lockFile)
-            expect(selectResult == .success(.selected(packID: "minimal-chime")), "setup: selectPack succeeds")
+            expect(
+                selectResult == .success(.selected(packID: "minimal-chime")),
+                "setup: selectPack succeeds")
 
             let muteResult = setEventEnabled(
                 .subagentStop, enabled: false, configFile: configFile, lockFile: lockFile)
             expect(
                 muteResult == .success(.updated(event: .subagentStop, enabled: false)),
-                "setEventEnabled after selectPack (same lock file) must still succeed, got \(muteResult)")
+                "setEventEnabled after selectPack (same lock file) must still succeed, got \(muteResult)"
+            )
 
             let data = try? Data(contentsOf: configFile)
             let config = data.flatMap { try? JSONDecoder().decode(ClaudioConfig.self, from: $0) }
@@ -359,7 +385,11 @@ func runEventEnabledSuites() {
             }
             // (b) + (c) 三个最小键与那个未知顶层键必须一个不少——并发写绝不能让任何一方的键集合丢失。
             expect(
-                Set(json.keys) == Set(["selected_pack", "master_volume", "events", "night_dim"]),
+                Set(json.keys)
+                    == Set([
+                        "selected_pack", "master_volume", "events", "night_dim",
+                        "sound_model_version",
+                    ]),
                 "并发写之后顶层键集合必须逐一保留（已知键 + 未知键），got \(json.keys.sorted())")
             expect(
                 json["night_dim"] as? Bool == true,

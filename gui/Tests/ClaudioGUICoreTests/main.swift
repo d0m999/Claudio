@@ -101,6 +101,26 @@ if CommandLine.arguments.contains("--event-attention") {
     exit(failures == 0 ? 0 : 1)
 }
 
+if CommandLine.arguments.contains("--ai-cue-assets") {
+    await runAICueAssetFetchSuites()
+    print("AI cue assets: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
+if CommandLine.arguments.contains("--workspace-sounds") {
+    runLocalizationSuites()
+    runPanelFocusOrderSuites()
+    await runPanelPresentationSuites()
+    runPanelConfigControllerSuites()
+    runWorkspaceSoundPresentationSuites()
+    runSurfaceSoundIssueLifecycleSuites()
+    runSettingsNavigationSuites()
+    runAICuePackScopedSuites()
+    await runAICuePackScopedAsyncSuites()
+    print("Workspace sounds: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
 if CommandLine.arguments.contains("--ai-cue-generation") {
     await runAICueGenerationViewModelSuites()
     await runAICueRuntimeSuites()
@@ -270,6 +290,7 @@ runSoundPacksWindowAccessibilitySuites()
 runSoundPacksEditorAccessibilityPostingSuites()
 runSoundPacksWindowStarredPacksSuites()
 runPanelConfigControllerSuites()
+runWorkspaceSoundPresentationSuites()
 runPanelConfigFailureLifecycleSuites()
 runSurfaceSoundIssueLifecycleSuites()
 runPanelFocusCoordinatorSuites()

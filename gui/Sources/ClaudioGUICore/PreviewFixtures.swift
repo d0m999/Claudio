@@ -907,11 +907,11 @@ public enum PreviewFixtures {
             case .integrations:
                 route = .integrations(surface: .workBuddy)
             case .eventsAndSounds:
-                route = .events(scope: .surface(.workBuddy), event: .notification)
+                route = .events(scope: .global, event: .notification)
             case .sounds:
                 route = .sounds(
                     .editEvent(
-                        surface: .workBuddy,
+                        surface: nil,
                         packID: "gallery-pack",
                         event: .stop))
             default:

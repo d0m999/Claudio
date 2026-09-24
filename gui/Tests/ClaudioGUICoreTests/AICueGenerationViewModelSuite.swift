@@ -178,7 +178,7 @@ func runAICueGenerationViewModelSuites() async {
             credentialManager: ComposerCredentialManagerFixture(status: .missing),
             generator: generator,
             providerProfileID: .elevenLabsGlobal)
-        viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+        viewModel.begin(packID: "workbuddy-pack", event: .stop)
         viewModel.updateDescription("短促木琴完成音效")
         viewModel.startGeneration(locale: "zh-Hans")
         for _ in 0..<1_000 {
@@ -210,7 +210,7 @@ func runAICueGenerationViewModelSuites() async {
             credentialManager: ComposerCredentialManagerFixture(status: .missing),
             generator: generator,
             providerProfileID: .elevenLabsGlobal)
-        viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+        viewModel.begin(packID: "workbuddy-pack", event: .stop)
         viewModel.updateDescription("短促木琴完成音效")
         viewModel.startGeneration(locale: "zh-Hans")
         for _ in 0..<1_000 {
@@ -257,7 +257,7 @@ func runAICueGenerationViewModelSuites() async {
                 generator: generator,
                 providerProfileID: profileID,
                 registry: registry)
-            viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+            viewModel.begin(packID: "workbuddy-pack", event: .stop)
             viewModel.updateDescription(description)
             viewModel.startGeneration(locale: "zh-Hans")
             await waitForAICueViewModel { viewModel.phase != .generating }
@@ -297,7 +297,7 @@ func runAICueGenerationViewModelSuites() async {
             credentialManager: credentialManager,
             generator: generator,
             providerProfileID: .elevenLabsGlobal)
-        viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+        viewModel.begin(packID: "workbuddy-pack", event: .stop)
         viewModel.updateDescription("一只小猫短促叫两声，不要背景音乐")
         await viewModel.refreshCredentialStatus()
 
@@ -330,7 +330,7 @@ func runAICueGenerationViewModelSuites() async {
             credentialManager: ComposerCredentialManagerFixture(status: .missing),
             generator: generator,
             providerProfileID: .qwenSingapore)
-        viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+        viewModel.begin(packID: "workbuddy-pack", event: .stop)
         viewModel.updateDescription("短促木琴完成音效")
 
         viewModel.startGeneration(locale: "zh-Hans")
@@ -355,7 +355,7 @@ func runAICueGenerationViewModelSuites() async {
             credentialManager: credentialManager,
             generator: ComposerGeneratorFixture(mode: .failure(.provider(.invalidCredential))),
             providerProfileID: .qwenSingapore)
-        viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+        viewModel.begin(packID: "workbuddy-pack", event: .stop)
         viewModel.updateDescription("清晰地说“完成”")
 
         viewModel.startGeneration(locale: "zh-Hans")
@@ -383,7 +383,7 @@ func runAICueGenerationViewModelSuites() async {
             credentialManager: credentialManager,
             generator: generator,
             providerProfileID: .elevenLabsGlobal)
-        viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+        viewModel.begin(packID: "workbuddy-pack", event: .stop)
         viewModel.updateDescription("短促木琴完成音效")
         expect(viewModel.displayName.isEmpty, "第一步不得预先要求提示音名称")
         await viewModel.refreshCredentialStatus()
@@ -417,7 +417,7 @@ func runAICueGenerationViewModelSuites() async {
                 status: .stored(verification: .verified, hasPendingReplacement: false)),
             generator: generator,
             providerProfileID: .elevenLabsGlobal)
-        viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+        viewModel.begin(packID: "workbuddy-pack", event: .stop)
         viewModel.updateDescription("短促木琴")
         viewModel.startGeneration(locale: "zh-Hans")
         await waitForAICueViewModel { viewModel.phase == .candidatesReady }
@@ -445,7 +445,7 @@ func runAICueGenerationViewModelSuites() async {
                 root: root.appendingPathComponent("editor"),
                 generationID: generation.id)
             let permit = aiCueComposerAdoptionPermit(from: editor.owner)
-            viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+            viewModel.begin(packID: "workbuddy-pack", event: .stop)
             viewModel.updateDescription("短促木琴")
             viewModel.startGeneration(locale: "zh-Hans")
             await waitForAICueViewModel { viewModel.phase == .candidatesReady }
@@ -498,7 +498,7 @@ func runAICueGenerationViewModelSuites() async {
                 status: .stored(verification: .verified, hasPendingReplacement: false)),
             generator: generator,
             providerProfileID: .elevenLabsGlobal)
-        viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+        viewModel.begin(packID: "workbuddy-pack", event: .stop)
         viewModel.updateDescription("短促木琴")
         viewModel.startGeneration(locale: "zh-Hans")
         await waitForAICueViewModel { viewModel.phase == .candidatesReady }
@@ -539,7 +539,7 @@ func runAICueGenerationViewModelSuites() async {
                 generationID: generation.id)
             let permit = aiCueComposerAdoptionPermit(from: editor.owner)
             let imported = aiCueImportedFixture(root: root, packID: "workbuddy-pack")
-            viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+            viewModel.begin(packID: "workbuddy-pack", event: .stop)
             viewModel.updateDescription("短促木琴")
             viewModel.startGeneration(locale: "zh-Hans")
             await waitForAICueViewModel { viewModel.phase == .candidatesReady }
@@ -574,7 +574,7 @@ func runAICueGenerationViewModelSuites() async {
                 generationID: generation.id)
             let permit = aiCueComposerAdoptionPermit(from: editor.owner)
             let gate = SuspendedComposerAdoptionFixture()
-            viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+            viewModel.begin(packID: "workbuddy-pack", event: .stop)
             viewModel.updateDescription("短促木琴")
             viewModel.startGeneration(locale: "zh-Hans")
             await waitForAICueViewModel { viewModel.phase == .candidatesReady }
@@ -608,7 +608,7 @@ func runAICueGenerationViewModelSuites() async {
             credentialManager: credentials,
             generator: ComposerGeneratorFixture(mode: .failure(.credentialRequired)),
             providerProfileID: .elevenLabsGlobal)
-        viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+        viewModel.begin(packID: "workbuddy-pack", event: .stop)
         viewModel.updateDescription("两声猫叫")
 
         await viewModel.saveCredential(
@@ -635,7 +635,7 @@ func runAICueGenerationViewModelSuites() async {
             generator: generator,
             providerProfileID: .elevenLabsGlobal,
             providerPreferences: preferences)
-        viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+        viewModel.begin(packID: "workbuddy-pack", event: .stop)
         viewModel.updateDescription("请说\"完成\"")
         viewModel.startGeneration(locale: "zh-Hans")
         await waitForAICueViewModel { viewModel.phase == .generating }
@@ -696,23 +696,20 @@ private func aiCueComposerEditorFixture(
     generationID: UUID
 ) async -> SoundEditorFixture {
     let fixture = makeSoundEditorFixture(
-        root: root,
-        packIDs: ["global-pack", "workbuddy-pack"],
-        config: ClaudioConfig(
-            selectedPack: "global-pack",
-            surfaceOverrides: [
-                HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
-                    selectedPack: "workbuddy-pack")
-            ]))
+        root: root, packIDs: ["global-pack", "workbuddy-pack"],
+        config: ClaudioConfig(selectedPack: "workbuddy-pack"))
     _ = fixture.owner.send(
         .activate(
-            .events(
-                route: EventSettingsWindowRoute(
-                    scope: .surface(.workBuddy),
-                    event: .stop),
-                requestRevision: 1,
-                candidateGenerationID: generationID)))
+            .sounds(route: .editEvent(packID: "workbuddy-pack", event: .stop), requestRevision: 1)))
     _ = await waitForSoundEditorReady(fixture.owner, library: fixture.library)
+    var generation = aiCueComposerGeneration(root: root)
+    generation = AICueGeneration(
+        id: generationID, profileID: generation.profileID, plan: generation.plan,
+        candidates: generation.candidates, generatedAt: generation.generatedAt)
+    fixture.owner.updateAICueComposer(
+        session: AICueComposerSession(packID: "workbuddy-pack", event: .stop),
+        generation: generation)
+
     return fixture
 }
 
@@ -720,8 +717,8 @@ private func aiCueComposerEditorFixture(
 private func aiCueComposerAdoptionPermit(
     from owner: SoundPacksEditorOwner
 ) -> SoundPackAdoptionPermit {
-    guard case .events(let events) = owner.presentation.mode,
-        let permit = events.adoptionPermit
+    guard case .sounds(let sounds) = owner.presentation.mode,
+        let permit = sounds.eventRows.first(where: { $0.event == .stop })?.aiCueAdoptionPermit
     else {
         fatalError("fixture 必须投影 adoption permit")
     }

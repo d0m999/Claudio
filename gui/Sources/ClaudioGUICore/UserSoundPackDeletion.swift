@@ -35,6 +35,7 @@ public enum UserSoundPackDeletionError: Error, Sendable, Equatable {
 public func referencedSoundPackIDs(in config: ClaudioConfig) -> Set<String> {
     var result = Set([config.selectedPack])
     result.formUnion(config.surfaceOverrides.values.compactMap(\.selectedPack))
+    result.formUnion(config.workspaceRules.compactMap { $0.profile?.selectedPack })
     return result
 }
 

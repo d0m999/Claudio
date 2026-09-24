@@ -35,8 +35,8 @@ func runSurfaceSoundIssueLifecycleSuites() {
                 #"{ "selected_pack": "global-pack", "surface_overrides": {} }"#,
                 to: configFile)
             controller.reloadConfigOnly()
-            expect(controller.surfaceSoundIssue == nil, "外部修复覆盖并有效读回后必须清除结构性问题")
-            expect(controller.config.selectedPack == "global-pack", "恢复后必须投影健康的声音配置")
+            expect(controller.surfaceSoundIssue != nil, "退役路由不会因旧字段修复而恢复")
+            expect(controller.config.selectedPack.isEmpty, "退役路由不能投影默认组为写目标")
         }
 
         expect(
@@ -54,7 +54,7 @@ func runSurfaceSoundIssueLifecycleSuites() {
             "没有当前 Surface 时不能用全局配置证明该覆盖已恢复")
         expect(
             surfaceSoundIssueAfterReadBack(
-                issue, configState: .operational(healthy), selectedSurface: .workBuddy) == nil,
+                issue, configState: .operational(healthy), selectedSurface: .workBuddy) == issue,
             "当前 Surface 覆盖经有效读回恢复健康后必须清除结构性问题")
     }
 

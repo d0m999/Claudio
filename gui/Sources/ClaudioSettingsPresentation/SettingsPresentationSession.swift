@@ -57,7 +57,8 @@ package final class SettingsPresentationSession: ObservableObject {
         loginProjection = dependencies.loginItemSettings.projection
         let initialShell = SettingsSoundPackShellProjection(
             editorPresentation: dependencies.soundPacksEditorOwner.presentation,
-            sourceRows: dependencies.hostIntegrations.content.sourceRows)
+            sourceRows: dependencies.hostIntegrations.content.sourceRows,
+            config: dependencies.eventSettingsModel.configState.resolvedConfig)
         availability = initialShell.availability
         pendingSoundPackOwnerAnnouncement = initialShell.pendingAnnouncement
         let initialRoute = SettingsRoute.destination(
@@ -87,7 +88,8 @@ package final class SettingsPresentationSession: ObservableObject {
             }
         soundPackProjectionCancellable = settingsSoundPackShellProjections(
             editor: dependencies.soundPacksEditorOwner,
-            hostIntegrations: dependencies.hostIntegrations
+            hostIntegrations: dependencies.hostIntegrations,
+            configModel: dependencies.eventSettingsModel
         ).sink { [weak self] projection in
             MainActor.assumeIsolated {
                 self?.applyAvailabilityProjection(projection)
@@ -332,7 +334,7 @@ package final class SettingsPresentationSession: ObservableObject {
                     generation: nil)
             }
             if eventRoute.unavailableRequestedScopeStoredValue == nil {
-                dependencies.eventSettingsModel.selectSoundSurface(eventRoute.surface)
+                dependencies.eventSettingsModel.selectSoundScope(eventRoute.scope)
             }
         case .destination(.eventsAndSounds):
             if let eventShortcut {

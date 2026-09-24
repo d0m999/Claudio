@@ -498,7 +498,7 @@ func runSoundPacksEditorAsyncOperationSuites() async {
     await suite("Sound editor perform：AI adoption 绑定 candidate generation 并 compound 刷新一次") {
         await withTempDirectory { root in
             let config = ClaudioConfig(
-                selectedPack: "global-pack",
+                selectedPack: "workbuddy-pack",
                 surfaceOverrides: [
                     HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
                         selectedPack: "workbuddy-pack")
@@ -510,7 +510,7 @@ func runSoundPacksEditorAsyncOperationSuites() async {
             let owner = fixture.owner
             let generationID = UUID()
             let route = EventSettingsWindowRoute(
-                scope: .surface(.workBuddy),
+                scope: .global,
                 event: .stop)
             _ = owner.send(
                 .activate(
@@ -581,7 +581,7 @@ func runSoundPacksEditorAsyncOperationSuites() async {
     await suite("Sound editor perform：AI adoption 经共享 coordinator 自动刷新现有 Panel") {
         await withTempDirectory { root in
             let config = ClaudioConfig(
-                selectedPack: "global-pack",
+                selectedPack: "workbuddy-pack",
                 surfaceOverrides: [
                     HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
                         selectedPack: "workbuddy-pack")
@@ -598,14 +598,14 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                 environment: environment,
                 soundPackLibrary: fixture.library,
                 soundPacksRefreshCoordinator: fixture.refreshCoordinator)
-            panel.selectSoundSurface(.workBuddy)
+            panel.selectSoundScope(.global)
             let owner = fixture.owner
             let generationID = UUID()
             _ = owner.send(
                 .activate(
                     .events(
                         route: EventSettingsWindowRoute(
-                            scope: .surface(.workBuddy),
+                            scope: .global,
                             event: .stop),
                         requestRevision: 21,
                         candidateGenerationID: generationID)))
@@ -1073,7 +1073,7 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                 config: validConfig)
             let owner = fixture.owner
             let context = SoundPacksEditorContext.sounds(
-                route: .overview(surface: .workBuddy),
+                route: .overview,
                 requestRevision: 231)
             _ = owner.send(.activate(context))
             await waitForSoundEditorReady(owner, library: fixture.library)
@@ -1092,7 +1092,7 @@ func runSoundPacksEditorAsyncOperationSuites() async {
             let scansBefore = fixture.recorder.requests.count
 
             writeFixture(
-                #"{"selected_pack":"pack-a","surface_overrides":"broken","future":{"keep":true}}"#,
+                #"{"selected_pack":7,"surface_overrides":"broken","future":{"keep":true}}"#,
                 to: fixture.configFile)
             let firstResult = await owner.perform(
                 .importAudio(permit: permit, sources: [source], bindTo: .stop))
@@ -1126,7 +1126,7 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                 "被消费 permit 的 replay 不得写 Event binding")
             if case .sounds(let sounds) = owner.presentation.mode {
                 expect(
-                    sounds.route == .overview(surface: .workBuddy)
+                    sounds.route == .overview
                         && sounds.selectedPack?.id == "pack-a"
                         && !owner.presentation.activities.contains { $0.kind == .importAudio },
                     "no-change rejection 必须保留当前 Sounds presentation 且不伪造 activity")
@@ -1653,7 +1653,7 @@ func runSoundPacksEditorAsyncOperationSuites() async {
         }
     }
 
-    await suite("Sound editor perform：已签 permit 在 user pack 变为 shared 后 fail closed") {
+    await suite("Sound editor perform：包级 permit 与默认组配置选择独立") {
         await withTempDirectory { root in
             let fixture = makeIsolatedAdoptionFixture(root: root)
             let owner = fixture.owner
@@ -1678,7 +1678,7 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                 fixture.manifest.deletingLastPathComponent())
             let scansBefore = fixture.recorder.requests.count
             let sharedConfig = ClaudioConfig(
-                selectedPack: "global-pack",
+                selectedPack: "missing-pack",
                 surfaceOverrides: [
                     HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
                         selectedPack: "workbuddy-pack"),
@@ -1690,13 +1690,16 @@ func runSoundPacksEditorAsyncOperationSuites() async {
             writeFixture(validMP3ID3Data(), to: source)
             let candidate = soundEditorCandidate(at: source, generationID: generationID)
 
-            expect(
-                await owner.perform(
-                    .adoptAICue(
-                        candidate: candidate,
-                        displayName: try! AICueDisplayName("private candidate display"),
-                        permit: permit)) == .rejected(.targetChanged),
-                "外部共享同一 user pack 后，旧 permit 必须在 import 前拒绝")
+            let result = await owner.perform(
+                .adoptAICue(
+                    candidate: candidate,
+                    displayName: try! AICueDisplayName("private candidate display"), permit: permit)
+            )
+            if case .adopted = result {
+                expect(true, "显式包编辑不受默认组切包影响")
+            } else {
+                expect(false, "已签包级许可仍应针对原包完成")
+            }
             expect(
                 await owner.perform(
                     .adoptAICue(
@@ -1705,16 +1708,16 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                         permit: permit)) == .rejected(.stalePermit),
                 "即使 target 漂移，adoption permit 仍必须 single-use")
             expect(
-                (try? Data(contentsOf: fixture.manifest)) == manifestBefore
+                (try? Data(contentsOf: fixture.manifest)) != manifestBefore
                     && soundEditorDirectoryEntries(
-                        fixture.manifest.deletingLastPathComponent()) == entriesBefore,
-                "shared drift 必须零 candidate bytes、零 manifest mutation")
+                        fixture.manifest.deletingLastPathComponent()) != entriesBefore,
+                "包级采纳写入原包的音频与 manifest")
             expect(
-                fixture.recorder.requests.count == scansBefore
-                    && !owner.presentation.activities.contains { $0.kind == .adoptAICue },
-                "pre-import shared drift 不得伪造 scan 或 operation activity")
+                fixture.recorder.requests.count == scansBefore + 1
+                    && owner.presentation.activities.contains { $0.kind == .adoptAICue },
+                "成功采纳只发布一次包刷新和真实活动")
             if case .events(let current) = owner.presentation.mode {
-                expect(current.adoptionPermit == nil, "shared user pack 不得重签 adoption permit")
+                expect(current.adoptionPermit != nil, "原显式用户包仍可编辑")
             } else {
                 expect(false, "shared drift 后必须保持同一 Events mode")
             }
@@ -1731,7 +1734,7 @@ func runSoundPacksEditorAsyncOperationSuites() async {
     await suite("Sound editor presentation：built-in 与 shared user pack 不签 adoption permit") {
         await withTempDirectory { root in
             let sharedConfig = ClaudioConfig(
-                selectedPack: "global-pack",
+                selectedPack: "workbuddy-pack",
                 surfaceOverrides: [
                     HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
                         selectedPack: "shared-pack"),
@@ -1743,7 +1746,7 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                 packIDs: ["global-pack", "shared-pack"],
                 config: sharedConfig)
             let route = EventSettingsWindowRoute(
-                scope: .surface(.workBuddy),
+                scope: .global,
                 event: .stop)
             _ = shared.owner.send(
                 .activate(
@@ -1763,7 +1766,7 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                     root: builtinRoot,
                     packIDs: ["global-pack", "workbuddy-pack"],
                     config: ClaudioConfig(
-                        selectedPack: "global-pack",
+                        selectedPack: "workbuddy-pack",
                         surfaceOverrides: [
                             HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
                                 selectedPack: "workbuddy-pack")
@@ -1921,7 +1924,7 @@ private func makeIsolatedAdoptionFixture(
         packIDs: ["global-pack", "workbuddy-pack"],
         durationProbe: durationProbe,
         config: ClaudioConfig(
-            selectedPack: "global-pack",
+            selectedPack: "workbuddy-pack",
             surfaceOverrides: [
                 HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
                     selectedPack: "workbuddy-pack")
@@ -1930,7 +1933,7 @@ private func makeIsolatedAdoptionFixture(
             afterFinalImportCancellationSampleForTesting)
     return IsolatedAdoptionFixture(
         base: base,
-        route: EventSettingsWindowRoute(scope: .surface(.workBuddy), event: .stop),
+        route: EventSettingsWindowRoute(scope: .global, event: .stop),
         manifest: root.appendingPathComponent("packs/workbuddy-pack/manifest.json"))
 }
 

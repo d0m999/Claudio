@@ -1787,7 +1787,7 @@ package final class SoundPacksWindowModel {
     /// 从完整 base config 投影当前管理作用域。Surface 只替换 effective pack/events；星标、
     /// 未知字段写入边界与顶层配置事实仍归 base。坏覆盖与非产品 Surface 均 fail closed。
     private func applyManagedScopeConfig() {
-        guard isValidSoundPacksWindowSurface(managedSurface) else {
+        guard managedSurface == nil else {
             let surface = managedSurface!
             managedScopeFailureReason =
                 "未知声音作用域 \(surface.rawValue)，已停止写入；不会回退到 Global。"
@@ -1843,13 +1843,10 @@ package final class SoundPacksWindowModel {
 
     package func aiCueAdoptionEligibility(for event: Event) -> AICueAdoptionEligibility {
         guard writesAllowed else { return .ineligible(.writesStopped) }
-        return ClaudioGUICore.aiCueAdoptionEligibility(
-            surface: managedSurface,
-            event: event,
-            selectedPackID: selectedPackID,
-            config: baseConfig,
-            packCards: packCards,
-            builtinPackIDs: builtinPackIDs)
+        guard let selectedPackID else { return .ineligible(.noSelectedPack) }
+        return ClaudioGUICore.aiCuePackAdoptionEligibility(
+            packID: selectedPackID, event: event,
+            packCards: packCards, builtinPackIDs: builtinPackIDs)
     }
 
     /// Package-level adoption deliberately ignores the current config write gate. A malformed

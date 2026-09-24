@@ -19,13 +19,13 @@ extension Claudio {
             guard let parsedHost = HostID(rawValue: host),
                 let parsedID = UUID(uuidString: installationID)
             else { return }
-            // One bounded read serves both the WorkBuddy input contract and the optional GUI
-            // notice. Existing hooks without either consumer leave stdin untouched.
+            // One bounded read serves directory resolution, the WorkBuddy input contract and
+            // optional GUI notices. cwd never enters receipts or activity summaries.
             let descriptor = EventNoticeTransport.loadDescriptor()
             let needsInput =
                 parsedHost == .workBuddy
                 && WorkBuddyHookPayloadPolicy.requiresValidation(nativeEvent: nativeEvent)
-            let hookInput = descriptor != nil || needsInput ? HookInputReader.read() : nil
+            let hookInput: HookInputReadResult? = HookInputReader.read()
             guard
                 !needsInput
                     || WorkBuddyHookPayloadPolicy.accepts(
@@ -40,7 +40,8 @@ extension Claudio {
             }
             let environment = systemHostHookEnvironment(
                 for: parsedHost,
-                eventNoticeChannel: channel)
+                eventNoticeChannel: channel,
+                sourcePayload: hookInput?.data)
             _ = handleHostHook(
                 host: parsedHost,
                 nativeEvent: nativeEvent,

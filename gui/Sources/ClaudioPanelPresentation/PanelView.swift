@@ -36,6 +36,7 @@ public struct PanelView: View {
     private let refreshesActivityOnLifecycle: Bool
     private let onAudibilityInputsChanged: @MainActor () -> Void
     private let onOpenSettings: @MainActor () -> Void
+    private let onEditSoundScope: @MainActor (PanelSoundScopeID) -> Void
     private let onOpenRecentNotices: @MainActor () -> Void
     private let onOpenIntegration: @MainActor (HostID) -> Void
     private let onQuit: @MainActor () -> Void
@@ -55,6 +56,7 @@ public struct PanelView: View {
         eventNoticeModel: EventNoticeModel,
         onAudibilityInputsChanged: @escaping @MainActor () -> Void,
         onOpenSettings: @escaping @MainActor () -> Void,
+        onEditSoundScope: @escaping @MainActor (PanelSoundScopeID) -> Void = { _ in },
         onOpenRecentNotices: @escaping @MainActor () -> Void,
         onOpenIntegration: @escaping @MainActor (HostID) -> Void,
         onQuit: @escaping @MainActor () -> Void,
@@ -70,6 +72,7 @@ public struct PanelView: View {
         self.eventNoticeModel = eventNoticeModel
         self.onAudibilityInputsChanged = onAudibilityInputsChanged
         self.onOpenSettings = onOpenSettings
+        self.onEditSoundScope = onEditSoundScope
         self.onOpenRecentNotices = onOpenRecentNotices
         self.onOpenIntegration = onOpenIntegration
         self.onQuit = onQuit
@@ -128,6 +131,7 @@ public struct PanelView: View {
         self.refreshesActivityOnLifecycle = false
         self.onAudibilityInputsChanged = {}
         self.onOpenSettings = {}
+        self.onEditSoundScope = { _ in }
         self.onOpenRecentNotices = {}
         self.onOpenIntegration = { _ in }
         self.onQuit = {}
@@ -372,7 +376,7 @@ public struct PanelView: View {
             return
         }
         selectedSurfaceRaw = scope.storedValue
-        panelModel.selectSoundSurface(scope.surface)
+        panelModel.selectSoundScope(scope)
         applyFirstFocus()
     }
 
@@ -387,19 +391,19 @@ public struct PanelView: View {
         {
             selectedSurfaceRaw = storedValue
         }
-        panelModel.selectSoundSurface(resolved.surface)
+        panelModel.selectSoundScope(resolved)
     }
 
     // MARK: - Activity overview
 
     private var activityPresentation: ActivityOverviewPresentation {
-        activityDiagnostics.presentation.projection.presentation(for: selectedScope.scope)
+        activityDiagnostics.presentation.projection.presentation(for: .global)
     }
 
     private var activityOverview: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(l10n.text(.settingsActivityTitle))
+                Text(l10n.text(.settingsActivityTitle) + " · " + l10n.text(.workspaceAllSources))
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 Spacer(minLength: 4)
@@ -713,7 +717,7 @@ public struct PanelView: View {
     }
 
     private var eventCoverageSummary: String {
-        if selectedScope.scope == .global { return selectedScope.coverageText }
+        if selectedScope.scope.surface == nil { return selectedScope.coverageText }
         return l10n.format(
             .panelEventsMappable,
             Int64(selectedScope.supportedCount),
@@ -785,16 +789,38 @@ public struct PanelView: View {
     // MARK: - Playback settings
 
     private func playbackSettings(masterVolumeEnabled: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        let scope = selectedScope.scope
+        return VStack(alignment: .leading, spacing: 5) {
             Text(l10n.text(.panelPlaybackSettings))
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-            VStack(spacing: 0) {
+            VStack(spacing: 8) {
+                Picker(
+                    l10n.text(.panelSoundPackLabel),
+                    selection: Binding(
+                        get: { panelModel.config.selectedPack },
+                        set: {
+                            guard panelModel.selectedSoundScope == scope else { return }
+                            _ = panelModel.switchPack(to: $0); onAudibilityInputsChanged()
+                        })
+                ) {
+                    if !panelModel.allSoundPacks.contains(where: {
+                        $0.id == panelModel.config.selectedPack
+                    }) {
+                        Text(panelModel.config.selectedPack).tag(panelModel.config.selectedPack)
+                    }
+                    ForEach(panelModel.allSoundPacks, id: \.id) { pack in
+                        Text(SelectedPackMetadata(id: pack.id, name: pack.name).displayName).tag(
+                            pack.id)
+                    }
+                }.padding(.horizontal, 9).padding(.top, 7)
+                    .accessibilityIdentifier("panel.workspace.pack-picker")
+                    .focused($focusedTarget, equals: .soundPackPicker)
                 MasterVolumeRow(
                     diskVolume: panelModel.config.masterVolume,
                     isEnabled: masterVolumeEnabled,
                     onCommit: { volume in
-                        let landed = panelModel.setMasterVolume(volume)
+                        let landed = panelModel.setVolume(volume, for: scope)
                         onAudibilityInputsChanged()
                         return landed
                     },
@@ -805,6 +831,31 @@ public struct PanelView: View {
                 )
                 .padding(.horizontal, 9)
                 .padding(.vertical, 7)
+                .id(selectedScope.scope)
+                if let id = selectedScope.scope.workspaceID,
+                    let rule = panelModel.workspaceRules.first(where: { $0.id == id })
+                {
+                    Text(
+                        l10n.text(.workspaceSurfaces) + ": "
+                            + rule.surfaces.map { surface in
+                                HostID.productVisibleCases.first { $0.surfaceID == surface }?
+                                    .displayName ?? surface.rawValue
+                            }.joined(separator: ", ")
+                    )
+                    .font(.caption).foregroundColor(.secondary)
+                    Button(l10n.text(.workspaceEdit)) { onEditSoundScope(.workspace(id)) }
+                        .accessibilityIdentifier("panel.workspace.edit")
+                        .focused($focusedTarget, equals: .workspaceDetails)
+                }
+                Text(l10n.text(.workspacePreviewNote)).font(.caption).foregroundColor(.secondary)
+                    .padding(9)
+                if panelModel.workspaceRulesMalformed {
+                    FailureRow(message: l10n.text(.workspaceInvalidRule))
+                }
+                if let error = panelModel.workspaceError {
+                    FailureRow(
+                        message: localizedWorkspaceError(error, language: languageStore.language))
+                }
             }
             .background(ClaudioTheme.surface(colorScheme))
             .overlay(
@@ -932,7 +983,12 @@ public struct PanelView: View {
                     && panelConfigRecoveryTarget(configFile: configFile) != nil,
                 hasRefreshFailedNotice: showsRefreshFailedNotice,
                 writeFailureRecoveryPaths: writeFailureRecoveryFiles.map(\.path),
-                hasWriteFailureConfigRecovery: showsWriteFailureConfigRecovery))
+                hasWriteFailureConfigRecovery: showsWriteFailureConfigRecovery,
+                hasSoundPackPicker: !content.hasConfigFailureNotice,
+                hasWorkspaceDetails: !content.hasConfigFailureNotice
+                    && panelModel.workspaceRules.contains {
+                        $0.id == selectedScope.scope.workspaceID
+                    }))
         return order
     }
 

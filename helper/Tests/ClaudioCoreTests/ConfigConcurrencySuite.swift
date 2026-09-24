@@ -84,7 +84,8 @@ func runConfigConcurrencySuites() {
                     switch result {
                     case .success: collector.append(.succeeded)
                     case .failure(.lockBusy): collector.append(.lockBusy)
-                    case .failure(let error): collector.append(.otherFailure("selectPack: \(error)"))
+                    case .failure(let error):
+                        collector.append(.otherFailure("selectPack: \(error)"))
                     }
                 case 1:
                     let event = Event.allCases[index % Event.allCases.count]
@@ -107,7 +108,8 @@ func runConfigConcurrencySuites() {
                     }
                 default:
                     let result = setStarredPacks(
-                        ["minimal-chime", "second-pack"], configFile: configFile, lockFile: lockFile,
+                        ["minimal-chime", "second-pack"], configFile: configFile,
+                        lockFile: lockFile,
                         userPacksDirectory: userPacks, defaultStarredPackIDs: [])
                     switch result {
                     case .success: collector.append(.succeeded)
@@ -148,7 +150,11 @@ func runConfigConcurrencySuites() {
             // `setMasterVolume` 只碰 `master_volume`，`setStarredPacks` 只碰 `starred_packs`，
             // `night_dim` 谁都不碰）。
             expect(
-                Set(json.keys) == Set(["selected_pack", "master_volume", "events", "night_dim", "starred_packs"]),
+                Set(json.keys)
+                    == Set([
+                        "selected_pack", "master_volume", "events", "night_dim", "starred_packs",
+                        "sound_model_version",
+                    ]),
                 "混跑之后顶层键集合必须逐一保留（已知键 + 未知键），got \(json.keys.sorted())")
             expect(
                 json["night_dim"] as? Bool == true,
@@ -168,7 +174,8 @@ func runConfigConcurrencySuites() {
                 "events 表必须仍然存在且非空——并发写不能把它写没了")
             let starredPacks = json["starred_packs"] as? [String]
             expect(
-                starredPacks == ["minimal-chime"] || starredPacks == ["minimal-chime", "second-pack"],
+                starredPacks == ["minimal-chime"]
+                    || starredPacks == ["minimal-chime", "second-pack"],
                 "starred_packs 必须保留初始星标；若本轮星标写者拿到锁，则还必须是它归一化过的一组 id，got"
                     + " \(String(describing: starredPacks))")
         }

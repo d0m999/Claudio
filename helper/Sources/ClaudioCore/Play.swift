@@ -65,6 +65,8 @@ public struct SystemProcessSpawner: ProcessSpawning {
 public struct PlayEnvironment: Sendable {
     /// `nil` 表示 legacy/global 播放；现代宿主回调始终传入稳定 surface ID。
     public let surfaceID: HostSurfaceID?
+    public let workingDirectory: String?
+    public let playbackAuthorized: @Sendable () -> Bool
     public let afplayPath: String
     public let lockFile: URL
     public let configFile: URL
@@ -109,6 +111,8 @@ public struct PlayEnvironment: Sendable {
 
     public init(
         surfaceID: HostSurfaceID? = nil,
+        workingDirectory: String? = nil,
+        playbackAuthorized: @escaping @Sendable () -> Bool = { true },
         afplayPath: String = "/usr/bin/afplay",
         lockFile: URL = ClaudioPaths.playLockFile,
         configFile: URL = ClaudioPaths.configFile,
@@ -125,6 +129,8 @@ public struct PlayEnvironment: Sendable {
         spawnResultObserver: (@Sendable (Bool) -> Void)? = nil
     ) {
         self.surfaceID = surfaceID
+        self.workingDirectory = workingDirectory
+        self.playbackAuthorized = playbackAuthorized
         self.afplayPath = afplayPath
         self.lockFile = lockFile
         self.configFile = configFile
@@ -239,16 +245,19 @@ private func prepareConfiguredPlay(
     environment: PlayEnvironment
 ) -> PreparedPlay {
     if let config = loadPlayConfig(from: environment.configFile) {
-        switch config.resolveSoundProfile(for: environment.surfaceID) {
+        switch config.resolveSoundProfile(
+            for: environment.surfaceID, cwd: environment.workingDirectory)
+        {
         case .failure:
             return .silent(.notReady)
         case .success(let profile):
             if !profile.isEnabled(event) {
                 return .silent(.disabled(event: event))
             } else if let audioFile = resolveAudioFile(
-                for: event, packID: profile.selectedPack, environment: environment)
+                for: event, packID: profile.selectedPack, environment: environment,
+                requireHealthyPack: profile.workspaceID != nil)
             {
-                return .ready(config: config, audioFile: audioFile)
+                return .ready(volume: profile.volume, audioFile: audioFile)
             } else {
                 return .silent(.notReady)
             }
@@ -258,7 +267,7 @@ private func prepareConfiguredPlay(
 }
 
 private enum PreparedPlay {
-    case ready(config: ClaudioConfig, audioFile: URL)
+    case ready(volume: Double, audioFile: URL)
     case silent(PlayOutcome)
 }
 
@@ -284,14 +293,15 @@ private func performDebouncedPlay(
         if case .silent(let outcome) = preparation {
             return outcome
         }
-        guard case .ready(let config, let audioFile) = preparation else {
+        guard case .ready(let volume, let audioFile) = preparation else {
             return .notReady
         }
         // `-v` and its value are two separate argv elements (never one concatenated
         // string) — `Process.arguments` passes each array element through as its own argv
         // entry, so `["-v value", path]` would make afplay see `-v value` as a single
         // malformed argument instead of a flag + its value (T9).
-        let volumeArgument = AfplayVolume.afplayArgument(forMasterVolume: config.masterVolume)
+        guard environment.playbackAuthorized() else { return .notReady }
+        let volumeArgument = AfplayVolume.afplayArgument(forMasterVolume: volume)
         let spawned = environment.spawner.spawn(
             executablePath: environment.afplayPath,
             arguments: ["-v", volumeArgument, audioFile.path])
@@ -327,7 +337,8 @@ private func performDebouncedPlay(
 private func resolveAudioFile(
     for event: Event,
     packID: String,
-    environment: PlayEnvironment
+    environment: PlayEnvironment,
+    requireHealthyPack: Bool = false
 ) -> URL? {
     guard
         let packDirectory = resolvePackDirectory(
@@ -335,6 +346,12 @@ private func resolveAudioFile(
             userPacksDirectory: environment.userPacksDirectory,
             bundledPacksDirectory: environment.bundledPacksDirectory),
         let manifest = loadPlayManifest(from: packDirectory),
+        !requireHealthyPack
+            || Event.allCases.allSatisfy({ event in
+                guard let file = manifest.events[event.manifestKey] else { return true }
+                guard let url = safePackFileURL(file, in: packDirectory) else { return false }
+                return nonEmptyRegularFileExists(at: url)
+            }),
         let relativeFile = manifest.events[event.manifestKey],
         let audioFile = safePackFileURL(relativeFile, in: packDirectory),
         // 必须是**正规文件**：一个名叫 `stop.mp3` 的目录 / FIFO 会让 `fileExists` 回答 `true`，

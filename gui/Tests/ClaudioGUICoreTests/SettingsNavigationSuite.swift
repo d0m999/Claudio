@@ -21,7 +21,7 @@ func runSettingsNavigationSuites() {
         let expectedNames: [(SettingsDestination, String, String)] = [
             (.general, "通用", "General"),
             (.integrations, "集成", "Integrations"),
-            (.eventsAndSounds, "事件与提示音", "Events & Sounds"),
+            (.eventsAndSounds, "默认组／工作区", "Default Group / Workspaces"),
             (.notifications, "通知", "Notifications"),
             (.display, "显示", "Display"),
             (.sounds, "声音", "Sounds"),
@@ -206,11 +206,7 @@ func runSettingsNavigationSuites() {
                 expect(false, "订阅必须同步交付且只交付一个初始 Settings shell projection")
                 return
             }
-            let allSurfaceScopes = Set(
-                [PanelSoundScopeID.global]
-                    + HostID.productVisibleCases.map {
-                        PanelSoundScopeID.surface($0.surfaceID)
-                    })
+            let allSurfaceScopes: Set<PanelSoundScopeID> = [.global]
             expect(editor.presentation.mode == .inactive, "fixture 必须证明未挂载 Sounds view")
             expect(
                 projection.availability.soundPackIDs == [packID]
@@ -220,7 +216,7 @@ func runSettingsNavigationSuites() {
                 projection.availability.integrationSurfaces
                     == Set(HostID.productVisibleCases.map(\.surfaceID))
                     && projection.availability.eventScopes
-                        == [.global, .surface(.claudeCode), .surface(.codex)]
+                        == [.global]
                     && projection.availability.soundScopes == allSurfaceScopes,
                 "host rows 必须保留全部 Integrations Surface，只过滤 Events scope")
             expect(
@@ -359,14 +355,14 @@ func runSettingsNavigationSuites() {
             hostIntegrations.replace(
                 state: integrationDestinationTestState(
                     statuses: [.workBuddy: .notConnected]))
-            guard emissions.count == 2 else {
+            guard emissions.count == 1 else {
                 expect(false, "host-only route 事实变化必须只交付一个新 projection")
                 return
             }
-            let hostOnly = emissions[1]
+            let hostOnly = emissions[0]
             expect(
                 hostOnly.availability.eventScopes
-                    == [.global, .surface(.claudeCode), .surface(.codex)]
+                    == [.global]
                     && hostOnly.availability.soundPackIDs == [packID]
                     && hostOnly.availability.soundPackSnapshotIsFresh
                     && hostOnly.pendingAnnouncement == nil,

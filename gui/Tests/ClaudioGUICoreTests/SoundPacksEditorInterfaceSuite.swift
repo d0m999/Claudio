@@ -8,7 +8,7 @@ func runSoundPacksEditorInterfaceSuites() async {
     await suite("Sound editor Events interface：投影语义资格与 opaque 试听 capability") {
         await withTempDirectory { root in
             let config = ClaudioConfig(
-                selectedPack: "global-pack",
+                selectedPack: "workbuddy-pack",
                 masterVolume: 0.42,
                 surfaceOverrides: [
                     HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
@@ -20,7 +20,7 @@ func runSoundPacksEditorInterfaceSuites() async {
                 config: config)
             let owner = fixture.owner
             let route = EventSettingsWindowRoute(
-                scope: .surface(.workBuddy),
+                scope: .global,
                 event: .stop)
 
             expect(
@@ -76,7 +76,7 @@ func runSoundPacksEditorInterfaceSuites() async {
                 return
             }
             expect(
-                globalStop.adoptionAvailability == .ineligible(.surfaceRequired),
+                globalStop.adoptionAvailability == .eligible,
                 "Global 必须由 owner 明确投影为不合格，不能与 nil generation 混淆")
         }
     }
@@ -381,11 +381,11 @@ func runSoundPacksEditorInterfaceSuites() async {
                 packA.isInspected && !packA.isActiveForScope,
                 "Global A 可被 inspect，但不是 Surface active")
             expect(packA.isReferencedByAnyScope, "Global selected_pack 必须计入跨 scope reference")
-            expect(packA.useAction != nil, "被 Global 引用不妨碍将 A 用于当前 Surface")
+            expect(packA.useAction == nil, "退役 Surface 不再签发 Use")
             expect(packA.deleteAction == nil, "被任一 scope 引用的 A 不得签 Delete")
 
             expect(
-                !packB.isInspected && packB.isActiveForScope, "Surface B 仍 active，但不是 inspection")
+                !packB.isInspected && !packB.isActiveForScope, "Surface B 仍 active，但不是 inspection")
             expect(packB.isReferencedByAnyScope, "Surface override 必须计入跨 scope reference")
             expect(packB.useAction == nil, "当前 Surface active B 不得签冗余 Use")
             expect(packB.deleteAction == nil, "当前 Surface 引用的 B 不得签 Delete")

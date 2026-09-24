@@ -134,13 +134,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Missing fields inherit global defaults"
+            "value": "Default Group or independent workspace settings"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "缺失字段继承全局默认"
+            "value": "默认组或独立工作区配置"
           }
         }
       }
@@ -342,13 +342,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Global defaults"
+            "value": "Default Group"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "全局默认"
+            "value": "默认组"
           }
         }
       }
@@ -390,13 +390,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Global"
+            "value": "Default Group"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "全局"
+            "value": "默认组"
           }
         }
       }
@@ -486,13 +486,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Applies to previews and event playback"
+            "value": "Applies to the selected group only"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "同时作用于试听与事件播放"
+            "value": "仅调整所选默认组或工作区"
           }
         }
       }
@@ -2824,13 +2824,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Master volume"
+            "value": "Volume"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "主音量"
+            "value": "音量"
           }
         }
       }
@@ -10472,13 +10472,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Events & Sounds"
+            "value": "Default Group / Workspaces"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "事件与提示音"
+            "value": "默认组／工作区"
           }
         }
       }
@@ -10613,38 +10613,98 @@
     },
     "settings.sounds.ai-cue.pack-name": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Cue pack name" } },
-        "zh-Hans": { "stringUnit": { "state": "translated", "value": "提示音组名称" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cue pack name"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提示音组名称"
+          }
+        }
       }
     },
     "settings.sounds.ai-cue.save-name": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Save name" } },
-        "zh-Hans": { "stringUnit": { "state": "translated", "value": "保存名称" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save name"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存名称"
+          }
+        }
       }
     },
     "settings.sounds.ai-cue.save-name-before-adopting": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Save the cue pack name before adopting this sound." } },
-        "zh-Hans": { "stringUnit": { "state": "translated", "value": "采纳此声音前请先保存提示音组名称。" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save the cue pack name before adopting this sound."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "采纳此声音前请先保存提示音组名称。"
+          }
+        }
       }
     },
     "settings.sounds.ai-cue.invalid-name": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Enter a name of 1–64 characters without control characters." } },
-        "zh-Hans": { "stringUnit": { "state": "translated", "value": "请输入 1–64 个字符且不含控制字符的名称。" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a name of 1–64 characters without control characters."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请输入 1–64 个字符且不含控制字符的名称。"
+          }
+        }
       }
     },
     "settings.sounds.ai-cue.usage": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Sound scopes using this pack:" } },
-        "zh-Hans": { "stringUnit": { "state": "translated", "value": "正在使用此包的声音作用域：" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sound scopes using this pack:"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在使用此包的声音作用域："
+          }
+        }
       }
     },
     "settings.sounds.ai-cue.inherited-usage": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "%@ (inherits Global)" } },
-        "zh-Hans": { "stringUnit": { "state": "translated", "value": "%@（继承全局默认）" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ (inherits Global)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@（继承全局默认）"
+          }
+        }
       }
     },
     "settings.sounds.ai-cue.description": {
@@ -13731,6 +13791,486 @@
           "stringUnit": {
             "state": "translated",
             "value": "刷新列表"
+          }
+        }
+      }
+    },
+    "workspace.label": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workspace"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作区"
+          }
+        }
+      }
+    },
+    "workspace.needs-repair": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Repair needed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要修复"
+          }
+        }
+      }
+    },
+    "workspace.add": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Workspace"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加工作区"
+          }
+        }
+      }
+    },
+    "workspace.remove": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove Workspace Rule"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除工作区规则"
+          }
+        }
+      }
+    },
+    "workspace.directory": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Directory scope"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目录范围"
+          }
+        }
+      }
+    },
+    "workspace.choose-directory": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Directory…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择目录…"
+          }
+        }
+      }
+    },
+    "workspace.git-scope": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Repository and linked worktrees"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "整个仓库及关联 worktree"
+          }
+        }
+      }
+    },
+    "workspace.plain-scope": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This directory and subdirectories"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此目录及其子目录"
+          }
+        }
+      }
+    },
+    "workspace.surfaces": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Applies to surfaces"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "适用来源"
+          }
+        }
+      }
+    },
+    "workspace.evidence-pending": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Directory callback verification pending"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未完成目录回调验证"
+          }
+        }
+      }
+    },
+    "workspace.edit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit Workspace…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "编辑工作区…"
+          }
+        }
+      }
+    },
+    "workspace.preview-note": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview checks audio playback only, not host event integration."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "试听只验证音频可播放，不代表宿主事件已接入。"
+          }
+        }
+      }
+    },
+    "workspace.volume-confirm": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm this volume"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "确认使用此音量"
+          }
+        }
+      }
+    },
+    "workspace.migration": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sounds now use a Default Group and Workspaces. Old surface overrides are inactive and preserved; a recovery backup is saved before the first write."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "声音设置已升级为默认组与工作区。旧来源覆盖已停用，原字段保留；首次写入前会保存恢复备份。"
+          }
+        }
+      }
+    },
+    "workspace.dismiss": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Got it"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "知道了"
+          }
+        }
+      }
+    },
+    "workspace.all-sources": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All sources"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所有来源"
+          }
+        }
+      }
+    },
+    "workspace.unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This sound target is no longer available for editing."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此声音目标已失效，无法编辑。"
+          }
+        }
+      }
+    },
+    "workspace.no-surfaces": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No surfaces selected; callbacks use the Default Group."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未选择适用来源；回调继续使用默认组。"
+          }
+        }
+      }
+    },
+    "workspace.write-failure": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not save. Previous values were retained."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "写入失败，原值已保留。"
+          }
+        }
+      }
+    },
+    "workspace.create": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create Workspace"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "创建工作区"
+          }
+        }
+      }
+    },
+    "workspace.cancel": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消"
+          }
+        }
+      }
+    },
+    "workspace.connected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected; see Integrations for event activation"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已接入；各事件激活情况见集成"
+          }
+        }
+      }
+    },
+    "workspace.disconnected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disconnected; no automatic playback"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未接入，不会自动播放"
+          }
+        }
+      }
+    },
+    "workspace.pack-repair": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sound pack is missing or damaged. Repair it in Sounds; the Default Group is not used as a fallback."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "声音包缺失或损坏，请在声音页修复；未回退到默认组。"
+          }
+        }
+      }
+    },
+    "workspace.select-pack": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a sound pack…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择声音包…"
+          }
+        }
+      }
+    },
+    "workspace.invalid-rule": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workspace settings are damaged. Check the directory, pack, volume and all five event switches."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作区配置损坏，请检查目录、声音包、音量与五个事件开关。"
+          }
+        }
+      }
+    },
+    "workspace.duplicate": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This directory or Git repository already has a workspace rule."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "该目录或 Git 仓库已有工作区规则。"
+          }
+        }
+      }
+    },
+    "workspace.save-failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not write settings or the migration backup. Check permissions and retry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置或迁移备份写入失败，请检查权限后重试。"
+          }
+        }
+      }
+    },
+    "workspace.lock-busy": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Settings are in use by another process. Try again shortly."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置正被其他进程使用，请稍后重试。"
+          }
+        }
+      }
+    },
+    "workspace.too-large": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Settings exceed the 64 KiB limit. Reduce workspace rules or oversized extension fields."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置超过 64 KiB 上限，请减少工作区规则或过大的扩展字段。"
           }
         }
       }

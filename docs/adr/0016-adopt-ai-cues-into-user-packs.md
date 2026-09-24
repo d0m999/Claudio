@@ -7,6 +7,10 @@ supersedes: 0007
 
 ## 决策
 
+> 2026-09-24：下文历史 Global/Surface 使用者和复制应用路由由 ADR 0005 新合同替代为默认组/工作区。
+> 生成、采纳与包级映射仍遵循本 ADR；来源级写入口退役。使用者列出默认组与工作区，旧覆盖不计入有效使用范围。
+> 新声音配置页的逐事件编辑定向进入同窗口的「声音」包编辑，不恢复旧 Surface composer。
+
 生成与采纳面向普通**用户声音包**，目标为显式 `packID + Event`。界面称呼「提示音组」
 不引入另一类包、数据库或声音映射。Global 与 Surface 仍按 [ADR 0005](0005-use-global-sound-defaults-with-sparse-surface-overrides.md)
 选择完整包；缺失的 Surface 覆盖逐字段继承 Global，损坏的显式覆盖 fail closed。生成入口在

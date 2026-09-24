@@ -16,3 +16,14 @@ public func runAudioOpenPanel(allowsMultipleSelection: Bool) -> [URL] {
     guard panel.runModal() == .OK else { return [] }
     return panel.urls
 }
+
+/// Directory-only chooser for a workspace scope; it never accepts audio files.
+@MainActor
+public func runWorkspaceDirectoryOpenPanel() -> URL? {
+    let panel = NSOpenPanel()
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = false
+    panel.allowsMultipleSelection = false
+    guard panel.runModal() == .OK else { return nil }
+    return panel.url
+}

@@ -67,10 +67,13 @@ public func nextAICuePackDraftName(
 public struct AICuePackUsageConsumer: Sendable, Equatable, Hashable {
     public let consumer: AICuePackConsumer
     public let inherited: Bool
+    public let workspaceName: String?
 
-    public init(consumer: AICuePackConsumer, inherited: Bool = false) {
+    public init(consumer: AICuePackConsumer, inherited: Bool = false, workspaceName: String? = nil)
+    {
         self.consumer = consumer
         self.inherited = inherited
+        self.workspaceName = workspaceName
     }
 }
 
@@ -109,34 +112,12 @@ public func aiCuePackUsage(
         consumers.append(AICuePackUsageConsumer(consumer: .global))
     }
 
-    if config.surfaceOverridesMalformed {
-        incomplete = true
-    }
-
-    var surfaceTokens = Set(config.surfaceOverrides.keys)
-    surfaceTokens.formUnion(config.invalidSurfaceOverrideKeys)
-    // Product surfaces without an explicit override still consume the Global package through
-    // inheritance. Include them in the effective-consumer list, not only explicit overrides.
-    surfaceTokens.formUnion(HostID.productVisibleCases.map { $0.surfaceID.rawValue })
-
-    for token in surfaceTokens.sorted() {
-        guard let surface = HostSurfaceID(rawValue: token) else {
-            incomplete = true
-            continue
-        }
-        if config.invalidSurfaceOverrideKeys.contains(token) {
-            incomplete = true
-            continue
-        }
-        switch config.resolveSoundProfile(for: surface) {
-        case .success(let profile):
-            guard profile.selectedPack == packID else { continue }
+    incomplete = incomplete || config.workspaceRulesMalformed
+    for rule in config.workspaceRules {
+        guard let profile = rule.profile else { incomplete = true; continue }
+        if profile.selectedPack == packID {
             consumers.append(
-                AICuePackUsageConsumer(
-                    consumer: .surface(surface),
-                    inherited: profile.inheritedPack))
-        case .failure:
-            incomplete = true
+                AICuePackUsageConsumer(consumer: .workspace(rule.id), workspaceName: rule.name))
         }
     }
 

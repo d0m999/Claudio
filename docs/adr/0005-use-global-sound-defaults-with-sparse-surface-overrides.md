@@ -2,18 +2,19 @@
 status: accepted
 ---
 
-# 使用全局声音默认值与稀疏 surface 覆盖
+# 使用完整的默认组与工作区声音配置
 
-claudi0 的顶层 `selected_pack`、事件开关和 `master_volume` 继续是声音默认值。具体
-`HostSurfaceID` 只在 `surface_overrides` 下保存用户明确改过的 `selected_pack` 或单个事件开关；
-缺失字段逐项继承顶层默认值。`master_volume` 保持唯一全局轴，不提供 per-surface 副本。
+2026-09-24 用户批准的新合同替代本 ADR 原来的 Global + sparse Surface 模型。
+默认组和每个工作区各自拥有声音包、音量、五个事件开关；顶层 `master_volume` 仅是默认组音量的兼容存储名，不再乘以工作区音量。工作区不继承单项默认值。创建时必须选包、确认音量，五事件初始全开。
 
-读取必须通过一个 effective profile 解析入口合成默认值与覆盖。某个 surface 的显式覆盖损坏时，
-该 surface fail closed 并停止播放，不能回退到全局配置掩盖损坏；其他 surface 和全局播放不受影响。
-写入使用既有 `config.lock` 和外科式 JSON 更新，保留未知顶层字段、未知其他 surface 与未来字段。
-reset 按字段或整 surface 删除覆盖；空 object 必须从配置中移除，使继承重新成为显式语义。
+唯一解析入口在播放前根据有界 hook payload 的 `cwd` 和 Surface 选择整套配置。可信目录缺失或没有适用规则时使用默认组；命中规则的显式损坏或包损坏停止该规则播放。宿主能力、当前接入代次和动态静默仍先行约束自动播放；断开后迟到的回调不得播放。试听只检查音频可播放，不声明宿主事件已接入。
 
-连接与声音偏好是正交事实。首次连接不创建覆盖、不播放试听；断开只撤销当前 activation，不删除
-surface 偏好或脱敏历史。popup 只显示当前已配置/可用来源的 effective profile，管理窗口继续展示
-全部已发布 adapter 的连接、版本、绑定和回执事实。显式引用不存在或损坏声音包的覆盖不得使用
-全局包兜底，因为那会把错误配置伪装成成功。
+Git 目录使用 `rev-parse --show-toplevel` 定位所选 worktree 根，使用绝对 `--git-common-dir` 作为共同仓库身份，覆盖所有关联 worktree。普通目录按解析符号链接后的实际路径及子目录匹配。共同 Git 身份或普通实际路径重复时拒绝；适用 Git 规则优先于普通目录，普通规则选最长路径。Git 识别失败不得伪装为普通目录或掩盖已命中的损坏规则。目录仅留在本机配置和进程内存，不进入普通日志、回执或活动摘要。
+
+升级立即忽略 `surface_overrides`（包括旧损坏覆盖），原始 JSON 与未知字段保留。首次新配置写入在既有 `config.lock`/CAS 边界中先制作私有可恢复备份，再记录模型版本；备份失败则拒写。旧来源声音写 API 明确拒绝，陈旧路由不得改写默认组。GUI 显示一次非阻塞迁移说明。
+
+第一版的目录适用来源限 Codex CLI 与 Claude Code，并须以目标事件的实际版本目录回调证据开放；WorkBuddy 暂不开放。新规则只勾选创建时已具备证据的来源，新增来源不自动加入。目录证据、接入、能力与当前激活分别呈现。
+
+设置详情与菜单栏共用写入 owner 和声音包库。设置提供默认组/工作区列表及同窗口详情；菜单栏只手动选组、换包、调该组音量、试听与逐事件静音，适用 Surface 只读并可定向进入详情。活动概览始终标为“所有来源”，不推算工作区统计。
+
+参考：[Git rev-parse](https://git-scm.com/docs/git-rev-parse)、[Git worktree](https://git-scm.com/docs/git-worktree)、[Codex Hooks](https://developers.openai.com/de-DE/docs/hooks)、[Claude Code Hooks](https://code.claude.com/docs/en/hooks)。公开文档不代替发布前逐事件真实验证。

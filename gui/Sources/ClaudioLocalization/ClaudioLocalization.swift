@@ -1231,7 +1231,70 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let feedbackHostStateUpdated: Self = "feedback.host-state-updated"
     public static let feedbackReceiptHistoryCleared: Self = "feedback.receipt-history-cleared"
 
+    public static let workspaceLabel: Self = "workspace.label"
+    public static let workspaceNeedsRepair: Self = "workspace.needs-repair"
+    public static let workspaceAdd: Self = "workspace.add"
+    public static let workspaceRemove: Self = "workspace.remove"
+    public static let workspaceDirectory: Self = "workspace.directory"
+    public static let workspaceChooseDirectory: Self = "workspace.choose-directory"
+    public static let workspaceGitScope: Self = "workspace.git-scope"
+    public static let workspacePlainScope: Self = "workspace.plain-scope"
+    public static let workspaceSurfaces: Self = "workspace.surfaces"
+    public static let workspaceEvidencePending: Self = "workspace.evidence-pending"
+    public static let workspaceEdit: Self = "workspace.edit"
+    public static let workspacePreviewNote: Self = "workspace.preview-note"
+    public static let workspaceVolumeConfirm: Self = "workspace.volume-confirm"
+    public static let workspaceMigration: Self = "workspace.migration"
+    public static let workspaceDismiss: Self = "workspace.dismiss"
+    public static let workspaceAllSources: Self = "workspace.all-sources"
+    public static let workspaceUnavailable: Self = "workspace.unavailable"
+    public static let workspaceNoSurfaces: Self = "workspace.no-surfaces"
+    public static let workspaceWriteFailure: Self = "workspace.write-failure"
+    public static let workspaceCreate: Self = "workspace.create"
+    public static let workspaceCancel: Self = "workspace.cancel"
+    public static let workspaceConnected: Self = "workspace.connected"
+    public static let workspaceDisconnected: Self = "workspace.disconnected"
+    public static let workspacePackRepair: Self = "workspace.pack-repair"
+    public static let workspaceSelectPack: Self = "workspace.select-pack"
+
+    public static let workspaceTooLarge: Self = "workspace.too-large"
+    public static let workspaceInvalidRule: Self = "workspace.invalid-rule"
+    public static let workspaceDuplicate: Self = "workspace.duplicate"
+    public static let workspaceSaveFailed: Self = "workspace.save-failed"
+    public static let workspaceLockBusy: Self = "workspace.lock-busy"
     public static let allKnown: [Self] = [
+        .workspaceTooLarge,
+        .workspaceInvalidRule,
+        .workspaceDuplicate,
+        .workspaceSaveFailed,
+        .workspaceLockBusy,
+
+        .workspaceLabel,
+        .workspaceNeedsRepair,
+        .workspaceAdd,
+        .workspaceRemove,
+        .workspaceDirectory,
+        .workspaceChooseDirectory,
+        .workspaceGitScope,
+        .workspacePlainScope,
+        .workspaceSurfaces,
+        .workspaceEvidencePending,
+        .workspaceEdit,
+        .workspacePreviewNote,
+        .workspaceVolumeConfirm,
+        .workspaceMigration,
+        .workspaceDismiss,
+        .workspaceAllSources,
+        .workspaceUnavailable,
+        .workspaceNoSurfaces,
+        .workspaceWriteFailure,
+        .workspaceCreate,
+        .workspaceCancel,
+        .workspaceConnected,
+        .workspaceDisconnected,
+        .workspacePackRepair,
+        .workspaceSelectPack,
+
         .interfaceTitle, .interfaceLanguage, .interfaceChinese, .interfaceEnglish,
         .panelTitle, .panelBaseLabel, .panelHeader, .panelHeaderWithPack, .panelSources,
         .panelSelectedPackNone, .panelAudibleEventsLoading,

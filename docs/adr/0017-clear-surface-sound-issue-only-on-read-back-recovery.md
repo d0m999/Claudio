@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded-by: 0005
 ---
 
 # surfaceSoundIssue 的自动清除只覆盖结构性损坏、且基于读回重估
+
+> 2026-09-24：ADR 0005 退役 Surface 声音写入；旧详情不因旧覆盖读回健康恢复写权限。下文保留迁移前历史。
 
 `surfaceSoundIssue` 有四个置值入口：当前 Surface 覆盖解析失败，以及静音、切包、重置覆盖
 三条写路径失败。前者可通过有效配置读回重新判定；后者的用户意图未可靠完成，仅重读配置

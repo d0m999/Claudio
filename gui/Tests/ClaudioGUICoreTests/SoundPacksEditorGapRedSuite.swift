@@ -606,7 +606,7 @@ private func gapAdoptionFixture(
         manifestJSONByPackID: manifestJSON.map { ["workbuddy-pack": $0] } ?? [:],
         durationProbe: durationProbe,
         config: ClaudioConfig(
-            selectedPack: "global-pack",
+            selectedPack: "workbuddy-pack",
             surfaceOverrides: [
                 HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
                     selectedPack: "workbuddy-pack")
@@ -614,7 +614,7 @@ private func gapAdoptionFixture(
         afterFinalImportCancellationSampleForTesting: afterFinalImportSample)
     return GapAdoptionFixture(
         base: base,
-        route: EventSettingsWindowRoute(scope: .surface(.workBuddy), event: .stop),
+        route: EventSettingsWindowRoute(scope: .global, event: .stop),
         manifest: root.appendingPathComponent("packs/workbuddy-pack/manifest.json"))
 }
 

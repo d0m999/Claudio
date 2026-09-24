@@ -55,50 +55,16 @@ func runPanelPresentationSuites() async {
                 scopes: [.global]) == .scope(.global),
             "陈旧 Surface 不得留下可写事件焦点，必须回到可见安全 scope")
 
-        let sparseConfig = ClaudioConfig(
-            selectedPack: "global",
-            surfaceOverrides: [
-                HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
-                    eventsEnabled: [Event.stop.cliName: false])
-            ])
+        let retired = ClaudioConfig(selectedPack: "default")
+        expect(
+            eventSettingsPackInheritanceState(config: retired, scope: .surface(.workBuddy))
+                == .invalidSurfaceOverride,
+            "退役 Surface 详情不得投影默认组为可写覆盖")
         expect(
             eventSettingsInheritanceState(
-                config: sparseConfig,
-                scope: .surface(.workBuddy),
-                event: .stop) == .surfaceOverride,
-            "逐 Event 显式覆盖必须可见为 Surface override")
-        expect(
-            eventSettingsInheritanceState(
-                config: sparseConfig,
-                scope: .surface(.workBuddy),
-                event: .taskStart) == .inheritedGlobal,
-            "同 Surface 未覆盖的 Event 必须明确显示继承 Global")
-        expect(
-            eventSettingsPackInheritanceState(
-                config: sparseConfig,
-                scope: .surface(.workBuddy)) == .inheritedGlobal,
-            "只有 Event 覆盖时，声音包仍必须明确显示继承 Global")
-
-        let packOverrideConfig = ClaudioConfig(
-            selectedPack: "global",
-            surfaceOverrides: [
-                HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(selectedPack: "surface")
-            ])
-        expect(
-            eventSettingsPackInheritanceState(
-                config: packOverrideConfig,
-                scope: .surface(.workBuddy)) == .surfaceOverride,
-            "只有 selected_pack 覆盖时，声音包才显示 Surface override")
-
-        let invalidOverrideConfig = ClaudioConfig(
-            selectedPack: "global",
-            surfaceOverrides: sparseConfig.surfaceOverrides,
-            invalidSurfaceOverrideKeys: [HostSurfaceID.workBuddy.rawValue])
-        expect(
-            eventSettingsPackInheritanceState(
-                config: invalidOverrideConfig,
-                scope: .surface(.workBuddy)) == .invalidSurfaceOverride,
-            "损坏 Surface 的声音包继承必须 fail closed")
+                config: retired, scope: .surface(.workBuddy), event: .stop)
+                == .invalidSurfaceOverride,
+            "退役 Surface 事件路由必须失效")
         expect(
             !eventSettingsShouldCloseAICueComposer(
                 includesAICueComposer: false,
@@ -206,7 +172,7 @@ func runPanelPresentationSuites() async {
             language: .zhHans)
 
         expect(
-            scopeIDs == [.global, .surface(.workBuddy)]
+            scopeIDs == [.global]
                 && panelScopes.map(\.scope) == scopeIDs,
             "面板与 Events route availability 必须消费同一份已配置/可用作用域真相")
 
@@ -226,7 +192,7 @@ func runPanelPresentationSuites() async {
         expect(
             disconnected.failure == .staleSurface(.claudeCode),
             "未连接 Surface 不得出现在 Events 选择器，typed deep link 必须留下可见失败")
-        expect(available.failure == nil, "可用 Surface 的 typed deep link 必须继续正常解析")
+        expect(available.failure == .staleSurface(.workBuddy), "已接入来源也不能恢复退役的声音写入口")
     }
 
     await suite("试听全部：只消费 opaque Event capability，保持顺序并可取消") {
@@ -296,40 +262,30 @@ func runPanelPresentationSuites() async {
             "集成入口已改为行内状态动作，菜单不再保留 footer 高度：\(layout.diagnosticsHeight)")
     }
 
-    suite("面板作用域：Global 恒在、Surface 按 registry 排序，notConnected 一律过滤") {
-        let config = ClaudioConfig(
-            selectedPack: "pack",
-            surfaceOverrides: [
-                HostSurfaceID.claudeCode.rawValue: SurfaceSoundOverride(selectedPack: "other")
-            ])
+    suite("声音选择器只显示默认组与工作区，与来源状态无关") {
+        var config = ClaudioConfig(selectedPack: "pack")
+        let rule = WorkspaceSoundRule(
+            directory: WorkspaceDirectory(kind: .directory, path: "/fixture/project"),
+            surfaces: [.codex], profile: WorkspaceSoundProfile(selectedPack: "other", volume: 0.3))
+        config.workspaceRules = [rule]
         let scopes = panelSoundScopePresentations(
             sourceRows: [
-                panelPresentationRow(.workBuddy, status: .awaitingActivation, supported: 3),
-                panelPresentationRow(.claudeCode, status: .notConnected, supported: 5),
                 panelPresentationRow(.codex, status: .ready, supported: 4),
-            ],
-            config: config,
-            language: .zhHans)
-
+                panelPresentationRow(.workBuddy, status: .awaitingActivation, supported: 3),
+            ], config: config, language: .zhHans)
+        expect(scopes.map(\.scope) == [.global, .workspace(rule.id)], "来源不能成为声音配置所有者")
+        expect(scopes.first?.name == "默认组", "默认组名称必须本地化")
+        expect(scopes.last?.name == "project", "工作区使用目录名称")
+        expect(scopes.last?.host == nil, "工作区不得冒充宿主激活状态")
         expect(
-            scopes.map(\.scope) == [.global, .surface(.codex), .surface(.workBuddy)],
-            "作用域菜单必须遵守 Global → Codex → Claude Code → WorkBuddy，并过滤未连接项：\(scopes.map(\.scope))")
-        expect(scopes[0].name == "全局默认", "Global 作用域必须使用完整名称")
+            panelSoundScopePresentations(sourceRows: [], config: config, language: .zhHans)
+                == scopes,
+            "来源断开或新回调不得改变声音选择器")
         expect(
-            scopes[0].coverageText == "5 个事件" && scopes[0].stateText == "默认"
-                && scopes[0].summaryText == "5 个事件 · 默认",
-            "Global 必须把事件数与默认状态分开投影")
-        expect(
-            scopes[1].coverageText == "4/5" && scopes[1].stateText == "已激活"
-                && scopes[1].summaryText == "4/5 · 已激活",
-            "Codex 必须显示 4/5 与当前激活事实")
-        expect(
-            scopes[2].status == .awaitingActivation && scopes[2].stateText == "待回执"
-                && scopes[2].summaryText == "3/5 · 待回执",
-            "WorkBuddy 必须保留 awaitingActivation 语义并使用面板专属待回执文案")
-        expect(
-            !scopes.contains(where: { $0.scope == .surface(.claudeCode) }),
-            "即使磁盘残留 Surface 覆盖，notConnected 也不得进入 popup")
+            resolvedPanelSoundScopeSelection(
+                storedValue: PanelSoundScopeID.workspace(rule.id).storedValue, scopes: scopes)
+                == .workspace(rule.id),
+            "手动工作区选择必须恢复")
     }
 
     suite("行内集成入口：仅异常 Surface 行产生动作宿主，Global/已激活/未连接保持只读") {
@@ -398,14 +354,8 @@ func runPanelPresentationSuites() async {
             config: ClaudioConfig(selectedPack: "pack"),
             language: .english)
 
-        expect(scopes[0].name == "Global defaults", "英文 Global 必须使用完整名称")
-        expect(scopes[0].summaryText == "5 events · Default", "英文 Global 摘要错误")
-        expect(
-            scopes[1].summaryText == "3/5 · Awaiting receipt",
-            "英文等待态不得继续显示 configured")
-        expect(
-            scopes[1].accessibilityLabel.contains("Awaiting receipt"),
-            "AX 文案必须消费与屏幕相同的面板状态投影")
+        expect(scopes.count == 1 && scopes.first?.name == "Default Group", "英文默认组不应包含来源项")
+        expect(scopes.first?.summaryText == "5 events · Default", "默认组摘要错误")
     }
 
     suite("面板作用域恢复：显式 Global/合法历史值保留，首次与失效值选首个可用来源") {
@@ -424,14 +374,14 @@ func runPanelPresentationSuites() async {
         expect(
             resolvedPanelSoundScopeSelection(
                 storedValue: HostSurfaceID.workBuddy.rawValue,
-                scopes: scopes) == .surface(.workBuddy),
+                scopes: scopes) == .global,
             "合法历史 WorkBuddy 选择必须恢复")
         expect(
-            resolvedPanelSoundScopeSelection(storedValue: nil, scopes: scopes) == .surface(.codex),
+            resolvedPanelSoundScopeSelection(storedValue: nil, scopes: scopes) == .global,
             "首次打开应选 registry 中首个可用来源")
         expect(
             resolvedPanelSoundScopeSelection(storedValue: "stale", scopes: scopes)
-                == .surface(.codex),
+                == .global,
             "失效值应选首个可用来源")
         expect(
             resolvedPanelSoundScopeSelection(storedValue: nil, scopes: [scopes[0]]) == .global,
@@ -469,7 +419,7 @@ func runPanelPresentationSuites() async {
         expect(
             panelSoundScopeStoredValueToPersist(
                 storedValue: "unselected",
-                resolvedSelection: firstAvailable) == HostSurfaceID.codex.rawValue,
+                resolvedSelection: firstAvailable) == nil,
             "首个可用来源到达后才应把首次自动选择持久化")
     }
 
@@ -550,7 +500,7 @@ func runPanelPresentationSuites() async {
         expect(
             events.map(\.nativeEventText) == Event.allCases.map(\.cliName),
             "Global 原生事件列必须显示稳定 claudi0 ID")
-        expect(events.allSatisfy { $0.capabilityText == "全局默认" }, "Global 能力标签必须是全局默认")
+        expect(events.allSatisfy { $0.capabilityText == "默认组" }, "Global 能力标签必须是全局默认")
         expect(
             events.allSatisfy { $0.support == nil && $0.implementation == nil },
             "Global 不得伪造 Host capability")

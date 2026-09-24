@@ -771,7 +771,8 @@ func runViewWiringSuites() {
     suite("行内集成入口接线：选择器只转发宿主身份，typed route 提交留在 MenuBarController") {
         guard
             let panel = codeOnly("gui/Sources/ClaudioPanelPresentation/PanelView.swift"),
-            let scopePicker = codeOnly("gui/Sources/ClaudioPanelPresentation/PanelSoundScopePicker.swift"),
+            let scopePicker = codeOnly(
+                "gui/Sources/ClaudioPanelPresentation/PanelSoundScopePicker.swift"),
             let theme = codeOnly("gui/Sources/ClaudioGUIComponents/ClaudioTheme.swift"),
             let menu = codeOnly("gui/Sources/ClaudioGUI/MenuBarController.swift")
         else {
@@ -2060,7 +2061,8 @@ func runViewWiringSuites() {
     // 不证明「这根线运行期真的接通、接对了地方」。别把这条 suite 全绿读成「面板行为被守住了」——行为那半
     // 由 `PanelConfigControllerSuite` + `PanelRefreshRouteSuite` 守，这半只守「渲染层的线还在不在」。
     suite("PanelView：config 不可用时必须换态（渲染层接线的存在性；行为那半在 PanelConfigControllerSuite）") {
-        guard let panel = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PanelView.swift") else {
+        guard let panel = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PanelView.swift")
+        else {
             expect(false, "读不到 PanelView.swift")
             return
         }
@@ -2248,7 +2250,8 @@ func runViewWiringSuites() {
         // 恰好把 X 写进错误消息的代码都会让它**假红**；更要命的是正向那半（下面 closureBody 那几条）
         // 会被同一份字符串**假绿**。统一读这一路。
         guard
-            let row = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/MasterVolumeRow.swift"),
+            let row = codeWithoutStrings(
+                "gui/Sources/ClaudioPanelPresentation/MasterVolumeRow.swift"),
             let shared = codeWithoutStrings(
                 "gui/Sources/ClaudioGUIComponents/SharedMasterVolumeSlider.swift")
         else {
@@ -2324,7 +2327,8 @@ func runViewWiringSuites() {
 
     suite("MasterVolumeRow：popover 隐藏必须冲刷（D22/D37，复用既有 hideCount 信号，不新增 closeCount）") {
         guard
-            let wrapper = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/MasterVolumeRow.swift"),
+            let wrapper = codeWithoutStrings(
+                "gui/Sources/ClaudioPanelPresentation/MasterVolumeRow.swift"),
             let row = codeWithoutStrings(
                 "gui/Sources/ClaudioGUIComponents/SharedMasterVolumeSlider.swift")
         else {
@@ -2367,7 +2371,8 @@ func runViewWiringSuites() {
         // （`/codex review 8771946` 完备性批评）：删掉 `.accessibilityValue`，1976 checks 全绿。
         // 一个「屏幕上没有、VO 里也没有」的值，就是压根不存在的值。
         guard
-            let wrapper = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/MasterVolumeRow.swift"),
+            let wrapper = codeWithoutStrings(
+                "gui/Sources/ClaudioPanelPresentation/MasterVolumeRow.swift"),
             let row = codeWithoutStrings(
                 "gui/Sources/ClaudioGUIComponents/SharedMasterVolumeSlider.swift")
         else {
@@ -2430,7 +2435,8 @@ func runViewWiringSuites() {
     }
 
     suite("PanelView：主音量 commit 后必须刷新共享可听矩阵，且刷新发生在落盘尝试之后") {
-        guard let panel = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PanelView.swift") else {
+        guard let panel = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PanelView.swift")
+        else {
             expect(false, "读不到 PanelView.swift")
             return
         }
@@ -2440,7 +2446,7 @@ func runViewWiringSuites() {
             return
         }
         guard
-            let write = body.range(of: "panelModel.setMasterVolume("),
+            let write = body.range(of: "panelModel.setVolume("),
             let refresh = body.range(of: "onAudibilityInputsChanged()")
         else {
             expect(
@@ -2460,7 +2466,8 @@ func runViewWiringSuites() {
     // 头部——EventRowView/PanelView 都住在不可 import 的 `ClaudioGUI` executableTarget）
 
     suite("PanelView：手工试听只消费安全解析与当前音量；映射导入完全离开面板") {
-        guard let panel = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PanelView.swift") else {
+        guard let panel = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PanelView.swift")
+        else {
             expect(false, "读不到 PanelView.swift")
             return
         }
@@ -2676,7 +2683,8 @@ func runViewWiringSuites() {
     suite("Panel 固定退出入口：footer 位于 ScrollView 之后并完整转发 required onQuit") {
         guard
             let panel = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PanelView.swift"),
-            let footer = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PanelQuitFooter.swift")
+            let footer = codeWithoutStrings(
+                "gui/Sources/ClaudioPanelPresentation/PanelQuitFooter.swift")
         else {
             expect(false, "读不到 PanelView/PanelQuitFooter")
             return
@@ -2717,7 +2725,8 @@ func runViewWiringSuites() {
     suite("退出生命周期：SwiftUI 只发意图，唯一 composition root 正常 terminate 且不预关闭") {
         guard
             let menu = codeWithoutStrings("gui/Sources/ClaudioGUI/MenuBarController.swift"),
-            let footer = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PanelQuitFooter.swift"),
+            let footer = codeWithoutStrings(
+                "gui/Sources/ClaudioPanelPresentation/PanelQuitFooter.swift"),
             let quitBody = closureBody(after: "onQuit:", in: menu)
         else {
             expect(false, "读不到退出接线或无法切出 onQuit 闭包")
@@ -2848,7 +2857,8 @@ func runViewWiringSuites() {
     }
 
     suite("PanelView：设置入口进入保留的统一 Settings session") {
-        guard let panel = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PanelView.swift") else {
+        guard let panel = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PanelView.swift")
+        else {
             expect(false, "读不到 PanelView.swift")
             return
         }
@@ -2979,7 +2989,8 @@ func runViewWiringSuites() {
         // missing 改回 muted `#6F665B`（暗色对 surface-2 只有 2.77:1）时，那四条都会继续全绿
         // ——断言措辞就比覆盖范围大。
         guard
-            let source = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PackGalleryView.swift"),
+            let source = codeWithoutStrings(
+                "gui/Sources/ClaudioPanelPresentation/PackGalleryView.swift"),
             let packCardBody = closureBody(after: "private struct PackCardView: View", in: source),
             let coverageTrackBody = closureBody(
                 after: "private struct CoverageTrack: View", in: source),
@@ -3299,9 +3310,9 @@ func runViewWiringSuites() {
 
         let allProduction = sourcesUnder("gui/Sources").map(\.code).joined(separator: "\n")
         expect(
-            allProduction.components(separatedBy: "NSOpenPanel()").count - 1 == 1
+            allProduction.components(separatedBy: "NSOpenPanel()").count - 1 == 2
                 && picker.contains("NSOpenPanel()"),
-            "全 GUI 只允许共享组件里一处 NSOpenPanel 构造，避免两处 allow-list/取消语义漂移")
+            "全 GUI 仅共享组件拥有两个独立选择器：音频文件与工作区目录")
         expect(
             allProduction.components(separatedBy: "NSSound(contentsOf:").count - 1 == 1
                 && player.contains("NSSound(contentsOf:"),

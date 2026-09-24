@@ -82,37 +82,28 @@ func runAICuePackScopedSuites() {
     suite("AI 提示音包使用范围：Global 继承、Surface 覆盖与损坏配置分离") {
         let globalConfig = ClaudioConfig(selectedPack: "global-pack")
         let globalUsage = aiCuePackUsage(packID: "global-pack", config: globalConfig)
-        let expectedGlobalConsumers =
-            [.global] + HostID.productVisibleCases.map { AICuePackConsumer.surface($0.surfaceID) }
+        expect(globalUsage.effectiveConsumers == [.global], "默认组只报告一个消费者")
+        var config = globalConfig
+        let rule = WorkspaceSoundRule(
+            directory: WorkspaceDirectory(kind: .directory, path: "/fixture/project"),
+            surfaces: [.codex],
+            profile: WorkspaceSoundProfile(selectedPack: "workspace-pack", volume: 0.4))
+        config.workspaceRules = [rule]
+        config.surfaceOverrides = [
+            HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(selectedPack: "retired")
+        ]
         expect(
-            globalUsage.effectiveConsumers == expectedGlobalConsumers,
-            "Global 包必须报告 Global 与所有产品 Surface 的继承使用者")
+            aiCuePackUsage(packID: "workspace-pack", config: config).effectiveConsumers == [
+                .workspace(rule.id)
+            ], "工作区必须报告独立包使用关系")
         expect(
-            globalUsage.consumers.dropFirst().allSatisfy(\.inherited)
-                && !globalUsage.usageIsIncomplete,
-            "继承使用者必须单独标记且完整配置不得提示范围不完整")
+            aiCuePackUsage(packID: "retired", config: config).effectiveConsumers.isEmpty,
+            "旧来源覆盖不再使用声音包")
+        config.invalidSurfaceOverrideKeys.insert(HostSurfaceID.codex.rawValue)
+        expect(
+            !aiCuePackUsage(packID: "global-pack", config: config).usageIsIncomplete,
+            "旧覆盖损坏不应污染新声音模型")
 
-        let surfaceConfig = ClaudioConfig(
-            selectedPack: "global-pack",
-            surfaceOverrides: [
-                HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
-                    selectedPack: "surface-pack")
-            ])
-        let surfaceUsage = aiCuePackUsage(packID: "surface-pack", config: surfaceConfig)
-        expect(
-            surfaceUsage.effectiveConsumers == [.surface(.workBuddy)]
-                && !surfaceUsage.consumers[0].inherited,
-            "显式 Surface 包必须只报告该 Surface，不能把它误算成 Global 继承")
-
-        var damagedConfig = surfaceConfig
-        damagedConfig.invalidSurfaceOverrideKeys.insert(HostSurfaceID.codex.rawValue)
-        let damagedUsage = aiCuePackUsage(packID: "global-pack", config: damagedConfig)
-        expect(
-            damagedUsage.usageIsIncomplete,
-            "无法分类的 Surface override 必须显示使用范围不完整")
-        expect(
-            !damagedUsage.effectiveConsumers.contains(.surface(.codex)),
-            "损坏的 Surface 不得被静默降级成 Global 或有效使用者")
     }
 
     suite("AI 提示音包资格：健康用户包与损坏配置解耦，内置/损坏/缺失包仍拒绝") {

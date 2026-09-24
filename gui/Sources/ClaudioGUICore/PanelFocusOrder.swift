@@ -18,6 +18,8 @@ public enum PanelFocusTarget: Sendable, Hashable {
     case eventPreview(Event)
     case eventMute(Event)
     case masterVolume
+    case soundPackPicker
+    case workspaceDetails
     case openSoundSettings
     case resetSurface
     case configReveal
@@ -71,7 +73,9 @@ public enum PanelFocusScope: Sendable, Equatable {
         hasConfigFailureNotice: Bool = false,
         hasRefreshFailedNotice: Bool = false,
         writeFailureRecoveryPaths: [String] = [],
-        hasWriteFailureConfigRecovery: Bool = false)
+        hasWriteFailureConfigRecovery: Bool = false,
+        hasSoundPackPicker: Bool = false,
+        hasWorkspaceDetails: Bool = false)
 }
 
 /// 生产顺序与视觉顺序相同：作用域 → 启动/配置恢复 → 每行可用试听/静音 → 播放设置 →
@@ -114,7 +118,9 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         let hasConfigFailureNotice,
         let hasRefreshFailedNotice,
         let writeFailureRecoveryPaths,
-        let hasWriteFailureConfigRecovery):
+        let hasWriteFailureConfigRecovery,
+        let hasSoundPackPicker,
+        let hasWorkspaceDetails):
         var order: [PanelFocusTarget] = [.headerSettings, .recentNotices, .soundScope]
         if hasActivityOverview {
             order.append(.activityRange)
@@ -126,7 +132,9 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
             if event.controls.previewEnabled { order.append(.eventPreview(event.event)) }
             if event.controls.muteEnabled { order.append(.eventMute(event.event)) }
         }
+        if hasSoundPackPicker { order.append(.soundPackPicker) }
         if hasMasterVolume { order.append(.masterVolume) }
+        if hasWorkspaceDetails { order.append(.workspaceDetails) }
         order.append(
             contentsOf: writeFailureRecoveryPaths.map { .writeFailureRecoveryFile(path: $0) })
         if hasWriteFailureConfigRecovery { order.append(.writeFailureConfigReveal) }

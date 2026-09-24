@@ -107,28 +107,9 @@ func runSettingsPresentationTargetSuites() {
             return
         }
         let code = scanned.codeWithoutStringLiterals
-        guard
-            let optionsStart = code.range(of: "private var scopeOptions"),
-            let optionsEnd = code.range(
-                of: "private func scopesForProduct",
-                range: optionsStart.upperBound..<code.endIndex)
-        else {
-            expect(false, "找不到 Events & Sounds scopeOptions 源码边界")
-            return
-        }
-        let optionsCode = String(code[optionsStart.lowerBound..<optionsEnd.lowerBound])
-        let compactOptionsCode = optionsCode.filter { !$0.isWhitespace }
         expect(
-            optionsCode.contains(
-                "ForEach(hostSourceProductGroups(from: hostIntegrations.content.sourceRows))")
-                && optionsCode.contains("ForEach(scopesForProduct(group.product))")
-                && optionsCode.contains("!scopesForProduct(group.product).isEmpty")
-                && compactOptionsCode.contains(
-                    "Text(group.title).frame(width:1,height:1).opacity(0.001)"
-                        + ".accessibilityHidden(false).accessibilityAddTraits(.isHeader)")
-                && !optionsCode.contains(".accessibilityElement(children: .contain)")
-                && !optionsCode.contains(".accessibilityLabel(group.title)"),
-            "作用域侧栏必须用真实 Text 导出 Product AXHeading，不能把标题 trait 放在 AXGroup 上")
+            code.contains("ForEach(scopes)") && code.contains("model.selectSoundScope(scope.scope)")
+                && !code.contains("hostSourceProductGroups"), "声音侧栏必须由默认组与工作区组成，不再按 Product 分类")
     }
 
     suite("Settings presentation target：Release view tree 不携带 DEBUG recorder modifier") {
@@ -677,9 +658,9 @@ func runSettingsPresentationSliceSuites() {
                         && state.route.event == scenarioSession.event,
                     "\(scenario.rawValue) composer route 必须与 fixture session scope/Event 对齐")
                 expect(
-                    SettingsMountRecorder.identifiers.contains(
+                    !SettingsMountRecorder.identifiers.contains(
                         "event-settings.ai-cue.composer"),
-                    "\(scenario.rawValue) 必须经 production root 挂载 compiled composer subtree")
+                    "\(scenario.rawValue) 声音配置页应通过定向声音包编辑进入 composer")
             }
             if scenario.rendersCredentialSheet {
                 expect(

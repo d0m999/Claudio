@@ -257,7 +257,7 @@ package struct SettingsRootView: View {
                     languageStore: preferences,
                     onManageEvents: { host in
                         settingsPresentationSession.send(
-                            .route(.events(scope: .surface(host.surfaceID), event: nil)))
+                            .route(.events(scope: .global, event: nil)))
                     },
                     onAnnouncement: onAnnouncement)
             case .eventsAndSounds:

@@ -206,24 +206,18 @@ private final class AICueControlledAssetProtocolControl: @unchecked Sendable {
     }
 
     func waitForSuppressedLateChunk() async {
-        await withCheckedContinuation { continuation in
-            let shouldResume = lock.withLock { () -> Bool in
-                if suppressedLateChunks > 0 { return true }
-                lateChunkWaiters.append(continuation)
-                return false
-            }
-            if shouldResume { continuation.resume() }
+        // Missing URLProtocol callbacks must fail the existing facts assertion, not hang the harness.
+        let deadline = DispatchTime.now().uptimeNanoseconds + 2_000_000_000
+        while facts().suppressedLateChunks == 0 && DispatchTime.now().uptimeNanoseconds < deadline {
+            try? await Task.sleep(nanoseconds: 1_000_000)
         }
     }
 
     func waitForStoppedAttempt() async {
-        await withCheckedContinuation { continuation in
-            let shouldResume = lock.withLock { () -> Bool in
-                if stoppedAttempts > 0 { return true }
-                stoppedAttemptWaiters.append(continuation)
-                return false
-            }
-            if shouldResume { continuation.resume() }
+        // Missing URLProtocol callbacks must fail the existing facts assertion, not hang the harness.
+        let deadline = DispatchTime.now().uptimeNanoseconds + 2_000_000_000
+        while facts().stoppedAttempts == 0 && DispatchTime.now().uptimeNanoseconds < deadline {
+            try? await Task.sleep(nanoseconds: 1_000_000)
         }
     }
 
@@ -1122,7 +1116,8 @@ func runAICueAssetFetchSuites() async {
         let lateFacts = AICueControlledAssetURLProtocol.control.facts()
         expect(
             lateFacts.stoppedAttempts == 1 && lateFacts.suppressedLateChunks == 1,
-            "inactivity 后的迟到 chunk 必须被已停止的 URLProtocol 丢弃")
+            "inactivity 后的迟到 chunk 必须被已停止的 URLProtocol 丢弃；requests=\(lateFacts.requests.count), stopped=\(lateFacts.stoppedAttempts), late=\(lateFacts.suppressedLateChunks)"
+        )
     }
 
     await suite("AI 提示音 URLSession asset loader：绝对边界的 Foundation timeout 不降级为 transient") {

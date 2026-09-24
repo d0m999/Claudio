@@ -8,9 +8,7 @@ import SwiftUI
 func runAICueDescriptionSuites() {
     suite("AI 提示音原生描述控件：生成时不挂载可编辑输入器") {
         for scenario in [PreviewFixtures.AICueGalleryScenario.generating, .editing] {
-            let fixture = SettingsPresentationFixtures.generalLogin(
-                route: .events(scope: .surface(.workBuddy), event: .stop),
-                aiCueScenario: scenario)
+            let fixture = aiCueDescriptionPackFixture(scenario)
             let hostingView = NSHostingView(rootView: SettingsRootView(session: fixture.session))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1_240, height: 820),
@@ -45,7 +43,7 @@ func runAICueDescriptionFocusSuites() async {
             ? [allScenarios[2]] : allScenarios
         let rounds = CommandLine.arguments.contains("--ai-cue-native-focus-stress") ? 10 : 1
         for (scenario, keyCode, characters) in (0..<rounds).flatMap({ _ in scenarios }) {
-            let fixture = SettingsPresentationFixtures.generalLogin(aiCueScenario: scenario)
+            let fixture = aiCueDescriptionPackFixture(scenario)
             let hostingView = NSHostingView(rootView: SettingsRootView(session: fixture.session))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1_240, height: 820),
@@ -160,4 +158,20 @@ private func aiCueSendKey(
 @MainActor
 private func aiCueNativeTextInputs(in view: NSView) -> [NSTextView] {
     (view as? NSTextView).map { [$0] } ?? view.subviews.flatMap { aiCueNativeTextInputs(in: $0) }
+}
+
+@MainActor
+private func aiCueDescriptionPackFixture(_ scenario: PreviewFixtures.AICueGalleryScenario)
+    -> SettingsPresentationFixture
+{
+    let state = scenario.previewState()
+    let viewModel = AICueGenerationViewModel(
+        previewState: AICueGenerationPreviewState(
+            providerProfileID: state.providerProfileID, credentialStatus: state.credentialStatus,
+            phase: state.phase, soundDescription: state.soundDescription,
+            session: AICueComposerSession(packID: "settings-fixture-pack", event: .stop)),
+        registry: PreviewFixtures.aiCueEvidenceRegistry)
+    return SettingsPresentationFixtures.generalLogin(
+        route: .sounds(.editEvent(surface: nil, packID: "settings-fixture-pack", event: .stop)),
+        aiCueViewModel: viewModel)
 }

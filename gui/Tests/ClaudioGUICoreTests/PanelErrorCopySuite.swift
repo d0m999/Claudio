@@ -97,8 +97,8 @@ func runPanelErrorCopySuites() {
             environment: makeAudioImportEnvironment(
                 userPacksDirectory: URL(fileURLWithPath: "/dev/null/packs")))
         expect(
-            brokenPreview.surfaceSoundIssueCopyCategory == .surfaceOverrideMalformed,
-            "State Gallery 损坏覆盖不能被误标成普通写失败")
+            brokenPreview.surfaceSoundIssueCopyCategory == .configWriteFailure,
+            "退役字段不参与解析；注入的写失败保留其分类")
         let published = UseError.configPublishedButFailed(
             reason: "published conflict",
             recoveryPath: "/tmp/.claudio-stage-fixture")

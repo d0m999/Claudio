@@ -6,6 +6,8 @@ import Foundation
 /// `HostSurfaceID`，供配置写入、窗口路由和焦点恢复共同消费。
 public enum PanelSoundScopeID: Sendable, Equatable, Hashable, Identifiable {
     case global
+    case workspace(UUID)
+    // Kept only for rejecting stale routes; never a selectable sound target.
     case surface(HostSurfaceID)
 
     public var id: String { storedValue }
@@ -13,8 +15,13 @@ public enum PanelSoundScopeID: Sendable, Equatable, Hashable, Identifiable {
     public var storedValue: String {
         switch self {
         case .global: "global"
+        case .workspace(let id): "workspace:" + id.uuidString
         case .surface(let surface): surface.rawValue
         }
+    }
+
+    public var workspaceID: UUID? {
+        guard case .workspace(let id) = self else { return nil }; return id
     }
 
     public var surface: HostSurfaceID? {
@@ -117,6 +124,7 @@ public func eventSettingsRouteFocusTarget(
 
 public enum EventSettingsInheritanceState: Sendable, Equatable {
     case globalDefault
+    case workspaceConfiguration
     case inheritedGlobal
     case surfaceOverride
     case invalidSurfaceOverride
@@ -128,11 +136,11 @@ public func eventSettingsPackInheritanceState(
     config: ClaudioConfig,
     scope: PanelSoundScopeID
 ) -> EventSettingsInheritanceState {
-    guard let surface = scope.surface else { return .globalDefault }
-    switch config.resolveSoundProfile(for: surface) {
-    case .success(let profile):
-        return profile.inheritedPack ? .inheritedGlobal : .surfaceOverride
-    case .failure:
+    switch scope {
+    case .global: return .globalDefault
+    case .surface: return .invalidSurfaceOverride
+    case .workspace(let id):
+        if case .success = config.resolveWorkspaceProfile(id: id) { return .workspaceConfiguration }
         return .invalidSurfaceOverride
     }
 }
@@ -183,11 +191,11 @@ public func eventSettingsInheritanceState(
     scope: PanelSoundScopeID,
     event: Event
 ) -> EventSettingsInheritanceState {
-    guard let surface = scope.surface else { return .globalDefault }
-    switch config.resolveSoundProfile(for: surface) {
-    case .success(let profile):
-        return profile.inheritedEvents.contains(event) ? .inheritedGlobal : .surfaceOverride
-    case .failure:
+    switch scope {
+    case .global: return .globalDefault
+    case .surface: return .invalidSurfaceOverride
+    case .workspace(let id):
+        if case .success = config.resolveWorkspaceProfile(id: id) { return .workspaceConfiguration }
         return .invalidSurfaceOverride
     }
 }
@@ -306,12 +314,8 @@ public func panelSoundScopeMenuLayout(
 public func panelSoundScopeIDs(
     sourceRows: [HostSourceRowPresentation]
 ) -> [PanelSoundScopeID] {
-    let byHost = Dictionary(uniqueKeysWithValues: sourceRows.map { ($0.host, $0) })
-    let surfaces = hostSurfacePresentationOrder().compactMap { host -> PanelSoundScopeID? in
-        guard let row = byHost[host], row.status != .notConnected else { return nil }
-        return .surface(host.surfaceID)
-    }
-    return [.global] + surfaces
+    [.global]
+
 }
 
 public func panelSoundScopePresentations(
@@ -340,39 +344,19 @@ public func panelSoundScopePresentations(
         hasSparseOverride: false,
         accessibilityLabel: [globalName, globalSummary].joined(separator: separator))
 
-    let byHost = Dictionary(uniqueKeysWithValues: sourceRows.map { ($0.host, $0) })
-    let visibleSurfaces = Set(panelSoundScopeIDs(sourceRows: sourceRows).compactMap(\.surface))
-    let surfaces = hostSurfacePresentationOrder().compactMap {
-        host -> PanelSoundScopePresentation? in
-        guard let raw = byHost[host] else { return nil }
-        guard visibleSurfaces.contains(host.surfaceID) else { return nil }
-        let hasOverride =
-            config.surfaceOverrides[host.surfaceID.rawValue] != nil
-            || config.invalidSurfaceOverrideKeys.contains(host.surfaceID.rawValue)
-        let row = localizedHostSourceRow(raw, language: language)
-        let supported = row.supportedCount ?? 0
-        let total = row.totalCount ?? Event.allCases.count
-        let coverage = "\(supported)/\(total)"
-        let state = panelSoundScopeStateText(row.status, l10n: l10n)
-        let summary = [coverage, state].joined(separator: " · ")
-        let overrideText: String? = hasOverride ? l10n.text(.panelCustomSoundOverrides) : nil
-        let accessibility = [row.title, summary, overrideText]
-            .compactMap { $0 }
-            .joined(separator: separator)
+    let workspaces = config.workspaceRules.map { rule in
+        let name = rule.name
+        let state = l10n.text(rule.profile == nil ? .workspaceNeedsRepair : .workspaceLabel)
         return PanelSoundScopePresentation(
-            scope: .surface(host.surfaceID),
-            host: host,
-            name: row.title,
-            supportedCount: supported,
-            totalCount: total,
-            status: row.status,
-            coverageText: coverage,
-            stateText: state,
-            summaryText: summary,
-            hasSparseOverride: hasOverride,
-            accessibilityLabel: accessibility)
+            scope: .workspace(rule.id), host: nil, name: name,
+            supportedCount: Event.allCases.count, totalCount: Event.allCases.count,
+            status: rule.profile == nil ? .needsAttention : .ready,
+            coverageText: globalCoverage, stateText: state,
+            summaryText: globalCoverage + " · " + state,
+            hasSparseOverride: false, accessibilityLabel: name + separator + state)
     }
-    return [global] + surfaces
+    return [global] + workspaces
+
 }
 
 private func panelSoundScopeStateText(
@@ -424,7 +408,7 @@ public func resolvedPanelSoundScopeSelection(
     {
         return exact.scope
     }
-    return scopes.first(where: { $0.scope.surface != nil })?.scope ?? .global
+    return .global
 }
 
 /// 延迟执行的选择动作在写入前必须针对最新可用集合重验目标。失效目标返回 `nil`，调用方据此
@@ -446,6 +430,15 @@ public func globalShortcutEventSettingsRoute(
     if storedValue == PanelSoundScopeID.global.storedValue {
         return EventSettingsWindowRoute(scope: .global)
     }
+    if let storedValue, storedValue.hasPrefix("workspace:"),
+        let id = UUID(uuidString: String(storedValue.dropFirst(10)))
+    {
+        let scope = PanelSoundScopeID.workspace(id)
+        return EventSettingsWindowRoute(
+            scope: scope,
+            unavailableRequestedScopeStoredValue: scopes.contains(where: { $0.scope == scope })
+                ? nil : storedValue)
+    }
     if let storedValue, let surface = HostSurfaceID(rawValue: storedValue) {
         let requestedScope = PanelSoundScopeID.surface(surface)
         if scopes.contains(where: { $0.scope == requestedScope }) {
@@ -463,7 +456,7 @@ public func globalShortcutEventSettingsRoute(
 }
 
 /// Resolves a retained Events & Sounds route only when its exact typed scope is currently visible.
-/// A known unavailable Surface remains recoverable if it reappears; an unknown raw shortcut value
+/// A missing Workspace retains its identity; an unknown raw shortcut value
 /// never turns its Global presentation into a writable fallback.
 public func resolvedEventSettingsScope(
     route: EventSettingsWindowRoute,
@@ -478,9 +471,8 @@ public func resolvedEventSettingsScope(
     return route.scope
 }
 
-/// `unselected` / missing means the first host refresh has not yet established whether a Surface
-/// is available. Global remains a safe transient presentation, but only a real Surface arrival or
-/// an explicit user choice may turn that pending marker into a persisted selection.
+/// A first launch displays the Default Group; only a manual choice persists a different scope.
+/// Host callbacks and integration refreshes never select a Workspace.
 public func panelSoundScopeStoredValueToPersist(
     storedValue: String?,
     resolvedSelection: PanelSoundScopeID
@@ -537,7 +529,7 @@ public func panelEventPresentations(
         let row = rowsByEvent[event] ?? EventRow(event: event, coverage: .unmapped, enabled: false)
         let binding: HostCapabilityBinding?
         switch scope {
-        case .global:
+        case .global, .workspace:
             binding = nil
         case .surface(let surface):
             binding = HostID.productVisibleCases
@@ -546,7 +538,7 @@ public func panelEventPresentations(
         }
         let implemented: Bool
         switch scope {
-        case .global:
+        case .global, .workspace:
             implemented = true
         case .surface:
             implemented =
@@ -571,7 +563,8 @@ public func panelEventPresentations(
         if let binding {
             capabilityText = panelCapabilityText(binding, language: language)
         } else {
-            capabilityText = l10n.text(.panelGlobalDefaults)
+            capabilityText = l10n.text(
+                scope.workspaceID == nil ? .panelGlobalDefaults : .workspaceLabel)
         }
         let soundFileText: String
         switch row.coverage {

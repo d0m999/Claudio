@@ -243,7 +243,7 @@ public struct ActivityOverviewProjection: Sendable, Equatable {
 
     public func presentation(for scope: PanelSoundScopeID) -> ActivityOverviewPresentation {
         switch scope {
-        case .global: global
+        case .global, .workspace: global
         case .surface(let surface):
             surfaces.first(where: { $0.key.surfaceID == surface })?.value
                 ?? global

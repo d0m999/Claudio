@@ -43,12 +43,8 @@ package func surfaceSoundIssueAfterReadBack(
     configState: PanelConfigState,
     selectedSurface: HostSurfaceID?
 ) -> SurfaceSoundIssue? {
-    guard case .malformedOverride? = issue,
-        let selectedSurface,
-        case .operational(let config) = configState,
-        case .success = config.resolveSoundProfile(for: selectedSurface)
-    else { return issue }
-    return nil
+    // A retired Surface sound route cannot recover into a default-group write target.
+    issue
 }
 
 /// 运行态面板的 **config 读模型 + 流经它的写操作** —— 从 `PanelView` 里抽出来的那一半
@@ -91,6 +87,61 @@ public final class PanelConfigController: ObservableObject {
     @Published public private(set) var config: ClaudioConfig
     /// `nil` 是全局默认 profile；非 nil 时 `config` 是该 surface 的 effective 投影。
     @Published public private(set) var selectedSurface: HostSurfaceID?
+    @Published public private(set) var selectedWorkspaceID: UUID? = nil
+    @Published public private(set) var workspaceError: WorkspaceSoundError? = nil
+    public var selectedSoundScope: PanelSoundScopeID {
+        if let selectedWorkspaceID { return .workspace(selectedWorkspaceID) }
+        if let selectedSurface { return .surface(selectedSurface) }
+        return .global
+    }
+    public var workspaceRules: [WorkspaceSoundRule] { baseConfig.workspaceRules }
+    public var workspaceRulesMalformed: Bool { baseConfig.workspaceRulesMalformed }
+    public var allSoundPacks: [PackCard] {
+        guard let librarySnapshot else { return packCards }
+        return librarySnapshot.packCards(
+            config: config, scope: .fullLibrary, defaultStarredPackIDs: builtinPackIDs)
+    }
+    public func previewURL(for event: Event) -> URL? {
+        guard let row = eventRows.first(where: { $0.event == event }) else { return nil }
+        return eventPreviewFileURL(row: row, packID: config.selectedPack, environment: environment)
+    }
+    @discardableResult
+    public func changeWorkspace(_ mutation: WorkspaceSoundMutation) -> Bool {
+        let result = mutateWorkspaceSound(
+            mutation, configFile: configFile, lockFile: lockFile,
+            userPacksDirectory: environment.userPacksDirectory,
+            bundledPacksDirectory: environment.bundledPacksDirectory)
+        switch result {
+        case .success:
+            workspaceError = nil
+            reload(origin: .writeAction, refreshSoundPackLibrary: false)
+            soundPacksRefreshCoordinator?.completeConfigFactChange(
+                .changed, source: configProjectionToken)
+            return true
+        case .failure(let error):
+            if error == .publishedConflict {
+                reload(origin: .writeAction, refreshSoundPackLibrary: false)
+                soundPacksRefreshCoordinator?.completeConfigFactChange(
+                    .changed, source: configProjectionToken)
+            }
+            workspaceError = error
+            return false
+        }
+    }
+    public func selectSoundScope(_ scope: PanelSoundScopeID) {
+        guard selectedSoundScope != scope else { return }
+        selectedWorkspaceID = scope.workspaceID
+        selectedSurface = scope.surface
+        workspaceError = nil
+        surfaceSoundIssueState = nil
+        applyEffectiveConfig()
+        if let librarySnapshot {
+            applySnapshot(librarySnapshot)
+        } else if !readSource.readsSharedSnapshot {
+            eventRows = packCoverage(
+                packID: config.selectedPack, config: config, environment: environment)
+        }
+    }
     /// Keep the diagnostic message with its typed UI category; views render the category only.
     @Published private var surfaceSoundIssueState: SurfaceSoundIssue?
     public var surfaceSoundIssue: String? { surfaceSoundIssueState?.message }
@@ -371,6 +422,10 @@ public final class PanelConfigController: ObservableObject {
     /// 这正是它从 `PanelView` 搬过来的全部理由：红队实测「去掉 `!`」「某条 case 早退成死代码」在旧
     /// 位置上两套测试全绿。搬过来后，`PanelConfigControllerSuite` 对这三样各有一条行为断言。
     public func toggleMute(_ event: Event) {
+        if let id = selectedWorkspaceID {
+            _ = changeWorkspace(.event(id, event, !config.isEnabled(event)))
+            return
+        }
         let currentlyEnabled = eventRows.first(where: { $0.event == event })?.enabled ?? true
         if let selectedSurface {
             switch setSurfaceEventEnabled(
@@ -435,6 +490,16 @@ public final class PanelConfigController: ObservableObject {
     ///   ``panelRefreshRoute(muteSucceeded:error:)`` 完全相同，见那里的文档。
     @discardableResult
     public func setMasterVolume(_ volume: Double) -> Double? {
+        setVolume(volume, for: selectedSoundScope)
+    }
+
+    /// A pending slider commit retains its original target across selection changes.
+    @discardableResult
+    public func setVolume(_ volume: Double, for scope: PanelSoundScopeID) -> Double? {
+        if case .surface = scope { return nil }
+        if let id = scope.workspaceID {
+            return changeWorkspace(.volume(id, volume)) ? volume : nil
+        }
         let landed = masterVolumeController.setVolume(volume)
         // republish：面板读 `panelModel.masterVolumeError`，不直接读 masterVolumeController（那会开
         // 幽灵实例的口，见 masterVolumeError 文档）。
@@ -476,6 +541,11 @@ public final class PanelConfigController: ObservableObject {
     /// - Returns: 切包的真实落盘结局。窗口同步只消费这个 outcome；调用返回本身绝不等于成功。
     @discardableResult
     public func switchPack(to packID: String) -> PanelPackSwitchOutcome {
+        if let id = selectedWorkspaceID {
+            return changeWorkspace(.pack(id, packID))
+                ? .succeeded
+                : .failed(.configWriteFailure(reason: workspaceError?.description ?? ""))
+        }
         if let selectedSurface {
             switch setSurfacePack(
                 packID,
@@ -668,25 +738,7 @@ public final class PanelConfigController: ObservableObject {
 
     /// 切换 popup 当前声音作用域。只改变读模型投影，不写 config；用户动作才物化稀疏覆盖。
     public func selectSoundSurface(_ surface: HostSurfaceID?) {
-        guard selectedSurface != surface else { return }
-        selectedSurface = surface
-        surfaceSoundIssueState = nil
-        applyEffectiveConfig()
-        if let librarySnapshot {
-            applySnapshot(librarySnapshot)
-        } else if !readSource.readsSharedSnapshot {
-            eventRows = packCoverage(
-                packID: config.selectedPack,
-                config: config,
-                environment: environment)
-            let loadedPackSection = Self.loadPackSection(config: config, environment: environment)
-            packCards = loadedPackSection.cards
-            packSectionState = loadedPackSection.state
-            selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(config.selectedPack)
-            selectedPackMetadata = ClaudioGUICore.selectedPackMetadata(
-                packID: config.selectedPack,
-                environment: environment)
-        }
+        selectSoundScope(surface.map(PanelSoundScopeID.surface) ?? .global)
     }
 
     /// Fail-closed projection for the Events & Sounds AI affordance. The controller already owns
@@ -765,13 +817,29 @@ public final class PanelConfigController: ObservableObject {
     }
 
     private func applyEffectiveConfig() {
-        switch baseConfig.resolveSoundProfile(for: selectedSurface) {
+        let resolved =
+            selectedWorkspaceID.map { baseConfig.resolveWorkspaceProfile(id: $0) }
+            ?? baseConfig.resolveSoundProfile(for: nil)
+        if selectedSurface != nil {
+            config = ClaudioConfig(
+                selectedPack: "",
+                eventsEnabled: Dictionary(
+                    uniqueKeysWithValues: Event.allCases.map { ($0.cliName, false) }))
+            surfaceSoundIssueState = .malformedOverride(message: "来源声音入口已退役，请编辑默认组或工作区。")
+            return
+        }
+        switch resolved {
         case .success(let profile):
+            if workspaceError == .invalidRule || workspaceError == .staleRule {
+                workspaceError = nil
+            }
             var effective = baseConfig
             effective.selectedPack = profile.selectedPack
             effective.eventsEnabled = profile.eventsEnabled
+            effective.masterVolume = profile.volume
             config = effective
-        case .failure:
+        case .failure(let error):
+            workspaceError = error
             config = ClaudioConfig(
                 selectedPack: "",
                 masterVolume: baseConfig.masterVolume,

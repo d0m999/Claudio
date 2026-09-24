@@ -1,8 +1,8 @@
 import AppKit
 import ClaudioCore
-import ClaudioPanelPresentation
 import ClaudioGUICore
 import ClaudioLocalization
+import ClaudioPanelPresentation
 import ClaudioSettingsPresentation
 import Combine
 import SoundPacksWindow
@@ -265,6 +265,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             },
             onOpenSettings: { [weak actionRouter] in
                 actionRouter?.owner?.requestSettingsWindowPresentation()
+            },
+            onEditSoundScope: { [weak actionRouter] scope in
+                actionRouter?.requestEventsSettings(
+                    route: EventSettingsWindowRoute(scope: scope), returnFocusTo: .soundScope)
             },
             onOpenRecentNotices: { [weak eventNoticeWindowController] in
                 eventNoticeWindowController?.openInteractive()

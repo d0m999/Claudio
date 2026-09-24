@@ -133,9 +133,11 @@ func runSoundPacksRefreshSuites() async {
             model.setManagedSurface(.codex)
             expect(model.selectedPackID == "pack-b", "Codex 未覆盖 selected_pack 时必须继承 Global")
             expect(model.selectPackForInspection("pack-a"), "前提：pack-a 必须可选")
-            expect(
-                model.useSelectedPack() == .success(.selected(packID: "pack-a")),
-                "Surface 的用这个包必须写稀疏覆盖")
+            if case .failure(.writesStopped) = model.useSelectedPack() {
+                expect(true, "旧 Surface 写入口明确停止")
+            } else {
+                expect(false, "旧 Surface 写入口必须拒绝")
+            }
 
             let beforeInvalid = try! Data(contentsOf: configFile)
             model.setManagedSurface(.chatGPTDesktopAX)
@@ -209,7 +211,7 @@ func runSoundPacksRefreshSuites() async {
                 object["selected_pack"] as? String == "pack-b",
                 "Surface 写不得改回 Global selected_pack")
             expect(
-                codex["selected_pack"] as? String == "pack-a",
+                codex["selected_pack"] == nil,
                 "Codex 必须只物化自己的 selected_pack")
             expect(events["stop"] as? Bool == false, "Surface sibling events 必须保留")
             expect(codex["future_surface"] as? Int == 7, "Surface 未知字段必须保留")
@@ -501,14 +503,14 @@ func runSoundPacksRefreshSuites() async {
                 !legacy.config.isEnabled(.stop) && !unified.config.isEnabled(.stop),
                 "任一 projection 修改 Event 后，peer 必须同步 enabled 事实")
 
-            legacy.selectSoundSurface(.workBuddy)
-            unified.selectSoundSurface(.codex)
+            legacy.selectSoundScope(.global)
+            unified.selectSoundScope(.global)
             expect(legacy.setMasterVolume(0.35) == 0.35, "全局主音量写入前提必须成功")
             expect(
                 legacy.config.masterVolume == 0.35 && unified.config.masterVolume == 0.35,
                 "唯一全局主音量必须同步到两个 projection")
             expect(
-                legacy.selectedSurface == .workBuddy && unified.selectedSurface == .codex,
+                legacy.selectedSoundScope == .global && unified.selectedSoundScope == .global,
                 "共享 config 刷新不得合并或改写各窗口的 Surface projection")
             expect(coordinator.configFactRevision == 3, "pack/Event/volume 必须各发布一次 config fact")
         }

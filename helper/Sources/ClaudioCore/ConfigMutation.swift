@@ -455,6 +455,21 @@ func updateConfigJSON(
     case .failure(let failure): return .failure(failure)
     }
 
+    // Preserve the exact pre-upgrade bytes before the first successful new-model write.
+    if json["sound_model_version"] == nil {
+        if let original = snapshot.data {
+            let backup = configFile.deletingLastPathComponent().appendingPathComponent(
+                "config-before-workspaces-" + UUID().uuidString + ".json")
+            do {
+                let backupIO = try AnchoredFileIO(file: backup, preserveFinalSymlink: true)
+                let empty = try backupIO.read(maxBytes: maxConfigFileBytes)
+                guard empty.data == nil else { return .failure(.writeFailed(reason: "迁移备份目标已存在")) }
+                try backupIO.publish(original, expected: empty)
+            } catch { return .failure(.writeFailed(reason: "无法创建工作区升级备份；配置未修改")) }
+        }
+        json["sound_model_version"] = 2
+    }
+
     // 规范化（不写脏数字）+ 校验（绝不 abort）+ 序列化，全在 ``encodeJSONForWriting(_:path:)`` 里，
     // 与 `gui` 的 manifest 绑定路径共用同一份实现——「哪些值写得出去」只有一个定义。
     let data: Data
@@ -462,6 +477,10 @@ func updateConfigJSON(
     case .success(let encoded): data = encoded
     case .failure(let rejection):
         return .failure(.writeFailed(reason: "\(rejection.reason)\(configRebuildHint)。"))
+    }
+
+    guard data.count <= maxConfigFileBytes else {
+        return .failure(.writeFailed(reason: "配置超过 64 KiB 上限；未修改原配置。请减少工作区规则或过大的扩展字段。"))
     }
 
     do {
@@ -568,47 +587,7 @@ private func parseRewritableConfig(
         }
     }
 
-    if let rawSurfaceOverrides = json["surface_overrides"] {
-        guard let surfaceOverrides = rawSurfaceOverrides as? [String: Any] else {
-            return .failure(
-                .unreadable(
-                    reason: "\(path) 的 surface_overrides 必须是 JSON 对象"
-                        + "（当前是\(describeJSONValue(rawSurfaceOverrides))）。请手工修正该值，"
-                        + "\(configRebuildHint)。"))
-        }
-        for (surface, rawOverride) in surfaceOverrides {
-            guard let override = rawOverride as? [String: Any] else {
-                return .failure(
-                    .unreadable(
-                        reason: "\(path) 的 surface_overrides.\(surface) 必须是 JSON 对象"
-                            + "（当前是\(describeJSONValue(rawOverride))）。请手工修正该值，"
-                            + "\(configRebuildHint)。"))
-            }
-            if let selectedPack = override["selected_pack"], !(selectedPack is String) {
-                return .failure(
-                    .unreadable(
-                        reason: "\(path) 的 surface_overrides.\(surface).selected_pack 必须是字符串"
-                            + "（当前是\(describeJSONValue(selectedPack))）。请手工修正该值，"
-                            + "\(configRebuildHint)。"))
-            }
-            if let rawEvents = override["events"] {
-                guard let events = rawEvents as? [String: Any] else {
-                    return .failure(
-                        .unreadable(
-                            reason: "\(path) 的 surface_overrides.\(surface).events 必须是 JSON 对象"
-                                + "（当前是\(describeJSONValue(rawEvents))）。请手工修正该值，"
-                                + "\(configRebuildHint)。"))
-                }
-                for (event, value) in events where !isJSONBoolean(value) {
-                    return .failure(
-                        .unreadable(
-                            reason: "\(path) 的 surface_overrides.\(surface).events.\(event)"
-                                + " 必须是 true/false（当前是\(describeJSONValue(value))）。"
-                                + "请手工修正该值，\(configRebuildHint)。"))
-                }
-            }
-        }
-    }
+    // Retired surface_overrides is opaque preserved data, including old malformed entries.
 
     // 最后：整棵树里不能有「读得进来、却写不出去」的值。见 ``firstUnwritableJSONValue(in:keyPath:depth:)``。
     // 这一条必须在**读侧**：写侧那道 `isValidJSONObject` 只能防崩，防不了假绿——`probeConfigRewritable`

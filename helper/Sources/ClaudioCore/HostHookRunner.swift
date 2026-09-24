@@ -36,6 +36,7 @@ public struct HostHookEnvironment: Sendable {
     public let now: @Sendable () -> Date
     public let uptime: @Sendable () -> TimeInterval
     public let eventNoticeChannel: HostEventNoticeChannel?
+    public let sourcePayload: Data?
 
     public init(
         host: HostID,
@@ -45,6 +46,7 @@ public struct HostHookEnvironment: Sendable {
         receiptStore: HostHookReceiptStore,
         activityStore: LocalActivitySummaryStore? = nil,
         eventNoticeChannel: HostEventNoticeChannel? = nil,
+        sourcePayload: Data? = nil,
         now: @escaping @Sendable () -> Date = { Date() },
         uptime: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     ) {
@@ -58,6 +60,7 @@ public struct HostHookEnvironment: Sendable {
         self.receiptStore = receiptStore
         self.activityStore = activityStore
         self.eventNoticeChannel = eventNoticeChannel
+        self.sourcePayload = sourcePayload ?? eventNoticeChannel?.sourcePayload
         self.now = now
         self.uptime = uptime
     }
@@ -66,7 +69,8 @@ public struct HostHookEnvironment: Sendable {
 /// 生产 CLI 的单一环境工厂。宿主级锁/状态路径留在 Core 的路径事实源内，CLI 不自行拼装。
 public func systemHostHookEnvironment(
     for host: HostID,
-    eventNoticeChannel: HostEventNoticeChannel? = nil
+    eventNoticeChannel: HostEventNoticeChannel? = nil,
+    sourcePayload: Data? = nil
 ) -> HostHookEnvironment {
     HostHookEnvironment(
         host: host,
@@ -81,7 +85,8 @@ public func systemHostHookEnvironment(
             installationsRoot: ClaudioPaths.activeInstallationsDirectory,
             installationLocksRoot: ClaudioPaths.activeInstallationLocksDirectory),
         activityStore: .production,
-        eventNoticeChannel: eventNoticeChannel)
+        eventNoticeChannel: eventNoticeChannel,
+        sourcePayload: sourcePayload)
 }
 
 public struct HostHookHandlingOutcome: Sendable, Equatable {
@@ -123,11 +128,15 @@ public func handleHostHook(
     else { return nil }
 
     // This is the single timestamp shared by the activity fact, receipt, and any related
-    // diagnostic line.  The marker is read at the acceptance boundary; stale callbacks may
-    // still be played according to the existing hook contract, but they never count as activity.
+    // diagnostic line. Disconnected or replaced installations are rejected before playback.
     let occurredAt = environment.now()
     let observedUptime = environment.eventNoticeChannel?.observedUptime ?? environment.uptime()
     let activeInstallationID = environment.receiptStore.currentInstallationID(host: host)
+    guard activeInstallationID == installationID else {
+        return HostHookHandlingOutcome(
+            host: host, nativeEvent: nativeEvent, event: event,
+            playbackResult: .notReady, activityRecordOutcome: .failed, receiptWritten: false)
+    }
     let activityRecordOutcome: LocalActivityRecordOutcome
     if let activityStore = environment.activityStore {
         activityRecordOutcome = activityStore.record(
@@ -144,7 +153,12 @@ public func handleHostHook(
     let base = environment.playEnvironment
     let isTaskStart = event == .taskStart
     let observedPlayEnvironment = PlayEnvironment(
-        surfaceID: base.surfaceID,
+        surfaceID: host.surfaceID,
+        workingDirectory: WorkspaceHookDirectory.cwd(from: environment.sourcePayload),
+        playbackAuthorized: {
+            base.playbackAuthorized()
+                && environment.receiptStore.currentInstallationID(host: host) == installationID
+        },
         afplayPath: base.afplayPath,
         lockFile: base.lockFile,
         configFile: base.configFile,

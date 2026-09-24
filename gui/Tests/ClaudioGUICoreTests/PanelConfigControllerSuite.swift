@@ -1461,44 +1461,19 @@ func runPanelConfigControllerSuites() {
                 lockFile: lockFile,
                 environment: makeEnvironment(packsDir))
 
+            let before = try! Data(contentsOf: configFile)
             controller.selectSoundSurface(.workBuddy)
-            expect(controller.selectedSurface == .workBuddy, "popup 必须记住当前 surface")
-            expect(controller.config.selectedPack == "surface-pack", "WorkBuddy 必须投影自己的 pack")
-            expect(!controller.config.isEnabled(.stop), "WorkBuddy 的 stop 覆盖必须优先于全局默认")
-
-            expect(controller.setMasterVolume(0.6) == 0.6, "master volume 始终是全局设置")
-            var onDisk = loadPanelConfig(from: configFile).resolvedConfig
-            expect(onDisk.masterVolume == 0.6, "master_volume 必须写在顶层")
-            expect(
-                onDisk.surfaceOverrides[HostSurfaceID.workBuddy.rawValue]?.selectedPack
-                    == "surface-pack",
-                "写全局音量不得重写 surface pack")
-
+            expect(controller.config.selectedPack.isEmpty, "旧来源详情不可写默认组")
+            expect(controller.setMasterVolume(0.6) == nil, "旧来源音量入口拒写")
             controller.toggleMute(.stop)
-            onDisk = loadPanelConfig(from: configFile).resolvedConfig
-            expect(onDisk.isEnabled(.stop), "surface 静音动作不得改顶层 stop")
-            expect(
-                onDisk.surfaceOverrides[HostSurfaceID.workBuddy.rawValue]?.eventsEnabled["stop"]
-                    == true,
-                "surface 静音动作必须只改 WorkBuddy.stop")
-
-            expect(controller.switchPack(to: "next-pack") == .succeeded, "surface 切包必须成功")
-            onDisk = loadPanelConfig(from: configFile).resolvedConfig
-            expect(onDisk.selectedPack == "global-pack", "surface 切包不得改全局 selected_pack")
-            expect(
-                onDisk.surfaceOverrides[HostSurfaceID.workBuddy.rawValue]?.selectedPack
-                    == "next-pack",
-                "surface 切包必须落到 WorkBuddy 稀疏覆盖")
-
+            expect(controller.switchPack(to: "next-pack") != .succeeded, "旧来源切包入口拒写")
             controller.resetSelectedSurfaceOverrides()
-            onDisk = loadPanelConfig(from: configFile).resolvedConfig
-            expect(
-                onDisk.surfaceOverrides[HostSurfaceID.workBuddy.rawValue] == nil,
-                "reset 必须删除空 surface override，而不是留下空 object")
+            expect((try! Data(contentsOf: configFile)) == before, "退役写入口不得改变任何字节")
+            controller.selectSoundScope(.global)
             expect(
                 controller.config.selectedPack == "global-pack"
-                    && controller.config.isEnabled(.stop),
-                "reset 后 WorkBuddy 必须重新继承全局 pack 与事件开关")
+                    && controller.config.masterVolume == 0.42,
+                "默认组保留升级前顶层值")
             let raw =
                 try! JSONSerialization.jsonObject(with: Data(contentsOf: configFile))
                 as! [String: Any]

@@ -327,7 +327,7 @@ private struct IsolationRuntime {
             credentialManager: runtime.credentialManager, generator: runtime.dispatcher,
             providerProfileID: .senseAudioChina, registry: registry,
             providerPreferences: runtime.providerPreferences)
-        viewModel.begin(scope: .surface(.workBuddy), event: .stop)
+        viewModel.begin(scope: .global, event: .stop)
         viewModel.updateDescription("短促 木琴 音效")
         return Self(
             runtime: runtime, viewModel: viewModel, vault: vault, defaults: defaults,
@@ -536,15 +536,15 @@ func runSenseAudioIsolationSuites() async {
                 "1/3 不能把候选 3 压缩为候选 1")
             let presentation = SettingsPresentationFixtures.generalLogin(
                 temporaryParent: root,
-                route: .events(scope: .surface(.workBuddy), event: .stop),
+                route: .events(scope: .global, event: .stop),
                 availability: PreviewFixtures.settingsRouteAvailability,
                 aiCueViewModel: fixture.viewModel)
-            presentation.beginEventTransientActivity(scope: .surface(.workBuddy), event: .stop)
+            presentation.beginEventTransientActivity(scope: .global, event: .stop)
             SettingsMountRecorder.reset()
             let probe = SettingsRootNativeProbe(session: presentation.session)
             expect(
-                SettingsMountRecorder.identifiers.contains("event-settings.ai-cue.composer"),
-                "真实生成后的 VM 必须能挂载生产 composer，不是独立替代 view")
+                !SettingsMountRecorder.identifiers.contains("event-settings.ai-cue.composer"),
+                "工作区声音页不挂载旧 Surface composer；生成与采纳仍由包编辑 owner 管理")
             probe.close()
             let candidate = generation.candidates.last!
             expect(
@@ -875,7 +875,7 @@ func runSenseAudioIsolationSuites() async {
             _ = editor.owner.send(
                 .activate(
                     .events(
-                        route: EventSettingsWindowRoute(scope: .surface(.workBuddy), event: .stop),
+                        route: EventSettingsWindowRoute(scope: .global, event: .stop),
                         requestRevision: 2, candidateGenerationID: UUID())))
             var result: SoundPacksEditorOperationResult?
             fixture.viewModel.adopt(candidateID: candidate.id, permit: permit) {
@@ -988,7 +988,7 @@ func runSenseAudioIsolationSuites() async {
                         .activate(
                             .events(
                                 route: EventSettingsWindowRoute(
-                                    scope: .surface(.workBuddy), event: .stop),
+                                    scope: .global, event: .stop),
                                 requestRevision: 2, candidateGenerationID: UUID())))
                 }
                 gate.release()
@@ -1086,7 +1086,7 @@ private func isolationEditor(
         root: root, packIDs: ["global-pack", "workbuddy-pack"],
         durationProbe: StubDurationProbe(fixedDuration: 1),
         config: ClaudioConfig(
-            selectedPack: "global-pack",
+            selectedPack: "workbuddy-pack",
             surfaceOverrides: [
                 HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
                     selectedPack: "workbuddy-pack")
@@ -1101,7 +1101,7 @@ private func isolationAdoptionPermit(_ editor: SoundEditorFixture, generationID:
     _ = editor.owner.send(
         .activate(
             .events(
-                route: EventSettingsWindowRoute(scope: .surface(.workBuddy), event: .stop),
+                route: EventSettingsWindowRoute(scope: .global, event: .stop),
                 requestRevision: 1, candidateGenerationID: generationID)))
     await waitForSoundEditorReady(editor.owner, library: editor.library)
     guard case .events(let events) = editor.owner.presentation.mode,

@@ -509,8 +509,8 @@ func runHostIntegrationManagerBridgeSuites() async {
                 state.matrix.cell(host: .claudeCode, event: .notification)?.state == .audible,
                 "Claude Code 未覆盖时必须继续继承全局 dual pack")
             expect(
-                state.matrix.cell(host: .codex, event: .notification)?.state == .missingSound,
-                "Codex 必须消费 codex-only 覆盖，不能错误复用全局 dual pack")
+                state.matrix.cell(host: .codex, event: .notification)?.state == .audible,
+                "无目录上下文的矩阵只报告默认组，旧来源覆盖不再生效")
         }
     }
 }

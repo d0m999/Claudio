@@ -12,6 +12,9 @@ public struct ClaudioConfig: Codable, Equatable, Sendable {
     /// Review 待解 ⑤: 倾向默认 0.8).
     public static let defaultMasterVolume = 0.8
 
+    public var workspaceRules: [WorkspaceSoundRule] = []
+    public var workspaceRulesMalformed = false
+    public var soundModelVersion: Int? = nil
     public var selectedPack: String
     public var masterVolume: Double
     /// Per-event mute state, keyed by ``Event/cliName``. An event absent from this map
@@ -47,6 +50,8 @@ public struct ClaudioConfig: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case workspaceRules = "workspace_rules"
+        case soundModelVersion = "sound_model_version"
         case selectedPack = "selected_pack"
         case masterVolume = "master_volume"
         case eventsEnabled = "events"
@@ -69,6 +74,15 @@ public struct ClaudioConfig: Codable, Equatable, Sendable {
     ///   `setStarredPacks` 都已经在那上面。
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        soundModelVersion = try? container.decode(Int.self, forKey: .soundModelVersion)
+        if container.contains(.workspaceRules) {
+            do {
+                let rules = try container.decode(
+                    [String: WorkspaceSoundRule].self, forKey: .workspaceRules)
+                workspaceRules = rules.values.sorted { $0.id.uuidString < $1.id.uuidString }
+                workspaceRulesMalformed = rules.contains { $0.key != $0.value.id.uuidString }
+            } catch { workspaceRulesMalformed = true }
+        }
         selectedPack = try container.decode(String.self, forKey: .selectedPack)
         masterVolume =
             (try? container.decode(Double.self, forKey: .masterVolume))
@@ -105,6 +119,12 @@ public struct ClaudioConfig: Codable, Equatable, Sendable {
 
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(soundModelVersion, forKey: .soundModelVersion)
+        if !workspaceRules.isEmpty {
+            try container.encode(
+                Dictionary(uniqueKeysWithValues: workspaceRules.map { ($0.id.uuidString, $0) }),
+                forKey: .workspaceRules)
+        }
         try container.encode(selectedPack, forKey: .selectedPack)
         try container.encode(masterVolume, forKey: .masterVolume)
         try container.encode(eventsEnabled, forKey: .eventsEnabled)

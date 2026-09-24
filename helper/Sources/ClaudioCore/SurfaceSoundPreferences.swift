@@ -43,6 +43,8 @@ public struct ResolvedSoundProfile: Sendable, Equatable {
     public let eventsEnabled: [String: Bool]
     public let inheritedPack: Bool
     public let inheritedEvents: Set<Event>
+    public var volume: Double = ClaudioConfig.defaultMasterVolume
+    public var workspaceID: UUID? = nil
 
     public func isEnabled(_ event: Event) -> Bool {
         eventsEnabled[event.cliName] ?? true
@@ -52,47 +54,6 @@ public struct ResolvedSoundProfile: Sendable, Equatable {
 public enum SurfaceSoundProfileError: Error, Sendable, Equatable {
     case malformedOverrides
     case malformedOverride(surface: HostSurfaceID)
-}
-
-extension ClaudioConfig {
-    /// 解析 effective profile 的唯一入口。显式损坏覆盖返回失败，绝不静默继承。
-    public func resolveSoundProfile(
-        for surface: HostSurfaceID?
-    ) -> Result<ResolvedSoundProfile, SurfaceSoundProfileError> {
-        guard let surface else {
-            return .success(
-                ResolvedSoundProfile(
-                    selectedPack: selectedPack,
-                    eventsEnabled: eventsEnabled,
-                    inheritedPack: false,
-                    inheritedEvents: []))
-        }
-        guard !surfaceOverridesMalformed else { return .failure(.malformedOverrides) }
-        guard !invalidSurfaceOverrideKeys.contains(surface.rawValue) else {
-            return .failure(.malformedOverride(surface: surface))
-        }
-        guard let override = surfaceOverrides[surface.rawValue] else {
-            return .success(
-                ResolvedSoundProfile(
-                    selectedPack: selectedPack,
-                    eventsEnabled: eventsEnabled,
-                    inheritedPack: true,
-                    inheritedEvents: Set(Event.allCases)))
-        }
-        var effectiveEvents = eventsEnabled
-        for (event, enabled) in override.eventsEnabled {
-            effectiveEvents[event] = enabled
-        }
-        return .success(
-            ResolvedSoundProfile(
-                selectedPack: override.selectedPack ?? selectedPack,
-                eventsEnabled: effectiveEvents,
-                inheritedPack: override.selectedPack == nil,
-                inheritedEvents: Set(
-                    Event.allCases.filter {
-                        override.eventsEnabled[$0.cliName] == nil
-                    })))
-    }
 }
 
 public enum SurfaceSoundMutationOutcome: Sendable, Equatable {
@@ -140,20 +101,7 @@ public func setSurfacePack(
     bundledPacksDirectory: URL? = nil,
     lockFile: URL = ClaudioPaths.configLockFile
 ) -> Result<SurfaceSoundMutationOutcome, SurfaceSoundMutationError> {
-    guard isSafePackID(packID) else { return .failure(.invalidPackID(packID)) }
-    guard
-        let directory = resolvePackDirectory(
-            id: packID,
-            userPacksDirectory: userPacksDirectory,
-            bundledPacksDirectory: bundledPacksDirectory)
-    else { return .failure(.packNotFound(packID)) }
-    if case .failure(let error) = loadPackManifest(in: directory) {
-        return .failure(.manifestUnreadable(packID: packID, reason: error.reason))
-    }
-    return mutateSurfaceSoundOverride(surface: surface, configFile: configFile, lockFile: lockFile)
-    {
-        $0["selected_pack"] = packID
-    }
+    .failure(.configWriteFailure(reason: "来源声音设置已退役，请编辑默认组或工作区。"))
 }
 
 public func setSurfaceEventEnabled(
@@ -163,11 +111,7 @@ public func setSurfaceEventEnabled(
     configFile: URL = ClaudioPaths.configFile,
     lockFile: URL = ClaudioPaths.configLockFile
 ) -> Result<SurfaceSoundMutationOutcome, SurfaceSoundMutationError> {
-    mutateSurfaceSoundOverride(surface: surface, configFile: configFile, lockFile: lockFile) {
-        var events = $0["events"] as? [String: Any] ?? [:]
-        events[event.cliName] = enabled
-        $0["events"] = events
-    }
+    .failure(.configWriteFailure(reason: "来源声音设置已退役，请编辑默认组或工作区。"))
 }
 
 public func resetSurfaceSoundOverride(
@@ -176,65 +120,5 @@ public func resetSurfaceSoundOverride(
     configFile: URL = ClaudioPaths.configFile,
     lockFile: URL = ClaudioPaths.configLockFile
 ) -> Result<SurfaceSoundMutationOutcome, SurfaceSoundMutationError> {
-    mutateSurfaceSoundOverride(surface: surface, configFile: configFile, lockFile: lockFile) {
-        switch field {
-        case .selectedPack:
-            $0.removeValue(forKey: "selected_pack")
-        case .event(let event):
-            var events = $0["events"] as? [String: Any] ?? [:]
-            events.removeValue(forKey: event.cliName)
-            if events.isEmpty { $0.removeValue(forKey: "events") } else { $0["events"] = events }
-        case .all:
-            $0.removeAll()
-        }
-    }
-}
-
-private func mutateSurfaceSoundOverride(
-    surface: HostSurfaceID,
-    configFile: URL,
-    lockFile: URL,
-    mutation: (inout [String: Any]) -> Void
-) -> Result<SurfaceSoundMutationOutcome, SurfaceSoundMutationError> {
-    let locked = withNonBlockingLock(path: lockFile.path) {
-        updateConfigJSON(at: configFile, onMissing: .failClosed) { json in
-            var surfaces = json["surface_overrides"] as? [String: Any] ?? [:]
-            var override = surfaces[surface.rawValue] as? [String: Any] ?? [:]
-            mutation(&override)
-            if override.isEmpty {
-                surfaces.removeValue(forKey: surface.rawValue)
-            } else {
-                surfaces[surface.rawValue] = override
-            }
-            if surfaces.isEmpty {
-                json.removeValue(forKey: "surface_overrides")
-            } else {
-                json["surface_overrides"] = surfaces
-            }
-            return .success(())
-        }
-    }
-    switch locked {
-    case .skipped: return .failure(.lockBusy)
-    case .failed(let errno): return .failure(.lockFailed(errno: errno))
-    case .ran(.success): return .success(.updated(surface: surface))
-    case .ran(.failure(.missing)): return .failure(.configMissing)
-    case .ran(.failure(.unreadable(let reason))):
-        return .failure(.configReadFailure(reason: reason))
-    case .ran(.failure(.writeFailed(let reason))):
-        return .failure(.configWriteFailure(reason: reason))
-    case .ran(.failure(.postPublishConflict(let recoveryPath))):
-        return .failure(
-            .configPublishedButFailed(
-                reason: ConfigMutationFailure.postPublishConflict(recoveryPath: recoveryPath)
-                    .reason,
-                recoveryPath: recoveryPath
-            ))
-    case .ran(.failure(.postPublishPathChanged(let location))):
-        return .failure(
-            .configPublishedButFailed(
-                reason: ConfigMutationFailure.postPublishPathChanged(location: location).reason))
-    case .ran(.failure(.mutationRejected)):
-        return .failure(.configWriteFailure(reason: "配置变更被调用方拒绝"))
-    }
+    .failure(.configWriteFailure(reason: "来源声音设置已退役，旧字段已保留；请编辑默认组或工作区。"))
 }

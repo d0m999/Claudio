@@ -8,7 +8,7 @@ Use glossary terms in code, tests, issues, and docs. Surface an ADR conflict exp
 silently introducing a second model.
 
 - Sound-pack scanning, snapshots, refresh, or concurrency: read ADRs 0001–0004.
-- Sound scopes, defaults, or Surface overrides: read ADR 0005.
+- Sound scopes, workspace directory matching, or legacy override migration: read ADR 0005.
 - AI Cue providers, credentials, generation, candidates, or adoption: read ADRs 0006–0007;
   SenseAudio additionally uses ADRs 0011, 0014–0015.
 - Settings navigation, window ownership, or dynamic quiet state: read ADRs 0008–0009; for a
@@ -36,9 +36,9 @@ Preserve one owner for every fact:
 - Keep host-native schemas inside their adapters and consume shared snapshots in GUI, CLI, and
   diagnostics. Configuration written, capability supported, and current receipt-backed activation
   are separate facts. A failure in one host must not damage or freeze another.
-- Resolve sound behavior from Global Sound Defaults plus sparse Surface overrides. `master_volume`
-  remains global. Explicitly malformed or stale write targets fail closed; never disguise them by
-  falling back to Global state.
+- Resolve automatic sound behavior through the Default Group / Workspace resolver in ADR 0005.
+  Each group owns its pack, volume and five event switches. Surface owns integration only; preserve
+  retired override bytes without using or writing them. Malformed or stale targets fail closed.
 
 Preserve established module names, event IDs, hook command formats, data paths, unknown JSON
 fields, future Surface entries, third-party hooks, backups, receipts, and user sound packs unless an

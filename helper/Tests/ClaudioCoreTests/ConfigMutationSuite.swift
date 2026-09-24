@@ -327,7 +327,9 @@ func runConfigMutationSuites() {
 
             let json = readRawConfigJSON(configFile)
             expect(
-                json?.keys.sorted() == ["events", "master_volume", "selected_pack"],
+                json?.keys.sorted() == [
+                    "events", "master_volume", "selected_pack", "sound_model_version",
+                ],
                 "全新 config.json 的顶层键必须恰好是三个最小必需键（starred_packs 缺失有默认语义），got"
                     + " \(String(describing: json?.keys.sorted()))")
             expect(
