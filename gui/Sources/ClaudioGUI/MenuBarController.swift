@@ -110,6 +110,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// while a transition to retained Settings transfers the debt to that window's owner.
     /// Nil whenever no handback is owed.
     private var previousApp: NSRunningApplication?
+    private var panelSettingsHandback = PanelSettingsHandback()
     /// Every production settings entry shares one close-before-show handoff. The typed route and
     /// exact panel focus target travel together, so no legacy window can race with this retained
     /// owner or leave a later popover close carrying a stale presentation.
@@ -527,6 +528,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         // it back (AppKit will not: see there). Guarded on a real closed→open transition —
         // a redundant `show` while already shown would otherwise overwrite this with Claudio.
         if !popover.isShown {
+            panelSettingsHandback.begin(
+                settingsWasForeground: settingsWindowController.hasForegroundKeyWindow)
             let front = NSWorkspace.shared.frontmostApplication
             if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier {
                 previousApp = front
@@ -797,6 +800,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
         // 必须在任何早返回之前通知 MasterVolumeRow 冲刷拖动会话。
         focusCoordinator.notePanelHidden()
+        let restoreSettings = panelSettingsHandback.takeSettingsRestoration()
 
         let settingsPresentation = pendingSettingsPresentation
         pendingSettingsPresentation = nil
@@ -813,10 +817,11 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         // `previous` — pulling it back would be us overriding the user's own choice.
         guard NSApp.isActive else { return }
 
-        // The accessory app may still report another app as frontmost while its retained
-        // Settings window is open. Closing the panel must return key focus to that window before
-        // considering the external app captured when the panel opened.
-        if settingsWindowController.restoreVisibleWindowAfterPopoverClose() { return }
+        // Restore Settings only if it owned key focus before the panel opened. A visible
+        // background Settings window must not take focus from the captured external app.
+        if restoreSettings && settingsWindowController.restoreVisibleWindowAfterPopoverClose() {
+            return
+        }
 
         guard let previous,
             !previous.isTerminated,

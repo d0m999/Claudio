@@ -1,4 +1,5 @@
 import AppKit
+import ClaudioGUIComponents
 import ClaudioGUICore
 import ClaudioLocalization
 import ClaudioSettingsPresentation
@@ -84,13 +85,21 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         scheduleSettingsPresentationAnnouncementDelivery()
     }
 
+    /// Capture key focus from the retained window or one of its attached sheets.
+    var hasForegroundKeyWindow: Bool {
+        guard NSApp.isActive, let window else { return false }
+        return settingsWindowOwnsKeyFocus(window, keyWindow: NSApp.keyWindow)
+    }
+
     /// A status-item popover can briefly take key focus while Settings stays open. Closing that
-    /// popover returns focus to this window without consuming the window's own close handback.
+    /// popover restores the active sheet or window without consuming its close handback.
     func restoreVisibleWindowAfterPopoverClose() -> Bool {
         guard let window, window.isVisible, !window.isMiniaturized, window.isOnActiveSpace else {
             return false
         }
-        window.makeKeyAndOrderFront(nil)
+        let target = settingsWindowRestorationTarget(window)
+        guard target.isVisible, !target.isMiniaturized, target.isOnActiveSpace else { return false }
+        target.makeKeyAndOrderFront(nil)
         return true
     }
 
