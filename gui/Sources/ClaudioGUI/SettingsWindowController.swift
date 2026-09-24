@@ -84,6 +84,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         scheduleSettingsPresentationAnnouncementDelivery()
     }
 
+    /// A status-item popover can briefly take key focus while Settings stays open. Closing that
+    /// popover returns focus to this window without consuming the window's own close handback.
+    func restoreVisibleWindowAfterPopoverClose() -> Bool {
+        guard let window, window.isVisible, !window.isMiniaturized, window.isOnActiveSpace else {
+            return false
+        }
+        window.makeKeyAndOrderFront(nil)
+        return true
+    }
+
     /// Mutual exclusion with the top event-notice list (SPEC: 设置打开和顶部列表互斥显示).
     /// Transfer the complete restoration before close consumes it. The notice surface will run
     /// it only when its own interaction ends, preserving both the host and panel destination.

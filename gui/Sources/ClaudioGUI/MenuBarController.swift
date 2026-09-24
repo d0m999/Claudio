@@ -811,8 +811,14 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         // Not active ⇒ the popover closed BECAUSE the user went elsewhere (clicked another
         // app, ⌘-Tabbed away). That app owns the foreground now, and it is not necessarily
         // `previous` — pulling it back would be us overriding the user's own choice.
-        guard NSApp.isActive,
-            let previous,
+        guard NSApp.isActive else { return }
+
+        // The accessory app may still report another app as frontmost while its retained
+        // Settings window is open. Closing the panel must return key focus to that window before
+        // considering the external app captured when the panel opened.
+        if settingsWindowController.restoreVisibleWindowAfterPopoverClose() { return }
+
+        guard let previous,
             !previous.isTerminated,
             previous.processIdentifier != ProcessInfo.processInfo.processIdentifier
         else { return }

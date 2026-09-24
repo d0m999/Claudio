@@ -101,6 +101,12 @@ if CommandLine.arguments.contains("--event-attention") {
     exit(failures == 0 ? 0 : 1)
 }
 
+if CommandLine.arguments.contains("--panel-settings-handback") {
+    runPanelSettingsHandbackSuites()
+    print("Panel settings handback: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
 if CommandLine.arguments.contains("--ai-cue-assets") {
     await runAICueAssetFetchSuites()
     print("AI cue assets: \(totalChecks) checks, \(failures) failures")
@@ -293,6 +299,7 @@ runWorkBuddyKeyboardAccessibilitySuites()
 await runHostIntegrationManagerBridgeSuites()
 runIntegrationDestinationWiringSuites()
 runRetainedWindowHandbackTrackerSuites()
+runPanelSettingsHandbackSuites()
 runPanelConfigSuites()
 runPanelRefreshRouteSuites()
 await runSoundPacksRefreshSuites()
