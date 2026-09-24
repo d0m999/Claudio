@@ -110,23 +110,18 @@ func runBootstrapReportSuites() {
         }
     }
 
-    suite("BootstrapReportStore：32 条上限、损坏文件与 symlink 都失败关闭") {
+    suite("BootstrapReportStore：历史数量不阻断自举，损坏文件与 symlink 仍失败关闭") {
         withTempDirectory { root in
             let directory = root.appendingPathComponent("reports", isDirectory: true)
             let store = BootstrapReportStore(directory: directory)
-            for index in 0..<BootstrapReportStore.maximumPendingRecords {
+            for index in 0..<32 {
                 _ = try! store.append(events: [
                     .packSalvaged(packID: "pack-\(index)", movedTo: "/private/\(index)")
                 ])
             }
-            do {
-                try store.ensureCapacity()
-                expect(false, "满 32 条时必须拒绝新的 bootstrap 修改")
-            } catch let error as BootstrapReportStoreError {
-                expect(error == .queueFull, "队列满必须保留 typed queueFull，got \(error)")
-            } catch {
-                expect(false, "队列满必须保留 BootstrapReportStoreError，got \(error)")
-            }
+            expect((try? store.validateExistingRecords()) != nil, "32 条历史报告仍可预检")
+            _ = try! store.append(events: [.failure(code: "later_failure")])
+            expect((try! store.records()).count == 33, "新报告须在历史报告后完整保留")
 
             let record = try! store.records()[0]
             let recordURL = directory.appendingPathComponent("\(record.id.uuidString).json")
@@ -143,6 +138,83 @@ func runBootstrapReportSuites() {
             } catch {
                 expect(false, "symlink 确认必须保留 typed error，got \(error)")
             }
+        }
+    }
+
+    suite("bootstrap report 积压不得阻断新版 helper 发布") {
+        withTempDirectory { root in
+            publishHealthyBootstrapRuntime(at: root)
+            let source = root.appendingPathComponent("app/Resources/bin/claudi0")
+            writeBootstrapFixture("new helper", to: source)
+            try! FileManager.default.setAttributes(
+                [.posixPermissions: 0o700], ofItemAtPath: source.path)
+            let environment = bootstrapEnvironment(root: root, executablePath: source)
+            let store = BootstrapReportStore(directory: environment.bootstrapReportsDirectory)
+            var previousIDs = Set<UUID>()
+            for index in 0..<32 {
+                let id = UUID()
+                previousIDs.insert(id)
+                _ = try! store.append(
+                    id: id,
+                    createdAt: Date(timeIntervalSinceReferenceDate: TimeInterval(index)),
+                    events: [.helperCopied(path: environment.claudioBinaryDestination.path)])
+            }
+
+            let execution = performSharedRuntimeBootstrapExecution(environment: environment)
+            guard case .completed(let outcome) = execution else {
+                expect(false, "32 条历史报告后仍须发布新版 helper，got \(execution)")
+                return
+            }
+            expect(outcome.copiedBinary, "新版 helper 必须完成发布")
+            expect(
+                (try? String(contentsOf: environment.claudioBinaryDestination, encoding: .utf8))
+                    == "new helper",
+                "已安装 helper 必须更新为 bundle 内容")
+            let records = try! store.records()
+            expect(records.count == 33, "所有历史报告和本次更新事实都必须保留")
+            expect(previousIDs.isSubset(of: Set(records.map(\.id))), "历史报告身份不得丢失")
+            expect(
+                !FileManager.default.fileExists(atPath: environment.bootstrapJournalFile.path),
+                "成功发布后 journal 必须清理")
+
+            let secondExecution = performSharedRuntimeBootstrapExecution(environment: environment)
+            guard case .completed(let secondOutcome) = secondExecution else {
+                expect(false, "新版 helper 第二次自举必须成功，got \(secondExecution)")
+                return
+            }
+            expect(!secondOutcome.copiedBinary, "第二次自举不应重复复制同一 helper")
+            expect((try! store.records()).count == 33, "正常重启不应继续积压报告")
+        }
+    }
+
+    suite("共享 runtime 重启时不重复复制相同 helper 或新增报告") {
+        withTempDirectory { root in
+            publishHealthyBootstrapRuntime(at: root)
+            let source = root.appendingPathComponent("app/Resources/bin/claudi0")
+            writeBootstrapFixture("helper", to: source)
+            try! FileManager.default.setAttributes(
+                [.posixPermissions: 0o700], ofItemAtPath: source.path)
+            let environment = bootstrapEnvironment(root: root, executablePath: source)
+            var before = stat()
+            expect(
+                lstat(environment.claudioBinaryDestination.path, &before) == 0,
+                "测试前必须能够读取 helper 的文件身份")
+
+            let execution = performSharedRuntimeBootstrapExecution(environment: environment)
+            guard case .completed(let outcome) = execution else {
+                expect(false, "相同 helper 的共享自举必须成功，got \(execution)")
+                return
+            }
+            expect(!outcome.copiedBinary, "同字节 helper 不应重复发布")
+            var after = stat()
+            expect(
+                lstat(environment.claudioBinaryDestination.path, &after) == 0
+                    && before.st_ino == after.st_ino,
+                "同字节 helper 不应被原子替换")
+            expect(
+                (try! BootstrapReportStore(directory: environment.bootstrapReportsDirectory)
+                    .records()).isEmpty,
+                "无变化的正常启动不应新增待确认报告")
         }
     }
 

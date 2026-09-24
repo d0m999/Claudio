@@ -444,6 +444,31 @@ func runHostIntegrationModelSuites() {
         }
     }
 
+    suite("Shared runtime inspect：可执行的旧 helper 仍须显示版本不一致") {
+        withTempDirectory { root in
+            let fixture = makeSharedRuntimeFixture(root: root, missingEvent: nil)
+            writeSharedRuntimeExecutable(at: fixture.helper)
+            let bundledHelper = root.appendingPathComponent("bundle/bin/claudi0")
+            writeSharedRuntimeExecutable(at: bundledHelper)
+            writeFixture("#!/bin/sh\nexit 1\n", to: fixture.helper)
+            try! FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: fixture.helper.path)
+
+            let environment = SetupEnvironment(
+                executablePath: bundledHelper,
+                claudioBinaryDestination: fixture.helper,
+                userPacksDirectory: fixture.environment.userPacksDirectory,
+                configFile: fixture.environment.configFile)
+            let bootstrapper = SystemSharedRuntimeBootstrapper(environment: environment)
+            expectSharedRuntimeDamaged(
+                bootstrapper.inspect(), contains: "版本不一致",
+                "旧 helper 即使可执行，也不得使连接状态伪装为 ready")
+
+            writeSharedRuntimeExecutable(at: fixture.helper)
+            expect(bootstrapper.inspect() == .ready, "helper 与当前 bundle 字节相同后应恢复 ready")
+        }
+    }
+
     suite("Shared runtime inspect：声音包只缺单事件时保持 ready，由矩阵精确显示 missingSound") {
         withTempDirectory { root in
             let fixture = makeSharedRuntimeFixture(root: root, missingEvent: .notification)

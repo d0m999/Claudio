@@ -75,14 +75,12 @@ public struct BootstrapReportRecord: Sendable, Equatable, Codable, Identifiable 
 }
 
 public enum BootstrapReportStoreError: Error, Sendable, Equatable, CustomStringConvertible {
-    case queueFull
     case unsafeRecord(path: String)
     case invalidRecord(path: String)
     case io(reason: String)
 
     public var description: String {
         switch self {
-        case .queueFull: "有 32 条尚未确认的启动报告，请先在面板中确认后再重试"
         case .unsafeRecord(let path): "启动报告不是安全的普通文件：\(path)"
         case .invalidRecord(let path): "启动报告损坏或超过 64 KiB：\(path)"
         case .io(let reason): "启动报告存储失败：\(reason)"
@@ -92,7 +90,6 @@ public enum BootstrapReportStoreError: Error, Sendable, Equatable, CustomStringC
 
 public struct BootstrapReportStore: Sendable {
     public static let maximumRecordBytes = 64 * 1024
-    public static let maximumPendingRecords = 32
     public let directory: URL
 
     public init(directory: URL = ClaudioPaths.bootstrapReportsDirectory) {
@@ -116,10 +113,10 @@ public struct BootstrapReportStore: Sendable {
         }.sorted { $0.createdAt < $1.createdAt }
     }
 
-    public func ensureCapacity() throws {
-        if try records().count >= Self.maximumPendingRecords {
-            throw BootstrapReportStoreError.queueFull
-        }
+    /// Validate existing reports before bootstrap changes user content. Record count is not an
+    /// installation prerequisite: a diagnostic history must never prevent a helper upgrade.
+    public func validateExistingRecords() throws {
+        _ = try records()
     }
 
     @discardableResult
@@ -129,7 +126,7 @@ public struct BootstrapReportStore: Sendable {
 
     /// Publishes a report whose identity is already durable elsewhere (the bootstrap journal).
     /// Repeating this call after a process dies between publication and journal removal returns
-    /// the original record rather than consuming another queue slot or duplicating side effects.
+    /// the original record rather than creating another report or duplicating side effects.
     @discardableResult
     public func append(
         id: UUID,
@@ -168,9 +165,6 @@ public struct BootstrapReportStore: Sendable {
             existing[index].occurrenceCount += 1
             try write(existing[index])
             return existing[index]
-        }
-        guard existing.count < Self.maximumPendingRecords else {
-            throw BootstrapReportStoreError.queueFull
         }
         try write(candidate)
         return candidate
@@ -437,10 +431,9 @@ private func performSharedRuntimeBootstrapExecutionLocked(
         } else if FileManager.default.fileExists(atPath: environment.bootstrapJournalFile.path) {
             throw BootstrapReportStoreError.invalidRecord(path: environment.bootstrapJournalFile.path)
         }
-        // Reconcile an already-published final journal before checking capacity. A crash after
-        // append but before unlink must be able to remove its journal even when it occupied the
-        // last queue slot.
-        try store.ensureCapacity()
+        // Validate the report history before changing user content. A diagnostic record count
+        // must not prevent helper repair or a journal replay.
+        try store.validateExistingRecords()
     } catch {
         return .failed(
             error: .reportingUnavailable(reason: String(describing: error)),

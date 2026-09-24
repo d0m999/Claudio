@@ -103,6 +103,12 @@ public struct SystemSharedRuntimeBootstrapper: SharedRuntimeBootstrapping {
         let helper = environment.claudioBinaryDestination
         let helperHealth = inspectSharedRuntimeHelper(at: helper)
         guard helperHealth == .ready else { return helperHealth }
+        if environment.executablePath.standardizedFileURL.path
+            != helper.standardizedFileURL.path,
+            !identicalRunnableHelperFiles(from: environment.executablePath, to: helper)
+        {
+            return .damaged(reason: "已安装 helper 与当前应用版本不一致，请修复连接")
+        }
         switch checkPackIntegrity(
             configFile: environment.configFile,
             userPacksDirectory: environment.userPacksDirectory,
@@ -217,9 +223,24 @@ public actor HostIntegrationManager {
     public func connect(
         _ host: HostID
     ) async -> Result<HostIntegrationSnapshot, HostIntegrationActionError> {
+        await connect(host, repairingSharedRuntime: false)
+    }
+
+    /// An explicit repair checks the bundled helper even when the installed copy still runs.
+    /// Host hooks are changed only after shared runtime repair completes successfully.
+    public func repair(
+        _ host: HostID
+    ) async -> Result<HostIntegrationSnapshot, HostIntegrationActionError> {
+        await connect(host, repairingSharedRuntime: true)
+    }
+
+    private func connect(
+        _ host: HostID,
+        repairingSharedRuntime: Bool
+    ) async -> Result<HostIntegrationSnapshot, HostIntegrationActionError> {
         if let error = productActionError(for: host) { return .failure(error) }
         let operationRevision = beginOperation(.connecting, host: host)
-        if runtime != .ready {
+        if repairingSharedRuntime || runtime != .ready {
             let execution = bootstrapper.bootstrapExecution()
             latestBootstrapExecution = execution
             switch execution {

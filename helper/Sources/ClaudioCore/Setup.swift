@@ -948,6 +948,22 @@ public enum SetupError: Error, Sendable, Equatable, CustomStringConvertible {
 
 // MARK: - Entry point
 
+/// A launch from the same app bundle should not replace a healthy installed helper or create a
+/// new "helper copied" report. A symlink, empty file, or non-executable destination still goes
+/// through the existing atomic repair path, even when its target has identical bytes.
+func identicalRunnableHelperFiles(from source: URL, to destination: URL) -> Bool {
+    func isRunnableRegularFile(_ url: URL) -> Bool {
+        var metadata = stat()
+        let inspected = url.withUnsafeFileSystemRepresentation { path in
+            path.map { Darwin.lstat($0, &metadata) } ?? -1
+        }
+        return inspected == 0 && metadata.st_mode & S_IFMT == S_IFREG
+            && metadata.st_size > 0 && FileManager.default.isExecutableFile(atPath: url.path)
+    }
+    return isRunnableRegularFile(source) && isRunnableRegularFile(destination)
+        && FileManager.default.contentsEqual(atPath: source.path, andPath: destination.path)
+}
+
 /// Publishes and repairs Claudio's host-independent runtime. Safe to call repeatedly
 /// (idempotent): if
 /// `executablePath` is already `claudioBinaryDestination` (i.e. this is a rerun of the
@@ -969,7 +985,7 @@ public func performSharedRuntimeBootstrap(
     var salvagedPacks: [SalvagedPack] = []
 
     if !alreadyInstalled {
-        // Copying the binary must NOT be gated on whether a sibling `packs/` exists
+        // Checking and updating the binary must NOT be gated on whether a sibling `packs/` exists
         // (Codex + Claude adversarial review, /ship pre-landing: three independent passes
         // converged on this — one verified it empirically in an isolated scratch package).
         // The earlier version nested this inside `if directoryExists(at: bundledPacksDirectory)`,
@@ -981,13 +997,17 @@ public func performSharedRuntimeBootstrap(
         // `printSetupSummary`) printing a message claiming the binary is "already there."
         // Every subsequent Claude Code event would then silently fail to play a sound with
         // zero signal anything was wrong — the exact "install completes but stays broken"
-        // failure class T17 exists to eliminate. Unconditionally attempting the copy here
-        // means a real failure now surfaces as a real `SetupError`, never a false success.
-        switch copySelfToFixedLocation(
-            from: environment.executablePath, to: environment.claudioBinaryDestination
-        ) {
-        case .success: copiedBinary = true
-        case .failure(let error): return .failure(error)
+        // failure class T17 exists to eliminate. An absent, damaged or older binary still
+        // takes the atomic copy path and surfaces its real failure.
+        if !identicalRunnableHelperFiles(
+            from: environment.executablePath, to: environment.claudioBinaryDestination)
+        {
+            switch copySelfToFixedLocation(
+                from: environment.executablePath, to: environment.claudioBinaryDestination
+            ) {
+            case .success: copiedBinary = true
+            case .failure(let error): return .failure(error)
+            }
         }
 
         // Bundled packs ship as a sibling of the binary's containing directory:
@@ -1053,7 +1073,10 @@ public func performSharedRuntimeBootstrap(
         != environment.claudioBinaryDestination.standardizedFileURL.path
         && legacyBinaryExists
         && !legacyBinaryIsDirectory.boolValue
-    if shouldPublishClaudi0Alias {
+    if shouldPublishClaudi0Alias
+        && !identicalRunnableHelperFiles(
+            from: environment.claudioBinaryDestination, to: claudi0AliasDestination)
+    {
         // The alias is additive branding, not part of the host runtime contract. A read-only
         // legacy installation must remain usable even if this convenience entry cannot be
         // refreshed; the next app-bundle bootstrap will retry it.

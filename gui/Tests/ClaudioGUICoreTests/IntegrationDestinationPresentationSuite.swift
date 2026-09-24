@@ -65,8 +65,13 @@ func runIntegrationDestinationPresentationSuites() {
             statuses: [.codex: .awaitingActivation])
         expect(
             codexAwaiting.connectionSection(for: .codex)?.row(.connectionStatus)?.actions
-                == [.copyHooks, .redetect],
-            "Codex 待回执必须额外提供复制 /hooks，其他状态不得伪造")
+                == [.copyHooks, .repair(.codex), .redetect],
+            "Codex 待回执必须保留 /hooks 与显式修复入口")
+        let codexReady = integrationDestinationTestContent(statuses: [.codex: .ready])
+        expect(
+            codexReady.connectionSection(for: .codex)?.row(.connectionStatus)?.actions
+                == [.repair(.codex), .redetect],
+            "Codex 已激活仍须允许用户修复旧 helper 与连接")
     }
 
     suite("集成 destination 四行 typed contract：顺序、Surface 范围与动作归属固定") {

@@ -6,6 +6,11 @@ private final class BridgeBootstrapper: SharedRuntimeBootstrapping, @unchecked S
     private let lock = NSLock()
     private var bootstrapCalls = 0
     private var inspectCalls = 0
+    private let failsBootstrap: Bool
+
+    init(failsBootstrap: Bool = false) {
+        self.failsBootstrap = failsBootstrap
+    }
 
     func inspect() -> SharedRuntimeHealth {
         lock.lock()
@@ -18,6 +23,9 @@ private final class BridgeBootstrapper: SharedRuntimeBootstrapping, @unchecked S
         lock.lock()
         bootstrapCalls += 1
         lock.unlock()
+        if failsBootstrap {
+            return .failure(.binaryCopyFailure(reason: "fixture helper update failed"))
+        }
         return .success(
             SharedRuntimeBootstrapOutcome(
                 copiedBinary: false,
@@ -42,18 +50,22 @@ private actor BridgeAdapter: HostIntegrationAdapter {
     private var disconnectCalls = 0
     private let failsConnect: Bool
     private let observesReceipt: Bool
+    private let bootstrapper: BridgeBootstrapper?
+    private var bootstrapCountAtConnect: Int?
 
     init(
         host: HostID,
         connected: Bool = false,
         failsConnect: Bool = false,
-        observesReceipt: Bool = true
+        observesReceipt: Bool = true,
+        bootstrapper: BridgeBootstrapper? = nil
     ) {
         self.host = host
         self.capabilities = HostCapabilityCatalog.bindings(for: host)
         self.connected = connected
         self.failsConnect = failsConnect
         self.observesReceipt = observesReceipt
+        self.bootstrapper = bootstrapper
     }
 
     func inspect(runtime: SharedRuntimeHealth) async -> HostIntegrationSnapshot {
@@ -65,6 +77,7 @@ private actor BridgeAdapter: HostIntegrationAdapter {
         runtime: SharedRuntimeHealth
     ) async -> Result<HostIntegrationSnapshot, HostIntegrationActionError> {
         connectCalls += 1
+        bootstrapCountAtConnect = bootstrapper?.counts().bootstrap
         if failsConnect {
             return .failure(.configuration(reason: "fixture 拒绝连接"))
         }
@@ -83,6 +96,8 @@ private actor BridgeAdapter: HostIntegrationAdapter {
     func counts() -> (inspect: Int, connect: Int, disconnect: Int) {
         (inspectCalls, connectCalls, disconnectCalls)
     }
+
+    func bootstrapCallsSeenAtConnect() -> Int? { bootstrapCountAtConnect }
 
     private func snapshot(runtime: SharedRuntimeHealth) -> HostIntegrationSnapshot {
         guard connected else {
@@ -121,7 +136,8 @@ private func bridgeFixture(
     root: URL,
     initiallyConnected: Bool = false,
     claudeFailsConnect: Bool = false,
-    codexObservesReceipt: Bool = true
+    codexObservesReceipt: Bool = true,
+    failsBootstrap: Bool = false
 ) -> (
     bridge: HostIntegrationManagerBridge,
     bootstrapper: BridgeBootstrapper,
@@ -135,7 +151,7 @@ private func bridgeFixture(
     let packs = root.appendingPathComponent("packs", isDirectory: true)
     let pack = packs.appendingPathComponent("dual", isDirectory: true)
     let config = root.appendingPathComponent("config.json")
-    let bootstrapper = BridgeBootstrapper()
+    let bootstrapper = BridgeBootstrapper(failsBootstrap: failsBootstrap)
     let claude = BridgeAdapter(
         host: .claudeCode,
         connected: initiallyConnected,
@@ -143,7 +159,8 @@ private func bridgeFixture(
     let codex = BridgeAdapter(
         host: .codex,
         connected: initiallyConnected,
-        observesReceipt: codexObservesReceipt)
+        observesReceipt: codexObservesReceipt,
+        bootstrapper: bootstrapper)
     let workBuddy = BridgeAdapter(
         host: .workBuddy,
         connected: initiallyConnected,
@@ -196,7 +213,7 @@ func runHostIntegrationManagerBridgeSuites() async {
     }
 
     await suite(
-        "HostIntegrationManagerBridge 动作：connect/repair/disconnect 只写目标 adapter，repair 复用 connect"
+        "HostIntegrationManagerBridge 动作：repair 先修共享 runtime，再只重连目标 adapter"
     ) {
         await withTempDirectory { root in
             let fixture = bridgeFixture(root: root)
@@ -217,6 +234,12 @@ func runHostIntegrationManagerBridgeSuites() async {
             expect(claudeCounts.connect == 1, "repair Codex 不得再次 connect Claude Code")
             expect(codexCounts.connect == 1, "repair 必须复用目标 adapter 的 connect")
             expect(workBuddyCounts.connect == 0, "repair Codex 不得 connect WorkBuddy")
+            let bootstrapCallsAtCodexConnect =
+                await fixture.codex.bootstrapCallsSeenAtConnect()
+            expect(
+                fixture.bootstrapper.counts().bootstrap == 1
+                    && bootstrapCallsAtCodexConnect == 1,
+                "repair 必须先修复共享 helper，再重建 Codex 连接")
             expect(
                 repair?.feedbackMessage == "Codex 已连接，当前代次已收到真实回执",
                 "刷新后已有当前代次回执时，反馈不得还说等待确认")
@@ -232,6 +255,22 @@ func runHostIntegrationManagerBridgeSuites() async {
                 disconnected?.state.snapshots.first(where: { $0.host == .codex })?
                     .configuration == .configured,
                 "断开一侧后刷新不得清空另一侧状态")
+        }
+    }
+
+    await suite("Codex repair：helper 更新失败时不改写宿主连接") {
+        await withTempDirectory { root in
+            let fixture = bridgeFixture(
+                root: root, initiallyConnected: true, failsBootstrap: true)
+            _ = await fixture.bridge.refresh()
+
+            let repair = try? await fixture.bridge.perform(.repair(.codex))
+            expect(fixture.bootstrapper.counts().bootstrap == 1, "显式修复必须尝试更新 helper")
+            let codexCounts = await fixture.codex.counts()
+            expect(
+                codexCounts.connect == 0,
+                "helper 修复失败时不得重建 Codex hooks 或连接代次")
+            expect(repair?.feedbackKind == .failure, "修复失败必须呈现失败反馈")
         }
     }
 

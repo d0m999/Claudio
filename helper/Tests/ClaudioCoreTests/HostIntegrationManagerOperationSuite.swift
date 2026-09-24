@@ -26,13 +26,15 @@ func runHostIntegrationManagerOperationSuites() async {
             let snapshotsBeforeRejectedActions = await manager.snapshots()
 
             let connectResult = await manager.connect(host)
+            let repairResult = await manager.repair(host)
             let disconnectResult = await manager.disconnect(host)
             guard case .failure(.hostUnavailable(_)) = connectResult,
+                case .failure(.hostUnavailable(_)) = repairResult,
                 case .failure(.hostUnavailable(_)) = disconnectResult
             else {
                 expect(
                     false,
-                    "AX identity 的 connect/disconnect 必须在 manager 边界失败关闭：\(host)")
+                    "AX identity 的 connect/repair/disconnect 必须在 manager 边界失败关闭：\(host)")
                 continue
             }
             let calls = await adapter.operationCalls()
@@ -51,8 +53,13 @@ func runHostIntegrationManagerOperationSuites() async {
         let adapter = ForbiddenOperationHostIntegrationAdapter(host: .chatGPTDesktopAX)
         let manager = HostIntegrationManager(adapters: [adapter], bootstrapper: bootstrapper)
         let result = await manager.connect(.chatGPTDesktopAX)
+        let repair = await manager.repair(.chatGPTDesktopAX)
         guard case .failure(.hostUnavailable(_)) = result else {
             expect(false, "拒绝 AX identity 必须优先于共享 runtime 修复")
+            return
+        }
+        guard case .failure(.hostUnavailable(_)) = repair else {
+            expect(false, "拒绝 AX identity 的 repair 必须优先于共享 runtime 修复")
             return
         }
         expect(

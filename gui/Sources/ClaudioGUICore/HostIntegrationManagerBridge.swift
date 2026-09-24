@@ -118,7 +118,7 @@ public actor HostIntegrationManagerBridge {
         case .connect(let requestedHost):
             result = await manager.connect(requestedHost)
         case .repair(let requestedHost):
-            result = await manager.connect(requestedHost)
+            result = await manager.repair(requestedHost)
         case .disconnect(let requestedHost):
             result = await manager.disconnect(requestedHost)
         case .copyHooksCommand, .redetect, .clearReceiptHistory:

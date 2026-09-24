@@ -526,9 +526,10 @@ N 个已发布来源 · 5 个声音事件
   连接状态同时说明配置、当前 installation 回执和 manager 诊断；没有回执时明确显示「暂无当前安装实例
   回执」。接入方式来自 `HostIntegrationDescriptor.mechanism`，只有 manager 提供配置来源时才显示
   复制路径动作；「管理事件」只路由到同一 Surface 的 Events 目的页；清除回执只在第四行确认。
-- **五态动作投影**：`ready` 为「已激活」并提供重新检测；`awaitingActivation` 为「待回执」，Codex
-  额外提供复制 `/hooks`；`legacy` 提供升级连接；`notConnected` 关闭 Toggle 且重新检测，开启时调用
-  connect；`needsAttention` 提供修复连接和重新检测。关闭 Toggle 统一进入 disconnect 确认，取消无副作用。
+- **五态动作投影**：`ready` 为「已激活」并提供重新检测，Codex 另提供修复连接以处理可执行但版本陈旧的
+  helper；`awaitingActivation` 为「待回执」，Codex 额外提供复制 `/hooks` 与修复连接；`legacy` 提供升级连接；
+  `notConnected` 关闭 Toggle 且重新检测，开启时调用 connect；`needsAttention` 提供修复连接和重新检测。
+  显式修复先更新共享 helper，成功后才重建目标宿主连接；关闭 Toggle 统一进入 disconnect 确认，取消无副作用。
 - **异步与反馈**：in-flight 保留旧 manager 快照，不乐观翻转 Toggle、不显示 skeleton；只禁用冲突动作，
   允许切换 Agent，进度归属发起动作的宿主。成功、错误、回执变化沿用逐条回执、代次保护、5 秒反馈和
   Reduce Motion 语义，视觉位置改为右下 Toast；只在目的页可见且窗口为 key 时主动播报。

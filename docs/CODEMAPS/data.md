@@ -22,7 +22,7 @@ host config ── installation ID ──> active marker ──> receipts/<host>
 | Runtime binaries | `~/.claudio/bin/claudi0`, legacy `claudio` | shared bootstrap; release bundle publishes both names |
 | Playback state | `play.lock`, `play.state` | legacy global debounce; host paths use per-host state |
 | Host evidence | `integrations/receipts/`, `integrations/installations/` | 0600 receipts/markers, installation-bound activation |
-| Bootstrap recovery | `bootstrap-journal.json`, `bootstrap-reports/` | journal before user-content changes; bounded report queue |
+| Bootstrap recovery | `bootstrap-journal.json`, `bootstrap-reports/` | journal before user-content changes; durable diagnostic reports never block helper updates by count |
 | Diagnostics | `claudio.log`, `claudio.log.lock` | redacted operational errors only |
 | Claude Code | `~/.claude/settings.json` | Claude adapter-owned Claudio entries only |
 | Codex | `~/.codex/hooks.json` | Codex adapter-owned command hooks only; `notify` is preserved |

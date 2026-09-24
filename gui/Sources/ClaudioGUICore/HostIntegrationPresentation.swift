@@ -607,12 +607,13 @@ public func integrationConnectionStatusActions(
     for row: HostSourceRowPresentation
 ) -> [HostIntegrationUserAction] {
     switch row.status {
-    case .ready: return [.redetect]
+    case .ready:
+        return row.host == .codex ? [.repair(row.host), .redetect] : [.redetect]
     case .legacy:
         return [.repair(row.host), .redetect]
     case .awaitingActivation:
         if row.host == .codex {
-            return [.copyHooksCommand, .redetect]
+            return [.copyHooksCommand, .repair(row.host), .redetect]
         }
         return [.redetect]
     case .notConnected: return [.redetect]

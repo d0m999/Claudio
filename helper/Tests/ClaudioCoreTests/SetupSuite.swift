@@ -1464,6 +1464,8 @@ func runSetupSuites() {
     suite("performFirstRunSetup: re-running from inside the bundle a second time is idempotent") {
         withTempDirectory { root in
             let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
+            try! FileManager.default.setAttributes(
+                [.posixPermissions: 0o700], ofItemAtPath: executablePath.path)
             let environment = makeEnvironment(root: root, executablePath: executablePath)
 
             _ = performFirstRunSetup(environment: environment)
@@ -1478,8 +1480,8 @@ func runSetupSuites() {
                 return
             }
             expect(
-                copiedBinary,
-                "the binary copy step itself is not guarded — copying over itself is safe")
+                !copiedBinary,
+                "an unchanged bundled helper should not be copied on every launch")
             expect(
                 copiedPacks.isEmpty,
                 "the pack should not be reported as newly copied the second time (destination already exists)"
