@@ -502,8 +502,9 @@ public struct PanelView: View {
                 count > 0
             {
                 HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(ClaudioTheme.warning(colorScheme))
+                    Image(systemName: claudioEventGlyphName(.stopFailure))
+                        .foregroundColor(ClaudioTheme.event(.stopFailure, colorScheme))
+                        .accessibilityHidden(true)
                     Text(localizedEventName(.stopFailure, language: languageStore.language))
                     Spacer(minLength: 4)
                     Text(String(count)).monospacedDigit()
