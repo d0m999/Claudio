@@ -88,7 +88,7 @@ public final class PanelConfigController: ObservableObject {
     /// `nil` 是全局默认 profile；非 nil 时 `config` 是该 surface 的 effective 投影。
     @Published public private(set) var selectedSurface: HostSurfaceID?
     @Published public private(set) var selectedWorkspaceID: UUID? = nil
-    public private(set) var selectedWorkspaceWriteTarget: WorkspaceSoundWriteTarget?
+    private var selectedWorkspaceWriteTarget: WorkspaceSoundWriteTarget?
     @Published public private(set) var workspaceError: WorkspaceSoundError? = nil
     @Published public private(set) var previewSafetyFailures: [Event: EventPreviewSafetyFailure] =
         [:]

@@ -726,18 +726,30 @@ public struct PanelView: View {
                                 guard panelModel.selectedSoundScope == selectedScope.scope,
                                     !panelModel.config.selectedPack.isEmpty
                                 else { return }
+                                let target = panelModel.selectedWorkspaceTarget
+                                let targetMatchesScope =
+                                    selectedScope.scope.workspaceID == nil
+                                    || target?.id == selectedScope.scope.workspaceID
+                                guard targetMatchesScope else {
+                                    onAnnounce(
+                                        localizedWorkspaceError(
+                                            .staleRule, language: languageStore.language))
+                                    return
+                                }
                                 if panelModel.selectedPackIsBuiltinReadOnly {
                                     onConfigureSound(
                                         .copyAndApply(
                                             scope: selectedScope.scope,
                                             packID: panelModel.config.selectedPack,
-                                            event: event.event))
+                                            event: event.event,
+                                            workspaceTarget: target))
                                 } else {
                                     onConfigureSound(
                                         .editEvent(
                                             scope: selectedScope.scope,
                                             packID: panelModel.config.selectedPack,
-                                            event: event.event))
+                                            event: event.event,
+                                            workspaceTarget: target))
                                 }
                             }
                         },
@@ -847,7 +859,7 @@ public struct PanelView: View {
     private func playbackSettings(masterVolumeEnabled: Bool) -> some View {
         let scope = selectedScope.scope
         let workspaceTarget = scope.workspaceID.flatMap { _ in
-            panelModel.selectedSoundScope == scope ? panelModel.selectedWorkspaceWriteTarget : nil
+            panelModel.selectedSoundScope == scope ? panelModel.selectedWorkspaceTarget : nil
         }
         return VStack(alignment: .leading, spacing: 5) {
             Text(l10n.text(.panelPlaybackSettings))
