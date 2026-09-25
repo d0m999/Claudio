@@ -172,9 +172,12 @@ struct EventSettingsWindowView: View {
                             selection.conflictRecoveryFiles,
                             identifierPrefix: "workspace.write.conflict-recovery-file")
                     }
+                    unresolvedConflictNotice
                     if let feedback = selection.deletionPresentation.feedback {
                         deletionFeedback(feedback)
-                    } else if let error = model.workspaceError {
+                    } else if let error = model.workspaceError,
+                        !isRetainedWorkspaceConflict(error)
+                    {
                         workspaceFailure(error)
                     }
                     libraryNotice
@@ -482,10 +485,12 @@ struct EventSettingsWindowView: View {
             {
                 Button(l10n.text(.workspaceDeleteReload)) {
                     if error.isPublishedConflict {
-                        selection.noteConflictReadback(
+                        reloadConflict(
+                            .workspace(error),
                             recoveryFiles: model.workspaceRecoveryFile.map { [$0] } ?? [])
+                    } else {
+                        model.reload()
                     }
-                    model.reload()
                 }
                 .accessibilityIdentifier("workspace.write.reload")
             }
@@ -554,8 +559,8 @@ struct EventSettingsWindowView: View {
                 return false
             }) {
                 Button(l10n.text(.workspaceDeleteReload)) {
-                    selection.noteConflictReadback(recoveryFiles: writeFailureRecoveryFiles)
-                    model.reload()
+                    reloadConflict(
+                        .writes(writeFailureItems), recoveryFiles: writeFailureRecoveryFiles)
                 }
                 .accessibilityIdentifier("workspace.write.reload")
             }
@@ -564,6 +569,47 @@ struct EventSettingsWindowView: View {
 
     private var writeFailureRecoveryFiles: [URL] {
         panelWriteFailureRecoveryFiles(items: writeFailureItems, surfaceRecoveryFile: nil)
+    }
+
+    @ViewBuilder
+    private var unresolvedConflictNotice: some View {
+        if let source = selection.unresolvedConflict {
+            VStack(alignment: .leading, spacing: 8) {
+                switch source {
+                case .workspace(let error):
+                    FailureRow(
+                        message: localizedWorkspaceError(error, language: languageStore.language))
+                case .writes(let failures):
+                    ForEach(panelWriteFailureRows(items: failures, l10n: l10n)) { row in
+                        FailureRow(message: row.message)
+                    }
+                }
+                configRevealButton
+                recoveryFileButtons(
+                    selection.conflictRecoveryFiles,
+                    identifierPrefix: "workspace.write.unresolved-recovery-file")
+                Button(l10n.text(.workspaceDeleteReload)) {
+                    reloadConflict(source, recoveryFiles: selection.conflictRecoveryFiles)
+                }
+                .accessibilityIdentifier("workspace.write.unresolved-reload")
+            }
+            .settingsMountIdentity("workspace.write.conflict-unresolved")
+        }
+    }
+
+    private func isRetainedWorkspaceConflict(_ error: WorkspaceSoundError) -> Bool {
+        guard case .workspace(let retained)? = selection.unresolvedConflict else { return false }
+        return retained == error
+    }
+
+    private func reloadConflict(
+        _ source: EventSettingsConflictSource, recoveryFiles: [URL]
+    ) {
+        let scope = selection.route.scope
+        model.reload()
+        _ = selection.finishConflictReadback(
+            scope: scope, configState: model.configState, source: source,
+            recoveryFiles: recoveryFiles)
     }
 
     private func retryIsLockBusy(_ retry: EventSettingsWriteRetry) -> Bool {

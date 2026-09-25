@@ -175,7 +175,10 @@ func runEventSettingsWindowSelectionSuites() {
 
         let recovery = URL(fileURLWithPath: "/fixture/recovery.json")
         selection.clearUnavailableScope()
-        selection.noteConflictReadback(recoveryFiles: [recovery])
+        _ = selection.finishConflictReadback(
+            scope: .global, configState: .operational(config),
+            source: .workspace(.publishedConflict(recoveryPath: recovery.path)),
+            recoveryFiles: [recovery])
         expect(
             selection.conflictWasReadBack && selection.conflictRecoveryFiles == [recovery],
             "发布冲突的手动读回保留结果不确定性与真实恢复路径")
@@ -219,6 +222,65 @@ func runEventSettingsWindowSelectionSuites() {
                     configState: .operational(config),
                     config: config, workspaceRule: changedRule),
             "适用来源读回变化后不得重放旧切换")
+    }
+
+    suite("冲突读回：不可用配置保留 typed 失败，不宣称已读回") {
+        let recovery = URL(fileURLWithPath: "/fixture/conflict-recovery.json")
+        let originalError = WorkspaceSoundError.publishedConflict(recoveryPath: recovery.path)
+        let source = EventSettingsConflictSource.workspace(originalError)
+        let config = ClaudioConfig(selectedPack: "current")
+        for state in [
+            PanelConfigState.malformed(reason: "fixture"),
+            .needsPack,
+            .unwritable(reason: "fixture"),
+        ] {
+            let selection = EventSettingsWindowSelection()
+            expect(
+                !selection.finishConflictReadback(
+                    scope: .global, configState: state, source: source,
+                    recoveryFiles: [recovery])
+                    && !selection.conflictWasReadBack
+                    && selection.conflictReadbackState
+                        == .unavailable(source: source, recoveryFiles: [recovery])
+                    && selection.unresolvedConflict == source
+                    && selection.conflictRecoveryFiles == [recovery],
+                "读回不能建立 operational 配置时必须保留原错误与恢复路径")
+            expect(
+                selection.finishConflictReadback(
+                    scope: .global, configState: .operational(config), source: source,
+                    recoveryFiles: [recovery])
+                    && selection.conflictWasReadBack
+                    && selection.conflictReadbackState == .readBack(recoveryFiles: [recovery])
+                    && selection.unresolvedConflict == nil,
+                "后续明确读回有效配置才能显示读回断言")
+        }
+
+        var malformedRules = config
+        malformedRules.workspaceRulesMalformed = true
+        let malformedRuleSelection = EventSettingsWindowSelection()
+        expect(
+            !malformedRuleSelection.finishConflictReadback(
+                scope: .global, configState: .operational(malformedRules),
+                source: source, recoveryFiles: [recovery])
+                && malformedRuleSelection.unresolvedConflict == source,
+            "配置可解析但工作区规则损坏时也不能断言可靠读回")
+
+        let write = PanelWriteFailure(
+            reason: .configPublishedButFailed(
+                reason: "fixture", recoveryPath: recovery.path),
+            message: "typed fixture", recoveryFile: recovery, source: .mute)
+        let selection = EventSettingsWindowSelection()
+        expect(
+            !selection.finishConflictReadback(
+                scope: .global, configState: .needsPack,
+                source: .writes([write]), recoveryFiles: [recovery])
+                && selection.unresolvedConflict == .writes([write])
+                && selection.conflictRecoveryFiles == [recovery],
+            "普通写错误在 reload 清空控制器错误后仍须保留 typed 失败与恢复文件")
+        selection.select(EventSettingsWindowRoute(scope: .workspace(UUID())))
+        expect(
+            selection.unresolvedConflict == nil && selection.conflictRecoveryFiles.isEmpty,
+            "离开原作用域应清理读回失败的暂存证据")
     }
 
     suite("删除锁忙重试：原目标重新确认，不复用已消费请求") {

@@ -10,6 +10,30 @@ package struct EventSettingsPreviewFailure: Equatable {
     package let reason: EventPreviewAttemptFailure
 }
 
+/// Keeps the typed failed write available when a requested conflict readback cannot establish
+/// an operational configuration. Recovery files remain tied to that original write result.
+package enum EventSettingsConflictSource: Equatable {
+    case workspace(WorkspaceSoundError)
+    case writes([PanelWriteFailure])
+
+    package var isPublishedConflict: Bool {
+        switch self {
+        case .workspace(let error): return error.isPublishedConflict
+        case .writes(let failures):
+            return failures.contains {
+                if case .configPublishedButFailed = $0.reason { return true }
+                return false
+            }
+        }
+    }
+}
+
+package enum EventSettingsConflictReadbackState: Equatable {
+    case idle
+    case readBack(recoveryFiles: [URL])
+    case unavailable(source: EventSettingsConflictSource, recoveryFiles: [URL])
+}
+
 /// The original control values are a guard for a deliberate retry after a lock failure.
 /// A readback that changed the target requires the user to make a new choice instead.
 package struct EventSettingsWriteRetry: Equatable {
@@ -69,8 +93,23 @@ package final class EventSettingsWindowSelection: ObservableObject {
     @Published package private(set) var deletionPresentation = WorkspaceDeletionPresentation()
     @Published package private(set) var previewFailure: EventSettingsPreviewFailure?
     @Published package private(set) var writeRetry: EventSettingsWriteRetry?
-    @Published package private(set) var conflictWasReadBack = false
-    @Published package private(set) var conflictRecoveryFiles: [URL] = []
+    @Published package private(set) var conflictReadbackState: EventSettingsConflictReadbackState =
+        .idle
+
+    package var conflictWasReadBack: Bool {
+        if case .readBack = conflictReadbackState { return true }
+        return false
+    }
+    package var conflictRecoveryFiles: [URL] {
+        switch conflictReadbackState {
+        case .idle: []
+        case .readBack(let files), .unavailable(_, let files): files
+        }
+    }
+    package var unresolvedConflict: EventSettingsConflictSource? {
+        if case .unavailable(let source, _) = conflictReadbackState { return source }
+        return nil
+    }
 
     private var storage: Storage
     private var isPublishingState = false
@@ -95,8 +134,7 @@ package final class EventSettingsWindowSelection: ObservableObject {
         deletionPresentation = WorkspaceDeletionPresentation()
         previewFailure = nil
         writeRetry = nil
-        conflictWasReadBack = false
-        conflictRecoveryFiles = []
+        conflictReadbackState = .idle
         consumedDeleteRequest = nil
         storage.route = route
         storage.routeRequestRevision &+= 1
@@ -110,8 +148,7 @@ package final class EventSettingsWindowSelection: ObservableObject {
         deletionPresentation.pending = nil
         previewFailure = nil
         writeRetry = nil
-        conflictWasReadBack = false
-        conflictRecoveryFiles = []
+        conflictReadbackState = .idle
         storage.route = EventSettingsWindowRoute(
             scope: storage.route.scope,
             event: storage.route.event,
@@ -277,14 +314,26 @@ package final class EventSettingsWindowSelection: ObservableObject {
         writeRetry = nil
     }
 
-    package func noteConflictReadback(recoveryFiles: [URL] = []) {
-        conflictWasReadBack = true
-        conflictRecoveryFiles = recoveryFiles
+    /// Call only after a user-requested reload. A failed readback must keep the original typed
+    /// failure and its recovery files visible without asserting that current config was read.
+    @discardableResult
+    package func finishConflictReadback(
+        scope: PanelSoundScopeID,
+        configState: PanelConfigState,
+        source: EventSettingsConflictSource,
+        recoveryFiles: [URL]
+    ) -> Bool {
+        guard storage.route.scope == scope, source.isPublishedConflict else { return false }
+        if case .operational(let config) = configState, !config.workspaceRulesMalformed {
+            conflictReadbackState = .readBack(recoveryFiles: recoveryFiles)
+            return true
+        }
+        conflictReadbackState = .unavailable(source: source, recoveryFiles: recoveryFiles)
+        return false
     }
 
     package func clearConflictReadback() {
-        conflictWasReadBack = false
-        conflictRecoveryFiles = []
+        conflictReadbackState = .idle
     }
 
     private func requestFocus(_ target: EventSettingsFocusTarget) {
@@ -356,8 +405,7 @@ package final class EventSettingsWindowSelection: ObservableObject {
         deletionPresentation = WorkspaceDeletionPresentation()
         previewFailure = nil
         writeRetry = nil
-        conflictWasReadBack = false
-        conflictRecoveryFiles = []
+        conflictReadbackState = .idle
         consumedDeleteRequest = nil
         publishState()
     }
