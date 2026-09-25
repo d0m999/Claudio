@@ -279,7 +279,7 @@ public enum SoundPacksWindowPackUseActionError: Error, Sendable, Equatable {
         case .writesStopped(let statusText): return statusText
         case .use(let error): return .literal(error.description)
         case .surface(let error): return .literal(error.description)
-        case .workspace(let error): return .literal(error.description)
+        case .workspace(let error): return .localized(workspaceSoundErrorL10nKey(error))
         }
     }
 
@@ -563,7 +563,7 @@ package final class SoundPacksWindowModel {
         if case .workspace(let id) = managedScope,
             case .failure(let error) = baseConfig.resolveWorkspaceProfile(id: id)
         {
-            return .literal(error.description)
+            return .localized(workspaceSoundErrorL10nKey(error))
         }
         return soundPacksWindowScopeFailureStatusText(
             managedSurface: managedSurface,

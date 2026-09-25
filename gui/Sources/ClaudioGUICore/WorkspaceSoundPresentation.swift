@@ -5,6 +5,10 @@ import Foundation
 public func localizedWorkspaceError(_ error: WorkspaceSoundError, language: ClaudioAppLanguage)
     -> String
 {
+    ClaudioL10n(language: language).text(workspaceSoundErrorL10nKey(error))
+}
+
+func workspaceSoundErrorL10nKey(_ error: WorkspaceSoundError) -> ClaudioL10nKey {
     let key: ClaudioL10nKey
     switch error {
     case .tooLarge: key = .workspaceTooLarge
@@ -17,5 +21,5 @@ public func localizedWorkspaceError(_ error: WorkspaceSoundError, language: Clau
     case .configFailure: key = .workspaceSaveFailed
     case .lockBusy: key = .workspaceLockBusy
     }
-    return ClaudioL10n(language: language).text(key)
+    return key
 }

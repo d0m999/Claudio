@@ -69,6 +69,30 @@ func runWorkspaceSoundPresentationSuites() {
             expect(
                 model.useSelectedPack() == .failure(.workspace(.staleRule)),
                 "删除后的工作区须由原有写入口拒绝")
+            let englishFailure = localizedWorkspaceError(.staleRule, language: .english)
+            let chineseFailure = localizedWorkspaceError(.staleRule, language: .zhHans)
+            let useStatus = model.windowStatuses.first(where: { $0.kind == .packUse })
+            expect(
+                englishFailure != chineseFailure
+                    && useStatus?.message(language: .english) == englishFailure
+                    && useStatus?.message(language: .zhHans) == chineseFailure,
+                "工作区切包失败状态须按当前语言解析，切换语言后不能保留中文 literal")
+            expect(
+                model.managedScopeFailureStatusText?.resolve(language: .english)
+                    == englishFailure,
+                "失效工作区的拒写状态须按英文解析")
+            guard
+                case .failure(.writesStopped) = model.assignSelectedAudioFile(
+                    "tone.aiff", to: .stop)
+            else {
+                expect(false, "失效工作区必须拒绝后续声音映射写入")
+                return
+            }
+            let rejectedStatus = model.windowStatuses.first(where: { $0.kind == .audio })
+            expect(
+                rejectedStatus?.message(language: .english) == englishFailure
+                    && rejectedStatus?.message(language: .zhHans) == chineseFailure,
+                "后续拒写状态须保留类型化原因并随语言变化")
             expect(
                 loadClaudioConfig(from: file)?.selectedPack == "default-pack"
                     && !model.writesAllowed,
