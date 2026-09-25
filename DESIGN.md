@@ -13,6 +13,7 @@
 - 菜单栏只列默认组与工作区，由用户手动选择。选择不随最近回调改变；可直接换包、调所选组音量、试听五事件、逐事件静音。Surface 在弹窗只读，“编辑工作区”定向打开同一设置窗口详情。
 - 活动概览明确标记「所有来源」。试听旁说明仅验证选中包的音频，不代表宿主事件已接入。损坏包显示修复提示，不改选默认组；写失败保留原值并显示原因。
 - 旧 Surface 声音入口退役；来源只在集成中管理接入。失效详情显示不可用，不可写默认组。升级说明非阻塞、一次展示，明确旧来源覆盖已停用且原始字段保留。
+- WorkBuddy 当前实现四个事件绑定、五条自有 hook，能力显示 4/5。Notification 只覆盖 `permission_prompt` 与 `idle_prompt`，使用默认组；StopFailure 尚未实现，WorkBuddy 工作区仍未开放。逐绑定显示待回执／当前回执；宿主 ready 沿用任务开始回执判定，不代表四类均有当前回执。
 - 自动 harness、原生键盘/VoiceOver、真实回调、实际听感和升级提示分别验收。
 
 ## Product Context（产品上下文）
@@ -363,8 +364,8 @@ N 个已发布来源 · 5 个声音事件
   `5 个事件`，Surface 显示 `supported/total 可映射`。
 - **单来源五事件**：列表永远按 `Event.allCases` 显示五行。Global 显示 claudi0 事件 ID 与
   「全局默认」，不伪造宿主原生名；Surface 显示原生事件、接口支持与当前实现。WorkBuddy 覆盖数
-  从能力目录计算：`UserPromptSubmit`、`Stop`、`SubagentStop` 可试听/静音；`StopFailure`、
-  `Notification` 标为未实现且两个动作都禁用。当前代次回执逐项显示，不从覆盖数推断激活。
+  从能力目录计算：`UserPromptSubmit`、`Stop`、`SubagentStop`、`Notification` 已实现（4/5）；
+  `Notification` 仅覆盖 `permission_prompt` 与 `idle_prompt`，`StopFailure` 尚未实现。当前代次回执逐项显示，不从覆盖数推断激活。
   Codex 的 `4/5` 同样是正常能力事实。
 - **动作资格**：视图与焦点顺序共同消费 `PanelEventControlAvailability`。未实现/不支持事件禁用
   试听与静音；缺失或损坏声音、主音量为零只禁用试听，已实现事件仍可切换静音。事件行没有
@@ -393,7 +394,7 @@ N 个已发布来源 · 5 个声音事件
 | 任务开始 | `task_start` | `UserPromptSubmit` | `UserPromptSubmit` | `UserPromptSubmit` / 已实现 |
 | 本轮结束 | `stop` | `Stop` | `Stop` | `Stop` / 已实现 |
 | 执行中断 | `stop_failure` | `StopFailure` | 不支持 | `StopFailure` / 未实现 |
-| 待响应 | `notification` | `Notification` | `PermissionRequest`，**仅授权请求** | `Notification` / 接口限定、未实现 |
+| 待响应 | `notification` | `Notification` | `PermissionRequest`，**仅授权请求** | `Notification` / 已实现，仅 `permission_prompt`、`idle_prompt` |
 | 子任务结束 | `subagent_stop` | `SubagentStop` | `SubagentStop` | `SubagentStop` / 已实现 |
 
 `Stop` 只表示一轮停止；特别是 Codex `Stop` hook 之后仍可能要求 Codex 继续，因此所有可见文案不得写成「任务完成」。`UserPromptSubmit` 只映射稳定语义「任务开始」，不得冒充「待响应」。
@@ -525,7 +526,8 @@ N 个已发布来源 · 5 个声音事件
 - **选中宿主的四行连接组**：严格按「连接状态 → 接入方式 → 事件与提示音 → 脱敏回执历史」渲染。
   连接状态同时说明配置、当前 installation 回执和 manager 诊断；没有回执时明确显示「暂无当前安装实例
   回执」。接入方式来自 `HostIntegrationDescriptor.mechanism`，只有 manager 提供配置来源时才显示
-  复制路径动作；「管理事件」只路由到同一 Surface 的 Events 目的页；清除回执只在第四行确认。
+  复制路径动作；「管理事件」路由至默认组／工作区目的页；清除回执只在第四行确认。WorkBuddy
+  在第四行内逐项展示四个已实现绑定的待回执／当前回执，只读文字不增加额外 Tab 控件。
 - **五态动作投影**：`ready` 为「已激活」并提供重新检测，Codex 另提供修复连接以处理可执行但版本陈旧的
   helper；`awaitingActivation` 为「待回执」，Codex 额外提供复制 `/hooks` 与修复连接；`legacy` 提供升级连接；
   `notConnected` 关闭 Toggle 且重新检测，开启时调用 connect；`needsAttention` 提供修复连接和重新检测。

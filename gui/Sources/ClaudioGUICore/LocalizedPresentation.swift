@@ -170,10 +170,12 @@ private func localizedQualification(
     if value == "Accessibility Beta 候选尚未实现" {
         return ClaudioL10n(language: language).text(.qualificationAccessibilityBetaUnavailable)
     }
+    if value == "仅授权与空闲提醒（permission_prompt / idle_prompt）" {
+        return ClaudioL10n(language: language).text(.qualificationNotificationMatchersOnly)
+    }
     let english: [String: String] = [
         "Codex 暂无执行中断事件": "Codex has no interruption event",
         "仅授权请求": "Authorization request only",
-        "仅通知匹配器": "Notification matchers only",
         "接口支持，当前版本尚未实现": "Supported by the interface; not implemented yet",
         "接口部分支持，当前版本尚未实现":
             "Partially supported by the interface; not implemented yet",

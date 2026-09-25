@@ -74,11 +74,11 @@ func runPanelFocusOrderSuites() {
                 hasMasterVolume: true,
                 hasOpenSoundSettings: true,
                 hasResetSurface: true))
-        for event in [Event.stopFailure, .notification] {
+        for event in [Event.stopFailure] {
             expect(!order.contains(.eventPreview(event)), "\(event) 不得有试听焦点")
             expect(!order.contains(.eventMute(event)), "\(event) 不得有静音焦点")
         }
-        for event in [Event.taskStart, .stop, .subagentStop] {
+        for event in [Event.taskStart, .stop, .notification, .subagentStop] {
             expect(order.contains(.eventPreview(event)), "\(event) 必须有试听焦点")
             expect(order.contains(.eventMute(event)), "\(event) 必须有静音焦点")
         }

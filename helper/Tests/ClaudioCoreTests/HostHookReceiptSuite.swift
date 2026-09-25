@@ -535,7 +535,9 @@ func runHostHookReceiptSuites() {
                     semanticEvent: .taskStart,
                     timestamp: base.addingTimeInterval(Double(index)),
                     playbackResult: .played)
-                expect(store.store(receipt) == .success(.written), "第 \(index) 条回执必须可写")
+                expect(
+                    store.store(receipt, scopeFingerprint: { "v1" }) == .success(.written),
+                    "第 \(index) 条回执必须可写")
             }
 
             let bounded = store.receiptHistory(host: .workBuddy, now: base)
@@ -607,7 +609,9 @@ func runHostHookReceiptSuites() {
                     semanticEvent: .taskStart,
                     timestamp: now.addingTimeInterval(-Double(index)),
                     playbackResult: .played)
-                expect(store.store(receipt) == .success(.written), "第 \(index) 条回执必须可写")
+                expect(
+                    store.store(receipt, scopeFingerprint: { "history-snapshot" })
+                        == .success(.written), "第 \(index) 条回执必须可写")
             }
             let history = store.historyRoot.appendingPathComponent(
                 HostSurfaceID.workBuddy.rawValue,
@@ -638,7 +642,8 @@ func runHostHookReceiptSuites() {
                 timestamp: now,
                 playbackResult: .played)
             expect(
-                externalStore.store(externalReceipt) == .success(.written),
+                externalStore.store(externalReceipt, scopeFingerprint: { "external" })
+                    == .success(.written),
                 "测试前提：外部目录必须含合法形状 receipt")
 
             let symlinkHistoryRoot = root.appendingPathComponent(

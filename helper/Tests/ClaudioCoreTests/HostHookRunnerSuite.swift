@@ -20,7 +20,7 @@ private final class HostHookRunnerSpawner: ProcessSpawning, @unchecked Sendable 
     }
 }
 
-private final class HostEventNoticeCollector: @unchecked Sendable {
+final class HostEventNoticeCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var notices: [HostEventNotice] = []
 
@@ -39,6 +39,23 @@ private final class HostEventNoticeCollector: @unchecked Sendable {
 
 @MainActor
 func runHostHookRunnerSuites() {
+    suite("WorkBuddy hook：旧 scope 不得播放或写当前回执") {
+        withTempDirectory { root in
+            let id = UUID()
+            let spawner = HostHookRunnerSpawner()
+            let old = makeHostHookRunnerEnvironment(
+                root: root, host: .workBuddy, spawner: spawner,
+                fixtureIsReady: true, activeInstallationID: id,
+                scopeFingerprint: { "upgraded-scope" })
+            let outcome = handleHostHook(
+                host: .workBuddy, nativeEvent: "Stop", installationID: id,
+                environment: old)
+            expect(outcome?.playbackResult == .notReady, "旧 scope 即使 installation ID 相同也必须拒绝播放")
+            expect(
+                spawner.callCount == 0 && outcome?.receiptWritten == false, "旧 scope 不得启动播放器或写回执")
+        }
+    }
+
     suite("host hook：UserPromptSubmit 严格映射任务开始，Codex StopFailure 与未知事件失败关闭") {
         withTempDirectory { root in
             let spawner = HostHookRunnerSpawner()
@@ -545,7 +562,8 @@ private func makeHostHookRunnerEnvironment(
     fixtureIsReady: Bool = false,
     taskStartMuted: Bool = false,
     now: Date = Date(timeIntervalSince1970: 3_000),
-    activeInstallationID: UUID? = nil
+    activeInstallationID: UUID? = nil,
+    scopeFingerprint: @escaping @Sendable () -> String? = { hostHookRunnerTestScope }
 ) -> HostHookEnvironment {
     let config = root.appendingPathComponent("config.json")
     let packs = root.appendingPathComponent("packs", isDirectory: true)
@@ -592,5 +610,6 @@ private func makeHostHookRunnerEnvironment(
         taskStartDebounceStateFile: root.appendingPathComponent(
             "\(host.rawValue)-task-start.state"),
         receiptStore: receiptStore,
+        scopeFingerprint: scopeFingerprint,
         now: { now })
 }

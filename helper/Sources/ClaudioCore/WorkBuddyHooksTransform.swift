@@ -8,6 +8,20 @@ public enum WorkBuddyHooksInspection: Sendable, Equatable {
     case conflict(reason: String)
 }
 
+private struct WorkBuddyHookSlot: Hashable {
+    let nativeEvent: String
+    let matcher: String?
+}
+
+private func workBuddyHookSlots(nativeEvent: String) -> [WorkBuddyHookSlot] {
+    if nativeEvent == "Notification" {
+        return WorkBuddyNotification.subtypes.map {
+            WorkBuddyHookSlot(nativeEvent: nativeEvent, matcher: $0)
+        }
+    }
+    return [WorkBuddyHookSlot(nativeEvent: nativeEvent, matcher: nil)]
+}
+
 /// 只安装 catalog 中已实现的 binding；未获得 Desktop 回调证据的事件不写入用户配置。
 public func inspectWorkBuddyHooks(
     root: [String: Any],
@@ -21,7 +35,7 @@ public func inspectWorkBuddyHooks(
 
     let implemented = HostCapabilityCatalog.bindings(for: .workBuddy)
         .filter(\.isAudibleCapability)
-    var matchedByEvent: [String: [MatchedHostHookCommand]] = [:]
+    var matchedBySlot: [WorkBuddyHookSlot: [MatchedHostHookCommand]] = [:]
     var ownedCount = 0
     var misplaced = false
     var wrongMatcher = false
@@ -38,9 +52,14 @@ public func inspectWorkBuddyHooks(
                     match.host == .workBuddy
                 else { continue }
                 ownedCount += 1
-                matchedByEvent[nativeEvent, default: []].append(match)
+                let slot = WorkBuddyHookSlot(
+                    nativeEvent: nativeEvent, matcher: group["matcher"] as? String)
+                matchedBySlot[slot, default: []].append(match)
                 misplaced = misplaced || match.nativeEvent != nativeEvent
-                wrongMatcher = wrongMatcher || group["matcher"] != nil
+                wrongMatcher =
+                    wrongMatcher
+                    || !workBuddyHookSlots(nativeEvent: nativeEvent).contains(slot)
+                    || (group["matcher"] != nil && slot.matcher == nil)
             }
         }
     }
@@ -52,14 +71,16 @@ public func inspectWorkBuddyHooks(
     guard !wrongMatcher else {
         return .success(.conflict(reason: "WorkBuddy hook 的 matcher 与事件不一致"))
     }
-    let matches = matchedByEvent.values.flatMap { $0 }
+    let matches = matchedBySlot.values.flatMap { $0 }
     let ids = Set(matches.map(\.installationID))
-    guard ids.count <= 1, !matchedByEvent.values.contains(where: { $0.count > 1 }) else {
+    guard ids.count <= 1, !matchedBySlot.values.contains(where: { $0.count > 1 }) else {
         return .success(.conflict(reason: "WorkBuddy hook 含重复或不同安装代次"))
     }
     let missing = implemented.compactMap { binding -> String? in
         guard let nativeEvent = binding.nativeEvent else { return nil }
-        return matchedByEvent[nativeEvent]?.count == 1 ? nil : nativeEvent
+        return workBuddyHookSlots(nativeEvent: nativeEvent).allSatisfy {
+            matchedBySlot[$0]?.count == 1
+        } ? nil : nativeEvent
     }
     if missing.isEmpty, let id = ids.first {
         return .success(.configured(installationID: id))
@@ -130,7 +151,11 @@ public func connectWorkBuddyHooks(
             return .failure(.malformed(reason: "WorkBuddy 能力目录缺少可执行 binding"))
         }
         var groups = (hooks[nativeEvent] as? [Any]) ?? []
-        groups.append(["hooks": [["type": "command", "command": command]]])
+        for slot in workBuddyHookSlots(nativeEvent: nativeEvent) {
+            var group: [String: Any] = ["hooks": [["type": "command", "command": command]]]
+            if let matcher = slot.matcher { group["matcher"] = matcher }
+            groups.append(group)
+        }
         hooks[nativeEvent] = groups
     }
     next["hooks"] = hooks

@@ -47,7 +47,7 @@ func runLocalActivitySummarySuites() {
             expect(
                 store.record(
                     host: .workBuddy,
-                    event: .notification,
+                    event: .stopFailure,
                     installationID: installation,
                     activeInstallationID: installation,
                     occurredAt: moment) == .failed,

@@ -271,7 +271,7 @@ func runPanelPresentationSuites() async {
         let scopes = panelSoundScopePresentations(
             sourceRows: [
                 panelPresentationRow(.codex, status: .ready, supported: 4),
-                panelPresentationRow(.workBuddy, status: .awaitingActivation, supported: 3),
+                panelPresentationRow(.workBuddy, status: .awaitingActivation, supported: 4),
             ], config: config, language: .zhHans)
         expect(scopes.map(\.scope) == [.global, .workspace(rule.id)], "来源不能成为声音配置所有者")
         expect(scopes.first?.name == "默认组", "默认组名称必须本地化")
@@ -349,7 +349,7 @@ func runPanelPresentationSuites() async {
     suite("面板作用域文案：英文同样分离覆盖数与状态，不回退共享 readiness 文案") {
         let scopes = panelSoundScopePresentations(
             sourceRows: [
-                panelPresentationRow(.workBuddy, status: .awaitingActivation, supported: 3)
+                panelPresentationRow(.workBuddy, status: .awaitingActivation, supported: 4)
             ],
             config: ClaudioConfig(selectedPack: "pack"),
             language: .english)
@@ -440,7 +440,9 @@ func runPanelPresentationSuites() async {
             events.map(\.nativeEventText)
                 == ["UserPromptSubmit", "Stop", "StopFailure", "Notification", "SubagentStop"],
             "WorkBuddy 原生事件名必须来自 catalog")
-        for event in events.filter({ [.taskStart, .stop, .subagentStop].contains($0.event) }) {
+        for event in events.filter({
+            [.taskStart, .stop, .notification, .subagentStop].contains($0.event)
+        }) {
             expect(event.implementation == .implemented, "\(event.event) 必须已实现")
             expect(event.capabilityText.contains("Implemented"), "能力标签必须说出已实现")
             expect(
@@ -448,10 +450,12 @@ func runPanelPresentationSuites() async {
                 "\(event.event) 必须同时允许试听与静音")
         }
         expect(
-            chineseEvents.filter({ [.taskStart, .stop, .subagentStop].contains($0.event) })
-                .allSatisfy { $0.capabilityText.contains("已实现") },
+            chineseEvents.filter({
+                [.taskStart, .stop, .notification, .subagentStop].contains($0.event)
+            })
+            .allSatisfy { $0.capabilityText.contains("已实现") },
             "简体中文能力标签也必须说出已实现")
-        for event in events.filter({ [.stopFailure, .notification].contains($0.event) }) {
+        for event in events.filter({ [.stopFailure].contains($0.event) }) {
             expect(event.implementation == .notImplemented, "\(event.event) 必须显式未实现")
             expect(event.capabilityText.contains("Not implemented"), "能力标签必须说出未实现")
             expect(
@@ -600,6 +604,6 @@ func runPanelPresentationSuites() async {
             qualificationText: "fixture")
         let localized = localizedCapabilityCell(cell, language: .english)
         expect(localized.support == .partial, "能力格必须保留 partial support")
-        expect(localized.implementation == .notImplemented, "能力格必须保留 notImplemented")
+        expect(localized.implementation == .implemented, "能力格必须保留 implemented")
     }
 }

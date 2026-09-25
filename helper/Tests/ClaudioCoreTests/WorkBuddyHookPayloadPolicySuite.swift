@@ -13,9 +13,9 @@ func runWorkBuddyHookPayloadPolicySuites() {
             WorkBuddyHookPayloadPolicy.requiresValidation(nativeEvent: "SubagentStop"),
             "已接入的 SubagentStop 必须校验真实 payload")
         expect(
-            !WorkBuddyHookPayloadPolicy.requiresValidation(nativeEvent: "Notification")
+            WorkBuddyHookPayloadPolicy.requiresValidation(nativeEvent: "Notification")
                 && !WorkBuddyHookPayloadPolicy.requiresValidation(nativeEvent: "StopFailure"),
-            "缺 Desktop 证据的两个事件不得进入生产输入链")
+            "Notification 必须启用校验；StopFailure 仍未实现")
         expect(
             WorkBuddyHookPayloadPolicy.accepts(
                 nativeEvent: "SubagentStop",
@@ -43,7 +43,7 @@ func runWorkBuddyHookPayloadPolicySuites() {
             "超限 stdin 不得产生回执")
     }
 
-    suite("WorkBuddy Notification 预备合同：只允许两类 matcher，拒绝 auth_success") {
+    suite("WorkBuddy Notification 输入合同：只允许两类 matcher，拒绝 auth_success") {
         for kind in ["permission_prompt", "idle_prompt"] {
             expect(
                 WorkBuddyHookPayloadPolicy.accepts(

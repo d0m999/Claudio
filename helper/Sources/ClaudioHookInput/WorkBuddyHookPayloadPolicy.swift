@@ -31,7 +31,7 @@ public enum WorkBuddyHookPayloadPolicy {
         else { return false }
         if nativeEvent == "Notification" {
             guard let kind = dictionary["notification_type"] as? String else { return false }
-            return kind == "permission_prompt" || kind == "idle_prompt"
+            return WorkBuddyNotification.subtypes.contains(kind)
         }
         return true
     }

@@ -5,6 +5,90 @@ import Foundation
 
 @MainActor
 func runWorkBuddyVisualStateBaselineSuites() {
+    suite("WorkBuddy Notification：4/5 能力、宿主 ready 与逐绑定回执相互独立") {
+        for phase in [
+            PreviewFixtures.WorkBuddyVisualPhase.taskStartCurrent, .allImplementedBindingsCurrent,
+        ] {
+            let scenario = PreviewFixtures.workBuddyVisualScenarios.first { $0.phase == phase }!
+            let matrix = scenario.state.matrix
+            let facts = integrationDestinationContent(state: scenario.state).facts(for: .workBuddy)!
+            expect(facts.bindingReceipts.count == 4, "生产设置页必须获得四条逐绑定回执投影")
+            let notificationReceipt = facts.bindingReceipts.first {
+                $0.binding.event == .notification
+            }!
+            for language in [ClaudioAppLanguage.english, .zhHans] {
+                let statusKey: ClaudioL10nKey =
+                    phase == .taskStartCurrent
+                    ? .integrationsBindingAwaitingReceipt : .integrationsBindingCurrentReceipt
+                expect(
+                    notificationReceipt.text(language: language)
+                        == ClaudioL10n(language: language).format(statusKey, "Notification"),
+                    "设置页 Notification 必须使用本绑定的双语待回执／当前回执文字")
+                let caption = ClaudioL10n(language: language).text(
+                    .integrationsWorkBuddySoundsCaption)
+                expect(
+                    caption.contains(language == .english ? "Default Group" : "默认组"),
+                    "声音入口必须说明 WorkBuddy 使用默认组")
+            }
+            expect(
+                matrix.summary(for: .workBuddy) == .ready(supported: 4, total: 5),
+                "保留 task_start 决定宿主 ready 的既有合同")
+            let cell = matrix.cell(host: .workBuddy, event: .notification)!
+            expect(
+                cell.state == (phase == .taskStartCurrent ? .awaitingActivation : .audible),
+                "Notification 必须有自己的当前回执，不能从宿主 ready 推断")
+            let presentation = HostCapabilityCellPresentation(cell: cell)
+            for language in [ClaudioAppLanguage.english, .zhHans] {
+                let localized = localizedCapabilityCell(presentation, language: language)
+                expect(
+                    localized.support == .partial && localized.implementation == .implemented,
+                    "通知两种 subtype 必须标记部分覆盖且已实现")
+                expect(
+                    localized.qualificationText?.contains("permission_prompt") == true
+                        && localized.qualificationText?.contains("idle_prompt") == true,
+                    "双语文案必须限定两个 subtype")
+                expect(
+                    localized.accessibilityLabel.contains("permission_prompt")
+                        && localized.accessibilityLabel.contains("idle_prompt"),
+                    "VoiceOver 文本投影必须包含通知范围")
+            }
+            expect(
+                matrix.cell(host: .workBuddy, event: .stopFailure)?.state == .unsupported,
+                "StopFailure 仍未实现")
+        }
+    }
+
+    suite("WorkBuddy 回执投影：宿主级回执、旧代次与错位 binding 均不能冒充 Notification") {
+        let id = UUID()
+        let notification = HostCapabilityCatalog.binding(
+            host: .workBuddy, nativeEvent: "Notification")!
+        let start = HostCapabilityCatalog.binding(
+            host: .workBuddy, nativeEvent: "UserPromptSubmit")!
+        for wrongBinding in [false, true] {
+            let evidence = HostReceiptEvidence(
+                bindingID: wrongBinding ? start.id : notification.id,
+                installationID: wrongBinding ? id : UUID(), nativeEvent: "Notification",
+                event: .notification, timestamp: Date(), playbackResult: .played)
+            let snapshot = HostIntegrationSnapshot(
+                host: .workBuddy, runtime: .ready,
+                availability: .available, configuration: .configured, writability: .writable,
+                activation: .observed(evidence),
+                bindingActivations: [notification.id: .observed(evidence)],
+                installationID: id)
+            let projected = IntegrationBindingReceiptPresentation(
+                binding: notification, snapshot: snapshot)
+            expect(
+                projected.activation == .awaitingReceipt(installationID: id),
+                "错位或旧代次不能显示当前 Notification 回执")
+        }
+        expect(
+            IntegrationBindingReceiptPresentation(
+                binding: notification,
+                snapshot: .disconnected(host: .workBuddy)
+            ).activation == .none,
+            "断开后不得显示当前回执")
+    }
+
     suite("WorkBuddy 七态 fixture：仍由生产 manager presentation 进入同一 destination") {
         let scenarios = PreviewFixtures.workBuddyVisualScenarios
         expect(
@@ -28,8 +112,8 @@ func runWorkBuddyVisualStateBaselineSuites() {
                 continue
             }
             expect(
-                facts.coverageText == "3/5",
-                "\(scenario.id) 必须保留中性的 3/5 能力事实")
+                facts.coverageText == "4/5",
+                "\(scenario.id) 必须保留中性的 4/5 能力事实")
             guard let section = content.connectionSection(for: .workBuddy) else {
                 expect(false, "\(scenario.id) 缺少 WorkBuddy 四行连接组")
                 continue
@@ -40,7 +124,7 @@ func runWorkBuddyVisualStateBaselineSuites() {
         }
     }
 
-    suite("WorkBuddy 七态 status：3/5 不被错误化，连接 Badge 和 Toggle 只由事实决定") {
+    suite("WorkBuddy 七态 status：4/5 不被错误化，连接 Badge 和 Toggle 只由事实决定") {
         let expected: [(PreviewFixtures.WorkBuddyVisualPhase, HostSourceRowStatus, Bool)] = [
             (.disconnected, .notConnected, false),
             (.awaitingActivation, .awaitingActivation, true),
@@ -62,9 +146,9 @@ func runWorkBuddyVisualStateBaselineSuites() {
             let agent = integrationDestinationContent(state: scenario.state).agent(for: .workBuddy)
             expect(agent?.status == status, "\(phase) 必须投影为 \(status)")
             expect(
-                agent?.coverageText == "3/5" && agent?.isOn == isOn, "\(phase) Toggle/coverage 必须诚实"
+                agent?.coverageText == "4/5" && agent?.isOn == isOn, "\(phase) Toggle/coverage 必须诚实"
             )
-            expect(agent?.badgeText != "错误", "3/5 本身不得渲染成错误")
+            expect(agent?.badgeText != "错误", "4/5 本身不得渲染成错误")
         }
     }
 
@@ -81,9 +165,9 @@ func runWorkBuddyVisualStateBaselineSuites() {
             let chinese = localizedHostSourceRow(row, language: .zhHans)
             expect(
                 english.title == "WorkBuddy"
-                    && english.readinessText.contains("3/5")
-                    && chinese.readinessText.contains("3/5"),
-                "\(scenario.id) 双语行必须保留 3/5")
+                    && english.readinessText.contains("4/5")
+                    && chinese.readinessText.contains("4/5"),
+                "\(scenario.id) 双语行必须保留 4/5")
             if let detail = row.detailText {
                 expect(
                     localizedHostSourceRow(

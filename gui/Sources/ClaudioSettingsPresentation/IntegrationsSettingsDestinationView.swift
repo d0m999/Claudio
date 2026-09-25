@@ -243,6 +243,17 @@ struct IntegrationsSettingsDestinationView: View {
                     .font(ClaudioTheme.font(.caption))
                     .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
+                if row.kind == .receiptHistory {
+                    ForEach(facts.bindingReceipts) { receipt in
+                        Text(receipt.text(language: languageStore.language))
+                            .font(ClaudioTheme.font(.caption))
+                            .foregroundStyle(ClaudioTheme.secondaryText(colorScheme))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier(
+                                "integrations.destination.binding-receipt.\(receipt.binding.event.rawValue)"
+                            )
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -536,6 +547,7 @@ struct IntegrationsSettingsDestinationView: View {
                 abbreviatedConfigurationPath(source))
             return "\(mechanism) · \(configurationSourceValue)"
         case .eventsAndSounds:
+            if facts.host == .workBuddy { return l10n.text(.integrationsWorkBuddySoundsCaption) }
             return l10n.format(.integrationsSurfaceEventsCaption, facts.host.displayName)
         case .receiptHistory:
             return l10n.text(.integrationsReceiptPolicy)

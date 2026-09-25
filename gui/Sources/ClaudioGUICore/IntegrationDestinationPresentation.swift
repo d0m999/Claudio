@@ -83,6 +83,7 @@ public struct IntegrationDestinationHostFacts: Identifiable, Sendable, Equatable
     public let latestReceiptText: String?
     public let latestReceiptEvidence: HostReceiptEvidence?
     public let mechanism: HostIntegrationMechanism
+    public let bindingReceipts: [IntegrationBindingReceiptPresentation]
 
     public init(
         host: HostID,
@@ -90,7 +91,8 @@ public struct IntegrationDestinationHostFacts: Identifiable, Sendable, Equatable
         configurationSource: String?,
         latestReceiptText: String?,
         latestReceiptEvidence: HostReceiptEvidence?,
-        mechanism: HostIntegrationMechanism? = nil
+        mechanism: HostIntegrationMechanism? = nil,
+        bindingReceipts: [IntegrationBindingReceiptPresentation] = []
     ) {
         self.host = host
         self.row = row
@@ -98,6 +100,7 @@ public struct IntegrationDestinationHostFacts: Identifiable, Sendable, Equatable
         self.latestReceiptText = latestReceiptText
         self.latestReceiptEvidence = latestReceiptEvidence
         self.mechanism = mechanism ?? host.descriptor.mechanism
+        self.bindingReceipts = bindingReceipts
     }
 
     public var surfaceID: HostSurfaceID { host.surfaceID }

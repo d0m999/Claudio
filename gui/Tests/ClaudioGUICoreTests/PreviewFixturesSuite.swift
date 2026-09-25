@@ -647,7 +647,7 @@ func runPreviewFixturesSuites() {
             "Claude Code 的 5/5 能力不得为了画廊 unsupported 视觉而被伪造")
         expect(
             workBuddy.eventRows.contains { $0.availability == .unsupported },
-            "unsupported 视觉必须来自真实 WorkBuddy 3/5 能力，而不是篡改 Claude")
+            "unsupported 视觉必须来自真实 WorkBuddy 4/5 能力，而不是篡改 Claude")
     }
 
     // MARK: - All-product integration scenarios
@@ -739,8 +739,8 @@ func runPreviewFixturesSuites() {
                 && allProductsConnected?.state.matrix.summary(for: .codex)
                     == .ready(supported: 4, total: 5)
                 && allProductsConnected?.state.matrix.summary(for: .workBuddy)
-                    == .ready(supported: 3, total: 5),
-            "全部产品连接必须同时保留 Claude 5/5、Codex 4/5 与 WorkBuddy 3/5")
+                    == .ready(supported: 4, total: 5),
+            "全部产品连接必须同时保留 Claude 5/5、Codex 4/5 与 WorkBuddy 4/5")
 
         let codexNormal = scenario("codex-normal-4-of-5")
         expect(

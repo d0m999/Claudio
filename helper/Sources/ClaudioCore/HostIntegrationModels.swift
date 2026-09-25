@@ -245,8 +245,7 @@ public enum HostCapabilityCatalog {
                     qualification: .interfaceSupportedNotImplemented),
                 HostCapabilityBinding(
                     host: host, event: .notification, nativeEvent: "Notification",
-                    support: .partial, implementation: .notImplemented,
-                    qualification: .interfacePartiallySupportedNotImplemented),
+                    support: .partial, qualification: .notificationMatchersOnly),
                 HostCapabilityBinding(
                     host: host, event: .subagentStop, nativeEvent: "SubagentStop",
                     support: .supported),
