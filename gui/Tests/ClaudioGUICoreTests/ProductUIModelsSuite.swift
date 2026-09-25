@@ -1,5 +1,6 @@
 import ClaudioCore
 import ClaudioGUICore
+import ClaudioLocalization
 import Foundation
 
 @MainActor
@@ -157,6 +158,30 @@ func runProductUIModelsSuites() {
                 safetyFailureReason: "不是安全正规文件")
                 == .unsafeOrUnreadable(reason: "不是安全正规文件"),
             "安全闸门失败必须覆盖表面上的 present")
+        expect(
+            eventPreviewRecoveryAction(for: .unmapped) == .editSound
+                && eventPreviewRecoveryAction(
+                    for: .missingOrDamaged(fileName: "gone.mp3")) == .repairSound
+                && eventPreviewRecoveryAction(
+                    for: .unsafeOrUnreadable(reason: "unsafe")) == .repairSound
+                && eventPreviewRecoveryAction(
+                    for: .masterVolumeZero(fileName: "stop.mp3")) == .adjustGroupVolume
+                && eventPreviewRecoveryAction(
+                    for: .available(fileName: "stop.mp3")) == nil,
+            "试听恢复意图按 typed 可用性分类，不能从文案推断")
+        for language in ClaudioAppLanguage.allCases {
+            let zero = localizedEventPreviewHint(
+                .masterVolumeZero(fileName: "stop.mp3"), language: language)
+            expect(
+                zero.contains(language == .english ? "Selected group" : "所选组"),
+                "音量为零应明确指向当前所选组")
+            expect(
+                !localizedEventPreviewAttemptFailure(.assetChanged, language: language).isEmpty
+                    && !localizedEventPreviewAttemptFailure(
+                        .playbackFailed, language: language
+                    ).isEmpty,
+                "点击时的两类失败均有可见双语文案")
+        }
     }
 
     suite("集成恢复动作：每个能力状态都有唯一产品意图") {
@@ -171,7 +196,8 @@ func runProductUIModelsSuites() {
                 event: event,
                 state: state,
                 muteReason: muteReason,
-                nativeEventText: HostCapabilityCatalog.binding(host: host, event: event)?.nativeEvent)
+                nativeEventText: HostCapabilityCatalog.binding(host: host, event: event)?
+                    .nativeEvent)
         }
         expect(
             integrationsRecoveryAction(for: cell(.audible), hostStatus: .ready) == .none,

@@ -167,11 +167,26 @@ public struct WorkspaceSoundDeleteTarget: Sendable, Equatable {
 
 public enum WorkspaceSoundError: Error, Sendable, Equatable, CustomStringConvertible {
     case invalidRule, duplicateDirectory, staleRule, unsupportedSurface, invalidPack, configFailure,
-        lockBusy, tooLarge, publishedConflict
+        lockBusy, tooLarge
+    case publishedConflict(recoveryPath: String? = nil)
+
+    /// Only the anchored write result can supply this path. A changed published path has none.
+    public var recoveryPath: String? {
+        guard case .publishedConflict(let recoveryPath) = self else { return nil }
+        return recoveryPath
+    }
+
+    public var isPublishedConflict: Bool {
+        if case .publishedConflict = self { return true }
+        return false
+    }
     public var description: String {
         switch self {
         case .tooLarge: "配置超过 64 KiB 上限；请减少工作区规则或过大的扩展字段。"
-        case .publishedConflict: "配置已发布但检测到并发冲突；请检查当前配置与保留的恢复文件。"
+        case .publishedConflict(let recoveryPath):
+            recoveryPath == nil
+                ? "配置已发布但检测到并发冲突；请重新读取当前配置。"
+                : "配置已发布但检测到并发冲突；请检查当前配置与保留的恢复文件。"
         case .invalidRule: "工作区配置已损坏，请修复目录、声音包、音量或五个事件开关。"
         case .duplicateDirectory: "该目录或 Git 仓库已存在工作区规则。"
         case .staleRule: "工作区已不存在；未修改默认组。"
@@ -382,8 +397,10 @@ public func mutateWorkspaceSound(
     }
     switch locked {
     case .ran(.success): return .success(())
-    case .ran(.failure(.postPublishConflict)), .ran(.failure(.postPublishPathChanged)):
-        return .failure(.publishedConflict)
+    case .ran(.failure(.postPublishConflict(let recoveryPath))):
+        return .failure(.publishedConflict(recoveryPath: recoveryPath))
+    case .ran(.failure(.postPublishPathChanged)):
+        return .failure(.publishedConflict())
     case .skipped: return .failure(.lockBusy)
     default: return .failure(rejection ?? .configFailure)
     }

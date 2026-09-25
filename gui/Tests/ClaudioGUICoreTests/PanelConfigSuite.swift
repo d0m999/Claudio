@@ -195,6 +195,15 @@ func runPanelConfigSuites() {
                 panelConfigRecoveryTarget(configFile: missingConfig)
                     == root.standardizedFileURL,
                 "配置文件缺失时，恢复动作必须回退到最近的现存目录，而不是制造无效文件按钮")
+
+            let controller = PanelConfigController(
+                configFile: missingConfig,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: makeAudioImportEnvironment(
+                    userPacksDirectory: root.appendingPathComponent("packs")))
+            expect(
+                controller.configRecoveryTarget == root.standardizedFileURL,
+                "设置页只消费控制器持有的配置路径与既有安全 Finder 目标")
         }
     }
 
@@ -212,6 +221,28 @@ func runPanelConfigSuites() {
                 panelConfigRecoveryTarget(configFile: configFile)
                     == configFile.standardizedFileURL,
                 "Finder 恢复动作必须选中需要修复的链接节点")
+        }
+    }
+
+    suite("恢复文件定位：只接受现存正规文件，不回退到目录或悬空链接") {
+        withTempDirectory { root in
+            let file = root.appendingPathComponent("retained.recovery")
+            writeFixture("retained", to: file)
+            expect(
+                panelExistingRecoveryFileTarget(file) == file.standardizedFileURL,
+                "真实保留文件可以在 Finder 中定位")
+            expect(
+                panelExistingRecoveryFileTarget(root) == nil,
+                "目录不能伪装为恢复文件")
+            let dangling = root.appendingPathComponent("dangling.recovery")
+            createSymlink(at: dangling, pointingTo: root.appendingPathComponent("missing"))
+            expect(
+                panelExistingRecoveryFileTarget(dangling) == nil,
+                "悬空链接不是可恢复的正规文件")
+            try! FileManager.default.removeItem(at: file)
+            expect(
+                panelExistingRecoveryFileTarget(file) == nil,
+                "文件消失后不可回退到父目录")
         }
     }
 

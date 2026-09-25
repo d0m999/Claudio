@@ -1638,13 +1638,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Master volume is zero; raise it to preview"
+            "value": "Selected group volume is zero; raise it to preview"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "主音量为零；调高主音量后可以试听"
+            "value": "所选组音量为零；调高所选组音量后可以试听"
           }
         }
       }
@@ -1695,6 +1695,42 @@
             "value": "无法安全试听：%@"
           }
         }
+      }
+    },
+    "event.preview.unsafe-file": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The mapped audio path is unsafe or is not a regular file" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "映射音频路径不安全或目标不是正规文件" } }
+      }
+    },
+    "event.preview.unreadable-file": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The mapped file cannot be read" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "映射文件无法读取" } }
+      }
+    },
+    "event.preview.asset-changed": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The preview sound changed or disappeared. Sound pack status is refreshing." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "试听声音已变化或消失，正在刷新声音包状态。" } }
+      }
+    },
+    "event.preview.playback-failed": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Playback could not start. Check the sound in Sound Packs." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无法开始播放，请在声音中检查该声音文件。" } }
+      }
+    },
+    "event.preview.adjust-group-volume": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Adjust selected group volume" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "调整所选组音量" } }
+      }
+    },
+    "event.preview.repair-sound": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Inspect sound in Sound Packs…" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "在声音中检查该事件…" } }
       }
     },
     "event-notice.recent": {
@@ -9233,6 +9269,12 @@
             "value": "在同一设置窗口打开当前声音作用域的声音目的页"
           }
         }
+      }
+    },
+    "event-settings.conflict-readback": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Current configuration was read back. The original write remains uncertain." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已重新读取当前配置；原写入结果仍不确定。" } }
       }
     },
     "event-settings.shortcut-scope.unavailable": {

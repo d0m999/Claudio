@@ -17,6 +17,7 @@ public struct PanelView: View {
     @State private var scrollViewportHeight: CGFloat = 0
     @State private var soundScopePickerBottom: CGFloat = 0
     @State private var previousTopContent: PanelTopContent?
+    @State private var previewAttemptFailures: [Event: EventPreviewAttemptFailure] = [:]
     @FocusState private var focusedTarget: PanelFocusTarget?
 
     @ObservedObject private var focusCoordinator: PanelFocusCoordinator
@@ -37,6 +38,7 @@ public struct PanelView: View {
     private let onAudibilityInputsChanged: @MainActor () -> Void
     private let onOpenSettings: @MainActor () -> Void
     private let onEditSoundScope: @MainActor (PanelSoundScopeID) -> Void
+    private let onConfigureSound: @MainActor (SoundPacksWindowRoute) -> Void
     private let onOpenRecentNotices: @MainActor () -> Void
     private let onOpenIntegration: @MainActor (HostID) -> Void
     private let onQuit: @MainActor () -> Void
@@ -57,6 +59,7 @@ public struct PanelView: View {
         onAudibilityInputsChanged: @escaping @MainActor () -> Void,
         onOpenSettings: @escaping @MainActor () -> Void,
         onEditSoundScope: @escaping @MainActor (PanelSoundScopeID) -> Void = { _ in },
+        onConfigureSound: @escaping @MainActor (SoundPacksWindowRoute) -> Void = { _ in },
         onOpenRecentNotices: @escaping @MainActor () -> Void,
         onOpenIntegration: @escaping @MainActor (HostID) -> Void,
         onQuit: @escaping @MainActor () -> Void,
@@ -73,6 +76,7 @@ public struct PanelView: View {
         self.onAudibilityInputsChanged = onAudibilityInputsChanged
         self.onOpenSettings = onOpenSettings
         self.onEditSoundScope = onEditSoundScope
+        self.onConfigureSound = onConfigureSound
         self.onOpenRecentNotices = onOpenRecentNotices
         self.onOpenIntegration = onOpenIntegration
         self.onQuit = onQuit
@@ -132,6 +136,7 @@ public struct PanelView: View {
         self.onAudibilityInputsChanged = {}
         self.onOpenSettings = {}
         self.onEditSoundScope = { _ in }
+        self.onConfigureSound = { _ in }
         self.onOpenRecentNotices = {}
         self.onOpenIntegration = { _ in }
         self.onQuit = {}
@@ -218,6 +223,7 @@ public struct PanelView: View {
         }
         .onChange(of: focusCoordinator.showCount) { _ in
             isSoundScopeMenuExpanded = false
+            previewAttemptFailures = [:]
             panelModel.reload()
             if refreshesActivityOnLifecycle {
                 activityDiagnostics.refresh()
@@ -235,6 +241,9 @@ public struct PanelView: View {
                 applyFocusAfterContentChange()
             }
             announcePanelSummary(opening: false)
+        }
+        .onChange(of: panelModel.config.selectedPack) { _ in
+            previewAttemptFailures = [:]
         }
         .onChange(of: panelModel.configState.topContent) { content in
             focusedTarget = panelFocusAfterTopContentChange(
@@ -377,6 +386,7 @@ public struct PanelView: View {
         }
         selectedSurfaceRaw = scope.storedValue
         panelModel.selectSoundScope(scope)
+        previewAttemptFailures = [:]
         applyFirstFocus()
     }
 
@@ -391,6 +401,7 @@ public struct PanelView: View {
         {
             selectedSurfaceRaw = storedValue
         }
+        if panelModel.selectedSoundScope != resolved { previewAttemptFailures = [:] }
         panelModel.selectSoundScope(resolved)
     }
 
@@ -661,7 +672,8 @@ public struct PanelView: View {
             scope: selectedScope.scope,
             masterVolume: panelModel.config.masterVolume,
             language: languageStore.language,
-            configWritesAllowed: panelModel.surfaceSoundIssue == nil)
+            configWritesAllowed: panelModel.surfaceSoundIssue == nil,
+            safetyFailures: panelModel.previewSafetyFailures)
     }
 
     private var eventSection: some View {
@@ -682,14 +694,36 @@ public struct PanelView: View {
                         presentation: event,
                         adaptation: layoutAdaptation,
                         language: languageStore.language,
+                        attemptFailure: previewAttemptFailures[event.event],
                         focusedTarget: $focusedTarget,
                         onPreview: {
-                            guard
-                                let row = panelModel.eventRows.first(where: {
-                                    $0.event == event.event
-                                })
-                            else { return false }
-                            return playPreview(for: row)
+                            let outcome = panelModel.attemptPreview(
+                                event.event, using: previewPlayer)
+                            switch outcome {
+                            case .started:
+                                previewAttemptFailures[event.event] = nil
+                                return true
+                            case .failed(let failure):
+                                previewAttemptFailures[event.event] = failure
+                                onAnnounce(
+                                    localizedEventPreviewAttemptFailure(
+                                        failure, language: languageStore.language))
+                                return false
+                            }
+                        },
+                        onRecovery: { action in
+                            switch action {
+                            case .adjustGroupVolume:
+                                focusedTarget = .masterVolume
+                            case .editSound, .repairSound:
+                                guard panelModel.selectedSoundScope == selectedScope.scope,
+                                    !panelModel.config.selectedPack.isEmpty
+                                else { return }
+                                onConfigureSound(
+                                    .editEvent(
+                                        surface: nil, packID: panelModel.config.selectedPack,
+                                        event: event.event))
+                            }
                         },
                         onToggleMute: {
                             panelModel.toggleMute(event.event)
@@ -770,9 +804,12 @@ public struct PanelView: View {
             if let category = panelModel.configState.errorCopyCategory {
                 FailureRow(message: l10n.text(category.key))
             }
-            if let recoveryTarget = panelConfigRecoveryTarget(configFile: configFile) {
+            if panelConfigRecoveryTarget(configFile: configFile) != nil {
                 Button {
-                    onRevealConfig(recoveryTarget)
+                    guard let current = panelConfigRecoveryTarget(configFile: configFile) else {
+                        return
+                    }
+                    onRevealConfig(current)
                 } label: {
                     Label(l10n.text(.panelRevealConfig), systemImage: "folder")
                 }
@@ -855,6 +892,30 @@ public struct PanelView: View {
                 if let error = panelModel.workspaceError {
                     FailureRow(
                         message: localizedWorkspaceError(error, language: languageStore.language))
+                    if error == .configFailure || error.isPublishedConflict,
+                        panelConfigRecoveryTarget(configFile: configFile) != nil
+                    {
+                        Button(l10n.text(.panelRevealConfig)) {
+                            guard let current = panelConfigRecoveryTarget(configFile: configFile)
+                            else { return }
+                            onRevealConfig(current)
+                        }
+                        .accessibilityIdentifier("panel.workspace.reveal-config")
+                    }
+                    if let recoveryFile = panelModel.workspaceRecoveryFile {
+                        Button(l10n.text(.panelRevealRecoveryFile)) {
+                            guard let target = panelExistingRecoveryFileTarget(recoveryFile)
+                            else { return }
+                            onRevealConfig(target)
+                        }
+                        .accessibilityIdentifier("panel.workspace.reveal-recovery")
+                    }
+                    if error.isPublishedConflict {
+                        Button(l10n.text(.workspaceDeleteReload)) {
+                            panelModel.reload()
+                        }
+                        .accessibilityIdentifier("panel.workspace.reload-after-conflict")
+                    }
                 }
             }
             .background(ClaudioTheme.surface(colorScheme))
@@ -879,9 +940,10 @@ public struct PanelView: View {
                 FailureRow(message: l10n.text(category.key))
             }
             ForEach(Array(writeFailureRecoveryFiles.enumerated()), id: \.element) { index, file in
-                if let recoveryTarget = panelConfigRecoveryTarget(configFile: file) {
+                if panelExistingRecoveryFileTarget(file) != nil {
                     Button {
-                        onRevealConfig(recoveryTarget)
+                        guard let current = panelExistingRecoveryFileTarget(file) else { return }
+                        onRevealConfig(current)
                     } label: {
                         Label(
                             writeFailureRecoveryFiles.count == 1
@@ -896,10 +958,13 @@ public struct PanelView: View {
                 }
             }
             if showsWriteFailureConfigRecovery,
-                let recoveryTarget = panelConfigRecoveryTarget(configFile: configFile)
+                panelConfigRecoveryTarget(configFile: configFile) != nil
             {
                 Button {
-                    onRevealConfig(recoveryTarget)
+                    guard let current = panelConfigRecoveryTarget(configFile: configFile) else {
+                        return
+                    }
+                    onRevealConfig(current)
                 } label: {
                     Label(l10n.text(.panelRevealConfig), systemImage: "folder")
                 }
@@ -1006,21 +1071,6 @@ public struct PanelView: View {
         }
     }
 
-    private func playPreview(for row: EventRow) -> Bool {
-        guard
-            let file = eventPreviewFileURL(
-                row: row,
-                packID: panelModel.config.selectedPack,
-                environment: audioEnvironment)
-        else {
-            panelModel.reloadAfterMissingPreview()
-            return false
-        }
-        return previewPlayer.play(
-            fileAt: file,
-            volume: Float(previewVolume(for: panelModel.config)))
-    }
-
     // MARK: - Shared projections
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
@@ -1055,7 +1105,9 @@ private struct PanelAgentEventRow: View {
     let presentation: PanelEventPresentation
     let adaptation: PanelLayoutAdaptation
     let language: ClaudioAppLanguage
+    let attemptFailure: EventPreviewAttemptFailure?
     let onPreview: () -> Bool
+    let onRecovery: (EventPreviewRecoveryAction) -> Void
     let onToggleMute: () -> Void
     private let focusedTarget: FocusState<PanelFocusTarget?>.Binding
 
@@ -1066,31 +1118,61 @@ private struct PanelAgentEventRow: View {
         presentation: PanelEventPresentation,
         adaptation: PanelLayoutAdaptation,
         language: ClaudioAppLanguage,
+        attemptFailure: EventPreviewAttemptFailure?,
         focusedTarget: FocusState<PanelFocusTarget?>.Binding,
         onPreview: @escaping () -> Bool,
+        onRecovery: @escaping (EventPreviewRecoveryAction) -> Void,
         onToggleMute: @escaping () -> Void
     ) {
         self.presentation = presentation
         self.adaptation = adaptation
         self.language = language
+        self.attemptFailure = attemptFailure
         self.focusedTarget = focusedTarget
         self.onPreview = onPreview
+        self.onRecovery = onRecovery
         self.onToggleMute = onToggleMute
     }
 
     var body: some View {
-        Group {
-            if adaptation.eventActionsMoveBelow {
-                VStack(alignment: .leading, spacing: 6) {
-                    identity
-                    actions.padding(.leading, 30)
+        VStack(alignment: .leading, spacing: 4) {
+            Group {
+                if adaptation.eventActionsMoveBelow {
+                    VStack(alignment: .leading, spacing: 6) {
+                        identity
+                        actions.padding(.leading, 30)
+                    }
+                } else {
+                    HStack(alignment: .center, spacing: 8) {
+                        identity
+                        Spacer(minLength: 4)
+                        actions
+                    }
                 }
-            } else {
-                HStack(alignment: .center, spacing: 8) {
-                    identity
-                    Spacer(minLength: 4)
-                    actions
+            }
+            if let reason = previewUnavailableReason {
+                Text(reason)
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier(
+                        "panel.event.\(presentation.event.rawValue).preview-reason")
+                if let recoveryAction {
+                    Button(recoveryTitle(for: recoveryAction)) {
+                        onRecovery(recoveryAction)
+                    }
+                    .buttonStyle(.link)
+                    .accessibilityIdentifier(
+                        "panel.event.\(presentation.event.rawValue).preview-recovery")
                 }
+            }
+            if let attemptFailure {
+                Text(localizedEventPreviewAttemptFailure(attemptFailure, language: language))
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundColor(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier(
+                        "panel.event.\(presentation.event.rawValue).preview-failure")
             }
         }
         .padding(.vertical, 7)
@@ -1128,7 +1210,35 @@ private struct PanelAgentEventRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(presentation.accessibilityLabel)
+        .accessibilityLabel(identityAccessibilityLabel)
+    }
+
+    private var previewUnavailableReason: String? {
+        guard !presentation.controls.previewAvailability.isAvailable else { return nil }
+        return localizedEventPreviewHint(
+            presentation.controls.previewAvailability, language: language)
+    }
+
+    private var recoveryAction: EventPreviewRecoveryAction? {
+        eventPreviewRecoveryAction(for: presentation.controls.previewAvailability)
+    }
+
+    private func recoveryTitle(for action: EventPreviewRecoveryAction) -> String {
+        let l10n = ClaudioL10n(language: language)
+        switch action {
+        case .adjustGroupVolume: return l10n.text(.eventPreviewAdjustGroupVolume)
+        case .editSound: return l10n.text(.actionConfigureSound)
+        case .repairSound: return l10n.text(.eventPreviewRepairSound)
+        }
+    }
+
+    private var identityAccessibilityLabel: String {
+        let separator = language == .english ? ", " : "，"
+        return [
+            presentation.accessibilityLabel,
+            previewUnavailableReason,
+            attemptFailure.map { localizedEventPreviewAttemptFailure($0, language: language) },
+        ].compactMap { $0 }.joined(separator: separator)
     }
 
     private var controlsUnavailable: Bool {
@@ -1166,6 +1276,10 @@ private struct PanelAgentEventRow: View {
             .disabled(!presentation.controls.previewEnabled)
             .focused(focusedTarget, equals: .eventPreview(presentation.event))
             .help(
+                localizedEventPreviewHint(
+                    presentation.controls.previewAvailability, language: language)
+            )
+            .accessibilityHint(
                 localizedEventPreviewHint(
                     presentation.controls.previewAvailability, language: language)
             )

@@ -91,8 +91,23 @@ func runWorkspaceDeletionSuites() {
                 testingBeforeRename: {
                     try! external.write(to: file, options: .atomic)
                 })
+            if case .failure(.publishedConflict(let recoveryPath)) = result,
+                let recoveryPath
+            {
+                expect(
+                    FileManager.default.fileExists(atPath: recoveryPath),
+                    "post-publish conflict must retain the exact existing recovery file")
+                if case .failure(let error) = result {
+                    expect(
+                        error.isPublishedConflict && error.recoveryPath == recoveryPath,
+                        "upper layers can consume the typed conflict and original recovery path")
+                }
+            } else {
+                expect(false, "post-publish race must carry its actual recovery path")
+            }
             expect(
-                deletionFailed(result, as: .publishedConflict), "post-publish race must stay typed")
+                WorkspaceSoundError.publishedConflict().recoveryPath == nil,
+                "path-changed conflicts never invent a recovery file")
             expect(
                 loadClaudioConfig(from: file) != nil,
                 "after publication conflict, caller can read back the actual current config")

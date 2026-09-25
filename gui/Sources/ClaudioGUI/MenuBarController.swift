@@ -271,6 +271,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 actionRouter?.requestEventsSettings(
                     route: EventSettingsWindowRoute(scope: scope), returnFocusTo: .soundScope)
             },
+            onConfigureSound: { [weak actionRouter] route in
+                actionRouter?.requestSoundsSettings(route: route, returnFocusTo: .soundScope)
+            },
             onOpenRecentNotices: { [weak eventNoticeWindowController] in
                 eventNoticeWindowController?.openInteractive()
             },

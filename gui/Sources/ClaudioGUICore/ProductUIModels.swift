@@ -147,7 +147,7 @@ public func panelPackSectionState(
     return .noPacks
 }
 
-/// 手工试听与事件自动播放静音完全正交。只要映射仍是安全、可读的正规文件且主音量非零，
+/// 手工试听与事件自动播放静音完全正交。只要映射仍是安全、可读的正规文件且所选组音量非零，
 /// `enabled == false` 的真实事件也可以从面板或声音包窗口手工试听。
 public enum EventPreviewAvailability: Sendable, Equatable {
     case available(fileName: String)
@@ -166,7 +166,7 @@ public enum EventPreviewAvailability: Sendable, Equatable {
         case .available:
             return nil
         case .masterVolumeZero:
-            return "主音量为零"
+            return "所选组音量为零"
         case .unmapped:
             return "尚未配置声音"
         case .missingOrDamaged:
@@ -181,7 +181,7 @@ public enum EventPreviewAvailability: Sendable, Equatable {
         case .available:
             return "播放当前映射的音频；事件静音不影响手工试听"
         case .masterVolumeZero:
-            return "主音量为零；调高主音量后可以试听"
+            return "所选组音量为零；调高所选组音量后可以试听"
         case .unmapped:
             return "尚未配置声音；请在声音包窗口中绑定音频"
         case .missingOrDamaged:
@@ -189,6 +189,60 @@ public enum EventPreviewAvailability: Sendable, Equatable {
         case .unsafeOrUnreadable(let reason):
             return "无法安全试听：\(reason)"
         }
+    }
+}
+
+/// The selected pack's targeted safety check uses the same containment and regular-file
+/// primitives as playback. No raw filename, path, or OS error becomes user-facing copy.
+public enum EventPreviewSafetyFailure: Sendable, Equatable {
+    case unsafeFile
+    case unreadableFile
+}
+
+public func localizedEventPreviewSafetyFailure(
+    _ failure: EventPreviewSafetyFailure, language: ClaudioAppLanguage
+) -> String {
+    let l10n = ClaudioL10n(language: language)
+    switch failure {
+    case .unsafeFile: return l10n.text(.eventPreviewUnsafeFile)
+    case .unreadableFile: return l10n.text(.eventPreviewUnreadableFile)
+    }
+}
+
+public enum EventPreviewRecoveryAction: Sendable, Equatable {
+    case adjustGroupVolume
+    case editSound
+    case repairSound
+}
+
+public func eventPreviewRecoveryAction(
+    for availability: EventPreviewAvailability
+) -> EventPreviewRecoveryAction? {
+    switch availability {
+    case .available: nil
+    case .masterVolumeZero: .adjustGroupVolume
+    case .unmapped: .editSound
+    case .missingOrDamaged, .unsafeOrUnreadable: .repairSound
+    }
+}
+
+public enum EventPreviewAttemptFailure: Sendable, Equatable {
+    case assetChanged
+    case playbackFailed
+}
+
+public enum EventPreviewAttemptOutcome: Sendable, Equatable {
+    case started
+    case failed(EventPreviewAttemptFailure)
+}
+
+public func localizedEventPreviewAttemptFailure(
+    _ failure: EventPreviewAttemptFailure, language: ClaudioAppLanguage
+) -> String {
+    let l10n = ClaudioL10n(language: language)
+    switch failure {
+    case .assetChanged: return l10n.text(.eventPreviewAssetChanged)
+    case .playbackFailed: return l10n.text(.eventPreviewPlaybackFailed)
     }
 }
 

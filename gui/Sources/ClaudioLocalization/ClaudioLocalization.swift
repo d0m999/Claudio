@@ -277,6 +277,12 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let eventPreviewUnmapped: Self = "event.preview.unmapped"
     public static let eventPreviewMissing: Self = "event.preview.missing"
     public static let eventPreviewUnsafe: Self = "event.preview.unsafe"
+    public static let eventPreviewUnsafeFile: Self = "event.preview.unsafe-file"
+    public static let eventPreviewUnreadableFile: Self = "event.preview.unreadable-file"
+    public static let eventPreviewAssetChanged: Self = "event.preview.asset-changed"
+    public static let eventPreviewPlaybackFailed: Self = "event.preview.playback-failed"
+    public static let eventPreviewAdjustGroupVolume: Self = "event.preview.adjust-group-volume"
+    public static let eventPreviewRepairSound: Self = "event.preview.repair-sound"
     public static let eventNoticeRecent: Self = "event-notice.recent"
     public static let eventNoticeOtherCount: Self = "event-notice.other-count"
     public static let eventNoticeUnknownSource: Self = "event-notice.unknown-source"
@@ -487,6 +493,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "event-settings.automatic-playback-for"
     public static let eventSettingsManageSounds: Self = "event-settings.manage-sounds"
     public static let eventSettingsManageSoundsHint: Self = "event-settings.manage-sounds.hint"
+    public static let eventSettingsConflictReadback: Self = "event-settings.conflict-readback"
     public static let eventSettingsWindowTitle: Self = "window.event-settings.title"
     public static let eventSettingsUnavailableShortcutScope: Self =
         "event-settings.shortcut-scope.unavailable"
@@ -1400,7 +1407,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .eventSettingsPreviewAllFailure,
         .eventSettingsAutomaticPlayback, .eventSettingsAutomaticPlaybackFor,
         .eventSettingsManageSounds,
-        .eventSettingsManageSoundsHint, .eventSettingsWindowTitle,
+        .eventSettingsManageSoundsHint, .eventSettingsConflictReadback, .eventSettingsWindowTitle,
         .eventSettingsUnavailableShortcutScope,
         .integrationsWindowTitle,
         .settingsWindowTitle, .settingsDestinationGeneral, .settingsDestinationIntegrations,
@@ -1605,7 +1612,10 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .eventPreviewAvailableEnabled, .eventPreviewAvailableMuted, .eventPreviewUnavailable,
         .eventMuteHint, .eventMute, .eventUnmute, .eventEnabled, .eventMuted, .eventPreviewHint,
         .eventPreviewMasterVolumeZero, .eventPreviewUnmapped, .eventPreviewMissing,
-        .eventPreviewUnsafe, .eventNoticeRecent, .eventNoticeOtherCount,
+        .eventPreviewUnsafe, .eventPreviewUnsafeFile, .eventPreviewUnreadableFile,
+        .eventPreviewAssetChanged, .eventPreviewPlaybackFailed,
+        .eventPreviewAdjustGroupVolume, .eventPreviewRepairSound,
+        .eventNoticeRecent, .eventNoticeOtherCount,
         .eventNoticeUnknownSource, .eventNoticeUnknownProject, .eventNoticeUnknownSession,
         .eventNoticeSessionID, .eventNoticeExpired, .eventNoticeParentSession,
         .eventNoticeExpandHint,

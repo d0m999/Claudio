@@ -3,6 +3,17 @@ import ClaudioGUICore
 import Foundation
 
 @MainActor
+private final class PanelPreviewPlayerStub: AudioPreviewPlaying {
+    var startsPlayback = true
+    private(set) var attempts = 0
+    func play(fileAt url: URL, volume: Float) -> Bool {
+        attempts += 1
+        return startsPlayback
+    }
+    func stop() {}
+}
+
+@MainActor
 func runPanelConfigFailureLifecycleSuites() {
     suite("PanelConfigController：写后刷新保留错误，外部刷新清除过期错误") {
         withTempDirectory { root in
@@ -118,6 +129,20 @@ func runPanelConfigFailureLifecycleSuites() {
                 controller.muteError == .lockBusy && controller.masterVolumeError == .lockBusy,
                 "前提：静音和主音量失败必须留下可见的写入错误")
 
+            let player = PanelPreviewPlayerStub()
+            player.startsPlayback = false
+            let reloadsBeforePlayerFailure = fullReloads
+            expect(
+                controller.attemptPreview(.stop, using: player) == .failed(.playbackFailed),
+                "播放器拒绝启动必须返回可见的 typed 失败")
+            expect(
+                player.attempts == 1 && fullReloads == reloadsBeforePlayerFailure + 1,
+                "播放器失败后应刷新读模型，且不能伪称试听已启动")
+            expect(
+                controller.packSwitchError == .packNotFound("missing-pack")
+                    && controller.muteError == .lockBusy,
+                "播放器失败后的刷新不能抹去尚未解决的写入错误")
+
             guard (try? FileManager.default.removeItem(at: audioFile)) != nil else {
                 expect(false, "前提：试听文件必须能够被删除")
                 return
@@ -127,7 +152,10 @@ func runPanelConfigFailureLifecycleSuites() {
                     == nil,
                 "旧行的试听文件失效必须触发预览刷新路径")
             let reloadsBeforePreview = fullReloads
-            controller.reloadAfterMissingPreview()
+            expect(
+                controller.attemptPreview(.stop, using: player) == .failed(.assetChanged),
+                "点击时文件已失效必须返回资产变化失败")
+            expect(player.attempts == 1, "资产失效时不能调用播放器")
             expect(fullReloads == reloadsBeforePreview + 1, "试听失效必须全量刷新读模型")
             expect(
                 controller.eventRows.first(where: { $0.event == .stop })?.coverage

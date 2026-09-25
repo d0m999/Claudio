@@ -89,6 +89,18 @@ public final class PanelConfigController: ObservableObject {
     @Published public private(set) var selectedSurface: HostSurfaceID?
     @Published public private(set) var selectedWorkspaceID: UUID? = nil
     @Published public private(set) var workspaceError: WorkspaceSoundError? = nil
+    @Published public private(set) var previewSafetyFailures: [Event: EventPreviewSafetyFailure] =
+        [:]
+    private var previewSafetyRevision: UInt64 = 0
+    private var previewSafetyTask: Task<Void, Never>?
+    public var workspaceRecoveryFile: URL? {
+        workspaceError?.recoveryPath.flatMap {
+            panelExistingRecoveryFileTarget(URL(fileURLWithPath: $0))
+        }
+    }
+    public var configRecoveryTarget: URL? {
+        ClaudioGUICore.panelConfigRecoveryTarget(configFile: configFile)
+    }
     public var selectedSoundScope: PanelSoundScopeID {
         if let selectedWorkspaceID { return .workspace(selectedWorkspaceID) }
         if let selectedSurface { return .surface(selectedSurface) }
@@ -105,6 +117,22 @@ public final class PanelConfigController: ObservableObject {
         guard let row = eventRows.first(where: { $0.event == event }) else { return nil }
         return eventPreviewFileURL(row: row, packID: config.selectedPack, environment: environment)
     }
+
+    /// Rechecks the selected audio at click time and refreshes the shared read projection after
+    /// either failure. A retry is always a new user action, never a replay of a config write.
+    public func attemptPreview(
+        _ event: Event, using player: AudioPreviewPlaying
+    ) -> EventPreviewAttemptOutcome {
+        guard let file = previewURL(for: event) else {
+            reloadAfterMissingPreview()
+            return .failed(.assetChanged)
+        }
+        guard player.play(fileAt: file, volume: Float(previewVolume(for: config))) else {
+            reloadAfterMissingPreview()
+            return .failed(.playbackFailed)
+        }
+        return .started
+    }
     @discardableResult
     public func changeWorkspace(_ mutation: WorkspaceSoundMutation) -> Bool {
         let result = mutateWorkspaceSound(
@@ -119,10 +147,10 @@ public final class PanelConfigController: ObservableObject {
                 .changed, source: configProjectionToken)
             return true
         case .failure(let error):
-            if error == .publishedConflict || error == .staleRule {
+            if error.isPublishedConflict || error == .staleRule {
                 reload(origin: .writeAction, refreshSoundPackLibrary: false)
             }
-            if error == .publishedConflict {
+            if error.isPublishedConflict {
                 soundPacksRefreshCoordinator?.completeConfigFactChange(
                     .changed, source: configProjectionToken)
             }
@@ -142,6 +170,7 @@ public final class PanelConfigController: ObservableObject {
         } else if !readSource.readsSharedSnapshot {
             eventRows = packCoverage(
                 packID: config.selectedPack, config: config, environment: environment)
+            schedulePreviewSafetyCheck()
         }
     }
     /// Keep the diagnostic message with its typed UI category; views render the category only.
@@ -794,6 +823,7 @@ public final class PanelConfigController: ObservableObject {
         guard readSource.readsSharedSnapshot else {
             eventRows = packCoverage(
                 packID: config.selectedPack, config: config, environment: environment)
+            schedulePreviewSafetyCheck()
             let loadedPackSection = Self.loadPackSection(config: config, environment: environment)
             packCards = loadedPackSection.cards
             packSectionState = loadedPackSection.state
@@ -807,6 +837,7 @@ public final class PanelConfigController: ObservableObject {
             applySnapshot(librarySnapshot)
         } else {
             eventRows = []
+            clearPreviewSafetyCheck()
             packCards = []
             if case .loadFailed = libraryPresentationState {
                 // Preserve the explicit failure state until a retry produces a new library value.
@@ -886,6 +917,7 @@ public final class PanelConfigController: ObservableObject {
                 packSectionState = .readFailed(reason: error.message)
                 selectedPackMetadata = SelectedPackMetadata(id: config.selectedPack, name: nil)
                 eventRows = []
+                clearPreviewSafetyCheck()
                 libraryPresentationState = .loadFailed(reason: error.message)
             }
         }
@@ -894,6 +926,7 @@ public final class PanelConfigController: ObservableObject {
     private func applySnapshot(_ snapshot: SoundPackLibrarySnapshot) {
         builtinPackIDs = snapshot.factoryPackIDs
         eventRows = snapshot.eventRows(packID: config.selectedPack, config: config)
+        schedulePreviewSafetyCheck()
         let pinnedCards = snapshot.packCards(
             config: config,
             scope: .panelStarredDisplay,
@@ -904,6 +937,32 @@ public final class PanelConfigController: ObservableObject {
             availablePackCount: snapshot.facts.count)
         selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(config.selectedPack)
         selectedPackMetadata = snapshot.selectedPackMetadata(packID: config.selectedPack)
+    }
+
+    private func clearPreviewSafetyCheck() {
+        previewSafetyTask?.cancel()
+        previewSafetyRevision &+= 1
+        previewSafetyFailures = [:]
+    }
+
+    private func schedulePreviewSafetyCheck() {
+        clearPreviewSafetyCheck()
+        guard eventRows.contains(where: { $0.coverage != .unmapped }) else { return }
+        let revision = previewSafetyRevision
+        let rows = eventRows
+        let packID = config.selectedPack
+        let environment = environment
+        previewSafetyTask = Task.detached(priority: .utility) { [weak self] in
+            let failures = eventPreviewSafetyFailures(
+                rows: rows, packID: packID, environment: environment)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self, self.previewSafetyRevision == revision,
+                    self.config.selectedPack == packID
+                else { return }
+                self.previewSafetyFailures = failures
+            }
+        }
     }
 
     private static func loadPackSection(

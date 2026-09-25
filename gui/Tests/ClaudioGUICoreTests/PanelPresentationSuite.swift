@@ -535,6 +535,56 @@ func runPanelPresentationSuites() async {
         expect(readOnly.allSatisfy { !$0.controls.muteEnabled }, "配置不可写时不得展示可操作静音")
     }
 
+    suite("默认组与工作区共用安全试听投影，事件自动静音不影响手工试听") {
+        withTempDirectory { root in
+            let packs = root.appendingPathComponent("packs")
+            let pack = packs.appendingPathComponent("selected")
+            writeFixture("audio", to: pack.appendingPathComponent("safe.aiff"))
+            writeFixture("outside", to: root.appendingPathComponent("outside.aiff"))
+            createSymlink(
+                at: pack.appendingPathComponent("escape.aiff"),
+                pointingTo: root.appendingPathComponent("outside.aiff"))
+            try! FileManager.default.createDirectory(
+                at: pack.appendingPathComponent("directory.aiff"),
+                withIntermediateDirectories: true)
+            let rows = [
+                EventRow(event: .stop, coverage: .present(fileName: "safe.aiff"), enabled: false),
+                EventRow(
+                    event: .notification, coverage: .broken(fileName: "escape.aiff"), enabled: true),
+                EventRow(
+                    event: .subagentStop, coverage: .broken(fileName: "directory.aiff"),
+                    enabled: true),
+                EventRow(
+                    event: .stopFailure, coverage: .broken(fileName: "missing.aiff"), enabled: true),
+            ]
+            let environment = makeAudioImportEnvironment(userPacksDirectory: packs)
+            let failures = eventPreviewSafetyFailures(
+                rows: rows, packID: "selected", environment: environment)
+            expect(
+                failures == [.notification: .unsafeFile, .subagentStop: .unsafeFile],
+                "越界链接和非正规文件是实际安全失败；缺失文件仍归缺失原因")
+            for scope in [PanelSoundScopeID.global, .workspace(UUID())] {
+                let projected = panelEventPresentations(
+                    rows: rows, scope: scope, masterVolume: 0.6, language: .english,
+                    safetyFailures: failures)
+                expect(
+                    projected.first(where: { $0.event == .stop })?.controls.previewEnabled == true,
+                    "自动静音的安全文件仍可手工试听")
+                expect(
+                    projected.first(where: { $0.event == .notification })?
+                        .controls.previewAvailability
+                        == .unsafeOrUnreadable(
+                            reason: "The mapped audio path is unsafe or is not a regular file"),
+                    "安全失败必须进入共享可用性，而非只存在于悬停提示")
+                expect(
+                    projected.first(where: { $0.event == .stopFailure })?
+                        .controls.previewAvailability
+                        == .missingOrDamaged(fileName: "missing.aiff"),
+                    "真实缺失仍使用缺失原因")
+            }
+        }
+    }
+
     suite("当前声音：事件行同时显示真实文件名与 AI 提示音名称") {
         let namedRows = Event.allCases.map {
             EventRow(

@@ -112,7 +112,8 @@ public func panelWriteFailureRecoveryFiles(
 ) -> [URL] {
     var seen: Set<URL> = []
     let candidates = items.compactMap(\.recoveryFile) + [surfaceRecoveryFile].compactMap { $0 }
-    return candidates.map(\.standardizedFileURL).filter { seen.insert($0).inserted }
+    return candidates.compactMap(panelExistingRecoveryFileTarget)
+        .filter { seen.insert($0).inserted }
 }
 
 /// 兼容现有视图调用点的文案投影；真正的去重使用 ``panelWriteFailureItems`` 的 typed reason。
