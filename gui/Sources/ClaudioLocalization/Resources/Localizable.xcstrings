@@ -9618,13 +9618,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Manage how Claudio connects to each app. Event switches and sounds remain independently saved in Events & Sounds."
+            "value": "Manage each app's connection here. Sound packs, volume, and event switches belong to the Default Group or individual workspaces."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "管理 Claudio 与每个应用的连接方式。事件开关和提示音仍在“事件与提示音”中按 app 独立保存。"
+            "value": "在此管理各应用的连接。声音包、音量与事件开关由默认组或各工作区分别保存。"
           }
         }
       }

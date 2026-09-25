@@ -1296,7 +1296,7 @@ private struct PanelAgentEventRow: View {
                     let token = UUID()
                     previewSuccessToken = token
                     Task { @MainActor in
-                        try? await Task.sleep(for: .seconds(1.2))
+                        try? await Task.sleep(nanoseconds: 1_200_000_000)
                         if previewSuccessToken == token { previewSuccessToken = nil }
                     }
                 } else {

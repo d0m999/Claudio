@@ -147,6 +147,7 @@ struct EventSettingsWindowView: View {
                     VStack(alignment: .leading, spacing: 20) {
                         Text(current?.name ?? l10n.text(.workspaceUnavailable)).font(.title2)
                             .fontWeight(.bold)
+                            .allowsTightening(true)
                             .accessibilityAddTraits(.isHeader)
                         if !migrationSeen && !model.configState.resolvedConfig.selectedPack.isEmpty
                         {
@@ -207,7 +208,7 @@ struct EventSettingsWindowView: View {
                                 ForEach(events) { event in eventRow(event) }
                             }
                             Button(l10n.text(.eventSettingsManageSounds)) {
-                                onConfigureSound(.overview(surface: nil))
+                                onConfigureSound(.overview(scope: selection.route.scope))
                             }
                         } else {
                             Text(l10n.text(.workspaceUnavailable)).foregroundColor(.secondary)
@@ -414,6 +415,9 @@ struct EventSettingsWindowView: View {
                 let sourceRow = hostIntegrations.content.sourceRows.first {
                     $0.host.surfaceID == surface
                 }
+                let localizedSourceRow = sourceRow.map {
+                    localizedHostSourceRow($0, language: languageStore.language)
+                }
                 Toggle(
                     isOn: Binding(
                         get: { rule.surfaces.contains(surface) },
@@ -434,7 +438,7 @@ struct EventSettingsWindowView: View {
                         Text(
                             !WorkspaceSurfaceEligibility.verified.contains(surface)
                                 ? l10n.text(.workspaceEvidencePending)
-                                : sourceRow.map {
+                                : localizedSourceRow.map {
                                     "\($0.readinessText) · \($0.supportedCount.map(String.init) ?? "—")/\($0.totalCount.map(String.init) ?? "—")"
                                 } ?? l10n.text(.workspaceDisconnected)
                         )
@@ -507,7 +511,7 @@ struct EventSettingsWindowView: View {
                 identifierPrefix: "workspace.write.recovery-file")
             if error == .invalidPack {
                 Button(l10n.text(.eventSettingsManageSounds)) {
-                    onConfigureSound(.overview(surface: nil))
+                    onConfigureSound(.overview(scope: selection.route.scope))
                 }
             }
             if error == .lockBusy, canRetryCurrentWrite {
@@ -795,7 +799,7 @@ struct EventSettingsWindowView: View {
                         let token = UUID()
                         previewSuccessTokens[event.event] = token
                         Task { @MainActor in
-                            try? await Task.sleep(for: .seconds(1.2))
+                            try? await Task.sleep(nanoseconds: 1_200_000_000)
                             if previewSuccessTokens[event.event] == token {
                                 previewSuccessTokens.removeValue(forKey: event.event)
                             }
