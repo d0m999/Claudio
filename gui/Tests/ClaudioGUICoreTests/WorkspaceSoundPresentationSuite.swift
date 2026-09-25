@@ -5,6 +5,76 @@ import Foundation
 
 @MainActor
 func runWorkspaceSoundPresentationSuites() {
+    suite("声音包编辑：工作区使用与复制应用复用现有写入口") {
+        withTempDirectory { root in
+            let file = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs", isDirectory: true)
+            for id in ["default-pack", "workspace-pack", "next-pack"] {
+                writeFixture(
+                    "{\"id\":\"\(id)\",\"name\":\"\(id)\",\"events\":{}}",
+                    to: packs.appendingPathComponent("\(id)/manifest.json"))
+            }
+            var config = ClaudioConfig(selectedPack: "default-pack", masterVolume: 0.2)
+            let rule = WorkspaceSoundRule(
+                directory: WorkspaceDirectory(kind: .directory, path: root.path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "workspace-pack", volume: 0.7))
+            config.workspaceRules = [rule]
+            try! JSONEncoder().encode(config).write(to: file)
+            let environment = makeAudioImportEnvironment(userPacksDirectory: packs)
+            let lock = root.appendingPathComponent("config.lock")
+            let controller = PanelConfigController(
+                configFile: file, lockFile: lock, environment: environment)
+            let model = SoundPacksWindowModel(
+                configFile: file, lockFile: lock, environment: environment,
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+            model.setWorkspacePackWriter { id, packID in
+                controller.changeWorkspace(.pack(id, packID))
+                    ? .success(()) : .failure(controller.workspaceError ?? .configFailure)
+            }
+            model.setManagedScope(.workspace(rule.id))
+            expect(
+                model.config.selectedPack == "workspace-pack"
+                    && model.config.masterVolume == 0.7,
+                "声音页须投影目标工作区的包及音量")
+            expect(model.selectPackForInspection("next-pack"), "测试包应可供检查")
+            expect(
+                model.useSelectedPack() == .success(.selected(packID: "next-pack")),
+                "使用按钮应写入工作区")
+            var readback = loadClaudioConfig(from: file)!
+            expect(
+                readback.selectedPack == "default-pack"
+                    && readback.workspaceRules.first?.profile?.selectedPack == "next-pack",
+                "工作区使用不得改写默认组")
+            expect(model.selectPackForInspection("workspace-pack"), "复制源包应可供检查")
+            guard case .success(let copy) = model.copySelectedPack() else {
+                expect(false, "复制并应用测试必须先复制包")
+                return
+            }
+            expect(
+                model.applyPackSelection(
+                    copy.newPackID, toScope: .workspace(rule.id),
+                    allowFreshlyPublishedPack: true)
+                    == .success(.selected(packID: copy.newPackID)),
+                "复制后的包须通过工作区原有配置写入入口应用")
+            readback = loadClaudioConfig(from: file)!
+            expect(
+                readback.selectedPack == "default-pack"
+                    && readback.workspaceRules.first?.profile?.selectedPack == copy.newPackID,
+                "复制并应用不得改写默认组")
+
+            readback.workspaceRules = []
+            try! JSONEncoder().encode(readback).write(to: file)
+            expect(model.selectPackForInspection("next-pack"), "过期写入测试仍可检查包")
+            expect(
+                model.useSelectedPack() == .failure(.workspace(.staleRule)),
+                "删除后的工作区须由原有写入口拒绝")
+            expect(
+                loadClaudioConfig(from: file)?.selectedPack == "default-pack"
+                    && !model.writesAllowed,
+                "陈旧写入不得回退默认组，读回后应停止继续写入")
+        }
+    }
     suite("工作区控制器：独立配置、失败原值、失效路由和延迟音量目标") {
         withTempDirectory { root in
             let file = root.appendingPathComponent("config.json")

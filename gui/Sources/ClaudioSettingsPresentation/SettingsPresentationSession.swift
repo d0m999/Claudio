@@ -78,6 +78,12 @@ package final class SettingsPresentationSession: ObservableObject {
             pendingAnnouncement: nil,
             presentationRevision: 0)
 
+        let workspaceConfig = dependencies.eventSettingsModel
+        dependencies.soundPacksEditorOwner.configureWorkspacePackWriter { id, packID in
+            workspaceConfig.changeWorkspace(.pack(id, packID))
+                ? .success(()) : .failure(workspaceConfig.workspaceError ?? .configFailure)
+        }
+
         preferenceCancellable = dependencies.preferences.$snapshot
             .sink { [weak self] snapshot in
                 MainActor.assumeIsolated {

@@ -66,7 +66,7 @@ public enum SettingsRoute: Sendable, Equatable, Hashable {
             return [SettingsDestination.eventsAndSounds.rawValue, scope.storedValue]
                 + (event.map { [$0.cliName] } ?? [])
         case .sounds(let route):
-            let scope = route.surface?.rawValue ?? PanelSoundScopeID.global.storedValue
+            let scope = route.scope.storedValue
             guard let target = route.editTarget else {
                 return [SettingsDestination.sounds.rawValue, scope]
             }
@@ -132,7 +132,7 @@ package struct SettingsSoundPackShellProjection: Equatable {
         availability = SettingsRouteAvailability(
             integrationSurfaces: publishedSurfaces,
             eventScopes: Set([.global] + config.workspaceRules.map { .workspace($0.id) }),
-            soundScopes: [.global],
+            soundScopes: Set([.global] + config.workspaceRules.map { .workspace($0.id) }),
             soundPackIDs: editorPresentation.installedPackIDs,
             soundPackSnapshotIsFresh: editorPresentation.library.isFresh,
             events: Set(Event.allCases))
@@ -216,10 +216,9 @@ public func resolveSettingsRoute(
             failure = nil
         }
     case .sounds(let soundsRoute):
-        if let surface = soundsRoute.surface,
-            let scopeFailure = settingsScopeFailure(
-                .surface(surface),
-                availableScopes: availability.soundScopes)
+        if let scopeFailure = settingsScopeFailure(
+            soundsRoute.scope,
+            availableScopes: availability.soundScopes)
         {
             failure = scopeFailure
         } else if let packID = soundsRoute.editTarget?.packID,

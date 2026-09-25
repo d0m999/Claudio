@@ -37,6 +37,18 @@ func runPanelPresentationSuites() async {
             workBuddy.soundPacksRoute(packID: "user-pack", event: .stop)
                 == .editEvent(surface: .workBuddy, packID: "user-pack", event: .stop),
             "逐事件声音编辑必须把当前 Surface 原样交给声音包窗口")
+        let workspaceID = UUID(uuidString: "61E452D2-5895-4D4C-BF22-D8B0A8FEB2E7")!
+        let workspace = EventSettingsWindowRoute(scope: .workspace(workspaceID))
+        expect(
+            workspace.soundPacksRoute(packID: "user-pack", event: .stop)
+                == .editEvent(
+                    scope: .workspace(workspaceID), packID: "user-pack", event: .stop),
+            "工作区事件编辑必须保留规则身份")
+        expect(
+            workspace.soundPacksCopyAndApplyRoute(packID: "factory-pack", event: .stop)
+                == .copyAndApply(
+                    scope: .workspace(workspaceID), packID: "factory-pack", event: .stop),
+            "只读包复制并应用必须保留工作区目标")
         expect(
             eventSettingsFirstFocusTarget(scopes: [.global, .surface(.workBuddy)])
                 == .scope(.global),

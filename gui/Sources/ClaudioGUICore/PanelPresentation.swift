@@ -52,16 +52,16 @@ public struct EventSettingsWindowRoute: Sendable, Equatable, Hashable {
     public var surface: HostSurfaceID? { scope.surface }
 
     public func soundPacksRoute(packID: String, event: Event) -> SoundPacksWindowRoute {
-        .editEvent(surface: surface, packID: packID, event: event)
+        .editEvent(scope: scope, packID: packID, event: event)
     }
 
     /// Missing-sound deep link for a read-only pack. The scope is retained explicitly so the
-    /// Sounds page can copy first and apply only to this Global/Surface target.
+    /// Sounds page can copy first and apply only to this Default Group/Workspace target.
     public func soundPacksCopyAndApplyRoute(
         packID: String,
         event: Event
     ) -> SoundPacksWindowRoute {
-        .copyAndApply(surface: surface, packID: packID, event: event)
+        .copyAndApply(scope: scope, packID: packID, event: event)
     }
 }
 

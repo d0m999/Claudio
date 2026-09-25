@@ -268,6 +268,7 @@ public enum SoundPacksWindowPackUseActionError: Error, Sendable, Equatable {
     case writesStopped(statusText: SoundPacksWindowStatusText)
     case use(UseError)
     case surface(SurfaceSoundMutationError)
+    case workspace(WorkspaceSoundError)
 
     public var statusText: SoundPacksWindowStatusText {
         switch self {
@@ -278,6 +279,7 @@ public enum SoundPacksWindowPackUseActionError: Error, Sendable, Equatable {
         case .writesStopped(let statusText): return statusText
         case .use(let error): return .literal(error.description)
         case .surface(let error): return .literal(error.description)
+        case .workspace(let error): return .literal(error.description)
         }
     }
 
@@ -546,14 +548,24 @@ public func soundPacksWindowScopeFailureStatusText(
 package final class SoundPacksWindowModel {
     package private(set) var configState: PanelConfigState
     package private(set) var config: ClaudioConfig
-    /// `nil` 明确表示正在管理 Global；非 nil 只有产品 registry Surface 才能获得写权限。
-    package private(set) var managedSurface: HostSurfaceID?
+    package private(set) var managedScope: PanelSoundScopeID = .global
+    package var managedSurface: HostSurfaceID? { managedScope.surface }
+    private var workspacePackWriter:
+        (@MainActor (UUID, String) -> Result<Void, WorkspaceSoundError>)?
     package private(set) var managedScopeFailureReason: String?
     /// Every production mutation consumes this one fail-closed scope decision. Browsing, preview,
     /// Finder reveal, and route changes remain read-only and available when writes are stopped.
-    package var writesAllowed: Bool { managedScopeFailureReason == nil }
+    package var writesAllowed: Bool {
+        managedScopeFailureReason == nil
+            && (managedScope.workspaceID == nil || workspacePackWriter != nil)
+    }
     package var managedScopeFailureStatusText: SoundPacksWindowStatusText? {
-        soundPacksWindowScopeFailureStatusText(
+        if case .workspace(let id) = managedScope,
+            case .failure(let error) = baseConfig.resolveWorkspaceProfile(id: id)
+        {
+            return .literal(error.description)
+        }
+        return soundPacksWindowScopeFailureStatusText(
             managedSurface: managedSurface,
             config: baseConfig)
     }
@@ -741,7 +753,7 @@ package final class SoundPacksWindowModel {
         configState = loadedState
         config = loadedConfig
         baseConfig = loadedConfig
-        managedSurface = nil
+        managedScope = .global
         managedScopeFailureReason = nil
         if !readSource.readsSharedSnapshot {
             let loadedCards = availablePacks(
@@ -863,7 +875,7 @@ package final class SoundPacksWindowModel {
         config = previewConfig
         baseConfig = previewConfig
         isStateGalleryFixture = true
-        managedSurface = nil
+        managedScope = .global
         managedScopeFailureReason = nil
         self.packCards = packCards
         self.selectedPackID = selectedPackID
@@ -904,10 +916,20 @@ package final class SoundPacksWindowModel {
         selectPackForInspection(packID, selectionAnnouncementSuppression: nil)
     }
 
-    /// 窗口路由先调用此方法再选择包。未知/诊断 Surface 保留为显式错误态，绝不降级到 Global。
+    package func setWorkspacePackWriter(
+        _ writer: @escaping @MainActor (UUID, String) -> Result<Void, WorkspaceSoundError>
+    ) {
+        workspacePackWriter = writer
+    }
+
+    /// 旧 Surface 入口只保留拒写语义；新路由始终携带 Default Group / Workspace 身份。
     package func setManagedSurface(_ surface: HostSurfaceID?) {
-        guard managedSurface != surface || managedScopeFailureReason != nil else { return }
-        managedSurface = surface
+        setManagedScope(surface.map(PanelSoundScopeID.surface) ?? .global)
+    }
+
+    package func setManagedScope(_ scope: PanelSoundScopeID) {
+        guard managedScope != scope || managedScopeFailureReason != nil else { return }
+        managedScope = scope
         #if DEBUG
         // State-gallery models retain their injected projection across typed route activation;
         // reading the sentinel /dev/null URL would turn a no-I/O fixture into a false missing state.
@@ -1000,7 +1022,7 @@ package final class SoundPacksWindowModel {
                     }),
             snapshotRevision: librarySnapshot?.revision,
             selectionGeneration: UInt64(inspectionSelectionRevision),
-            managedSurface: managedSurface,
+            managedScope: managedScope,
             writesAllowed: writesAllowed && configAllowsWrites,
             config: config,
             packCards: packCards,
@@ -1238,11 +1260,27 @@ package final class SoundPacksWindowModel {
         guard let selectedPackID else {
             return finishPackUse(.failure(.noSelectedPack))
         }
-        guard isValidSoundPacksWindowSurface(managedSurface) else {
-            return finishPackUse(.failure(.invalidScope(managedSurface!)))
+        if case .surface(let surface) = managedScope,
+            !isValidSoundPacksWindowSurface(surface)
+        {
+            return finishPackUse(.failure(.invalidScope(surface)))
         }
         guard writesAllowed else {
             return finishPackUse(.failure(.writesStopped(statusText: writesStoppedStatusText)))
+        }
+        if case .workspace(let id) = managedScope {
+            guard let workspacePackWriter else {
+                return finishPackUse(.failure(.workspace(.configFailure)))
+            }
+            switch workspacePackWriter(id, selectedPackID) {
+            case .success:
+                return finishPackUse(.success(.selected(packID: selectedPackID)))
+            case .failure(let error):
+                return finishPackUse(.failure(.workspace(error)))
+            }
+        }
+        guard isValidSoundPacksWindowSurface(managedSurface) else {
+            return finishPackUse(.failure(.invalidScope(managedSurface!)))
         }
         if let managedSurface {
             switch setSurfacePack(
@@ -1281,6 +1319,16 @@ package final class SoundPacksWindowModel {
         to surface: HostSurfaceID?,
         allowFreshlyPublishedPack: Bool = false
     ) -> Result<UseOutcome, SoundPacksWindowPackUseActionError> {
+        applyPackSelection(
+            packID, toScope: surface.map(PanelSoundScopeID.surface) ?? .global,
+            allowFreshlyPublishedPack: allowFreshlyPublishedPack)
+    }
+
+    package func applyPackSelection(
+        _ packID: String,
+        toScope scope: PanelSoundScopeID,
+        allowFreshlyPublishedPack: Bool = false
+    ) -> Result<UseOutcome, SoundPacksWindowPackUseActionError> {
         guard isSafePackID(packID) else {
             return finishPackUse(.failure(.noSelectedPack))
         }
@@ -1300,12 +1348,29 @@ package final class SoundPacksWindowModel {
         guard isInstalledAndHealthy || isFreshlyPublishedAndHealthy else {
             return finishPackUse(.failure(.noSelectedPack))
         }
-        guard isValidSoundPacksWindowSurface(surface) else {
-            return finishPackUse(.failure(.invalidScope(surface!)))
+        if case .surface(let surface) = scope,
+            !isValidSoundPacksWindowSurface(surface)
+        {
+            return finishPackUse(.failure(.invalidScope(surface)))
         }
-        guard writesAllowed else {
+        guard scope == managedScope, writesAllowed else {
             return finishPackUse(.failure(.writesStopped(statusText: writesStoppedStatusText)))
         }
+        if case .workspace(let id) = scope {
+            guard let workspacePackWriter else {
+                return finishPackUse(.failure(.workspace(.configFailure)))
+            }
+            switch workspacePackWriter(id, packID) {
+            case .success:
+                return finishPackUse(.success(.selected(packID: packID)))
+            case .failure(let error):
+                return finishPackUse(.failure(.workspace(error)))
+            }
+        }
+        guard isValidSoundPacksWindowSurface(scope.surface) else {
+            return finishPackUse(.failure(.invalidScope(scope.surface!)))
+        }
+        let surface = scope.surface
         if let surface {
             switch setSurfacePack(
                 packID,
@@ -1788,8 +1853,7 @@ package final class SoundPacksWindowModel {
     /// 从完整 base config 投影当前管理作用域。Surface 只替换 effective pack/events；星标、
     /// 未知字段写入边界与顶层配置事实仍归 base。坏覆盖与非产品 Surface 均 fail closed。
     private func applyManagedScopeConfig() {
-        guard managedSurface == nil else {
-            let surface = managedSurface!
+        if case .surface(let surface) = managedScope {
             managedScopeFailureReason =
                 "未知声音作用域 \(surface.rawValue)，已停止写入；不会回退到 Global。"
             var failed = baseConfig
@@ -1799,15 +1863,25 @@ package final class SoundPacksWindowModel {
             config = failed
             return
         }
-        switch baseConfig.resolveSoundProfile(for: managedSurface) {
+        let profile: Result<ResolvedSoundProfile, WorkspaceSoundError>
+        switch managedScope {
+        case .global:
+            profile = baseConfig.resolveSoundProfile(for: nil)
+        case .workspace(let id):
+            profile = baseConfig.resolveWorkspaceProfile(id: id)
+        case .surface:
+            return
+        }
+        switch profile {
         case .success(let profile):
             managedScopeFailureReason = nil
             var effective = baseConfig
             effective.selectedPack = profile.selectedPack
             effective.eventsEnabled = profile.eventsEnabled
+            effective.masterVolume = profile.volume
             config = effective
         case .failure:
-            let name = managedSurface?.rawValue ?? "global"
+            let name = managedScope.storedValue
             managedScopeFailureReason =
                 "\(name) 的声音覆盖已损坏；已停止该来源写入，不会回退到 Global。"
             var failed = baseConfig
@@ -2586,6 +2660,10 @@ package final class SoundPacksWindowModel {
                 packID: selectedPackID)
             switch error {
             case .use(.configPublishedButFailed), .surface(.configPublishedButFailed):
+                completeSynchronousWrite(.changedDespiteFailure)
+            case .workspace(let workspaceError)
+            where workspaceError.isPublishedConflict || workspaceError == .staleRule
+                || workspaceError == .invalidRule:
                 completeSynchronousWrite(.changedDespiteFailure)
             default:
                 completeSynchronousWrite(.failed)

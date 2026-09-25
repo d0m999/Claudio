@@ -1569,6 +1569,22 @@
         }
       }
     },
+    "event.preview.started": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview started"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "试听已开始"
+          }
+        }
+      }
+    },
     "event.preview.available-enabled": {
       "localizations": {
         "en": {

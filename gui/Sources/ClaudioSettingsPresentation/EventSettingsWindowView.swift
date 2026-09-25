@@ -27,10 +27,12 @@ struct EventSettingsWindowView: View {
     var reloadsOnAppear = true
     #endif
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focusedTarget: EventSettingsFocusTarget?
     @State private var isAddingWorkspace = false
     @State private var player = NSSoundAudioPreviewPlayer()
     @State private var previewPulseTriggers: [Event: Int] = [:]
+    @State private var previewSuccessTokens: [Event: UUID] = [:]
     @AppStorage("claudio.workspace-migration-notice-seen") private var migrationSeen = false
 
     init(
@@ -174,7 +176,8 @@ struct EventSettingsWindowView: View {
                             Button(l10n.text(.eventPreviewRepairSound)) {
                                 onConfigureSound(
                                     .editEvent(
-                                        surface: nil, packID: failure.packID, event: failure.event))
+                                        scope: failure.scope, packID: failure.packID,
+                                        event: failure.event))
                             }
                             .accessibilityIdentifier("workspace.event.preview-failure-repair")
                         }
@@ -239,10 +242,14 @@ struct EventSettingsWindowView: View {
             #endif
             synchronize()
         }
-        .onChange(of: selection.route) { _ in synchronize() }
+        .onChange(of: selection.route) { _ in
+            previewSuccessTokens.removeAll()
+            synchronize()
+        }
         .onChange(of: selection.presentationState.focusRequestRevision) { _ in synchronize() }
         .onDisappear {
             player.stop()
+            previewSuccessTokens.removeAll()
             selection.cancelDeletion()
         }
         .sheet(
@@ -785,7 +792,16 @@ struct EventSettingsWindowView: View {
                     case .started:
                         selection.clearPreviewFailure()
                         previewPulseTriggers[event.event, default: 0] &+= 1
+                        let token = UUID()
+                        previewSuccessTokens[event.event] = token
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .seconds(1.2))
+                            if previewSuccessTokens[event.event] == token {
+                                previewSuccessTokens.removeValue(forKey: event.event)
+                            }
+                        }
                     case .failed(let failure):
+                        previewSuccessTokens.removeValue(forKey: event.event)
                         reportPreviewFailure(
                             failure, event: event.event, scope: scope, packID: packID)
                     }
@@ -838,6 +854,13 @@ struct EventSettingsWindowView: View {
                 ).labelsHidden().toggleStyle(.switch).disabled(!event.controls.muteEnabled)
                     .focused($focusedTarget, equals: .mute(event.event))
             }
+            if reduceMotion && previewSuccessTokens[event.event] != nil {
+                Label(l10n.text(.eventPreviewStarted), systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundColor(ClaudioTheme.clay(colorScheme))
+                    .accessibilityIdentifier(
+                        "workspace.event.preview-started.\(event.event.cliName)")
+            }
             if let failure {
                 FailureRow(
                     message: localizedEventPreviewAttemptFailure(
@@ -853,7 +876,7 @@ struct EventSettingsWindowView: View {
 
     private func configureSound(_ event: Event, scope: PanelSoundScopeID) {
         guard model.selectedSoundScope == scope, selection.route.scope == scope else { return }
-        onConfigureSound(.editEvent(surface: nil, packID: model.config.selectedPack, event: event))
+        onConfigureSound(.editEvent(scope: scope, packID: model.config.selectedPack, event: event))
     }
 
     private func reportPreviewFailure(

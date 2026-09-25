@@ -1125,7 +1125,9 @@ private struct PanelAgentEventRow: View {
     private let focusedTarget: FocusState<PanelFocusTarget?>.Binding
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var previewPulseTrigger = 0
+    @State private var previewSuccessToken: UUID?
 
     init(
         presentation: PanelEventPresentation,
@@ -1187,6 +1189,16 @@ private struct PanelAgentEventRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier(
                         "panel.event.\(presentation.event.rawValue).preview-failure")
+            }
+            if reduceMotion && previewSuccessToken != nil {
+                Label(
+                    ClaudioL10n(language: language).text(.eventPreviewStarted),
+                    systemImage: "checkmark.circle.fill"
+                )
+                .font(.caption)
+                .foregroundColor(ClaudioTheme.clay(colorScheme))
+                .accessibilityIdentifier(
+                    "panel.event.\(presentation.event.rawValue).preview-started")
             }
         }
         .padding(.vertical, 7)
@@ -1281,6 +1293,14 @@ private struct PanelAgentEventRow: View {
             Button {
                 if onPreview() {
                     previewPulseTrigger &+= 1
+                    let token = UUID()
+                    previewSuccessToken = token
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(1.2))
+                        if previewSuccessToken == token { previewSuccessToken = nil }
+                    }
+                } else {
+                    previewSuccessToken = nil
                 }
             } label: {
                 Image(systemName: "play.fill")

@@ -52,6 +52,7 @@ package struct SoundsEditorPresentation: Equatable {
     package let requestRevision: UInt64
     package let routeState: SoundPacksEditorRouteState
     package let scope: SoundPackEditorScopeAvailability
+    package let workspaceName: String?
     package let masterVolume: Double
     package let packs: [SoundPackEditorPackPresentation]
     package let selectedPack: SoundPackEditorPackPresentation?
@@ -541,7 +542,7 @@ struct SoundPacksEditorModelSeed: Equatable {
     let installedPackIDs: Set<String>
     let snapshotRevision: UInt64?
     let selectionGeneration: UInt64
-    let managedSurface: HostSurfaceID?
+    let managedScope: PanelSoundScopeID
     let writesAllowed: Bool
     let config: ClaudioConfig
     let packCards: [PackCard]

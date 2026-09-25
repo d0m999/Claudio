@@ -112,7 +112,7 @@ public struct EmbeddedSoundPacksEditorView: View {
         case .resolved(let resolved):
             focusRoute = resolved
         case .pendingFreshSnapshot, .staleTarget:
-            focusRoute = .overview(surface: sounds.route.surface)
+            focusRoute = .overview(scope: sounds.route.scope)
         }
         if requestsInitialFocus {
             focusCoordinator.requestInitialFocus(route: focusRoute)
@@ -397,9 +397,12 @@ private struct SoundPacksWindowContentView: View {
     private var managedScopeBar: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 7) {
-                Image(systemName: managedSurface == nil ? "globe" : "square.stack.3d.up.fill")
-                    .foregroundColor(ClaudioTheme.clay(colorScheme))
-                    .accessibilityHidden(true)
+                Image(
+                    systemName: activeSounds.route.scope == .global
+                        ? "globe" : "square.stack.3d.up.fill"
+                )
+                .foregroundColor(ClaudioTheme.clay(colorScheme))
+                .accessibilityHidden(true)
                 Text(l10n.format(.soundPacksManagingScope, managedScopeName))
                     .font(.system(.subheadline, design: .rounded).weight(.semibold))
                     .foregroundColor(ClaudioTheme.text(colorScheme))
@@ -420,11 +423,15 @@ private struct SoundPacksWindowContentView: View {
     }
 
     private var managedScopeName: String {
-        guard let surface = managedSurface else {
+        switch activeSounds.route.scope {
+        case .global:
             return l10n.text(.panelGlobalName)
+        case .workspace:
+            return activeSounds.workspaceName ?? l10n.text(.workspaceUnavailable)
+        case .surface(let surface):
+            return HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?.displayName
+                ?? surface.rawValue
         }
-        return HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?.displayName
-            ?? surface.rawValue
     }
 
     private var localizedManagedScopeFailure: String? {
@@ -941,9 +948,7 @@ private struct SoundPacksWindowContentView: View {
     }
 
     private var copyAndApplyScopeName: String {
-        activeSounds.route.surface.flatMap { surface in
-            HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?.displayName
-        } ?? l10n.text(.panelGlobalName)
+        managedScopeName
     }
 
     private func invoke(_ action: SoundPackEditorAction?) {
@@ -1491,13 +1496,6 @@ private struct SoundPacksWindowContentView: View {
             return l10n.format(
                 .soundPacksInventoryDirectoryUnreadable,
                 l10n.text(.panelPacksReadFailed))
-        }
-    }
-
-    private var managedSurface: HostSurfaceID? {
-        switch activeSounds.scope {
-        case .available(let scope), .unavailable(scope: let scope, reason: _):
-            return scope.surface
         }
     }
 

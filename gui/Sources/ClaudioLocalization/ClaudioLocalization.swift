@@ -264,6 +264,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let eventCoveragePresentFile: Self = "event.coverage.present-file"
     public static let eventCoverageBrokenFile: Self = "event.coverage.broken-file"
     public static let eventPreviewLabel: Self = "event.preview.label"
+    public static let eventPreviewStarted: Self = "event.preview.started"
     public static let eventPreviewAvailableEnabled: Self = "event.preview.available-enabled"
     public static let eventPreviewAvailableMuted: Self = "event.preview.available-muted"
     public static let eventPreviewUnavailable: Self = "event.preview.unavailable"
@@ -1609,6 +1610,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .eventTaskStart, .eventStop, .eventStopFailure, .eventNotification, .eventSubagentStop,
         .eventEditorHint, .eventCoveragePresent, .eventCoverageUnmapped, .eventCoverageBroken,
         .eventCoveragePresentFile, .eventCoverageBrokenFile, .eventPreviewLabel,
+        .eventPreviewStarted,
         .eventPreviewAvailableEnabled, .eventPreviewAvailableMuted, .eventPreviewUnavailable,
         .eventMuteHint, .eventMute, .eventUnmute, .eventEnabled, .eventMuted, .eventPreviewHint,
         .eventPreviewMasterVolumeZero, .eventPreviewUnmapped, .eventPreviewMissing,

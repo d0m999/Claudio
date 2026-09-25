@@ -285,8 +285,7 @@ public func localizedEventPreviewHint(
     }
 }
 
-/// 保留的声音包窗口只接受显式路由。每条路由都携带声音作用域；`nil` 明确表示 Global，
-/// 不是“缺少 scope”。窗口必须先验证非 nil Surface 属于产品 registry，才允许任何配置写入。
+/// 保留的声音包窗口只接受显式声音作用域；过期目标不得回退到默认组。
 public struct SoundPacksWindowRoute: Sendable, Equatable, Hashable {
     public enum Destination: Sendable, Equatable, Hashable {
         case overview
@@ -296,12 +295,19 @@ public struct SoundPacksWindowRoute: Sendable, Equatable, Hashable {
         case copyAndApply(packID: String, event: Event)
     }
 
-    public let surface: HostSurfaceID?
+    public let scope: PanelSoundScopeID
+    public var surface: HostSurfaceID? { scope.surface }
     public let destination: Destination
 
-    public init(surface: HostSurfaceID?, destination: Destination) {
-        self.surface = surface
+    public init(scope: PanelSoundScopeID, destination: Destination) {
+        self.scope = scope
         self.destination = destination
+    }
+
+    /// Retained source routes are rejected downstream; `nil` means Default Group.
+    public init(surface: HostSurfaceID?, destination: Destination) {
+        self.init(
+            scope: surface.map(PanelSoundScopeID.surface) ?? .global, destination: destination)
     }
 
     /// 兼容现有 Global 调用点的显式值；它仍真实携带 `surface == nil`。
@@ -311,8 +317,22 @@ public struct SoundPacksWindowRoute: Sendable, Equatable, Hashable {
         SoundPacksWindowRoute(surface: surface, destination: .overview)
     }
 
+    public static func overview(scope: PanelSoundScopeID) -> SoundPacksWindowRoute {
+        SoundPacksWindowRoute(scope: scope, destination: .overview)
+    }
+
     public static func editEvent(packID: String, event: Event) -> SoundPacksWindowRoute {
         editEvent(surface: nil, packID: packID, event: event)
+    }
+
+    public static func editEvent(
+        scope: PanelSoundScopeID,
+        packID: String,
+        event: Event
+    ) -> SoundPacksWindowRoute {
+        SoundPacksWindowRoute(
+            scope: scope,
+            destination: .editEvent(packID: packID, event: event))
     }
 
     public static func editEvent(
@@ -330,6 +350,16 @@ public struct SoundPacksWindowRoute: Sendable, Equatable, Hashable {
         event: Event
     ) -> SoundPacksWindowRoute {
         copyAndApply(surface: nil, packID: packID, event: event)
+    }
+
+    public static func copyAndApply(
+        scope: PanelSoundScopeID,
+        packID: String,
+        event: Event
+    ) -> SoundPacksWindowRoute {
+        SoundPacksWindowRoute(
+            scope: scope,
+            destination: .copyAndApply(packID: packID, event: event))
     }
 
     public static func copyAndApply(
@@ -373,7 +403,7 @@ public func resolveSoundPacksWindowRoute(
 ) -> SoundPacksWindowRouteResolution {
     guard let packID = route.editTarget?.packID else { return .resolved(route) }
     if availablePackIDs.contains(packID) { return .resolved(route) }
-    if libraryState == .ready { return .resolved(.overview(surface: route.surface)) }
+    if libraryState == .ready { return .resolved(.overview(scope: route.scope)) }
     return .pending(route)
 }
 

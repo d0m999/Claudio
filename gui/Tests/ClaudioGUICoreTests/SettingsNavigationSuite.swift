@@ -172,6 +172,35 @@ func runSettingsNavigationSuites() {
 
     }
 
+    suite("Settings Sounds 工作区路由：身份、缺包回退与失效拒绝") {
+        let id = UUID(uuidString: "61E452D2-5895-4D4C-BF22-D8B0A8FEB2E7")!
+        let route = SoundPacksWindowRoute.copyAndApply(
+            scope: .workspace(id), packID: "source-pack", event: .stop)
+        expect(
+            SettingsRoute.sounds(route).stableIdentityComponents
+                == ["sounds", "workspace:\(id.uuidString)", "source-pack", "stop"],
+            "工作区 Sounds 深链必须携带 UUID，不能与默认组共用身份")
+        expect(
+            resolveSoundPacksWindowRoute(
+                route, availablePackIDs: [], libraryState: .ready)
+                == .resolved(.overview(scope: .workspace(id))),
+            "缺包降级仍须保留工作区目标")
+        let available = SettingsRouteAvailability(
+            integrationSurfaces: [], eventScopes: [.global, .workspace(id)],
+            soundScopes: [.global, .workspace(id)], soundPackIDs: ["source-pack"],
+            events: Set(Event.allCases))
+        expect(
+            resolveSettingsRoute(.sounds(route), availability: available).failure == nil,
+            "现存工作区 Sounds 路由应可解析")
+        let removed = SettingsRouteAvailability(
+            integrationSurfaces: [], eventScopes: [.global], soundScopes: [.global],
+            soundPackIDs: ["source-pack"], events: Set(Event.allCases))
+        expect(
+            resolveSettingsRoute(.sounds(route), availability: removed).failure
+                == .staleSoundScope(.workspace(id)),
+            "工作区删除后不得回退默认组")
+    }
+
     suite("Settings sound shell：inactive editor 通过一个 coherent projection 提供 route 事实") {
         withTempDirectory { root in
             let packID = "pack-a"
