@@ -722,9 +722,7 @@ public struct PanelView: View {
                                 guard panelModel.selectedSoundScope == selectedScope.scope,
                                     !panelModel.config.selectedPack.isEmpty
                                 else { return }
-                                if action == .repairSound
-                                    && panelModel.selectedPackIsBuiltinReadOnly
-                                {
+                                if panelModel.selectedPackIsBuiltinReadOnly {
                                     onConfigureSound(
                                         .copyAndApply(
                                             scope: selectedScope.scope,

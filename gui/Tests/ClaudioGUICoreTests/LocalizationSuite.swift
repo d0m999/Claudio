@@ -47,6 +47,20 @@ func runLocalizationSuites() {
                     == "Opens sound settings for the Default Group and workspaces in this Settings window.",
             "English sound entrance must describe the same destination without a selected-host target"
         )
+        let previewDestinationKeys: [ClaudioL10nKey] = [
+            .eventPreviewUnmapped, .eventPreviewMissing,
+            .eventPreviewPlaybackFailed, .eventPreviewRepairSound,
+        ]
+        for key in previewDestinationKeys {
+            expect(
+                chinese.text(key).contains("设置")
+                    && chinese.text(key).contains("「\(chinese.text(.settingsDestinationSounds))」页")
+                    && english.text(key).contains("Settings")
+                    && english.text(key).contains(english.text(.settingsDestinationSounds))
+                    && !chinese.text(key).contains("声音包窗口")
+                    && !english.text(key).contains("Sound Packs"),
+                "试听禁用与恢复文案须在双语中指向统一设置的声音页：\(key.rawValue)")
+        }
         expect(
             chinese.text(.workspaceChooseDefaultGroup) == "选择默认组"
                 && english.text(.workspaceChooseDefaultGroup) == "Select Default Group",

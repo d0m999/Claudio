@@ -2864,7 +2864,7 @@ func runViewWiringSuites() {
             "打开设置必须通过统一 session action，并把焦点留在 headerSettings")
     }
 
-    suite("Panel 缺声恢复：默认组／工作区精确路由，只读修复复制并应用，失效目标失败关闭") {
+    suite("Panel 缺声恢复：默认组／工作区精确路由，只读包复制并应用，失效目标失败关闭") {
         guard
             let panel = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PanelView.swift"),
             let events = closureBody(after: "private var eventSection: some View", in: panel),
@@ -2880,13 +2880,13 @@ func runViewWiringSuites() {
                     "guard panelModel.selectedSoundScope == selectedScope.scope, "
                         + "!panelModel.config.selectedPack.isEmpty else { return }")
                 && wiring.contains(
-                    "if action == .repairSound && panelModel.selectedPackIsBuiltinReadOnly { "
+                    "if panelModel.selectedPackIsBuiltinReadOnly { "
                         + "onConfigureSound( .copyAndApply( scope: selectedScope.scope, "
                         + "packID: panelModel.config.selectedPack, event: event.event)) } else { "
                         + "onConfigureSound( .editEvent( scope: selectedScope.scope, "
                         + "packID: panelModel.config.selectedPack, event: event.event)) }")
                 && !wiring.contains("surface: nil"),
-            "只读内置包的修复须复制并用于当前组；其他恢复须精确编辑当前组的包与事件")
+            "只读内置包的未映射与损坏恢复须复制并用于当前组；可编辑包须精确编辑当前组的包与事件")
 
         let workspace = PanelSoundScopeID.workspace(
             UUID(uuidString: "61E452D2-5895-4D4C-BF22-D8B0A8FEB2E7")!)

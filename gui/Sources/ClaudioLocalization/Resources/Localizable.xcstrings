@@ -1670,13 +1670,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No sound is configured; bind audio in Sound Packs"
+            "value": "No sound is configured; bind audio on the Sounds page in Settings"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "尚未配置声音；请在声音包窗口中绑定音频"
+            "value": "尚未配置声音；请在设置的「声音」页绑定音频"
           }
         }
       }
@@ -1686,13 +1686,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mapped sound is missing or damaged; repair it in Sound Packs"
+            "value": "Mapped sound is missing or damaged; repair it on the Sounds page in Settings"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "映射的声音文件缺失或损坏；请在声音包窗口中修复"
+            "value": "映射的声音文件缺失或损坏；请在设置的「声音」页修复"
           }
         }
       }
@@ -1733,8 +1733,8 @@
     },
     "event.preview.playback-failed": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Playback could not start. Check the sound in Sound Packs." } },
-        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无法开始播放，请在声音中检查该声音文件。" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Playback could not start. Check the sound on the Sounds page in Settings." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无法开始播放，请在设置的「声音」页检查该声音文件。" } }
       }
     },
     "event.preview.adjust-group-volume": {
@@ -1745,8 +1745,8 @@
     },
     "event.preview.repair-sound": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Inspect sound in Sound Packs…" } },
-        "zh-Hans": { "stringUnit": { "state": "translated", "value": "在声音中检查该事件…" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Inspect in Settings > Sounds…" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "前往设置的「声音」页检查…" } }
       }
     },
     "event-notice.recent": {
