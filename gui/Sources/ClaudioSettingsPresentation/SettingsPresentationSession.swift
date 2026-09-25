@@ -148,6 +148,21 @@ package final class SettingsPresentationSession: ObservableObject {
                             || presentation.routeRequestRevision
                                 != previousPresentation.routeRequestRevision
                     {
+                        // A valid deep link hands selection to the Events destination. Keep the
+                        // shell in step when that owner deliberately selects another scope (for
+                        // example, Default Group after deletion), rather than revalidating the
+                        // deleted link forever on later config publications.
+                        if case .events(let requestedScope, _) = self.routeResolution.route,
+                            requestedScope == previousPresentation.route.scope,
+                            presentation.route.scope != previousPresentation.route.scope,
+                            presentation.route.unavailableRequestedScopeStoredValue == nil
+                        {
+                            self.routeResolution = resolveSettingsRoute(
+                                .events(
+                                    scope: presentation.route.scope,
+                                    event: presentation.route.event),
+                                availability: self.availability)
+                        }
                         self.activateEventsEditor(
                             eventPresentation: presentation,
                             aiSession: self.dependencies.aiCueViewModel.session,

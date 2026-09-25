@@ -151,6 +151,85 @@ func runWorkspaceDeletionPresentationSuites() {
     }
 
     #if DEBUG
+    suite("workspace delete session: a deep-linked deletion returns to the Default Group") {
+        withTempDirectory { root in
+            let rule = deletionPresentationRule()
+            let file = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs", isDirectory: true)
+            for id in ["default", "workspace"] {
+                writeFixture(
+                    "{\"id\":\"\(id)\",\"name\":\"\(id)\",\"events\":{}}",
+                    to: packs.appendingPathComponent("\(id)/manifest.json"))
+            }
+            try! JSONEncoder().encode(deletionPresentationConfig(rule: rule)).write(to: file)
+            let model = PanelConfigController(
+                configFile: file, lockFile: root.appendingPathComponent("config.lock"),
+                environment: makeAudioImportEnvironment(userPacksDirectory: packs))
+            let fixture = SettingsPresentationFixtures.generalLogin(
+                route: .events(scope: .workspace(rule.id), event: .stop),
+                workspaceRules: [rule], eventSettingsModel: model)
+            let selection = fixture.eventSettingsSelection
+            expect(
+                fixture.session.state.routeResolution.failure == nil
+                    && selection.route.scope == .workspace(rule.id),
+                "the live settings session must accept the Workspace deep link")
+            expect(selection.requestDeletion(of: rule), "request captures the deep-linked rule")
+            let request = selection.deletionPresentation.pending!
+            expect(selection.consumeDeletion(request), "confirmation consumes exactly once")
+            let succeeded = model.changeWorkspace(.remove(request.target))
+            expect(succeeded, "the normal config writer must remove the requested rule")
+            let selectedDefault = selection.finishDeletion(
+                request, succeeded: succeeded, error: model.workspaceError,
+                configState: model.configState)
+            if selectedDefault { model.selectSoundScope(.global) }
+            expect(
+                selectedDefault && selection.route.scope == .global
+                    && fixture.session.state.routeResolution.failure == nil
+                    && selection.deletionPresentation.feedback == .succeeded(request.target)
+                    && selection.presentationState.focusTarget == .workspaceDeleteResult,
+                "config publication must not leave the shell on the removed deep link")
+            model.reload()
+            expect(
+                fixture.session.state.routeResolution.failure == nil
+                    && selection.route.scope == .global,
+                "later config readback must keep the successful Default Group destination")
+        }
+    }
+
+    suite("workspace scope handoff: explicit selection cannot mask an unavailable request") {
+        let rule = deletionPresentationRule()
+        let available = SettingsRouteAvailability(
+            integrationSurfaces: Set(HostID.productVisibleCases.map(\.surfaceID)),
+            eventScopes: [.global], soundScopes: [.global], soundPackIDs: [],
+            events: Set(Event.allCases))
+        for selectsDefault in [false, true] {
+            let fixture = SettingsPresentationFixtures.generalLogin(
+                route: .events(scope: .workspace(rule.id), event: .stop),
+                workspaceRules: [rule])
+            if selectsDefault {
+                fixture.eventSettingsSelection.select(EventSettingsWindowRoute(scope: .global))
+            }
+            fixture.session.replaceAvailabilityForTesting(available)
+            expect(
+                (fixture.session.state.routeResolution.failure == nil) == selectsDefault,
+                "removing the original target keeps failure unless the user already selected Default Group"
+            )
+        }
+
+        let fixture = SettingsPresentationFixtures.generalLogin(
+            route: .events(scope: .workspace(rule.id), event: .stop),
+            workspaceRules: [rule])
+        let missingScope = PanelSoundScopeID.workspace(UUID())
+        let rejectedRoute = SettingsRoute.events(scope: missingScope, event: .stop)
+        _ = fixture.session.send(.route(rejectedRoute))
+        let rejectedResolution = fixture.session.state.routeResolution
+        expect(rejectedResolution.failure != nil, "an unknown Workspace request must be rejected")
+        fixture.eventSettingsSelection.select(EventSettingsWindowRoute(scope: .global))
+        expect(
+            fixture.session.state.routeResolution == rejectedResolution,
+            "a retained child cannot replace the failure for a different requested Workspace")
+    }
+
     suite("workspace delete mounted Events: confirmation and failure survive unavailable details") {
         let rule = deletionPresentationRule()
         let fixture = SettingsPresentationFixtures.generalLogin(
