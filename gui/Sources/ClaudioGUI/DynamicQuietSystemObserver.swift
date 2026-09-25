@@ -43,21 +43,21 @@ final class DynamicQuietSystemObserver: NSObject {
             },
             requestFocusAuthorization: { completion in
                 // This closure is reached only from the user's explicit Focus off -> on change.
-                notificationCenter.requestAuthorization(options: [.alert]) { _, _ in
-                    focusCenter.requestAuthorization { focusAuthorization in
-                        notificationCenter.getNotificationSettings { settings in
-                            Task { @MainActor in
+                notificationCenter.requestAuthorization(options: [.alert]) { @Sendable _, _ in
+                    focusCenter.requestAuthorization { @Sendable focusAuthorization in
+                        notificationCenter.getNotificationSettings(
+                            completionHandler: notificationSettingsCallback { authorizationStatus in
                                 notificationAuthorization.value =
                                     focusQuietNotificationAuthorization(
-                                        settings.authorizationStatus)
+                                        UNAuthorizationStatus(rawValue: authorizationStatus)
+                                            ?? .denied)
                                 completion(
                                     focusQuietSystemState(
                                         center: focusCenter,
                                         notificationAuthorization:
                                             notificationAuthorization.value,
                                         focusAuthorizationOverride: focusAuthorization))
-                            }
-                        }
+                            })
                     }
                 }
             },
@@ -116,13 +116,25 @@ final class DynamicQuietSystemObserver: NSObject {
     }
 
     @objc private func refreshDynamicQuietState() {
-        notificationCenter.getNotificationSettings { [weak self] settings in
-            Task { @MainActor in
+        notificationCenter.getNotificationSettings(
+            completionHandler: notificationSettingsCallback { [weak self] authorizationStatus in
                 guard let self else { return }
                 self.notificationAuthorization.value = focusQuietNotificationAuthorization(
-                    settings.authorizationStatus)
+                    UNAuthorizationStatus(rawValue: authorizationStatus) ?? .denied)
                 self.policy.refresh()
-            }
+            })
+    }
+}
+
+/// UserNotifications invokes this completion on its own queue. Convert its non-Sendable settings
+/// object to a Sendable raw status before entering the MainActor.
+private nonisolated func notificationSettingsCallback(
+    _ deliver: @escaping @MainActor @Sendable (Int) -> Void
+) -> @Sendable (UNNotificationSettings) -> Void {
+    { @Sendable settings in
+        let authorizationStatus = settings.authorizationStatus.rawValue
+        Task { @MainActor in
+            deliver(authorizationStatus)
         }
     }
 }
