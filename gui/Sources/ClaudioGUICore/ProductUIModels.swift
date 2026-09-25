@@ -298,10 +298,27 @@ public struct SoundPacksWindowRoute: Sendable, Equatable, Hashable {
     public let scope: PanelSoundScopeID
     public var surface: HostSurfaceID? { scope.surface }
     public let destination: Destination
+    /// A deep link may pin the directory selected when the action was created. A later UUID
+    /// rebind must not turn that link into an edit of a different workspace.
+    public let workspaceTarget: WorkspaceSoundWriteTarget?
 
-    public init(scope: PanelSoundScopeID, destination: Destination) {
+    public init(
+        scope: PanelSoundScopeID,
+        destination: Destination,
+        workspaceTarget: WorkspaceSoundWriteTarget? = nil
+    ) {
         self.scope = scope
         self.destination = destination
+        self.workspaceTarget = workspaceTarget
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(scope)
+        hasher.combine(destination)
+        hasher.combine(workspaceTarget?.id)
+        hasher.combine(workspaceTarget?.directory.kind.rawValue)
+        hasher.combine(workspaceTarget?.directory.path)
+        hasher.combine(workspaceTarget?.directory.commonGitDirectory)
     }
 
     /// Retained source routes are rejected downstream; `nil` means Default Group.
@@ -317,8 +334,12 @@ public struct SoundPacksWindowRoute: Sendable, Equatable, Hashable {
         SoundPacksWindowRoute(surface: surface, destination: .overview)
     }
 
-    public static func overview(scope: PanelSoundScopeID) -> SoundPacksWindowRoute {
-        SoundPacksWindowRoute(scope: scope, destination: .overview)
+    public static func overview(
+        scope: PanelSoundScopeID,
+        workspaceTarget: WorkspaceSoundWriteTarget? = nil
+    ) -> SoundPacksWindowRoute {
+        SoundPacksWindowRoute(
+            scope: scope, destination: .overview, workspaceTarget: workspaceTarget)
     }
 
     public static func editEvent(packID: String, event: Event) -> SoundPacksWindowRoute {
@@ -328,11 +349,13 @@ public struct SoundPacksWindowRoute: Sendable, Equatable, Hashable {
     public static func editEvent(
         scope: PanelSoundScopeID,
         packID: String,
-        event: Event
+        event: Event,
+        workspaceTarget: WorkspaceSoundWriteTarget? = nil
     ) -> SoundPacksWindowRoute {
         SoundPacksWindowRoute(
             scope: scope,
-            destination: .editEvent(packID: packID, event: event))
+            destination: .editEvent(packID: packID, event: event),
+            workspaceTarget: workspaceTarget)
     }
 
     public static func editEvent(
@@ -355,11 +378,13 @@ public struct SoundPacksWindowRoute: Sendable, Equatable, Hashable {
     public static func copyAndApply(
         scope: PanelSoundScopeID,
         packID: String,
-        event: Event
+        event: Event,
+        workspaceTarget: WorkspaceSoundWriteTarget? = nil
     ) -> SoundPacksWindowRoute {
         SoundPacksWindowRoute(
             scope: scope,
-            destination: .copyAndApply(packID: packID, event: event))
+            destination: .copyAndApply(packID: packID, event: event),
+            workspaceTarget: workspaceTarget)
     }
 
     public static func copyAndApply(
@@ -403,7 +428,9 @@ public func resolveSoundPacksWindowRoute(
 ) -> SoundPacksWindowRouteResolution {
     guard let packID = route.editTarget?.packID else { return .resolved(route) }
     if availablePackIDs.contains(packID) { return .resolved(route) }
-    if libraryState == .ready { return .resolved(.overview(scope: route.scope)) }
+    if libraryState == .ready {
+        return .resolved(.overview(scope: route.scope, workspaceTarget: route.workspaceTarget))
+    }
     return .pending(route)
 }
 

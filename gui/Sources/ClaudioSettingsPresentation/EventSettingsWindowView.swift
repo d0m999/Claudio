@@ -182,11 +182,11 @@ struct EventSettingsWindowView: View {
                             )
                             .settingsMountIdentity("workspace.event.preview-failure-readback")
                             Button(l10n.text(.eventPreviewRepairSound)) {
-                                onConfigureSound(
-                                    soundRepairRoute(
-                                        scope: failure.scope, packID: failure.packID,
-                                        event: failure.event,
-                                        readOnly: failure.sourcePackReadOnly))
+                                openSoundRepair(
+                                    scope: failure.scope, packID: failure.packID,
+                                    event: failure.event,
+                                    readOnly: failure.sourcePackReadOnly,
+                                    workspaceTarget: failure.workspaceTarget)
                             }
                             .accessibilityIdentifier("workspace.event.preview-failure-repair")
                         }
@@ -222,7 +222,7 @@ struct EventSettingsWindowView: View {
                                 ForEach(events) { event in eventRow(event) }
                             }
                             Button(l10n.text(.eventSettingsManageSounds)) {
-                                onConfigureSound(.overview(scope: selection.route.scope))
+                                openSoundOverview(scope: selection.route.scope)
                             }
                         } else {
                             Text(l10n.text(.workspaceUnavailable)).foregroundColor(.secondary)
@@ -404,7 +404,7 @@ struct EventSettingsWindowView: View {
 
     private var soundControls: some View {
         let scope = selection.route.scope
-        let workspaceTarget = rule.map { WorkspaceSoundWriteTarget(rule: $0) }
+        let workspaceTarget = model.selectedWorkspaceTarget
         return VStack(alignment: .leading, spacing: 14) {
             Picker(
                 l10n.text(.panelSoundPackLabel),
@@ -413,7 +413,7 @@ struct EventSettingsWindowView: View {
                     set: {
                         guard model.selectedSoundScope == scope else { return }
                         let retry = EventSettingsWriteRetry(
-                            scope: scope, workspaceDirectory: rule?.directory,
+                            scope: scope, workspaceDirectory: workspaceTarget?.directory,
                             operation: .pack(before: model.config.selectedPack, requested: $0))
                         selection.clearConflictReadback()
                         _ = model.switchPack(to: $0)
@@ -565,7 +565,7 @@ struct EventSettingsWindowView: View {
                 identifierPrefix: "workspace.write.recovery-file")
             if error == .invalidPack {
                 Button(l10n.text(.eventSettingsManageSounds)) {
-                    onConfigureSound(.overview(scope: selection.route.scope))
+                    openSoundOverview(scope: selection.route.scope)
                 }
             }
             if error == .lockBusy, canRetryCurrentWrite {
@@ -837,7 +837,8 @@ struct EventSettingsWindowView: View {
                         set: { _ in
                             guard model.selectedSoundScope == scope else { return }
                             let retry = EventSettingsWriteRetry(
-                                scope: scope, workspaceDirectory: rule?.directory,
+                                scope: scope,
+                                workspaceDirectory: model.selectedWorkspaceTarget?.directory,
                                 operation: .event(
                                     event.event, before: model.config.isEnabled(event.event)))
                             selection.clearConflictReadback()
@@ -894,18 +895,41 @@ struct EventSettingsWindowView: View {
 
     private func configureSound(_ event: Event, scope: PanelSoundScopeID) {
         guard model.selectedSoundScope == scope, selection.route.scope == scope else { return }
-        onConfigureSound(
-            soundRepairRoute(
-                scope: scope, packID: model.config.selectedPack, event: event,
-                readOnly: model.selectedPackIsBuiltinReadOnly))
+        openSoundRepair(
+            scope: scope, packID: model.config.selectedPack, event: event,
+            readOnly: model.selectedPackIsBuiltinReadOnly,
+            workspaceTarget: model.selectedWorkspaceTarget)
     }
 
-    private func soundRepairRoute(
-        scope: PanelSoundScopeID, packID: String, event: Event, readOnly: Bool
-    ) -> SoundPacksWindowRoute {
-        readOnly
-            ? .copyAndApply(scope: scope, packID: packID, event: event)
-            : .editEvent(scope: scope, packID: packID, event: event)
+    private func openSoundOverview(scope: PanelSoundScopeID) {
+        guard model.selectedSoundScope == scope, selection.route.scope == scope else { return }
+        let target = model.selectedWorkspaceTarget
+        guard scope.workspaceID == nil || target?.id == scope.workspaceID else {
+            onAnnouncement(localizedWorkspaceError(.staleRule, language: languageStore.language))
+            return
+        }
+        onConfigureSound(.overview(scope: scope, workspaceTarget: target))
+    }
+
+    private func openSoundRepair(
+        scope: PanelSoundScopeID,
+        packID: String,
+        event: Event,
+        readOnly: Bool,
+        workspaceTarget: WorkspaceSoundWriteTarget?
+    ) {
+        guard scope.workspaceID == nil || workspaceTarget?.id == scope.workspaceID else {
+            onAnnouncement(localizedWorkspaceError(.staleRule, language: languageStore.language))
+            return
+        }
+        onConfigureSound(
+            readOnly
+                ? .copyAndApply(
+                    scope: scope, packID: packID, event: event,
+                    workspaceTarget: workspaceTarget)
+                : .editEvent(
+                    scope: scope, packID: packID, event: event,
+                    workspaceTarget: workspaceTarget))
     }
 
     private func reportPreviewFailure(
@@ -918,7 +942,8 @@ struct EventSettingsWindowView: View {
         guard
             selection.notePreviewFailure(
                 event: event, scope: scope, packID: packID, reason: reason,
-                sourcePackReadOnly: sourcePackReadOnly)
+                sourcePackReadOnly: sourcePackReadOnly,
+                workspaceTarget: model.selectedWorkspaceTarget)
         else { return }
         let message = localizedEventPreviewAttemptFailure(reason, language: languageStore.language)
         onAnnouncement(message)

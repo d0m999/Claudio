@@ -560,7 +560,17 @@ package final class SoundPacksWindowModel {
         managedScopeFailureReason == nil
             && (managedScope.workspaceID == nil || workspacePackWriter != nil)
     }
+    private var managedWorkspaceTargetIsCurrent: Bool {
+        guard case .workspace(let id) = managedScope else { return true }
+        guard let target = managedWorkspacePackTarget, target.id == id,
+            let rule = baseConfig.workspaceRules.first(where: { $0.id == id })
+        else { return false }
+        return target.directory == rule.directory
+    }
     package var managedScopeFailureStatusText: SoundPacksWindowStatusText? {
+        if managedScope.workspaceID != nil, !managedWorkspaceTargetIsCurrent {
+            return .localized(.workspaceUnavailable)
+        }
         if case .workspace(let id) = managedScope,
             case .failure(let error) = baseConfig.resolveWorkspaceProfile(id: id)
         {
@@ -931,15 +941,23 @@ package final class SoundPacksWindowModel {
         setManagedScope(surface.map(PanelSoundScopeID.surface) ?? .global)
     }
 
-    package func setManagedScope(_ scope: PanelSoundScopeID) {
-        guard managedScope != scope || managedScopeFailureReason != nil else { return }
+    package func setManagedScope(
+        _ scope: PanelSoundScopeID,
+        workspaceTarget: WorkspaceSoundWriteTarget? = nil,
+        rebindSelectedWorkspace: Bool = false
+    ) {
+        let scopeChanged = managedScope != scope
         managedScope = scope
         #if DEBUG
         // State-gallery models retain their injected projection across typed route activation;
         // reading the sentinel /dev/null URL would turn a no-I/O fixture into a false missing state.
         if isStateGalleryFixture {
             configState = .operational(baseConfig)
-            captureManagedWorkspacePackTarget()
+            if let workspaceTarget {
+                managedWorkspacePackTarget = workspaceTarget
+            } else if scopeChanged || rebindSelectedWorkspace {
+                captureManagedWorkspacePackTarget()
+            }
             applyManagedScopeConfig()
             if packCards.contains(where: { $0.id == config.selectedPack }) {
                 selectedPackID = config.selectedPack
@@ -950,7 +968,11 @@ package final class SoundPacksWindowModel {
         let loadedState = loadPanelConfig(from: configFile)
         configState = loadedState
         baseConfig = loadedState.resolvedConfig
-        captureManagedWorkspacePackTarget()
+        if let workspaceTarget {
+            managedWorkspacePackTarget = workspaceTarget
+        } else if scopeChanged || rebindSelectedWorkspace {
+            captureManagedWorkspacePackTarget()
+        }
         applyManagedScopeConfig()
         reload(followActivePack: true, refreshSoundPackLibrary: false)
     }
@@ -1874,6 +1896,16 @@ package final class SoundPacksWindowModel {
         if case .surface(let surface) = managedScope {
             managedScopeFailureReason =
                 "未知声音作用域 \(surface.rawValue)，已停止写入；不会回退到 Global。"
+            var failed = baseConfig
+            failed.selectedPack = ""
+            failed.eventsEnabled = Dictionary(
+                uniqueKeysWithValues: Event.allCases.map { ($0.cliName, false) })
+            config = failed
+            return
+        }
+        if managedScope.workspaceID != nil, !managedWorkspaceTargetIsCurrent {
+            managedScopeFailureReason =
+                "工作区目录已变更；已停止该来源写入，不会回退到 Global。"
             var failed = baseConfig
             failed.selectedPack = ""
             failed.eventsEnabled = Dictionary(

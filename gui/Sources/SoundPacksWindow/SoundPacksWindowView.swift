@@ -436,6 +436,9 @@ private struct SoundPacksWindowContentView: View {
 
     private var localizedManagedScopeFailure: String? {
         guard case .unavailable = activeSounds.scope else { return nil }
+        if case .workspace = activeSounds.route.scope {
+            return l10n.text(.workspaceUnavailable)
+        }
         return l10n.format(.soundPacksDamagedScope, managedScopeName)
     }
 

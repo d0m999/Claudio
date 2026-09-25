@@ -137,6 +137,7 @@ if CommandLine.arguments.contains("--workspace-sounds") {
     await runPanelPresentationSuites()
     runPanelConfigControllerSuites()
     runWorkspaceSoundPresentationSuites()
+    runSoundPacksEditorOwnerSuites()
     runSurfaceSoundIssueLifecycleSuites()
     runSettingsNavigationSuites()
     runAICuePackScopedSuites()

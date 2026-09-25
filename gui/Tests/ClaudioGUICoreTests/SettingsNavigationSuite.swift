@@ -235,6 +235,24 @@ func runSettingsNavigationSuites() {
                 route, availablePackIDs: [], libraryState: .ready)
                 == .resolved(.overview(scope: .workspace(id))),
             "缺包降级仍须保留工作区目标")
+        let originalTarget = WorkspaceSoundWriteTarget(
+            id: id, directory: WorkspaceDirectory(kind: .directory, path: "/tmp/workspace-a"))
+        let reboundTarget = WorkspaceSoundWriteTarget(
+            id: id, directory: WorkspaceDirectory(kind: .directory, path: "/tmp/workspace-b"))
+        let anchored = SoundPacksWindowRoute.copyAndApply(
+            scope: .workspace(id), packID: "source-pack", event: .stop,
+            workspaceTarget: originalTarget)
+        let rebound = SoundPacksWindowRoute.copyAndApply(
+            scope: .workspace(id), packID: "source-pack", event: .stop,
+            workspaceTarget: reboundTarget)
+        expect(
+            Set([anchored, rebound]).count == 2
+                && resolveSoundPacksWindowRoute(
+                    anchored, availablePackIDs: [], libraryState: .ready)
+                    == .resolved(.overview(scope: .workspace(id), workspaceTarget: originalTarget))
+                && SettingsRoute.sounds(anchored).stableIdentityComponents
+                    == SettingsRoute.sounds(rebound).stableIdentityComponents,
+            "同 UUID 的目录目标须独立哈希并在缺包回退中保留，不将本地路径放进稳定导航身份")
         let available = SettingsRouteAvailability(
             integrationSurfaces: [], eventScopes: [.global, .workspace(id)],
             soundScopes: [.global, .workspace(id)], soundPackIDs: ["source-pack"],

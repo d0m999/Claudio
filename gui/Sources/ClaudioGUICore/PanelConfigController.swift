@@ -107,6 +107,10 @@ public final class PanelConfigController: ObservableObject {
         if let selectedSurface { return .surface(selectedSurface) }
         return .global
     }
+    /// The directory pinned by the last explicit selection, even after a stale config readback.
+    public var selectedWorkspaceTarget: WorkspaceSoundWriteTarget? {
+        selectedWorkspaceWriteTarget
+    }
     public var workspaceRules: [WorkspaceSoundRule] { baseConfig.workspaceRules }
     public var workspaceRulesMalformed: Bool { baseConfig.workspaceRulesMalformed }
     public var allSoundPacks: [PackCard] {

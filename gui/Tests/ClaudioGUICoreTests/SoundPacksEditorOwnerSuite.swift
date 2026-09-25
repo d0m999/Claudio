@@ -1,9 +1,150 @@
 import ClaudioCore
 import ClaudioGUICore
+import ClaudioSettingsPresentation
 import Foundation
 
 @MainActor
 func runSoundPacksEditorOwnerSuites() {
+    suite("SoundPacks editor route：试听失败保留旧目录，激活时拒绝同 UUID 换绑") {
+        withTempDirectory { root in
+            let file = root.appendingPathComponent("config.json")
+            let lock = root.appendingPathComponent("config.lock")
+            let packs = root.appendingPathComponent("packs", isDirectory: true)
+            for id in ["default-pack", "workspace-pack", "next-pack"] {
+                writeFixture(
+                    "{\"id\":\"\(id)\",\"name\":\"\(id)\",\"events\":{}}",
+                    to: packs.appendingPathComponent("\(id)/manifest.json"))
+            }
+            let original = WorkspaceSoundRule(
+                directory: WorkspaceDirectory(
+                    kind: .directory, path: root.appendingPathComponent("before").path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "workspace-pack", volume: 0.7))
+            var config = ClaudioConfig(selectedPack: "default-pack", masterVolume: 0.2)
+            config.workspaceRules = [original]
+            try! JSONEncoder().encode(config).write(to: file)
+            let environment = makeAudioImportEnvironment(userPacksDirectory: packs)
+            let controller = PanelConfigController(
+                configFile: file, lockFile: lock, environment: environment)
+            controller.selectSoundScope(.workspace(original.id))
+            let selection = EventSettingsWindowSelection(
+                route: EventSettingsWindowRoute(scope: .workspace(original.id)))
+            expect(
+                selection.notePreviewFailure(
+                    event: .stop, scope: .workspace(original.id), packID: "workspace-pack",
+                    reason: .assetChanged, sourcePackReadOnly: true,
+                    workspaceTarget: controller.selectedWorkspaceTarget),
+                "试听失败须记录当时选中的目录身份")
+            let captured = selection.previewFailure?.workspaceTarget
+            expect(captured == WorkspaceSoundWriteTarget(rule: original), "失败事实不得只保留 UUID")
+
+            let replacement = WorkspaceSoundRule(
+                id: original.id,
+                directory: WorkspaceDirectory(
+                    kind: .directory, path: root.appendingPathComponent("after").path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "workspace-pack", volume: 0.7))
+            config.workspaceRules = [replacement]
+            try! JSONEncoder().encode(config).write(to: file)
+            controller.reload()
+            expect(
+                captured == selection.previewFailure?.workspaceTarget
+                    && controller.selectedWorkspaceTarget == captured,
+                "延迟修复与面板已选目标均不得被读回的新目录替换")
+
+            let owner = SoundPacksEditorOwner(
+                configFile: file, lockFile: lock, environment: environment,
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+            owner.configureWorkspacePackWriter { target, packID in
+                controller.changeWorkspace(.pack(target, packID))
+                    ? .success(()) : .failure(controller.workspaceError ?? .configFailure)
+            }
+            let delayedRoute = SoundPacksWindowRoute.copyAndApply(
+                scope: .workspace(original.id), packID: "workspace-pack", event: .stop,
+                workspaceTarget: captured)
+            _ = owner.send(.activate(.sounds(route: delayedRoute, requestRevision: 1)))
+            guard case .sounds(let rejected) = owner.presentation.mode else {
+                expect(false, "Sounds 激活必须交付失败态")
+                return
+            }
+            expect(
+                rejected.route == delayedRoute
+                    && rejected.scope
+                        == .unavailable(
+                            scope: .workspace(original.id), reason: .scopeUnavailable)
+                    && rejected.packs.allSatisfy {
+                        $0.useAction == nil && $0.copyAndApplyAction == nil
+                    }
+                    && loadClaudioConfig(from: file)?.selectedPack == "default-pack"
+                    && loadClaudioConfig(from: file)?.workspaceRules.first?.profile?.selectedPack
+                        == "workspace-pack",
+                "旧深链激活不得捕获新目录、签发应用写入或改写默认组")
+
+            let pinnedOverview = SoundPacksWindowRoute.overview(
+                scope: .workspace(original.id), workspaceTarget: captured)
+            _ = owner.send(.activate(.sounds(route: pinnedOverview, requestRevision: 2)))
+            guard case .sounds(let rejectedOverview) = owner.presentation.mode else {
+                expect(false, "Events 概览激活必须交付失败态")
+                return
+            }
+            expect(
+                rejectedOverview.scope
+                    == .unavailable(
+                        scope: .workspace(original.id), reason: .scopeUnavailable)
+                    && rejectedOverview.packs.allSatisfy { $0.useAction == nil },
+                "来自旧工作区的 Events 概览也不能换绑并签发使用动作")
+
+            _ = owner.send(
+                .activate(
+                    .sounds(
+                        route: .overview(scope: .workspace(original.id)), requestRevision: 3)))
+            guard case .sounds(let repeated) = owner.presentation.mode else {
+                expect(false, "重复概览请求必须交付 Sounds")
+                return
+            }
+            expect(
+                repeated.scope
+                    == .unavailable(
+                        scope: .workspace(original.id), reason: .scopeUnavailable),
+                "普通重复导航即使 revision 改变，也不能接受同 UUID 新目录")
+
+            controller.selectSoundScope(
+                .workspace(original.id), rebindSelectedWorkspace: true)
+            let reselectedRoute = SoundPacksWindowRoute.overview(
+                scope: .workspace(original.id),
+                workspaceTarget: controller.selectedWorkspaceTarget)
+            _ = owner.send(.activate(.sounds(route: reselectedRoute, requestRevision: 4)))
+            guard case .sounds(let rebound) = owner.presentation.mode else {
+                expect(false, "显式工作区重选必须交付 Sounds")
+                return
+            }
+            expect(
+                rebound.scope == .available(.workspace(original.id)),
+                "用户显式重选同 UUID 后，新目录锚点才能恢复编辑")
+            _ = owner.send(.activate(.sounds(route: delayedRoute, requestRevision: 5)))
+            guard case .sounds(let oldAgain) = owner.presentation.mode else {
+                expect(false, "旧深链再次激活必须交付 Sounds")
+                return
+            }
+            expect(
+                oldAgain.scope
+                    == .unavailable(
+                        scope: .workspace(original.id), reason: .scopeUnavailable),
+                "显式重选后再次使用旧链接仍须拒绝原目录身份")
+            let currentRoute = SoundPacksWindowRoute.editEvent(
+                scope: .workspace(original.id), packID: "workspace-pack", event: .stop,
+                workspaceTarget: WorkspaceSoundWriteTarget(rule: replacement))
+            _ = owner.send(.activate(.sounds(route: currentRoute, requestRevision: 6)))
+            guard case .sounds(let current) = owner.presentation.mode else {
+                expect(false, "新目录深链必须交付 Sounds")
+                return
+            }
+            expect(
+                current.scope == .available(.workspace(original.id)),
+                "新选择生成的目录锚点可安全进入编辑器")
+        }
+    }
+
     suite("SoundPacks editor owner：Events 切包只在真实成功后刷新共享编辑器") {
         withTempDirectory { root in
             let coordinator = SoundPacksRefreshCoordinator()

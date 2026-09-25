@@ -9,6 +9,7 @@ package struct EventSettingsPreviewFailure: Equatable {
     package let event: Event
     package let reason: EventPreviewAttemptFailure
     package let sourcePackReadOnly: Bool
+    package let workspaceTarget: WorkspaceSoundWriteTarget?
 }
 
 /// Keeps the typed failed write available when a requested conflict readback cannot establish
@@ -307,14 +308,15 @@ package final class EventSettingsWindowSelection: ObservableObject {
         scope: PanelSoundScopeID,
         packID: String,
         reason: EventPreviewAttemptFailure,
-        sourcePackReadOnly: Bool = false
+        sourcePackReadOnly: Bool = false,
+        workspaceTarget: WorkspaceSoundWriteTarget? = nil
     ) -> Bool {
         guard storage.route.scope == scope,
             storage.route.unavailableRequestedScopeStoredValue == nil
         else { return false }
         previewFailure = EventSettingsPreviewFailure(
             scope: scope, packID: packID, event: event, reason: reason,
-            sourcePackReadOnly: sourcePackReadOnly)
+            sourcePackReadOnly: sourcePackReadOnly, workspaceTarget: workspaceTarget)
         return true
     }
 

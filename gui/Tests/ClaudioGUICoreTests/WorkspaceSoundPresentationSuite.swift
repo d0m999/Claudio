@@ -140,9 +140,19 @@ func runWorkspaceSoundPresentationSuites() {
             config.workspaceRules = [replacement]
             try! JSONEncoder().encode(config).write(to: file)
             controller.reload()
+            model.reload(followActivePack: false)
+            expect(
+                !model.writesAllowed && model.config.selectedPack.isEmpty
+                    && model.managedScopeFailureStatusText?.resolve(language: .english)
+                        == localizedWorkspaceError(.staleRule, language: .english),
+                "声音编辑读回同 UUID 新目录后须立即停写并显示本地化失效说明")
+            model.setManagedScope(.workspace(original.id))
+            expect(!model.writesAllowed, "普通重复激活不得暗中换绑编辑目标")
             expect(
                 controller.workspaceError == .staleRule
-                    && controller.config.selectedPack.isEmpty,
+                    && controller.config.selectedPack.isEmpty
+                    && controller.selectedWorkspaceTarget
+                        == WorkspaceSoundWriteTarget(rule: original),
                 "外部读回换绑不得自动接受新目录")
             expect(
                 controller.switchPack(to: "next-pack") != .succeeded
@@ -167,8 +177,9 @@ func runWorkspaceSoundPresentationSuites() {
                     && controller.workspaceError == .staleRule,
                 "适用来源不得写换绑目录")
             expect(
-                model.useSelectedPack() == .failure(.workspace(.staleRule)),
-                "使用按钮不能写同 UUID 的新目录")
+                model.useSelectedPack()
+                    == .failure(.writesStopped(statusText: .localized(.workspaceUnavailable))),
+                "使用按钮须在读回失效时停写同 UUID 的新目录")
             guard case .success(let copy) = model.copySelectedPack() else {
                 expect(false, "复制应先独立成功")
                 return
@@ -176,8 +187,9 @@ func runWorkspaceSoundPresentationSuites() {
             expect(
                 model.applyPackSelection(
                     copy.newPackID, toScope: .workspace(original.id),
-                    allowFreshlyPublishedPack: true) == .failure(.workspace(.staleRule)),
-                "副本应用不能写同 UUID 的新目录")
+                    allowFreshlyPublishedPack: true)
+                    == .failure(.writesStopped(statusText: .localized(.workspaceUnavailable))),
+                "副本应用须在读回失效时停写同 UUID 的新目录")
             let readback = loadClaudioConfig(from: file)!
             expect(
                 readback.selectedPack == "default-pack"
@@ -196,6 +208,19 @@ func runWorkspaceSoundPresentationSuites() {
                     && controller.setVolume(0.8, for: .workspace(original.id)) == 0.8
                     && loadClaudioConfig(from: file)?.workspaceRules.first?.profile?.volume == 0.8,
                 "用户显式重新选择后可编辑当前目录")
+            model.setManagedScope(
+                .workspace(original.id), rebindSelectedWorkspace: true)
+            expect(
+                model.writesAllowed && model.config.selectedPack == "workspace-pack"
+                    && model.managedScopeFailureStatusText == nil,
+                "声音编辑显式重选同一 UUID 后才绑定当前目录")
+            expect(
+                model.applyPackSelection("next-pack", toScope: .workspace(original.id))
+                    == .success(.selected(packID: "next-pack"))
+                    && loadClaudioConfig(from: file)?.workspaceRules.first?.profile?.selectedPack
+                        == "next-pack"
+                    && loadClaudioConfig(from: file)?.selectedPack == "default-pack",
+                "重选后的包写入当前目录，默认组保持原值")
         }
     }
     suite("工作区控制器：独立配置、失败原值、失效路由和延迟音量目标") {

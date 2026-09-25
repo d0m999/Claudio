@@ -265,7 +265,9 @@ package final class SoundPacksEditorOwner: ObservableObject {
                 publish(from: model.editorProjectionSeed())
             case .sounds(let route, _):
                 let (_, seed) = captureModelTransition {
-                    model.setManagedScope(route.scope)
+                    model.setManagedScope(
+                        route.scope,
+                        workspaceTarget: route.workspaceTarget)
                     let seed = model.editorProjectionSeed()
                     if case .ready = seed.library,
                         let packID = route.editTarget?.packID,
@@ -2279,7 +2281,8 @@ package final class SoundPacksEditorOwner: ObservableObject {
             copyAction: allowsCopy && seed.library.isFresh && isAvailable && !isBroken
                 && isInspected && !hasBusyOperation
                 ? makeAction(.copy, binding: .copy(packID: card.id), seed: seed) : nil,
-            copyAndApplyAction: allowsCopyAndApply && seed.library.isFresh && isAvailable
+            copyAndApplyAction: allowsCopyAndApply && seed.library.isFresh && seed.writesAllowed
+                && isAvailable
                 && !isBroken && isInspected && !hasBusyOperation
                 ? makeAction(
                     .copyAndApply,
