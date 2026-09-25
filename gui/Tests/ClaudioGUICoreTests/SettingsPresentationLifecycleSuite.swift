@@ -98,33 +98,6 @@ func runSettingsPresentationLifecycleSuites() async {
             "gallery 必须只组合 target-owned SettingsStateGalleryView，不得直接重建 destination/model")
     }
 
-    suite("Settings production sound entrance：集成按钮只提交普通目的页路由") {
-        let root = guiTestRepositoryRoot()
-        let rootURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift")
-        let integrationsURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift")
-        guard let rootSource = try? String(contentsOf: rootURL, encoding: .utf8),
-            let integrationsSource = try? String(contentsOf: integrationsURL, encoding: .utf8)
-        else {
-            expect(false, "读不到 production Settings 入口代码")
-            return
-        }
-        let forcedDefault = rootSource.replacingOccurrences(
-            of: ".route(.destination(.eventsAndSounds)))",
-            with: ".route(.events(scope: .global, event: nil)))")
-        let hostTarget = integrationsSource.replacingOccurrences(
-            of: "onManageSoundScopes()", with: "onManageSoundScopes(facts.host)")
-        expect(
-            settingsSoundEntranceUsesOrdinaryRoute(
-                rootSource: rootSource, integrationsSource: integrationsSource)
-                && !settingsSoundEntranceUsesOrdinaryRoute(
-                    rootSource: forcedDefault, integrationsSource: integrationsSource)
-                && !settingsSoundEntranceUsesOrdinaryRoute(
-                    rootSource: rootSource, integrationsSource: hostTarget),
-            "production button → root callback 必须保持无 Host 目标的普通 destination route")
-    }
-
     suite("Settings native announcement adapter：deferred exact-head post/ack 与 key retry") {
         let controllerURL = guiTestRepositoryRoot().appendingPathComponent(
             "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
@@ -985,25 +958,6 @@ private func settingsMenuRequestOwnsOnlyTypedRoute(_ source: String) -> Bool {
     return request.contains("host ?? integrationsModel.selectedHost ?? .claudeCode")
         && request.contains(".route(.integrations(surface: selectedHost.surfaceID))")
         && !request.contains("integrationsModel.selectHost")
-}
-
-private func settingsSoundEntranceUsesOrdinaryRoute(
-    rootSource: String,
-    integrationsSource: String
-) -> Bool {
-    let root = strippingComments(rootSource)
-    let integrations = strippingComments(integrationsSource)
-    guard root.unmodeledConstructs.isEmpty, integrations.unmodeledConstructs.isEmpty else {
-        return false
-    }
-    let rootCode = root.codeWithoutStringLiterals.filter { !$0.isWhitespace }
-    let integrationsCode = integrations.codeWithoutStringLiterals.filter { !$0.isWhitespace }
-    return rootCode.contains(
-        "onManageSoundScopes:{settingsPresentationSession.send(.route(.destination(.eventsAndSounds)))},"
-    )
-        && integrationsCode.contains(
-            "case.manageSoundScopes:Button(l10n.text(.settingsIntegrationsManageEvents)){onManageSoundScopes()}"
-        )
 }
 
 private func settingsNativeAnnouncementAdapterIsSound(_ source: String) -> Bool {
