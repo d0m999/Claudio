@@ -95,6 +95,28 @@ func runSoundPacksEditorViewSuites() async {
             "Gallery 必须由 production view interface 编译并挂载")
     }
 
+    suite("Sound editor read-only deep link：缺声也定位目标事件") {
+        let route = SoundPacksWindowRoute.editEvent(
+            surface: nil, packID: "builtin", event: .stop)
+        let fallback = SoundPacksWindowFocusTarget.packList
+        expect(
+            soundPacksWindowDeepLinkFocusTarget(
+                route: route, selectedPackID: "builtin",
+                visibleEvents: Set(Event.allCases), fallback: fallback)
+                == .eventAudio(.stop),
+            "只读包的缺声事件仍应聚焦目标映射行")
+        expect(
+            soundPacksWindowDeepLinkFocusTarget(
+                route: route, selectedPackID: "builtin",
+                visibleEvents: [], fallback: fallback) == fallback,
+            "目标事件不在实际渲染行中时应回到安全焦点")
+        expect(
+            soundPacksWindowDeepLinkFocusTarget(
+                route: route, selectedPackID: "other",
+                visibleEvents: Set(Event.allCases), fallback: fallback) == fallback,
+            "目标包尚未显示时不能把焦点交给其他包的同名事件")
+    }
+
     suite("Sound editor focus：同一 route request 只推进一次，settlement 与重新打开仍推进") {
         var tracker = SoundPacksEditorFocusApplicationTracker()
         let pending = SoundPacksEditorFocusProjection(

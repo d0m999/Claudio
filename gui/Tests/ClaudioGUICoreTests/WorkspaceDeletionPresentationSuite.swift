@@ -88,10 +88,10 @@ func runWorkspaceDeletionPresentationSuites() {
             expect(selection.consumeDeletion(request), "each conflict consumes once")
             expect(
                 !selection.finishDeletion(
-                    request, succeeded: false, error: .publishedConflict, configState: state)
+                    request, succeeded: false, error: .publishedConflict(), configState: state)
                     && selection.route.scope == .workspace(rule.id)
                     && selection.deletionPresentation.feedback
-                        == .failed(target, .publishedConflict, expected),
+                        == .failed(target, .publishedConflict(), expected),
                 "published conflict displays actual readback without selecting Default Group")
             if expected == .absent {
                 expect(
@@ -112,11 +112,11 @@ func runWorkspaceDeletionPresentationSuites() {
         let replacementRequest = selection.deletionPresentation.pending!
         expect(selection.consumeDeletion(replacementRequest), "replacement request consumes once")
         _ = selection.finishDeletion(
-            replacementRequest, succeeded: false, error: .publishedConflict,
+            replacementRequest, succeeded: false, error: .publishedConflict(),
             configState: .operational(config))
         expect(
             selection.deletionPresentation.feedback
-                == .failed(target, .publishedConflict, .replaced)
+                == .failed(target, .publishedConflict(), .replaced)
                 && selection.unavailableRequestedScopeStoredValue != nil,
             "same UUID rebound to another directory is disclosed as replacement")
 
@@ -126,12 +126,12 @@ func runWorkspaceDeletionPresentationSuites() {
         let refreshRequest = refreshed.deletionPresentation.pending!
         expect(refreshed.consumeDeletion(refreshRequest), "unreadable conflict consumes once")
         _ = refreshed.finishDeletion(
-            refreshRequest, succeeded: false, error: .publishedConflict,
+            refreshRequest, succeeded: false, error: .publishedConflict(),
             configState: .unwritable(reason: "fixture"))
         refreshed.refreshDeletionReadback(configState: .operational(config))
         expect(
             refreshed.deletionPresentation.feedback
-                == .failed(target, .publishedConflict, .replaced)
+                == .failed(target, .publishedConflict(), .replaced)
                 && refreshed.unavailableRequestedScopeStoredValue != nil,
             "explicit reload updates conflict evidence and blocks replacement under the old scope")
 

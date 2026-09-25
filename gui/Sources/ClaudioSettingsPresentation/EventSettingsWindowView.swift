@@ -69,14 +69,19 @@ struct EventSettingsWindowView: View {
         model.workspaceRules.first { $0.id == selection.route.scope.workspaceID }
     }
     private var writable: Bool {
-        current != nil && selection.unavailableRequestedScopeStoredValue == nil
+        guard case .operational = model.configState else { return false }
+        if model.workspaceError == .invalidRule || model.workspaceError == .staleRule {
+            return false
+        }
+        return current != nil && selection.unavailableRequestedScopeStoredValue == nil
             && model.selectedSoundScope == selection.route.scope
     }
     private var events: [PanelEventPresentation] {
         panelEventPresentations(
             rows: model.eventRows, scope: selection.route.scope,
             masterVolume: model.config.masterVolume,
-            language: languageStore.language, configWritesAllowed: writable)
+            language: languageStore.language, configWritesAllowed: writable,
+            safetyFailures: model.previewSafetyFailures)
     }
 
     var body: some View {
@@ -89,7 +94,14 @@ struct EventSettingsWindowView: View {
                             Button {
                                 player.stop()
                                 selection.select(EventSettingsWindowRoute(scope: scope.scope))
+                                let reselectsCurrentScope = model.selectedSoundScope == scope.scope
                                 model.selectSoundScope(scope.scope)
+                                if reselectsCurrentScope,
+                                    model.workspaceError == .staleRule
+                                        || model.workspaceError == .invalidRule
+                                {
+                                    model.reload()
+                                }
                             } label: {
                                 HStack {
                                     VStack(alignment: .leading) {
@@ -132,27 +144,47 @@ struct EventSettingsWindowView: View {
                     if model.workspaceRulesMalformed {
                         FailureRow(message: l10n.text(.workspaceInvalidRule))
                     }
+                    if let category = model.configState.errorCopyCategory {
+                        FailureRow(message: l10n.text(category.key))
+                        configRevealButton
+                    }
+                    if let failure = selection.previewFailure,
+                        failure.scope == selection.route.scope,
+                        (failure.packID != model.config.selectedPack || !writable
+                            || !model.libraryPresentationState.hasUsableSnapshot)
+                    {
+                        FailureRow(
+                            message: localizedEventPreviewAttemptFailure(
+                                failure.reason, language: languageStore.language)
+                        )
+                        .settingsMountIdentity("workspace.event.preview-failure-readback")
+                        Button(l10n.text(.eventPreviewRepairSound)) {
+                            onConfigureSound(
+                                .editEvent(
+                                    surface: nil, packID: failure.packID, event: failure.event))
+                        }
+                        .accessibilityIdentifier("workspace.event.preview-failure-repair")
+                    }
+                    if selection.conflictWasReadBack {
+                        FailureRow(message: l10n.text(.eventSettingsConflictReadback))
+                            .settingsMountIdentity("workspace.write.conflict-readback")
+                        recoveryFileButtons(
+                            selection.conflictRecoveryFiles,
+                            identifierPrefix: "workspace.write.conflict-recovery-file")
+                    }
                     if let feedback = selection.deletionPresentation.feedback {
                         deletionFeedback(feedback)
                     } else if let error = model.workspaceError {
-                        FailureRow(
-                            message: localizedWorkspaceError(
-                                error, language: languageStore.language))
+                        workspaceFailure(error)
                     }
+                    libraryNotice
                     if writable {
                         if let rule { workspaceDetails(rule) }
-                        soundControls
-                        Text(l10n.text(.workspacePreviewNote)).font(.caption).foregroundColor(
-                            .secondary)
-                        ForEach(events) { event in eventRow(event) }
-                        ForEach(
-                            panelWriteFailureRows(
-                                items: panelWriteFailureItems(
-                                    muteError: model.muteError,
-                                    packSwitchError: model.packSwitchError,
-                                    masterVolumeError: model.masterVolumeError), l10n: l10n)
-                        ) { row in
-                            FailureRow(message: row.message)
+                        if model.libraryPresentationState.hasUsableSnapshot {
+                            soundControls
+                            Text(l10n.text(.workspacePreviewNote)).font(.caption).foregroundColor(
+                                .secondary)
+                            ForEach(events) { event in eventRow(event) }
                         }
                         Button(l10n.text(.eventSettingsManageSounds)) {
                             onConfigureSound(.overview(surface: nil))
@@ -169,6 +201,7 @@ struct EventSettingsWindowView: View {
                             .settingsMountIdentity("workspace.choose-default-group")
                         }
                     }
+                    writeFailures
                 }.padding(24).frame(maxWidth: 820, alignment: .leading)
             }
             .id(selection.route.scope)
@@ -253,6 +286,32 @@ struct EventSettingsWindowView: View {
             ?? .scope(selection.route.scope)
     }
 
+    private var libraryNotice: some View {
+        Group {
+            switch model.libraryPresentationState {
+            case .loading:
+                Text(l10n.text(.soundPacksLibraryLoading)).font(.caption)
+            case .refreshing, .ready:
+                EmptyView()
+            case .refreshFailed:
+                libraryFailure(l10n.text(.panelLibraryRefreshFailed))
+            case .loadFailed:
+                libraryFailure(l10n.text(.panelAudibleEventsUnavailable))
+            }
+        }
+    }
+
+    private func libraryFailure(_ message: String) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            FailureRow(message: message)
+            Button(l10n.text(.soundPacksLibraryRetryLabel)) {
+                model.retrySoundPackLibraryRefresh()
+            }
+            .accessibilityIdentifier("workspace.library.retry")
+        }
+        .settingsMountIdentity("workspace.library.failure")
+    }
+
     private var soundControls: some View {
         let scope = selection.route.scope
         return VStack(alignment: .leading, spacing: 14) {
@@ -262,7 +321,15 @@ struct EventSettingsWindowView: View {
                     get: { model.config.selectedPack },
                     set: {
                         guard model.selectedSoundScope == scope else { return }
-                        _ = model.switchPack(to: $0); onAudibilityInputsChanged()
+                        let retry = EventSettingsWriteRetry(
+                            scope: scope, workspaceDirectory: rule?.directory,
+                            operation: .pack(before: model.config.selectedPack, requested: $0))
+                        selection.clearConflictReadback()
+                        _ = model.switchPack(to: $0)
+                        selection.noteLockFailureRetry(retryIsLockBusy(retry) ? retry : nil)
+                        markStaleWorkspaceTarget(scope)
+                        selection.clearPreviewFailure()
+                        onAudibilityInputsChanged()
                     })
             ) {
                 if !model.allSoundPacks.contains(where: { $0.id == model.config.selectedPack }) {
@@ -278,7 +345,15 @@ struct EventSettingsWindowView: View {
                 diskVolume: model.config.masterVolume, isEnabled: writable,
                 language: languageStore.language, focusedTarget: $focusedTarget
             ) { volume in
-                let landed = model.setVolume(volume, for: scope); onAudibilityInputsChanged();
+                let retry = EventSettingsWriteRetry(
+                    scope: scope, workspaceDirectory: rule?.directory,
+                    operation: .volume(before: model.config.masterVolume, requested: volume))
+                selection.clearConflictReadback()
+                let landed = model.setVolume(volume, for: scope)
+                selection.noteLockFailureRetry(retryIsLockBusy(retry) ? retry : nil)
+                markStaleWorkspaceTarget(scope)
+                selection.clearPreviewFailure()
+                onAudibilityInputsChanged()
                 return landed
             }.id(selection.route.scope)
             if model.eventRows.contains(where: {
@@ -310,7 +385,13 @@ struct EventSettingsWindowView: View {
                         set: { enabled in
                             var surfaces = rule.surfaces.filter { $0 != surface }
                             if enabled { surfaces.append(surface) }
+                            let retry = EventSettingsWriteRetry(
+                                scope: .workspace(rule.id), workspaceDirectory: rule.directory,
+                                operation: .surfaces(before: rule.surfaces, requested: surfaces))
+                            selection.clearConflictReadback()
                             _ = model.changeWorkspace(.surfaces(rule.id, surfaces))
+                            selection.noteLockFailureRetry(retryIsLockBusy(retry) ? retry : nil)
+                            markStaleWorkspaceTarget(.workspace(rule.id))
                         })
                 ) {
                     VStack(alignment: .leading) {
@@ -351,12 +432,202 @@ struct EventSettingsWindowView: View {
                 .focusable()
                 .focused($focusedTarget, equals: .workspaceDeleteFeedback)
                 .settingsMountIdentity("workspace.delete.failure")
+            if error == .configFailure || error == .invalidRule || error.isPublishedConflict {
+                configRevealButton
+            }
+            recoveryFileButtons(
+                error.recoveryPath.map { [URL(fileURLWithPath: $0)] } ?? [],
+                identifierPrefix: "workspace.delete.recovery-file")
             Button(l10n.text(.workspaceDeleteReload)) {
                 model.reload()
                 selection.refreshDeletionReadback(configState: model.configState)
             }
             .accessibilityIdentifier("workspace.delete.reload")
+            if error == .lockBusy {
+                Button(l10n.text(.commonRetry)) {
+                    model.reload()
+                    guard
+                        let currentRule = model.workspaceRules.first(where: { $0.id == target.id })
+                    else {
+                        selection.refreshDeletionReadback(configState: model.configState)
+                        return
+                    }
+                    _ = selection.requestDeletionRetry(of: currentRule)
+                }
+                .accessibilityIdentifier("workspace.delete.retry-confirmation")
+            }
         }
+    }
+
+    private func workspaceFailure(_ error: WorkspaceSoundError) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            FailureRow(message: localizedWorkspaceError(error, language: languageStore.language))
+            if error == .configFailure || error == .invalidRule || error.isPublishedConflict {
+                configRevealButton
+            }
+            recoveryFileButtons(
+                model.workspaceRecoveryFile.map { [$0] } ?? [],
+                identifierPrefix: "workspace.write.recovery-file")
+            if error == .invalidPack {
+                Button(l10n.text(.eventSettingsManageSounds)) {
+                    onConfigureSound(.overview(surface: nil))
+                }
+            }
+            if error == .lockBusy, canRetryCurrentWrite {
+                Button(l10n.text(.commonRetry)) { retryCurrentWrite() }
+                    .accessibilityIdentifier("workspace.write.retry")
+            }
+            if error == .configFailure || error == .invalidRule || error.isPublishedConflict
+                || error == .staleRule
+            {
+                Button(l10n.text(.workspaceDeleteReload)) {
+                    if error.isPublishedConflict {
+                        selection.noteConflictReadback(
+                            recoveryFiles: model.workspaceRecoveryFile.map { [$0] } ?? [])
+                    }
+                    model.reload()
+                }
+                .accessibilityIdentifier("workspace.write.reload")
+            }
+        }
+        .settingsMountIdentity("workspace.write.failure")
+    }
+
+    private func recoveryFileButtons(
+        _ files: [URL], identifierPrefix: String
+    ) -> some View {
+        let existing = files.compactMap(panelExistingRecoveryFileTarget)
+        return ForEach(Array(existing.enumerated()), id: \.element) { index, file in
+            Button(
+                existing.count == 1
+                    ? l10n.text(.panelRevealRecoveryFile)
+                    : l10n.format(.panelRevealRecoveryFileNumber, Int64(index + 1))
+            ) {
+                guard let currentTarget = panelExistingRecoveryFileTarget(file) else { return }
+                NSWorkspace.shared.activateFileViewerSelecting([currentTarget])
+            }
+            .accessibilityValue(file.path)
+            .accessibilityIdentifier("\(identifierPrefix).\(index + 1)")
+        }
+    }
+
+    @ViewBuilder
+    private var configRevealButton: some View {
+        if let target = model.configRecoveryTarget {
+            Button(l10n.text(.panelRevealConfig)) {
+                guard let currentTarget = model.configRecoveryTarget else { return }
+                NSWorkspace.shared.activateFileViewerSelecting([currentTarget])
+            }
+            .accessibilityHint(l10n.text(.panelRevealConfigHint))
+            .accessibilityIdentifier("workspace.reveal-config")
+            .accessibilityValue(target.path)
+        }
+    }
+
+    private var writeFailureItems: [PanelWriteFailure] {
+        panelWriteFailureItems(
+            muteError: model.muteError,
+            packSwitchError: model.packSwitchError,
+            masterVolumeError: model.masterVolumeError)
+    }
+
+    private var writeFailures: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(panelWriteFailureRows(items: writeFailureItems, l10n: l10n)) { row in
+                FailureRow(message: row.message)
+            }
+            recoveryFileButtons(
+                writeFailureRecoveryFiles,
+                identifierPrefix: "workspace.write.reveal-recovery")
+            if writeFailureItems.contains(where: { $0.reason.copyCategory.offersConfigRecovery }) {
+                configRevealButton
+            }
+            if writeFailureItems.contains(where: {
+                if case .lockBusy = $0.reason { return true }
+                return false
+            }), canRetryCurrentWrite {
+                Button(l10n.text(.commonRetry)) { retryCurrentWrite() }
+                    .accessibilityIdentifier("workspace.write.retry")
+            }
+            if writeFailureItems.contains(where: {
+                if case .configPublishedButFailed = $0.reason { return true }
+                return false
+            }) {
+                Button(l10n.text(.workspaceDeleteReload)) {
+                    selection.noteConflictReadback(recoveryFiles: writeFailureRecoveryFiles)
+                    model.reload()
+                }
+                .accessibilityIdentifier("workspace.write.reload")
+            }
+        }
+    }
+
+    private var writeFailureRecoveryFiles: [URL] {
+        panelWriteFailureRecoveryFiles(items: writeFailureItems, surfaceRecoveryFile: nil)
+    }
+
+    private func retryIsLockBusy(_ retry: EventSettingsWriteRetry) -> Bool {
+        if retry.scope.workspaceID != nil { return model.workspaceError == .lockBusy }
+        switch retry.operation {
+        case .pack:
+            if case .lockBusy? = model.packSwitchError { return true }
+        case .volume:
+            if case .lockBusy? = model.masterVolumeError { return true }
+        case .event:
+            if case .lockBusy? = model.muteError { return true }
+        case .surfaces:
+            return false
+        }
+        return false
+    }
+
+    private func markStaleWorkspaceTarget(_ scope: PanelSoundScopeID) {
+        if scope.workspaceID != nil, model.workspaceError == .staleRule {
+            selection.markCurrentScopeUnavailable()
+        }
+    }
+
+    private var canRetryCurrentWrite: Bool {
+        guard let retry = selection.writeRetry else { return false }
+        return retry.canRetry(
+            route: selection.route,
+            selectedScope: model.selectedSoundScope,
+            configState: model.configState,
+            config: model.config,
+            workspaceRule: model.workspaceRules.first { $0.id == retry.scope.workspaceID })
+    }
+
+    private func retryCurrentWrite() {
+        guard let retry = selection.writeRetry else { return }
+        model.reload()
+        guard canRetryCurrentWrite else {
+            selection.clearWriteRetry()
+            if retry.scope.workspaceID != nil,
+                !model.workspaceRules.contains(where: { $0.id == retry.scope.workspaceID })
+            {
+                selection.markCurrentScopeUnavailable()
+            }
+            return
+        }
+        switch retry.operation {
+        case .pack(_, let requested):
+            selection.clearConflictReadback()
+            _ = model.switchPack(to: requested)
+        case .volume(_, let requested):
+            selection.clearConflictReadback()
+            _ = model.setVolume(requested, for: retry.scope)
+        case .event(let event, _):
+            selection.clearConflictReadback()
+            model.toggleMute(event)
+        case .surfaces(_, let requested):
+            guard let workspaceID = retry.scope.workspaceID else { return }
+            selection.clearConflictReadback()
+            _ = model.changeWorkspace(.surfaces(workspaceID, requested))
+        }
+        selection.noteLockFailureRetry(retryIsLockBusy(retry) ? retry : nil)
+        markStaleWorkspaceTarget(retry.scope)
+        selection.clearPreviewFailure()
+        onAudibilityInputsChanged()
     }
 
     private func deletionFailureMessage(
@@ -401,47 +672,123 @@ struct EventSettingsWindowView: View {
 
     private func eventRow(_ event: PanelEventPresentation) -> some View {
         let scope = selection.route.scope
-        return HStack(spacing: 12) {
-            VStack(alignment: .leading) {
-                Text(event.title).fontWeight(.semibold)
-                Text(event.soundFileText).font(.caption).foregroundColor(.secondary)
-            }
-            .accessibilityElement(children: .combine)
-            .focusable()
-            .focused($focusedTarget, equals: .event(event.event))
-            Spacer()
-            Button {
-                if let url = model.previewURL(for: event.event) {
-                    if !player.play(fileAt: url, volume: Float(model.config.masterVolume)) {
-                        onAnnouncement(l10n.text(.workspacePackRepair))
+        let recovery = eventPreviewRecoveryAction(for: event.controls.previewAvailability)
+        let failure = selection.previewFailure.flatMap {
+            $0.scope == scope && $0.packID == model.config.selectedPack
+                && $0.event == event.event ? $0 : nil
+        }
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(event.title).fontWeight(.semibold)
+                    Text(event.soundFileText).font(.caption).foregroundColor(.secondary)
+                    if !event.controls.previewEnabled {
+                        Text(
+                            localizedEventPreviewHint(
+                                event.controls.previewAvailability,
+                                language: languageStore.language)
+                        )
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier(
+                            "workspace.event.preview-reason.\(event.event.cliName)")
                     }
                 }
-            } label: {
-                Image(systemName: "play.fill")
-            }
-            .disabled(!event.controls.previewEnabled)
-            .accessibilityLabel(l10n.format(.eventPreviewLabel, event.title))
-            .accessibilityHint(l10n.text(.workspacePreviewNote))
-            .focused($focusedTarget, equals: .preview(event.event))
-            Button(l10n.text(.eventSettingsManageSounds)) {
-                guard model.selectedSoundScope == scope else { return }
-                onConfigureSound(
-                    .editEvent(surface: nil, packID: model.config.selectedPack, event: event.event))
-            }.disabled(!writable)
+                .accessibilityElement(children: .combine)
+                .accessibilityHint(
+                    localizedEventPreviewHint(
+                        event.controls.previewAvailability,
+                        language: languageStore.language)
+                )
+                .focusable()
+                .focused($focusedTarget, equals: .event(event.event))
+                Spacer()
+                Button {
+                    let packID = model.config.selectedPack
+                    switch model.attemptPreview(event.event, using: player) {
+                    case .started:
+                        selection.clearPreviewFailure()
+                    case .failed(let failure):
+                        reportPreviewFailure(
+                            failure, event: event.event, scope: scope, packID: packID)
+                    }
+                } label: {
+                    Image(systemName: "play.fill")
+                }
+                .disabled(!event.controls.previewEnabled)
+                .accessibilityLabel(l10n.format(.eventPreviewLabel, event.title))
+                .accessibilityHint(
+                    localizedEventPreviewHint(
+                        event.controls.previewAvailability,
+                        language: languageStore.language)
+                )
+                .focused($focusedTarget, equals: .preview(event.event))
+                if recovery == .adjustGroupVolume {
+                    Button(l10n.text(.eventPreviewAdjustGroupVolume)) {
+                        guard selection.requestGroupVolumeFocus(for: scope) else { return }
+                        focusedTarget = .masterVolume
+                    }
+                    .accessibilityIdentifier("workspace.event.adjust-volume.\(event.event.cliName)")
+                }
+                Button(
+                    l10n.text(
+                        recovery == .repairSound
+                            ? .eventPreviewRepairSound : .eventSettingsManageSounds)
+                ) {
+                    configureSound(event.event, scope: scope)
+                }
+                .disabled(!writable)
                 .focused($focusedTarget, equals: .configure(event.event))
-            Toggle(
-                event.title,
-                isOn: Binding(
-                    get: { event.enabled },
-                    set: { _ in
-                        guard model.selectedSoundScope == scope else { return }
-                        model.toggleMute(event.event); onAudibilityInputsChanged()
-                    })
-            ).labelsHidden().toggleStyle(.switch).disabled(!event.controls.muteEnabled)
-                .focused($focusedTarget, equals: .mute(event.event))
+                Toggle(
+                    event.title,
+                    isOn: Binding(
+                        get: { event.enabled },
+                        set: { _ in
+                            guard model.selectedSoundScope == scope else { return }
+                            let retry = EventSettingsWriteRetry(
+                                scope: scope, workspaceDirectory: rule?.directory,
+                                operation: .event(
+                                    event.event, before: model.config.isEnabled(event.event)))
+                            selection.clearConflictReadback()
+                            model.toggleMute(event.event)
+                            selection.noteLockFailureRetry(retryIsLockBusy(retry) ? retry : nil)
+                            markStaleWorkspaceTarget(scope)
+                            selection.clearPreviewFailure()
+                            onAudibilityInputsChanged()
+                        })
+                ).labelsHidden().toggleStyle(.switch).disabled(!event.controls.muteEnabled)
+                    .focused($focusedTarget, equals: .mute(event.event))
+            }
+            if let failure {
+                FailureRow(
+                    message: localizedEventPreviewAttemptFailure(
+                        failure.reason, language: languageStore.language)
+                )
+                .settingsMountIdentity("workspace.event.preview-failure.\(event.event.cliName)")
+            }
         }.padding(12).background(ClaudioTheme.elevated(colorScheme)).cornerRadius(10)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("workspace.event.\(event.event.cliName)")
+    }
+
+    private func configureSound(_ event: Event, scope: PanelSoundScopeID) {
+        guard model.selectedSoundScope == scope, selection.route.scope == scope else { return }
+        onConfigureSound(.editEvent(surface: nil, packID: model.config.selectedPack, event: event))
+    }
+
+    private func reportPreviewFailure(
+        _ reason: EventPreviewAttemptFailure,
+        event: Event,
+        scope: PanelSoundScopeID,
+        packID: String
+    ) {
+        guard
+            selection.notePreviewFailure(
+                event: event, scope: scope, packID: packID, reason: reason)
+        else { return }
+        let message = localizedEventPreviewAttemptFailure(reason, language: languageStore.language)
+        onAnnouncement(message)
     }
 }
 

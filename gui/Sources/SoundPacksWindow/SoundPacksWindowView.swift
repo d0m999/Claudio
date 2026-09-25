@@ -218,6 +218,7 @@ private struct SoundPacksWindowContentView: View {
     @State private var handledFocusRequestRevision = 0
     @State private var dropTargetEvent: Event?
     @State private var requestedRoute: SoundPacksWindowRoute = .overview
+    @State private var awaitsDeepLinkFocus = false
 
     init(
         editorOwner: SoundPacksEditorOwner,
@@ -1315,6 +1316,9 @@ private struct SoundPacksWindowContentView: View {
                         localizedEventName(row.event, language: languageStore.language))
                 )
                 .accessibilityValue(mappingText(row.coverage))
+                .focusable(readOnlyDeepLinkEvent == row.event)
+                .focused($focusedTarget, equals: .eventAudio(row.event))
+                .accessibilityIdentifier("sound-packs.event.\(row.event.rawValue).readonly-mapping")
         }
     }
 
@@ -1592,23 +1596,45 @@ private struct SoundPacksWindowContentView: View {
     }
 
     private func applyInitialFocus() {
+        let visibleEvents = Set(activeSounds.eventRows.map(\.event))
+        awaitsDeepLinkFocus =
+            requestedRoute.editTarget.map {
+                activeSounds.selectedPack?.id != $0.packID || !visibleEvents.contains($0.event)
+            } ?? false
+        focusedTarget = soundPacksWindowDeepLinkFocusTarget(
+            route: requestedRoute,
+            selectedPackID: activeSounds.selectedPack?.id,
+            visibleEvents: visibleEvents,
+            fallback: soundPacksWindowFirstFocusTarget(focusScope))
+    }
+
+    private var readOnlyDeepLinkEvent: Event? {
+        guard !canEditSelectedPack,
+            activeSounds.selectedPack?.id == requestedRoute.editTarget?.packID
+        else { return nil }
         switch requestedRoute.destination {
-        case .overview:
-            focusedTarget = soundPacksWindowFirstFocusTarget(focusScope)
-        case .editEvent(_, let event), .copyAndApply(_, let event):
-            if canEditSelectedPack {
-                focusedTarget = .eventAudio(event)
-            } else if focusScope.previewableEvents.contains(event) {
-                focusedTarget = .eventPreview(event)
-            } else {
-                focusedTarget = soundPacksWindowFirstFocusTarget(focusScope)
-            }
+        case .overview: return nil
+        case .editEvent(_, let event), .copyAndApply(_, let event): return event
         }
     }
 
     private func reconcileFocusWithVisibleControls(assignFirstIfNil: Bool = false) {
+        if awaitsDeepLinkFocus, let target = requestedRoute.editTarget,
+            activeSounds.selectedPack?.id == target.packID,
+            activeSounds.eventRows.contains(where: { $0.event == target.event })
+        {
+            awaitsDeepLinkFocus = false
+            focusedTarget = .eventAudio(target.event)
+            return
+        }
         let order = soundPacksWindowFocusOrder(focusScope)
         if let focusedTarget {
+            if case .eventAudio(let event) = focusedTarget,
+                readOnlyDeepLinkEvent == event,
+                activeSounds.eventRows.contains(where: { $0.event == event })
+            {
+                return
+            }
             if !order.contains(focusedTarget) {
                 self.focusedTarget = order.first
             }
@@ -1685,5 +1711,20 @@ private struct SoundPacksWindowContentView: View {
         return values.isEmpty
             ? l10n.text(.soundPacksPackNotUsed)
             : values.joined(separator: languageStore.language == .english ? ", " : "，")
+    }
+}
+
+/// Route focus names the inspected event even when its read-only mapping has no preview action.
+package func soundPacksWindowDeepLinkFocusTarget(
+    route: SoundPacksWindowRoute,
+    selectedPackID: String?,
+    visibleEvents: Set<Event>,
+    fallback: SoundPacksWindowFocusTarget?
+) -> SoundPacksWindowFocusTarget? {
+    switch route.destination {
+    case .overview: fallback
+    case .editEvent(let packID, let event), .copyAndApply(let packID, let event):
+        selectedPackID == packID && visibleEvents.contains(event)
+            ? .eventAudio(event) : fallback
     }
 }

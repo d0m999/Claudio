@@ -3,11 +3,74 @@ import ClaudioGUICore
 import Combine
 import Foundation
 
+package struct EventSettingsPreviewFailure: Equatable {
+    package let scope: PanelSoundScopeID
+    package let packID: String
+    package let event: Event
+    package let reason: EventPreviewAttemptFailure
+}
+
+/// The original control values are a guard for a deliberate retry after a lock failure.
+/// A readback that changed the target requires the user to make a new choice instead.
+package struct EventSettingsWriteRetry: Equatable {
+    package enum Operation: Equatable {
+        case pack(before: String, requested: String)
+        case volume(before: Double, requested: Double)
+        case event(Event, before: Bool)
+        case surfaces(before: [HostSurfaceID], requested: [HostSurfaceID])
+    }
+
+    package let scope: PanelSoundScopeID
+    package let workspaceDirectory: WorkspaceDirectory?
+    package let operation: Operation
+
+    package init(
+        scope: PanelSoundScopeID,
+        workspaceDirectory: WorkspaceDirectory?,
+        operation: Operation
+    ) {
+        self.scope = scope
+        self.workspaceDirectory = workspaceDirectory
+        self.operation = operation
+    }
+
+    package func canRetry(
+        route: EventSettingsWindowRoute,
+        selectedScope: PanelSoundScopeID,
+        configState: PanelConfigState,
+        config: ClaudioConfig,
+        workspaceRule: WorkspaceSoundRule?
+    ) -> Bool {
+        guard case .operational = configState else { return false }
+        guard route.scope == scope, route.unavailableRequestedScopeStoredValue == nil,
+            selectedScope == scope
+        else { return false }
+        if let workspaceID = scope.workspaceID {
+            guard workspaceRule?.id == workspaceID,
+                workspaceRule?.directory == workspaceDirectory,
+                workspaceRule?.profile?.isValid == true
+            else { return false }
+        } else if workspaceDirectory != nil {
+            return false
+        }
+        switch operation {
+        case .pack(let before, _): return config.selectedPack == before
+        case .volume(let before, _): return config.masterVolume == before
+        case .event(let event, let before): return config.isEnabled(event) == before
+        case .surfaces(let before, _): return workspaceRule?.surfaces == before
+        }
+    }
+}
+
 /// App-lifetime typed selection shared by the unified Events & Sounds destination and its routes.
 @MainActor
 package final class EventSettingsWindowSelection: ObservableObject {
     @Published package private(set) var presentationState: SettingsEventPresentationState
     @Published package private(set) var deletionPresentation = WorkspaceDeletionPresentation()
+    @Published package private(set) var previewFailure: EventSettingsPreviewFailure?
+    @Published package private(set) var writeRetry: EventSettingsWriteRetry?
+    @Published package private(set) var conflictWasReadBack = false
+    @Published package private(set) var conflictRecoveryFiles: [URL] = []
 
     private var storage: Storage
     private var isPublishingState = false
@@ -30,6 +93,10 @@ package final class EventSettingsWindowSelection: ObservableObject {
         guard storage.route != route else { return }
         storage.leaveDestination()
         deletionPresentation = WorkspaceDeletionPresentation()
+        previewFailure = nil
+        writeRetry = nil
+        conflictWasReadBack = false
+        conflictRecoveryFiles = []
         consumedDeleteRequest = nil
         storage.route = route
         storage.routeRequestRevision &+= 1
@@ -41,6 +108,10 @@ package final class EventSettingsWindowSelection: ObservableObject {
         guard storage.route.unavailableRequestedScopeStoredValue == nil else { return }
         storage.leaveDestination()
         deletionPresentation.pending = nil
+        previewFailure = nil
+        writeRetry = nil
+        conflictWasReadBack = false
+        conflictRecoveryFiles = []
         storage.route = EventSettingsWindowRoute(
             scope: storage.route.scope,
             event: storage.route.event,
@@ -125,28 +196,95 @@ package final class EventSettingsWindowSelection: ObservableObject {
         }
         let reason = error ?? .configFailure
         let readback: WorkspaceDeleteReadback? =
-            reason == .publishedConflict || reason == .staleRule
+            reason.isPublishedConflict || reason == .staleRule
             ? WorkspaceDeleteReadback(target: target, configState: configState) : nil
-        if readback == .absent || readback == .replaced {
+        if reason == .staleRule || readback == .absent || readback == .replaced {
             markCurrentScopeUnavailable()
         }
         deletionPresentation.feedback = .failed(
             target, reason,
-            reason == .publishedConflict || readback == .replaced ? readback : nil)
+            reason.isPublishedConflict || reason == .staleRule || readback == .replaced
+                ? readback : nil)
         requestFocus(.workspaceDeleteFeedback)
         return false
     }
 
     package func refreshDeletionReadback(configState: PanelConfigState) {
-        guard case .failed(let target, .publishedConflict, _) = deletionPresentation.feedback else {
+        guard case .failed(let target, let error, _) = deletionPresentation.feedback,
+            error.isPublishedConflict || error == .staleRule
+        else {
             return
         }
         let readback = WorkspaceDeleteReadback(target: target, configState: configState)
-        if readback == .absent || readback == .replaced {
+        if error == .staleRule || readback == .absent || readback == .replaced {
             markCurrentScopeUnavailable()
         }
-        deletionPresentation.feedback = .failed(target, .publishedConflict, readback)
+        deletionPresentation.feedback = .failed(target, error, readback)
         requestFocus(.workspaceDeleteFeedback)
+    }
+
+    /// A retry of deletion opens a new confirmation only for the same read-back rule identity.
+    /// It never submits the old deletion request or writes from a stale route.
+    @discardableResult
+    package func requestDeletionRetry(of rule: WorkspaceSoundRule) -> Bool {
+        guard case .failed(let target, .lockBusy, _) = deletionPresentation.feedback,
+            WorkspaceSoundDeleteTarget(rule: rule) == target,
+            storage.route.scope == .workspace(target.id),
+            storage.route.unavailableRequestedScopeStoredValue == nil
+        else { return false }
+        return requestDeletion(of: rule)
+    }
+
+    @discardableResult
+    package func requestGroupVolumeFocus(for scope: PanelSoundScopeID) -> Bool {
+        guard storage.route.scope == scope,
+            storage.route.unavailableRequestedScopeStoredValue == nil
+        else { return false }
+        requestFocus(.masterVolume)
+        return true
+    }
+
+    @discardableResult
+    package func notePreviewFailure(
+        event: Event,
+        scope: PanelSoundScopeID,
+        packID: String,
+        reason: EventPreviewAttemptFailure
+    ) -> Bool {
+        guard storage.route.scope == scope,
+            storage.route.unavailableRequestedScopeStoredValue == nil
+        else { return false }
+        previewFailure = EventSettingsPreviewFailure(
+            scope: scope, packID: packID, event: event, reason: reason)
+        return true
+    }
+
+    package func clearPreviewFailure() {
+        previewFailure = nil
+    }
+
+    package func noteLockFailureRetry(_ retry: EventSettingsWriteRetry?) {
+        guard let retry, storage.route.scope == retry.scope,
+            storage.route.unavailableRequestedScopeStoredValue == nil
+        else {
+            writeRetry = nil
+            return
+        }
+        writeRetry = retry
+    }
+
+    package func clearWriteRetry() {
+        writeRetry = nil
+    }
+
+    package func noteConflictReadback(recoveryFiles: [URL] = []) {
+        conflictWasReadBack = true
+        conflictRecoveryFiles = recoveryFiles
+    }
+
+    package func clearConflictReadback() {
+        conflictWasReadBack = false
+        conflictRecoveryFiles = []
     }
 
     private func requestFocus(_ target: EventSettingsFocusTarget) {
@@ -216,6 +354,10 @@ package final class EventSettingsWindowSelection: ObservableObject {
     package func leaveDestination() {
         storage.leaveDestination()
         deletionPresentation = WorkspaceDeletionPresentation()
+        previewFailure = nil
+        writeRetry = nil
+        conflictWasReadBack = false
+        conflictRecoveryFiles = []
         consumedDeleteRequest = nil
         publishState()
     }

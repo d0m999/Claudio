@@ -21,7 +21,7 @@ func runSettingsNavigationSuites() {
         let expectedNames: [(SettingsDestination, String, String)] = [
             (.general, "通用", "General"),
             (.integrations, "集成", "Integrations"),
-            (.eventsAndSounds, "默认组／工作区", "Default Group / Workspaces"),
+            (.eventsAndSounds, "默认组／工作区", "Default Group & Workspaces"),
             (.notifications, "通知", "Notifications"),
             (.display, "显示", "Display"),
             (.sounds, "声音", "Sounds"),
