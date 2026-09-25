@@ -132,17 +132,19 @@ struct EventSettingsWindowView: View {
                     if model.workspaceRulesMalformed {
                         FailureRow(message: l10n.text(.workspaceInvalidRule))
                     }
+                    if let feedback = selection.deletionPresentation.feedback {
+                        deletionFeedback(feedback)
+                    } else if let error = model.workspaceError {
+                        FailureRow(
+                            message: localizedWorkspaceError(
+                                error, language: languageStore.language))
+                    }
                     if writable {
                         if let rule { workspaceDetails(rule) }
                         soundControls
                         Text(l10n.text(.workspacePreviewNote)).font(.caption).foregroundColor(
                             .secondary)
                         ForEach(events) { event in eventRow(event) }
-                        if let error = model.workspaceError {
-                            FailureRow(
-                                message: localizedWorkspaceError(
-                                    error, language: languageStore.language))
-                        }
                         ForEach(
                             panelWriteFailureRows(
                                 items: panelWriteFailureItems(
@@ -160,6 +162,7 @@ struct EventSettingsWindowView: View {
                     }
                 }.padding(24).frame(maxWidth: 820, alignment: .leading)
             }
+            .id(selection.route.scope)
         }
         .background(ClaudioTheme.panel(colorScheme))
         .accessibilityIdentifier("workspace.settings")
@@ -173,7 +176,10 @@ struct EventSettingsWindowView: View {
         }
         .onChange(of: selection.route) { _ in synchronize() }
         .onChange(of: selection.presentationState.focusRequestRevision) { _ in synchronize() }
-        .onDisappear { player.stop() }
+        .onDisappear {
+            player.stop()
+            selection.cancelDeletion()
+        }
         .sheet(
             isPresented: Binding(
                 get: { selection.presentationState.credentialSheetIsPresented },
@@ -196,6 +202,36 @@ struct EventSettingsWindowView: View {
                 isAddingWorkspace = false
             }
         }
+        .alert(
+            l10n.format(
+                .workspaceDeleteConfirmTitle,
+                selection.deletionPresentation.pending?.target.name ?? ""),
+            isPresented: Binding(
+                get: { selection.deletionPresentation.pending != nil },
+                set: { presented in
+                    guard !presented, let pending = selection.deletionPresentation.pending else {
+                        return
+                    }
+                    // A native dismissal may arrive before its button action. Defer cancellation
+                    // until the action has had a chance to consume the captured target.
+                    Task { @MainActor in
+                        if selection.deletionPresentation.pending == pending {
+                            selection.cancelDeletion()
+                        }
+                    }
+                }),
+            presenting: selection.deletionPresentation.pending
+        ) { request in
+            Button(l10n.text(.workspaceCancel), role: .cancel) {
+                selection.cancelDeletion()
+            }
+            .keyboardShortcut(.defaultAction)
+            Button(l10n.text(.workspaceDeleteAction), role: .destructive) {
+                confirmDeletion(request)
+            }
+        } message: { request in
+            Text(l10n.format(.workspaceDeleteConfirmMessage, request.target.directory.path))
+        }
     }
 
     private func synchronize() {
@@ -203,7 +239,8 @@ struct EventSettingsWindowView: View {
         // Preserve invalid identities so delayed actions cannot write the Default Group.
         model.selectSoundScope(selection.route.scope)
         focusedTarget =
-            selection.route.event.map(EventSettingsFocusTarget.event)
+            selection.presentationState.focusTarget
+            ?? selection.route.event.map(EventSettingsFocusTarget.event)
             ?? .scope(selection.route.scope)
     }
 
@@ -284,11 +321,72 @@ struct EventSettingsWindowView: View {
             Text("WorkBuddy · " + l10n.text(.workspaceEvidencePending)).font(.caption)
                 .foregroundColor(.secondary)
             Button(l10n.text(.workspaceRemove)) {
-                if model.changeWorkspace(.remove(rule.id)) {
-                    selection.select(EventSettingsWindowRoute(scope: .global));
-                    model.selectSoundScope(.global)
-                }
-            }.accessibilityIdentifier("workspace.remove")
+                _ = selection.requestDeletion(of: rule)
+            }
+            .focused($focusedTarget, equals: .workspaceRemove(rule.id))
+            .settingsMountIdentity("workspace.remove")
+        }
+    }
+
+    @ViewBuilder
+    private func deletionFeedback(_ feedback: WorkspaceDeleteFeedback) -> some View {
+        switch feedback {
+        case .succeeded(let target):
+            Label(
+                l10n.format(.workspaceDeleteSucceeded, target.name),
+                systemImage: "checkmark.circle.fill"
+            )
+            .settingsMountIdentity("workspace.delete.result")
+        case .failed(let target, let error, let readback):
+            FailureRow(message: deletionFailureMessage(target, error: error, readback: readback))
+                .focusable()
+                .focused($focusedTarget, equals: .workspaceDeleteFeedback)
+                .settingsMountIdentity("workspace.delete.failure")
+            Button(l10n.text(.workspaceDeleteReload)) {
+                model.reload()
+                selection.refreshDeletionReadback(configState: model.configState)
+            }
+            .accessibilityIdentifier("workspace.delete.reload")
+        }
+    }
+
+    private func deletionFailureMessage(
+        _ target: WorkspaceSoundDeleteTarget,
+        error: WorkspaceSoundError,
+        readback: WorkspaceDeleteReadback?
+    ) -> String {
+        let reason = localizedWorkspaceError(error, language: languageStore.language)
+        var message = l10n.format(.workspaceDeleteFailed, target.name, reason)
+        if let readback {
+            let key: ClaudioL10nKey
+            switch readback {
+            case .originalPresent: key = .workspaceDeleteReadbackPresent
+            case .absent: key = .workspaceDeleteReadbackAbsent
+            case .replaced: key = .workspaceDeleteReadbackReplaced
+            case .unavailable: key = .workspaceDeleteReadbackUnavailable
+            }
+            message += " " + l10n.text(key)
+        }
+        return message
+    }
+
+    private func confirmDeletion(_ request: WorkspaceDeletionRequest) {
+        guard selection.consumeDeletion(request) else { return }
+        let target = request.target
+        let succeeded = model.changeWorkspace(.remove(target))
+        let error = model.workspaceError
+        let selectedDefault = selection.finishDeletion(
+            request, succeeded: succeeded, error: error, configState: model.configState)
+        if selectedDefault { model.selectSoundScope(.global) }
+        if let feedback = selection.deletionPresentation.feedback {
+            switch feedback {
+            case .succeeded:
+                onAnnouncement(l10n.format(.workspaceDeleteSucceeded, target.name))
+            case .failed(let failedTarget, let reason, let readback):
+                onAnnouncement(
+                    deletionFailureMessage(
+                        failedTarget, error: reason, readback: readback))
+            }
         }
     }
 

@@ -150,6 +150,20 @@ public struct WorkspaceSoundRule: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+/// The rule the user inspected when requesting deletion. A UUID alone cannot distinguish a
+/// replacement written by another process before the confirmation is accepted.
+public struct WorkspaceSoundDeleteTarget: Sendable, Equatable {
+    public let id: UUID
+    public let name: String
+    public let directory: WorkspaceDirectory
+
+    public init(rule: WorkspaceSoundRule) {
+        id = rule.id
+        name = rule.name
+        directory = rule.directory
+    }
+}
+
 public enum WorkspaceSoundError: Error, Sendable, Equatable, CustomStringConvertible {
     case invalidRule, duplicateDirectory, staleRule, unsupportedSurface, invalidPack, configFailure,
         lockBusy, tooLarge, publishedConflict
@@ -246,7 +260,7 @@ extension ClaudioConfig {
 
 public enum WorkspaceSoundMutation: Sendable {
     case add(WorkspaceSoundRule)
-    case remove(UUID)
+    case remove(WorkspaceSoundDeleteTarget)
     case pack(UUID, String)
     case volume(UUID, Double)
     case event(UUID, Event, Bool)
@@ -259,11 +273,15 @@ public func mutateWorkspaceSound(
     lockFile: URL = ClaudioPaths.configLockFile,
     userPacksDirectory: URL = ClaudioPaths.packsDirectory,
     bundledPacksDirectory: URL? = nil,
-    verifiedSurfaces: Set<HostSurfaceID> = WorkspaceSurfaceEligibility.verified
+    verifiedSurfaces: Set<HostSurfaceID> = WorkspaceSurfaceEligibility.verified,
+    testingBeforeRename: (() -> Void)? = nil
 ) -> Result<Void, WorkspaceSoundError> {
     var rejection: WorkspaceSoundError?
     let locked = withNonBlockingLock(path: lockFile.path) {
-        updateConfigJSON(at: configFile, onMissing: .failClosed) { json in
+        updateConfigJSON(
+            at: configFile, onMissing: .failClosed,
+            testingBeforeRename: testingBeforeRename
+        ) { json in
             func reject(_ error: WorkspaceSoundError) -> Result<Void, ConfigMutationFailure> {
                 rejection = error
                 return .failure(.mutationRejected)
@@ -295,7 +313,10 @@ public func mutateWorkspaceSound(
                 rules[rule.id.uuidString] = object
                 id = rule.id
             case .remove(let target):
-                guard rules.removeValue(forKey: target.uuidString) != nil else {
+                guard let current = config.workspaceRules.first(where: { $0.id == target.id }),
+                    current.directory == target.directory,
+                    rules.removeValue(forKey: target.id.uuidString) != nil
+                else {
                     return reject(.staleRule)
                 }
                 json["workspace_rules"] = rules

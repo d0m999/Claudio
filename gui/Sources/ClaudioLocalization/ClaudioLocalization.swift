@@ -1235,6 +1235,17 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let workspaceNeedsRepair: Self = "workspace.needs-repair"
     public static let workspaceAdd: Self = "workspace.add"
     public static let workspaceRemove: Self = "workspace.remove"
+    public static let workspaceDeleteConfirmTitle: Self = "workspace.delete-confirm-title"
+    public static let workspaceDeleteConfirmMessage: Self = "workspace.delete-confirm-message"
+    public static let workspaceDeleteAction: Self = "workspace.delete-action"
+    public static let workspaceDeleteSucceeded: Self = "workspace.delete-succeeded"
+    public static let workspaceDeleteFailed: Self = "workspace.delete-failed"
+    public static let workspaceDeleteReload: Self = "workspace.delete-reload"
+    public static let workspaceDeleteReadbackPresent: Self = "workspace.delete-readback-present"
+    public static let workspaceDeleteReadbackAbsent: Self = "workspace.delete-readback-absent"
+    public static let workspaceDeleteReadbackReplaced: Self = "workspace.delete-readback-replaced"
+    public static let workspaceDeleteReadbackUnavailable: Self =
+        "workspace.delete-readback-unavailable"
     public static let workspaceDirectory: Self = "workspace.directory"
     public static let workspaceChooseDirectory: Self = "workspace.choose-directory"
     public static let workspaceGitScope: Self = "workspace.git-scope"
@@ -1273,6 +1284,16 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .workspaceNeedsRepair,
         .workspaceAdd,
         .workspaceRemove,
+        .workspaceDeleteConfirmTitle,
+        .workspaceDeleteConfirmMessage,
+        .workspaceDeleteAction,
+        .workspaceDeleteSucceeded,
+        .workspaceDeleteFailed,
+        .workspaceDeleteReload,
+        .workspaceDeleteReadbackPresent,
+        .workspaceDeleteReadbackAbsent,
+        .workspaceDeleteReadbackReplaced,
+        .workspaceDeleteReadbackUnavailable,
         .workspaceDirectory,
         .workspaceChooseDirectory,
         .workspaceGitScope,

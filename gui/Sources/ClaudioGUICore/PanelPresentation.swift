@@ -88,6 +88,8 @@ public func eventPreviewFileURL(
 /// view loop.
 public enum EventSettingsFocusTarget: Sendable, Equatable, Hashable {
     case scope(PanelSoundScopeID)
+    case workspaceRemove(UUID)
+    case workspaceDeleteFeedback
     case event(Event)
     case previewAll
     case masterVolume

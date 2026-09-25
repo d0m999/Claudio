@@ -7,10 +7,12 @@ import Foundation
 @MainActor
 package final class EventSettingsWindowSelection: ObservableObject {
     @Published package private(set) var presentationState: SettingsEventPresentationState
+    @Published package private(set) var deletionPresentation = WorkspaceDeletionPresentation()
 
     private var storage: Storage
     private var isPublishingState = false
     private var republishRequested = false
+    private var consumedDeleteRequest: WorkspaceDeletionRequest?
 
     package var route: EventSettingsWindowRoute { storage.route }
     package var routeRequestRevision: UInt64 { storage.routeRequestRevision }
@@ -27,6 +29,8 @@ package final class EventSettingsWindowSelection: ObservableObject {
     package func select(_ route: EventSettingsWindowRoute) {
         guard storage.route != route else { return }
         storage.leaveDestination()
+        deletionPresentation = WorkspaceDeletionPresentation()
+        consumedDeleteRequest = nil
         storage.route = route
         storage.routeRequestRevision &+= 1
         storage.focusTarget = nil
@@ -36,6 +40,7 @@ package final class EventSettingsWindowSelection: ObservableObject {
     package func markCurrentScopeUnavailable() {
         guard storage.route.unavailableRequestedScopeStoredValue == nil else { return }
         storage.leaveDestination()
+        deletionPresentation.pending = nil
         storage.route = EventSettingsWindowRoute(
             scope: storage.route.scope,
             event: storage.route.event,
@@ -63,6 +68,89 @@ package final class EventSettingsWindowSelection: ObservableObject {
                 scopes: scopes,
                 events: Set(Event.allCases))
         }
+        storage.focusRequestRevision &+= 1
+        publishState()
+    }
+
+    @discardableResult
+    package func requestDeletion(of rule: WorkspaceSoundRule) -> Bool {
+        guard storage.route.scope == .workspace(rule.id),
+            storage.route.unavailableRequestedScopeStoredValue == nil,
+            deletionPresentation.pending == nil, consumedDeleteRequest == nil
+        else { return false }
+        deletionPresentation = WorkspaceDeletionPresentation(
+            pending: WorkspaceDeletionRequest(target: WorkspaceSoundDeleteTarget(rule: rule)),
+            feedback: nil)
+        return true
+    }
+
+    package func cancelDeletion() {
+        guard let pending = deletionPresentation.pending else { return }
+        deletionPresentation.pending = nil
+        if storage.route.scope == .workspace(pending.target.id) {
+            requestFocus(.workspaceRemove(pending.target.id))
+        }
+    }
+
+    /// Clear the pending request before any disk I/O, so a second action cannot submit it again.
+    package func consumeDeletion(_ request: WorkspaceDeletionRequest) -> Bool {
+        guard deletionPresentation.pending == request,
+            storage.route.scope == .workspace(request.target.id),
+            storage.route.unavailableRequestedScopeStoredValue == nil
+        else { return false }
+        deletionPresentation.pending = nil
+        consumedDeleteRequest = request
+        return true
+    }
+
+    /// The caller has completed the existing config transaction and its conflict readback.
+    /// A route changed during that call must not be overwritten by the old deletion result.
+    @discardableResult
+    package func finishDeletion(
+        _ request: WorkspaceDeletionRequest,
+        succeeded: Bool,
+        error: WorkspaceSoundError?,
+        configState: PanelConfigState
+    ) -> Bool {
+        guard consumedDeleteRequest == request,
+            storage.route.scope == .workspace(request.target.id)
+        else { return false }
+        consumedDeleteRequest = nil
+        let target = request.target
+        if succeeded {
+            select(EventSettingsWindowRoute(scope: .global))
+            deletionPresentation.feedback = .succeeded(target)
+            requestFocus(.scope(.global))
+            return true
+        }
+        let reason = error ?? .configFailure
+        let readback: WorkspaceDeleteReadback? =
+            reason == .publishedConflict || reason == .staleRule
+            ? WorkspaceDeleteReadback(target: target, configState: configState) : nil
+        if readback == .absent || readback == .replaced {
+            markCurrentScopeUnavailable()
+        }
+        deletionPresentation.feedback = .failed(
+            target, reason,
+            reason == .publishedConflict || readback == .replaced ? readback : nil)
+        requestFocus(.workspaceDeleteFeedback)
+        return false
+    }
+
+    package func refreshDeletionReadback(configState: PanelConfigState) {
+        guard case .failed(let target, .publishedConflict, _) = deletionPresentation.feedback else {
+            return
+        }
+        let readback = WorkspaceDeleteReadback(target: target, configState: configState)
+        if readback == .absent || readback == .replaced {
+            markCurrentScopeUnavailable()
+        }
+        deletionPresentation.feedback = .failed(target, .publishedConflict, readback)
+        requestFocus(.workspaceDeleteFeedback)
+    }
+
+    private func requestFocus(_ target: EventSettingsFocusTarget) {
+        storage.focusTarget = target
         storage.focusRequestRevision &+= 1
         publishState()
     }
@@ -127,6 +215,8 @@ package final class EventSettingsWindowSelection: ObservableObject {
 
     package func leaveDestination() {
         storage.leaveDestination()
+        deletionPresentation = WorkspaceDeletionPresentation()
+        consumedDeleteRequest = nil
         publishState()
     }
 

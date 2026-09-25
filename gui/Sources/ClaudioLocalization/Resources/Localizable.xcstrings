@@ -13859,6 +13859,166 @@
         }
       }
     },
+    "workspace.delete-confirm-title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete sound rule for “%@”?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除“%@”的声音规则？"
+          }
+        }
+      }
+    },
+    "workspace.delete-confirm-message": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Directory: %@\nOnly this sound rule is deleted. Project files and sound packs stay. Future callbacks match remaining Workspace rules or the Default Group."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目录：%@\n只删除这条声音规则，项目文件与声音包保留。后续回调按剩余工作区规则或默认组重新匹配。"
+          }
+        }
+      }
+    },
+    "workspace.delete-action": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Rule"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除规则"
+          }
+        }
+      }
+    },
+    "workspace.delete-succeeded": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Removed the sound rule for “%@”."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已删除“%@”的声音规则。"
+          }
+        }
+      }
+    },
+    "workspace.delete-failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not confirm deletion of “%@”: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法确认“%@”的删除结果：%@"
+          }
+        }
+      }
+    },
+    "workspace.delete-reload": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reload current configuration"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新载入当前配置"
+          }
+        }
+      }
+    },
+    "workspace.delete-readback-present": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The latest readable configuration still contains this rule. The published write conflicted; review the current configuration before requesting deletion again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最新可读配置仍有此规则。已发布的写入发生冲突；请核对当前配置后再重新请求删除。"
+          }
+        }
+      }
+    },
+    "workspace.delete-readback-absent": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The latest readable configuration has no rule with this ID. Which write removed it is uncertain; review the current configuration."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最新可读配置中已无此 ID 的规则。无法确定是哪次写入移除了它；请核对当前配置。"
+          }
+        }
+      }
+    },
+    "workspace.delete-readback-replaced": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The latest readable configuration uses this ID for another directory. No further deletion was attempted."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最新可读配置把此 ID 用于另一目录。没有继续尝试删除。"
+          }
+        }
+      }
+    },
+    "workspace.delete-readback-unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The configuration could not be read back reliably. The deletion outcome is unknown; inspect the current configuration and recovery files."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法可靠读回配置，删除结果未知；请检查当前配置与恢复文件。"
+          }
+        }
+      }
+    },
     "workspace.directory": {
       "localizations": {
         "en": {

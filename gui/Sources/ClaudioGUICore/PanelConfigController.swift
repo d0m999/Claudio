@@ -119,8 +119,10 @@ public final class PanelConfigController: ObservableObject {
                 .changed, source: configProjectionToken)
             return true
         case .failure(let error):
-            if error == .publishedConflict {
+            if error == .publishedConflict || error == .staleRule {
                 reload(origin: .writeAction, refreshSoundPackLibrary: false)
+            }
+            if error == .publishedConflict {
                 soundPacksRefreshCoordinator?.completeConfigFactChange(
                     .changed, source: configProjectionToken)
             }

@@ -118,6 +118,7 @@ package enum SettingsPresentationFixtures {
         availability: SettingsRouteAvailability? = nil,
         textSize: ClaudioCompactPreviewDensity = .standard,
         experienceProfile: PreviewFixtures.SettingsExperienceProfile? = nil,
+        workspaceRules: [WorkspaceSoundRule] = [],
         builtinPackIDs: Set<String> = [],
         aiCueViewModel injectedAICueViewModel: AICueGenerationViewModel? = nil,
         aiCueScenario: PreviewFixtures.AICueGalleryScenario? = nil,
@@ -159,13 +160,14 @@ package enum SettingsPresentationFixtures {
         if generalState == .writeFailed {
             loginItemSettings.setEnabled(true)
         }
-        let settingsConfig = ClaudioConfig(
+        var settingsConfig = ClaudioConfig(
             selectedPack: "settings-fixture-pack",
             masterVolume: 0.7,
             surfaceOverrides: [
                 HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
                     selectedPack: "settings-fixture-workbuddy-pack")
             ])
+        settingsConfig.workspaceRules = workspaceRules
         let soundPacksEditor = SoundPacksEditorOwner.stateGalleryFixture(
             previewConfig: settingsConfig,
             packCards: [
