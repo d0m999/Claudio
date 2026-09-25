@@ -560,7 +560,8 @@ func runPanelPresentationSuites() async {
             let environment = makeAudioImportEnvironment(userPacksDirectory: packs)
             let fact = SoundPackFacts(
                 id: "selected", name: nil, isCC0: false, factoryIntegrity: nil,
-                eventCoverage: Dictionary(uniqueKeysWithValues: rows.map { ($0.event, $0.coverage) }),
+                eventCoverage: Dictionary(
+                    uniqueKeysWithValues: rows.map { ($0.event, $0.coverage) }),
                 cardState: .partial(present: 1, total: Event.allCases.count),
                 audioInventory: .deferred)
             let library = SoundPackLibrary(
