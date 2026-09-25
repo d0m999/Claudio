@@ -146,10 +146,14 @@ struct EventSettingsWindowView: View {
                 Divider()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        Text(current?.name ?? l10n.text(.workspaceUnavailable)).font(.title2)
-                            .fontWeight(.bold)
-                            .allowsTightening(true)
-                            .accessibilityAddTraits(.isHeader)
+                        Text(
+                            (current?.name ?? l10n.text(.workspaceUnavailable))
+                                .replacingOccurrences(of: "-", with: "-\u{200B}")
+                        )
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityLabel(current?.name ?? l10n.text(.workspaceUnavailable))
                         if !migrationSeen && !model.configState.resolvedConfig.selectedPack.isEmpty
                         {
                             VStack(alignment: .leading, spacing: 8) {
