@@ -666,7 +666,7 @@ public struct PanelView: View {
             playbackSettings(
                 masterVolumeEnabled: panelModel.libraryPresentationState.hasUsableSnapshot)
         case .needsPack:
-            needsPackNotice
+            if panelModel.workspaceError == nil { needsPackNotice }
             playbackSettings(masterVolumeEnabled: false)
         case .configFailure:
             configFailureNotice()
