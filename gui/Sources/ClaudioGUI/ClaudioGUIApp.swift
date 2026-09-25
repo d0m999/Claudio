@@ -4,38 +4,27 @@ import ClaudioGUICore
 import ClaudioSettingsPresentation
 import SwiftUI
 
-/// The real menu-bar app entry point (ENGINEERING.md T15 D2) — replaces T7's temporary
-/// `WindowGroup { OnboardingView(...) }` scaffolding, whose own doc comment already flagged
-/// it as disposable ("expected to be replaced wholesale once the menu bar skeleton lands").
-/// `Settings {}` remains the smallest legal placeholder `Scene` SwiftUI's `App` protocol
-/// requires. Its process-wide command is removed because the accessory app may be active while a
-/// host still owns the visible menu bar; explicit panel and Carbon entries route to the retained
-/// AppKit owner instead. This menu-bar-only app still has no document window.
+/// The menu-bar app starts AppKit directly. A SwiftUI `App` needs a `Scene`, but the former
+/// `Settings { EmptyView() }` placeholder could open an empty settings window on cold launch
+/// when the app was linked against an older macOS SDK. The real settings window is owned by
+/// `SettingsWindowController` and opens only through explicit panel and Carbon routes.
 ///
 /// ⚠️ COMPILE-ONLY here (see ``MenuBarController``'s doc comment): the actual menu-bar
 /// icon, popover open/close, and focus behavior are manual-verify on a real Mac.
 @main
-struct ClaudioGUIApp: App {
-    @NSApplicationDelegateAdaptor(ClaudioGUIAppDelegate.self) private var appDelegate
+@MainActor
+enum ClaudioGUIApp {
+    private static let appDelegate = ClaudioGUIAppDelegate()
 
-    var body: some Scene {
-        Settings {
-            EmptyView()
-        }
-        // SwiftUI synthesizes a process-wide ⌘, for every Settings scene. The popover activates
-        // this accessory process while the visible menu bar may still belong to a host, so keeping
-        // that key equivalent would steal the host's Settings shortcut. Only the synthesized item
-        // is removed; explicit panel routes and user-configured Carbon shortcuts remain available.
-        .commands {
-            CommandGroup(replacing: .appSettings) {}
-        }
+    static func main() {
+        let application = NSApplication.shared
+        application.delegate = appDelegate
+        application.run()
     }
 }
 
-/// Owns ``MenuBarController`` for the app's lifetime — an `NSApplicationDelegate`, not a
-/// SwiftUI `Scene`, because the status item + popover are pure AppKit constructs with no
-/// SwiftUI `Scene` counterpart (mirrors how every "menu bar only" SwiftUI app on macOS is
-/// structured: `Scene` bodies model WINDOWS, and this app deliberately has none).
+/// Owns ``MenuBarController`` for the app's lifetime. The status item and popover are AppKit
+/// constructs, and no implicit SwiftUI window participates in their lifecycle.
 @MainActor
 final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
     let preferences = ClaudioPreferences()

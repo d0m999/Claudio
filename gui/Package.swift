@@ -10,7 +10,8 @@ import PackageDescription
 //     can be exercised by the same dependency-free test harness `helper/` uses.
 //   - `ClaudioSettingsPresentation`: the importable Settings tree and its typed presentation
 //     transaction; it has no native window, system-effect adapter, or resource ownership.
-//   - `ClaudioGUI`: the executable — SwiftUI `App`/`View` layer, depends on `ClaudioGUICore`.
+//   - `ClaudioGUI`: the executable — AppKit entry/window ownership and SwiftUI views, depends on
+//     `ClaudioGUICore`.
 let package = Package(
     name: "claudio-gui",
     defaultLocalization: "zh-Hans",
@@ -102,7 +103,7 @@ let package = Package(
                 .product(name: "ClaudioCore", package: "helper"),
             ]
         ),
-        // The SwiftUI app shell owns the status-item panel, native adapters, and one retained
+        // The AppKit app shell owns the status-item panel, native adapters, and one retained
         // Settings window. The imported presentation target consumes `ClaudioGUICore` values and
         // never opens host config itself, so composition creates no second truth source.
         //

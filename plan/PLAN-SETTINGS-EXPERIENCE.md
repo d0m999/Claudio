@@ -60,8 +60,8 @@
 
 ## 1. 当前事实与逐页差距
 
-当前 `ClaudioGUIApp` 的 `Settings { EmptyView() }` 只为满足 SwiftUI `App` 协议存在，且合成的
-`appSettings` 命令被移除。生产 UI 由 `MenuBarController` 持有一个 retained 的统一
+`ClaudioGUIApp` 直接启动 AppKit，不注册会在旧 SDK 标记下冷启动弹出的空白 SwiftUI `Settings`
+场景，也不生成 process-wide `appSettings` 命令。生产 UI 由 `MenuBarController` 持有一个 retained 的统一
 `SettingsWindowController`；集成目的页已经迁入该窗口，事件与声音包编辑仍按各自迁移阶段嵌入或保留其
 既有 owner，因此后续页面的差距不能通过新建并行窗口解决。
 
@@ -187,7 +187,7 @@ enum SettingsRoute {
   `isReleasedWhenClosed = false`，窗口内容和 app-lifetime models 不因关闭重复实例化。
 - 菜单栏增加明确的「设置…」入口；现有「连接与诊断」「打开设置」「管理声音包」分别提交
   `.integrations`、`.events`、`.sounds` 深链接。
-- 继续移除 SwiftUI 合成的 process-wide `appSettings` 命令：popover 激活时 `⌘,` 仍可能抢走
+- 不注册 SwiftUI `Settings` 场景及其 process-wide `appSettings` 命令：popover 激活时 `⌘,` 仍可能抢走
   前台宿主的设置快捷键。快捷键页允许用户自行注册不冲突的 claudi0 全局入口。
 - 首次打开捕获前台外部 app；关闭统一窗口只消费一次 handback。页面切换、sheet 和内部路由不交还焦点。
 - 重复调用 show 只提到前台并路由，不创建窗口，也不重置不相关页面状态。
