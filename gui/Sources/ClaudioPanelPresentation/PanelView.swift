@@ -111,7 +111,9 @@ public struct PanelView: View {
         focusCoordinator: PanelFocusCoordinator,
         hostIntegrations: HostIntegrationPresentationStore,
         languageStore: ClaudioPreferences,
-        eventNoticeModel: EventNoticeModel = EventNoticeModel(receiverEpoch: UUID())
+        eventNoticeModel: EventNoticeModel = EventNoticeModel(receiverEpoch: UUID()),
+        previewPlayer: AudioPreviewPlaying? = nil,
+        onAnnounce: @escaping @MainActor (String) -> Void = { _ in }
     ) {
         let previewKey = UUID().uuidString
         let defaults = UserDefaults(suiteName: "com.orbitzero.claudio.state-gallery")!
@@ -131,7 +133,7 @@ public struct PanelView: View {
         self.eventNoticeModel = eventNoticeModel
         self.activityDiagnostics = ActivityDiagnosticsModel(
             previewPresentation: previewActivityPresentation)
-        self.previewPlayer = NSSoundAudioPreviewPlayer()
+        self.previewPlayer = previewPlayer ?? NSSoundAudioPreviewPlayer()
         self.refreshesActivityOnLifecycle = false
         self.onAudibilityInputsChanged = {}
         self.onOpenSettings = {}
@@ -141,7 +143,7 @@ public struct PanelView: View {
         self.onOpenIntegration = { _ in }
         self.onQuit = {}
         self.onRevealConfig = { _ in }
-        self.onAnnounce = { _ in }
+        self.onAnnounce = onAnnounce
     }
     #endif
 
@@ -1234,7 +1236,13 @@ private struct PanelAgentEventRow: View {
                     .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier(
-                        "panel.event.\(presentation.event.rawValue).preview-failure")
+                        "panel.event.\(presentation.event.rawValue).preview-failure"
+                    )
+                    .modifier(
+                        PanelPreviewFailureMount(
+                            event: presentation.event,
+                            text: localizedEventPreviewAttemptFailure(
+                                attemptFailure, language: language)))
             }
             if reduceMotion && previewSuccessToken != nil {
                 Label(
@@ -1336,19 +1344,7 @@ private struct PanelAgentEventRow: View {
 
     private var actions: some View {
         HStack(spacing: 5) {
-            Button {
-                if onPreview() {
-                    previewPulseTrigger &+= 1
-                    let token = UUID()
-                    previewSuccessToken = token
-                    Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 1_200_000_000)
-                        if previewSuccessToken == token { previewSuccessToken = nil }
-                    }
-                } else {
-                    previewSuccessToken = nil
-                }
-            } label: {
+            Button(action: performPreview) {
                 Image(systemName: "play.fill")
                     .claudioPreviewPulse(trigger: previewPulseTrigger)
             }
@@ -1369,6 +1365,12 @@ private struct PanelAgentEventRow: View {
                     presentation.title)
             )
             .accessibilityIdentifier("panel.event.\(presentation.event.rawValue).preview")
+            #if DEBUG
+            .onAppear {
+                PanelPreviewMountRecorder.register(
+                    presentation.event, action: performPreview)
+            }
+            #endif
 
             Button(action: onToggleMute) {
                 PanelMuteSpeakerIcon(isMuted: !presentation.enabled)
@@ -1391,7 +1393,87 @@ private struct PanelAgentEventRow: View {
         }
         .fixedSize()
     }
+
+    private func performPreview() {
+        if onPreview() {
+            previewPulseTrigger &+= 1
+            let token = UUID()
+            previewSuccessToken = token
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                if previewSuccessToken == token { previewSuccessToken = nil }
+            }
+        } else {
+            previewSuccessToken = nil
+        }
+    }
 }
+
+private struct PanelPreviewFailureMount: ViewModifier {
+    let event: Event
+    let text: String
+
+    func body(content: Content) -> some View {
+        #if DEBUG
+        content
+            .onAppear { PanelPreviewMountRecorder.showFailure(for: event, text: text) }
+            .onChange(of: text) { value in
+                PanelPreviewMountRecorder.showFailure(for: event, text: value)
+            }
+            .onDisappear { PanelPreviewMountRecorder.hideFailure(for: event) }
+        #else
+        content
+        #endif
+    }
+}
+
+#if DEBUG
+/// Exercises the action registered by an actually mounted production Button, then observes the
+/// failure Text's own lifecycle. No duplicate preview handler or gallery-only view is involved.
+@MainActor
+package enum PanelPreviewMountRecorder {
+    private static var isRecording = false
+    private static var actions: [Event: () -> Void] = [:]
+    private static var failures: [Event: String] = [:]
+
+    package static func reset() {
+        actions.removeAll()
+        failures.removeAll()
+        isRecording = true
+    }
+
+    package static func stopRecording() {
+        actions.removeAll()
+        failures.removeAll()
+        isRecording = false
+    }
+
+    static func register(_ event: Event, action: @escaping () -> Void) {
+        guard isRecording else { return }
+        actions[event] = action
+    }
+
+    static func showFailure(for event: Event, text: String) {
+        guard isRecording else { return }
+        failures[event] = text
+    }
+
+    static func hideFailure(for event: Event) {
+        guard isRecording else { return }
+        failures[event] = nil
+    }
+
+    package static func invoke(_ event: Event) -> Bool {
+        guard let action = actions[event] else { return false }
+        action()
+        return true
+    }
+
+    package static func visibleFailure(for event: Event) -> String? {
+        failures[event]
+    }
+}
+#endif
 
 /// Activity segments keep their 29pt target and 13pt visible bar while exposing the same warm
 /// interaction language as the shared icon actions. Geometry never changes between states.

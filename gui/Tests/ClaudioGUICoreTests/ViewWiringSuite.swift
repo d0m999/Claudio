@@ -2462,32 +2462,8 @@ func runViewWiringSuites() {
             "onCommit 仍须把真实 landed/nil 返回 MasterVolumeRow，维持成功提交与失败回滚契约")
     }
 
-    // MARK: - PLAN-SOUND-MANAGER.md T2：自动试听回归 + 「清除绑定」菜单项接线（存在性级，理由同本文件
-    // 头部——EventRowView/PanelView 都住在不可 import 的 `ClaudioGUI` executableTarget）
-
-    suite("PanelView：手工试听消费控制器的点击时安全读回与结果，映射导入离开面板") {
-        guard let panel = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PanelView.swift")
-        else {
-            expect(false, "读不到 PanelView.swift")
-            return
-        }
-        let flat = collapsingWhitespace(panel)
-        expect(
-            flat.contains("panelModel.attemptPreview( event.event, using: previewPlayer)")
-                && flat.contains("case .failed(let failure):")
-                && flat.contains("previewAttemptFailures[event.event] = failure")
-                && flat.contains("onAnnounce( localizedEventPreviewAttemptFailure("),
-            "面板试听必须委托可编译控制器，并把两种点击失败显示及播报")
-        expect(
-            !flat.contains("AudioImportViewModel")
-                && !flat.contains("runAudioOpenPanel")
-                && !flat.contains("clearEventBinding("),
-            "面板不得保留映射导入、选择文件或清除绑定写路径")
-        expect(
-            !flat.contains("eventPreviewFileURL(")
-                && !flat.contains("previewPlayer.play("),
-            "安全路径与刷新由可编译控制器负责，面板不再复制一次播放判定")
-    }
+    // MARK: - PLAN-SOUND-MANAGER.md T2：按钮试听由可导入的生产 Panel 挂载 suite 检验；
+    // 这里只守旧编辑器与声音包窗口之间仍无可编译接线边界的跨文件契约。
 
     suite("声音包窗口：清除绑定只走窗口；面板恢复携带精确包与事件路由") {
         guard
