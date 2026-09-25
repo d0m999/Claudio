@@ -666,7 +666,7 @@ public struct PanelView: View {
             playbackSettings(
                 masterVolumeEnabled: panelModel.libraryPresentationState.hasUsableSnapshot)
         case .needsPack:
-            if panelModel.workspaceError == nil { needsPackNotice }
+            needsPackNotice
             playbackSettings(masterVolumeEnabled: false)
         case .configFailure:
             configFailureNotice()
@@ -799,20 +799,23 @@ public struct PanelView: View {
         }
     }
 
+    @ViewBuilder
     private var needsPackNotice: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Label(l10n.text(.panelSelectPack), systemImage: "speaker.slash")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(ClaudioTheme.text(colorScheme))
-            Text(l10n.text(.panelNeedsPackSettingsMessage))
-                .font(.system(size: 11, design: .rounded))
-                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
+        if panelModel.workspaceError == nil {
+            VStack(alignment: .leading, spacing: 5) {
+                Label(l10n.text(.panelSelectPack), systemImage: "speaker.slash")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(ClaudioTheme.text(colorScheme))
+                Text(l10n.text(.panelNeedsPackSettingsMessage))
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(9)
+            .background(ClaudioTheme.elevated(colorScheme))
+            .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row))
+            .accessibilityIdentifier("panel.needs-pack")
         }
-        .padding(9)
-        .background(ClaudioTheme.elevated(colorScheme))
-        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.row))
-        .accessibilityIdentifier("panel.needs-pack")
     }
 
     private func configFailureNotice() -> some View {
