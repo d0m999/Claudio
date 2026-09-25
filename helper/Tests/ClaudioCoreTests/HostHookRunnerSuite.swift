@@ -442,14 +442,15 @@ func runHostHookRunnerSuites() {
                 root: root, host: .codex, spawner: spawner,
                 fixtureIsReady: true, activeInstallationID: id)
             let received = HostEventNoticeCollector()
-            guard
-                let receiver = try? EventNoticeReceiver(
+            let receiver: EventNoticeReceiver
+            do {
+                receiver = try EventNoticeReceiver(
                     descriptorFile: root.appendingPathComponent("performance-descriptor.json"),
                     ownerLockFile: root.appendingPathComponent("performance-owner.lock"),
                     currentInstallationID: { $0 == .codex ? id : nil },
                     callback: { received.append($0) })
-            else {
-                expect(false, "性能 fixture 必须有真实 receiver")
+            } catch {
+                expect(false, "性能 fixture 必须有真实 receiver：\(error)")
                 return
             }
             receiver.start()
