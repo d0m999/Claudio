@@ -154,7 +154,7 @@ func runHostEventSourceSuites() {
         }
         expect(
             HostEventSourceParser.parseInput(
-                host: .workBuddy, nativeEvent: "Notification", data: nil
+                host: .workBuddy, nativeEvent: "StopFailure", data: nil
             ).reason == nil,
             "不得升级 WorkBuddy 未实现 binding")
         expect(
@@ -167,6 +167,38 @@ func runHostEventSourceSuites() {
                 data: Data(#"{"notification_type":"permission_prompt"}"#.utf8)
             ).reason == nil,
             "Stop 不因输入通知类型升级为授权")
+    }
+
+    suite("HostEventInput：WorkBuddy 已验证通知类型只投影提醒原因") {
+        for (subtype, expected) in [
+            ("permission_prompt", HostEventNoticeReason.permission),
+            ("idle_prompt", .informational),
+        ] {
+            let payload = Data(
+                #"{"hook_event_name":"Notification","notification_type":"\#(subtype)","cwd":"/private-sentinel/project","message":"SECRET_PERMISSION"}"#
+                    .utf8)
+            let parsed = HostEventSourceParser.parseInput(
+                host: .workBuddy, nativeEvent: "Notification", data: payload)
+            expect(parsed.reason == expected, "WorkBuddy \(subtype) 必须按 subtype 分类")
+            expect(
+                parsed.source == .unavailable(reason: .unsupportedHost, partial: nil),
+                "WorkBuddy 通知原因不得顺带启用未经校准的来源字段")
+        }
+        for raw in [
+            #"{"notification_type":"permission_prompt"}"#,
+            #"{"hook_event_name":"Stop","notification_type":"permission_prompt"}"#,
+            #"{"hook_event_name":"Notification","notification_type":"auth_success"}"#,
+            #"{"hook_event_name":"Notification","notification_type":42}"#,
+            #"{"hook_event_name":"Notification","notification_type":"permission_prompt","notification_type":"idle_prompt"}"#,
+            #"{"hook_event_name":"Notification","hook_event_name":"Notification","notification_type":"permission_prompt"}"#,
+        ] {
+            let parsed = HostEventSourceParser.parseInput(
+                host: .workBuddy, nativeEvent: "Notification", data: Data(raw.utf8))
+            expect(parsed.reason == .review, "非法 WorkBuddy payload 不得投影确定的提醒原因")
+            expect(
+                parsed.source == .unavailable(reason: .unsupportedHost, partial: nil),
+                "非法 WorkBuddy payload 不得投影来源")
+        }
     }
 
     suite("HostEventInput：身份不截断，parent 标记缺失或损坏不能变为主会话") {

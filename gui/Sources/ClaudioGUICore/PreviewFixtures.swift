@@ -1359,7 +1359,7 @@ public enum PreviewFixtures {
                 bindingActivations: workBuddyImplementedBindingActivations(
                     taskStart: awaiting,
                     stop: awaiting,
-                    subagentStop: awaiting))
+                    subagentStop: awaiting, notification: awaiting))
         case .taskStartCurrent:
             title = "WorkBuddy 仅 task_start current"
             let taskStart = workBuddyVisualReceipt(event: .taskStart, timestamp: 1_721_980_801)
@@ -1368,12 +1368,14 @@ public enum PreviewFixtures {
                 bindingActivations: workBuddyImplementedBindingActivations(
                     taskStart: .observed(taskStart),
                     stop: awaiting,
-                    subagentStop: awaiting),
+                    subagentStop: awaiting, notification: awaiting),
                 latestReceipt: taskStart)
         case .allImplementedBindingsCurrent:
-            title = "WorkBuddy 三条 binding current"
+            title = "WorkBuddy 四条 binding current"
             let taskStart = workBuddyVisualReceipt(event: .taskStart, timestamp: 1_721_980_801)
             let stop = workBuddyVisualReceipt(event: .stop, timestamp: 1_721_980_802)
+            let notification = workBuddyVisualReceipt(
+                event: .notification, timestamp: 1_721_980_804)
             let subagentStop = workBuddyVisualReceipt(
                 event: .subagentStop, timestamp: 1_721_980_803)
             snapshot = workBuddyVisualSnapshot(
@@ -1381,8 +1383,8 @@ public enum PreviewFixtures {
                 bindingActivations: workBuddyImplementedBindingActivations(
                     taskStart: .observed(taskStart),
                     stop: .observed(stop),
-                    subagentStop: .observed(subagentStop)),
-                latestReceipt: subagentStop)
+                    subagentStop: .observed(subagentStop), notification: .observed(notification)),
+                latestReceipt: notification)
         case .conflict:
             title = "WorkBuddy 配置冲突，可 Repair"
             snapshot = workBuddyVisualSnapshot(
@@ -1395,7 +1397,7 @@ public enum PreviewFixtures {
                 bindingActivations: workBuddyImplementedBindingActivations(
                     taskStart: awaiting,
                     stop: awaiting,
-                    subagentStop: awaiting))
+                    subagentStop: awaiting, notification: awaiting))
         case .disconnectedAfterAction:
             title = "WorkBuddy Disconnect 后未连接"
             snapshot = .disconnected(host: .workBuddy)
@@ -1430,12 +1432,14 @@ public enum PreviewFixtures {
     private static func workBuddyImplementedBindingActivations(
         taskStart: HostActivationEvidence,
         stop: HostActivationEvidence,
-        subagentStop: HostActivationEvidence
+        subagentStop: HostActivationEvidence,
+        notification: HostActivationEvidence
     ) -> [HostEventBindingID: HostActivationEvidence] {
         [
             workBuddyVisualBinding(for: .taskStart).id: taskStart,
             workBuddyVisualBinding(for: .stop).id: stop,
             workBuddyVisualBinding(for: .subagentStop).id: subagentStop,
+            workBuddyVisualBinding(for: .notification).id: notification,
         ]
     }
 

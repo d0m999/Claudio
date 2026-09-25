@@ -193,8 +193,8 @@ func runHostIntegrationModelSuites() {
         expect(workBuddy.map(\.event) == Event.allCases, "WorkBuddy 必须始终展示五个语义事件")
         expect(
             workBuddy.filter(\.isAudibleCapability).map(\.event)
-                == [.taskStart, .stop, .subagentStop],
-            "WorkBuddy 只可执行三条已证明的 Desktop 事件")
+                == [.taskStart, .stop, .notification, .subagentStop],
+            "WorkBuddy 只可执行四类已证明的 Desktop 事件")
         expect(
             workBuddy.filter(\.isDeclaredCapability).count == 5,
             "官方接口能力必须保留在目录中，不能被当前实现数覆盖")
@@ -307,8 +307,8 @@ func runHostIntegrationModelSuites() {
             matrix.summary(for: .claudeCode) == .ready(supported: 5, total: 5), "Claude 5/5 ready")
         expect(matrix.summary(for: .codex) == .ready(supported: 4, total: 5), "Codex 4/5 是正常 ready")
         expect(
-            matrix.summary(for: .workBuddy) == .ready(supported: 3, total: 5),
-            "WorkBuddy 当前实现必须诚实显示 3/5")
+            matrix.summary(for: .workBuddy) == .ready(supported: 4, total: 5),
+            "WorkBuddy 当前实现必须诚实显示 4/5")
         expect(
             matrix.cell(host: .codex, event: .stopFailure)?.state == .unsupported,
             "Codex 执行中断格必须以中性 unsupported 存在")

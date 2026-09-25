@@ -37,6 +37,7 @@ public struct HostHookEnvironment: Sendable {
     public let uptime: @Sendable () -> TimeInterval
     public let eventNoticeChannel: HostEventNoticeChannel?
     public let sourcePayload: Data?
+    public let scopeFingerprint: @Sendable () -> String?
 
     public init(
         host: HostID,
@@ -47,6 +48,7 @@ public struct HostHookEnvironment: Sendable {
         activityStore: LocalActivitySummaryStore? = nil,
         eventNoticeChannel: HostEventNoticeChannel? = nil,
         sourcePayload: Data? = nil,
+        scopeFingerprint: @escaping @Sendable () -> String? = HostActivationScope.workBuddy,
         now: @escaping @Sendable () -> Date = { Date() },
         uptime: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     ) {
@@ -61,6 +63,7 @@ public struct HostHookEnvironment: Sendable {
         self.activityStore = activityStore
         self.eventNoticeChannel = eventNoticeChannel
         self.sourcePayload = sourcePayload ?? eventNoticeChannel?.sourcePayload
+        self.scopeFingerprint = scopeFingerprint
         self.now = now
         self.uptime = uptime
     }
@@ -131,8 +134,15 @@ public func handleHostHook(
     // diagnostic line. Disconnected or replaced installations are rejected before playback.
     let occurredAt = environment.now()
     let observedUptime = environment.eventNoticeChannel?.observedUptime ?? environment.uptime()
-    let activeInstallationID = environment.receiptStore.currentInstallationID(host: host)
-    guard activeInstallationID == installationID else {
+    let scope = host == .workBuddy ? environment.scopeFingerprint() : nil
+    let installationIsCurrent: @Sendable () -> Bool = {
+        if host == .workBuddy {
+            guard let scope, environment.scopeFingerprint() == scope else { return false }
+        }
+        return environment.receiptStore.isCurrentInstallation(
+            host: host, installationID: installationID, scopeFingerprint: scope)
+    }
+    guard installationIsCurrent() else {
         return HostHookHandlingOutcome(
             host: host, nativeEvent: nativeEvent, event: event,
             playbackResult: .notReady, activityRecordOutcome: .failed, receiptWritten: false)
@@ -143,7 +153,7 @@ public func handleHostHook(
             host: host,
             event: event,
             installationID: installationID,
-            activeInstallationID: activeInstallationID,
+            activeInstallationID: installationID,
             occurredAt: occurredAt)
     } else {
         activityRecordOutcome = .failed
@@ -157,7 +167,7 @@ public func handleHostHook(
         workingDirectory: WorkspaceHookDirectory.cwd(from: environment.sourcePayload),
         playbackAuthorized: {
             base.playbackAuthorized()
-                && environment.receiptStore.currentInstallationID(host: host) == installationID
+                && installationIsCurrent()
         },
         afplayPath: base.afplayPath,
         lockFile: base.lockFile,
@@ -188,7 +198,9 @@ public func handleHostHook(
         timestamp: occurredAt,
         playbackResult: playbackResult)
     let written: Bool
-    switch environment.receiptStore.store(receipt) {
+    switch environment.receiptStore.store(
+        receipt, expectedScopeFingerprint: scope, scopeFingerprint: environment.scopeFingerprint)
+    {
     case .success:
         written = true
     case .failure(.staleInstallation):
@@ -204,7 +216,7 @@ public func handleHostHook(
             lockFile: base.logLockFile)
     }
     if let channel = environment.eventNoticeChannel,
-        activeInstallationID == installationID,
+        installationIsCurrent(),
         let binding = HostCapabilityCatalog.binding(host: host, nativeEvent: nativeEvent)
     {
         let input = HostEventSourceParser.parseInput(

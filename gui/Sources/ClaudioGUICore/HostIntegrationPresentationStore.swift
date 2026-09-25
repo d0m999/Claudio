@@ -121,7 +121,11 @@ public func integrationDestinationContent(
             configurationSource: configurationSources[host],
             latestReceiptText: snapshot.flatMap(hostLatestReceiptText),
             latestReceiptEvidence: snapshot.flatMap(hostLatestReceiptEvidence),
-            mechanism: host.descriptor.mechanism)
+            mechanism: host.descriptor.mechanism,
+            bindingReceipts: host == .workBuddy
+                ? HostCapabilityCatalog.bindings(for: host).filter(\.isAudibleCapability).map {
+                    IntegrationBindingReceiptPresentation(binding: $0, snapshot: snapshot)
+                } : [])
     }
     return IntegrationDestinationContent(
         sourceRows: sourceRows,

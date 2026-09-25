@@ -134,7 +134,7 @@ private func hostSourceRowPresentation(
         case .claudeCode: detailText = nil
         case .codex: detailText = "执行中断暂无事件"
         case .workBuddy:
-            detailText = "其余能力尚未启用"
+            detailText = "通知仅覆盖授权与空闲提醒；执行中断尚未实现"
         case .chatGPTDesktopAX, .claudeDesktopAX: detailText = nil
         }
         status = .ready
@@ -467,7 +467,7 @@ private func defaultQualificationText(_ qualification: HostCapabilityQualificati
     switch qualification {
     case .codexStopFailureUnavailable: "Codex 暂无执行中断事件"
     case .permissionRequestOnly: "仅授权请求"
-    case .notificationMatchersOnly: "仅通知匹配器"
+    case .notificationMatchersOnly: "仅授权与空闲提醒（permission_prompt / idle_prompt）"
     case .interfaceSupportedNotImplemented: "接口支持，当前版本尚未实现"
     case .interfacePartiallySupportedNotImplemented: "接口部分支持，当前版本尚未实现"
     case .undeclaredCapability: "此宿主未声明该能力"

@@ -519,6 +519,8 @@ func runEventNoticeModelSuites() {
             (.claudeCode, "Notification", .informational, .transient, 0),
             (.claudeCode, "Notification", .review, .review, 1),
             (.claudeCode, "Notification", nil, .review, 1),
+            (.workBuddy, "Notification", .permission, .permission, 1),
+            (.workBuddy, "Notification", .informational, .transient, 0),
         ]
         for (host, native, reason, kind, count) in cases {
             model.clearForPrivacy()
@@ -532,7 +534,7 @@ func runEventNoticeModelSuites() {
         expect(
             model.accept(
                 attentionNotice(
-                    epoch: model.receiverEpoch, native: "Notification", host: .workBuddy))
+                    epoch: model.receiverEpoch, native: "StopFailure", host: .workBuddy))
                 == .invalid, "WorkBuddy 未实现能力不升级")
     }
 

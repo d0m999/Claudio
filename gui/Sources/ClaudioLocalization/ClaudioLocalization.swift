@@ -252,6 +252,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let hostWorkBuddyConflictDetail: Self = "host.workbuddy.conflict-detail"
     public static let qualificationAccessibilityBetaUnavailable: Self =
         "qualification.accessibility-beta-unavailable"
+    public static let qualificationNotificationMatchersOnly: Self =
+        "qualification.notification-matchers-only"
     public static let eventTaskStart: Self = "event.task-start"
     public static let eventStop: Self = "event.stop"
     public static let eventStopFailure: Self = "event.stop-failure"
@@ -903,6 +905,14 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "integrations.destination.needs-attention-description"
     public static let integrationsSurfaceEventsCaption: Self =
         "integrations.destination.surface-events-caption"
+    public static let integrationsWorkBuddySoundsCaption: Self =
+        "integrations.destination.workbuddy-sounds-caption"
+    public static let integrationsBindingNoReceipt: Self =
+        "integrations.destination.binding-no-receipt"
+    public static let integrationsBindingAwaitingReceipt: Self =
+        "integrations.destination.binding-awaiting-receipt"
+    public static let integrationsBindingCurrentReceipt: Self =
+        "integrations.destination.binding-current-receipt"
     public static let integrationsReceiptPolicy: Self =
         "integrations.destination.receipt-policy"
     public static let integrationsActivationCallout: Self =
@@ -1604,6 +1614,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .hostWorkBuddyReadyDetail, .hostWorkBuddyAwaitingDetail,
         .hostWorkBuddyConflictDetail,
         .qualificationAccessibilityBetaUnavailable,
+        .qualificationNotificationMatchersOnly,
         .panelSoundScope, .panelSoundScopeInheritanceCaption, .panelSoundScopeExpandHint,
         .panelSoundScopeCollapseHint, .panelSoundScopeGlobalCoverage,
         .panelSoundScopeStatusDefault, .panelSoundScopeStatusActive,
@@ -1660,6 +1671,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .integrationsActivatedDescription, .integrationsConfiguredWaitingDescription,
         .integrationsNotConnectedDescription, .integrationsNeedsAttentionDescription,
         .integrationsSurfaceEventsCaption, .integrationsReceiptPolicy,
+        .integrationsWorkBuddySoundsCaption, .integrationsBindingNoReceipt,
+        .integrationsBindingAwaitingReceipt, .integrationsBindingCurrentReceipt,
         .integrationsActivationCallout, .integrationsUnavailableTitle,
         .integrationsMechanismNativeHooks, .integrationsMechanismAccessibilityBeta,
         .actionRedetectInProgress, .actionConnectInProgress, .actionUpgradeInProgress,

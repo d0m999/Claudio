@@ -233,6 +233,16 @@ public struct HostHookReceiptStore: Sendable {
         currentInstallationUnlocked(host: host)?.scopeFingerprint
     }
 
+    /// 一次 marker 读取同时核对代次与完整 scope，避免拼接两次读取的不同安装。
+    public func isCurrentInstallation(
+        host: HostID, installationID: UUID, scopeFingerprint: String? = nil
+    ) -> Bool {
+        guard let current = currentInstallationUnlocked(host: host),
+            current.installationID == installationID
+        else { return false }
+        return scopeFingerprint.map { current.scopeFingerprint == $0 } ?? true
+    }
+
     /// 每个宿主原生事件拥有独立 JSON。未知/unsupported 事件没有路径，避免把外部输入当文件名。
     public func receiptFile(host: HostID, nativeEvent: String) -> URL? {
         guard HostCapabilityCatalog.semanticEvent(host: host, nativeEvent: nativeEvent) != nil
@@ -258,7 +268,9 @@ public struct HostHookReceiptStore: Sendable {
     }
 
     public func store(
-        _ receipt: HostHookReceipt
+        _ receipt: HostHookReceipt,
+        expectedScopeFingerprint: String? = nil,
+        scopeFingerprint: @Sendable () -> String? = HostActivationScope.workBuddy
     ) -> Result<HostHookReceiptWriteOutcome, HostHookReceiptStoreError> {
         guard receipt.schema == HostHookReceipt.currentSchema,
             let binding = HostCapabilityCatalog.binding(
@@ -282,9 +294,17 @@ public struct HostHookReceiptStore: Sendable {
         let generationLocked = withNonBlockingLock(
             path: installationLockFile(host: receipt.host).path
         ) {
-            guard currentInstallationIDUnlocked(host: receipt.host) == receipt.installationID else {
+            guard let current = currentInstallationUnlocked(host: receipt.host),
+                current.installationID == receipt.installationID
+            else {
                 return Result<HostHookReceiptWriteOutcome, HostHookReceiptStoreError>.failure(
                     .staleInstallation)
+            }
+            // WorkBuddy 的版本身份在安装锁内重读；迟到回执不得激活同 UUID 的旧 scope。
+            if receipt.host == .workBuddy {
+                guard let scope = scopeFingerprint(), current.scopeFingerprint == scope,
+                    expectedScopeFingerprint.map({ $0 == scope }) ?? true
+                else { return .failure(.staleInstallation) }
             }
             let eventLocked = withNonBlockingLock(path: lock.path) {
                 switch publish(data, to: destination) {

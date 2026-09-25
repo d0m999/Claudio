@@ -199,7 +199,10 @@ public enum HostEventSourceParser {
         guard data.count <= HookInputReader.defaultMaximumBytes else {
             return unavailable(.oversized)
         }
-        guard host == .claudeCode || host == .codex else { return unavailable(.unsupportedHost) }
+        guard
+            host == .claudeCode || host == .codex
+                || (host == .workBuddy && nativeEvent == "Notification")
+        else { return unavailable(.unsupportedHost) }
         guard
             let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
         else { return unavailable(.invalidJSON) }
@@ -209,6 +212,10 @@ public enum HostEventSourceParser {
             host: host, nativeEvent: nativeEvent,
             dictionary: duplicateKeys.contains("notification_type")
                 || duplicateKeys.contains("hook_event_name") ? nil : dictionary)
+        if host == .workBuddy {
+            return HostEventInput(
+                source: .unavailable(reason: .unsupportedHost, partial: nil), reason: reason)
+        }
         let sourceKeys: Set<String> = [
             "cwd", "session_id", "agent_id", "is_subagent", "subagent", "hook_event_name",
         ]
@@ -229,6 +236,11 @@ public enum HostEventSourceParser {
             binding.event == .notification
         else { return nil }
         if host == .codex, nativeEvent == "PermissionRequest" { return .permission }
+        if host == .workBuddy, nativeEvent == "Notification" {
+            guard dictionary?["hook_event_name"] as? String == nativeEvent else { return .review }
+            return WorkBuddyNotification.noticeReason(
+                for: dictionary?["notification_type"] as? String) ?? .review
+        }
         guard host == .claudeCode, nativeEvent == "Notification" else { return .review }
         if let payloadEvent = dictionary?["hook_event_name"],
             (payloadEvent as? String) != nativeEvent

@@ -18,6 +18,7 @@
 - 面板与设置共享试听可用性投影。未映射、文件缺失／损坏、所选组音量为零及安全／可读性失败均有可见文字和无障碍原因；关闭自动事件开关不单独禁用手工试听。点击时文件失效或播放器启动失败显示错误并经现有播报通道反馈。恢复按类型化原因定位当前组音量、目标包与事件、包修复、库刷新重试、现有 Finder 配置／恢复文件入口或显式重试；失效规则需重新选择，发布冲突先读回实际状态。恢复目标必须确实存在，不猜文件名、不自动重放失败写入；试听不证明宿主接入或激活。
 - 默认组／工作区页使用与其他设置页一致的可聚焦主标题、header trait 和稳定无障碍身份，组名为详情标题。普通侧栏与集成通用入口请求页面标题焦点并保留有效选择；显式工作区／事件深链接聚焦目标，失效请求聚焦可见失败说明。取消确认回删除按钮、成功删除聚焦结果位置，关闭窗口仍由统一 owner handback；实际 Tab 与 VoiceOver 顺序须原生验证。
 - 统一设置默认 1240×820、最小 960×640，内容最大阅读宽度约 820 pt；窗口宽度不超过 1100 pt 时侧栏 210 pt，否则 252 pt。详情保留一层主纵向滚动，作用域列表可独立滚动；最小窗口内操作和错误可达，外壳不横向溢出。面板固定 312 pt、固定紧凑密度。
+- WorkBuddy 当前实现四个事件绑定、五条自有 hook，能力显示 4/5。Notification 只覆盖 `permission_prompt` 与 `idle_prompt`，使用默认组；StopFailure 尚未实现，WorkBuddy 工作区仍未开放。逐绑定显示待回执／当前回执；宿主 ready 沿用任务开始回执判定，不代表四类均有当前回执。
 - 自动 harness、原生键盘/VoiceOver、真实回调、实际听感和升级提示分别验收。
 
 ## Product Context（产品上下文）
@@ -370,8 +371,8 @@ N 个已发布来源 · 5 个声音事件
   `5 个事件`，Surface 显示 `supported/total 可映射`。
 - **单来源五事件**：列表永远按 `Event.allCases` 显示五行。Global 显示 claudi0 事件 ID 与
   「全局默认」，不伪造宿主原生名；Surface 显示原生事件、接口支持与当前实现。WorkBuddy 覆盖数
-  从能力目录计算：`UserPromptSubmit`、`Stop`、`SubagentStop` 可试听/静音；`StopFailure`、
-  `Notification` 标为未实现且两个动作都禁用。当前代次回执逐项显示，不从覆盖数推断激活。
+  从能力目录计算：`UserPromptSubmit`、`Stop`、`SubagentStop`、`Notification` 已实现（4/5）；
+  `Notification` 仅覆盖 `permission_prompt` 与 `idle_prompt`，`StopFailure` 尚未实现。当前代次回执逐项显示，不从覆盖数推断激活。
   Codex 的 `4/5` 同样是正常能力事实。
 - **动作资格**：视图与焦点顺序共同消费 `PanelEventControlAvailability`。未实现/不支持事件禁用
   试听与静音；缺失或损坏声音、主音量为零只禁用试听，已实现事件仍可切换静音。事件行没有
@@ -400,7 +401,7 @@ N 个已发布来源 · 5 个声音事件
 | 任务开始 | `task_start` | `UserPromptSubmit` | `UserPromptSubmit` | `UserPromptSubmit` / 已实现 |
 | 本轮结束 | `stop` | `Stop` | `Stop` | `Stop` / 已实现 |
 | 执行中断 | `stop_failure` | `StopFailure` | 不支持 | `StopFailure` / 未实现 |
-| 待响应 | `notification` | `Notification` | `PermissionRequest`，**仅授权请求** | `Notification` / 接口限定、未实现 |
+| 待响应 | `notification` | `Notification` | `PermissionRequest`，**仅授权请求** | `Notification` / 已实现，仅 `permission_prompt`、`idle_prompt` |
 | 子任务结束 | `subagent_stop` | `SubagentStop` | `SubagentStop` | `SubagentStop` / 已实现 |
 
 `Stop` 只表示一轮停止；特别是 Codex `Stop` hook 之后仍可能要求 Codex 继续，因此所有可见文案不得写成「任务完成」。`UserPromptSubmit` 只映射稳定语义「任务开始」，不得冒充「待响应」。
@@ -532,7 +533,8 @@ N 个已发布来源 · 5 个声音事件
 - **选中宿主的四行连接组**：严格按「连接状态 → 接入方式 → 默认组／工作区 → 脱敏回执历史」渲染。
   连接状态同时说明配置、当前 installation 回执和 manager 诊断；没有回执时明确显示「暂无当前安装实例
   回执」。接入方式来自 `HostIntegrationDescriptor.mechanism`，只有 manager 提供配置来源时才显示
-  复制路径动作；声音入口标为「默认组／工作区…」并走普通目的页路由，不根据所选 Surface 改变声音作用域；清除回执只在第四行确认。
+  复制路径动作；声音入口标为「默认组／工作区…」并走普通目的页路由，不根据所选 Surface 改变声音作用域；清除回执只在第四行确认。WorkBuddy
+  在第四行内逐项展示四个已实现绑定的待回执／当前回执，只读文字不增加额外 Tab 控件。
 - **五态动作投影**：`ready` 为「已激活」并提供重新检测，Codex 另提供修复连接以处理可执行但版本陈旧的
   helper；`awaitingActivation` 为「待回执」，Codex 额外提供复制 `/hooks` 与修复连接；`legacy` 提供升级连接；
   `notConnected` 关闭 Toggle 且重新检测，开启时调用 connect；`needsAttention` 提供修复连接和重新检测。

@@ -155,21 +155,63 @@ run_silent_hook stale-installation "$MISSING_ROOT" \
 
 WORKBUDDY_ROOT="$TEST_ROOT/workbuddy"
 prepare_root "$WORKBUDDY_ROOT" workbuddy muted
+# Scope 来自生产只读 collector；没有 Desktop 的机器仍验证旧 scope 零输出拒绝，
+# 正向 subtype/播放由可注入的 executable harness 覆盖。
+WORKBUDDY_SCOPE="$(CLAUDIO_TEST_ROOT="$WORKBUDDY_ROOT" "$DEBUG_BIN" acceptance workbuddy-preflight --json | jq -r '.scope.fingerprint // empty')"
 cat > "$WORKBUDDY_ROOT/config.json" <<'JSON'
-{"selected_pack":"minimal-chime","master_volume":0,"events":{"subagent_stop":false}}
+{"selected_pack":"minimal-chime","master_volume":0,"events":{"subagent_stop":false,"notification":false}}
 JSON
 WORKBUDDY_RECEIPT="$WORKBUDDY_ROOT/integrations/receipts/workbuddy/SubagentStop.json"
-printf '%s' '{"hook_event_name":"Stop"}' | run_silent_hook workbuddy-wrong-event \
+printf '%s' '{"hook_event_name":"SubagentStop"}' | run_silent_hook workbuddy-stale-scope \
   "$WORKBUDDY_ROOT" workbuddy SubagentStop --installation-id "$INSTALLATION_ID"
 if [[ -e "$WORKBUDDY_RECEIPT" ]]; then
-  echo "FAIL: WorkBuddy 错位 stdin 不得写 SubagentStop 回执" >&2
+  echo "FAIL: WorkBuddy 旧 scope 不得写回执" >&2
   exit 1
 fi
-printf '%s' '{"hook_event_name":"SubagentStop"}' | run_silent_hook workbuddy-subagent \
-  "$WORKBUDDY_ROOT" workbuddy SubagentStop --installation-id "$INSTALLATION_ID"
-if [[ "$(receipt_result "$WORKBUDDY_RECEIPT")" != "muted" ]]; then
-  echo "FAIL: WorkBuddy 有效 stdin 未形成 SubagentStop muted 回执" >&2
-  exit 1
+if [[ -n "$WORKBUDDY_SCOPE" ]]; then
+  jq --arg scope "$WORKBUDDY_SCOPE" '.scope_fingerprint = $scope' \
+    "$WORKBUDDY_ROOT/integrations/installations/workbuddy.json" > "$WORKBUDDY_ROOT/current.json"
+  mv "$WORKBUDDY_ROOT/current.json" "$WORKBUDDY_ROOT/integrations/installations/workbuddy.json"
+  printf '%s' '{"hook_event_name":"Stop"}' | run_silent_hook workbuddy-wrong-event \
+    "$WORKBUDDY_ROOT" workbuddy SubagentStop --installation-id "$INSTALLATION_ID"
+  if [[ -e "$WORKBUDDY_RECEIPT" ]]; then
+    echo "FAIL: WorkBuddy 错位 stdin 不得写 SubagentStop 回执" >&2
+    exit 1
+  fi
+
+  NOTIFICATION_RECEIPT="$WORKBUDDY_ROOT/integrations/receipts/workbuddy/Notification.json"
+  for payload in \
+    '{}' \
+    '{"hook_event_name":"Stop","notification_type":"idle_prompt"}' \
+    '{"hook_event_name":"Notification","notification_type":"auth_success"}' \
+    '{"hook_event_name":"Notification","notification_type":null}' \
+    '{"hook_event_name":"Notification","hook_event_name":"Notification","notification_type":"idle_prompt"}' \
+    '{"hook_event_name":"Notification","notification_type":"idle_prompt","notification_type":"idle_prompt"}' \
+    '{broken'; do
+    printf '%s' "$payload" | run_silent_hook workbuddy-invalid-notification \
+      "$WORKBUDDY_ROOT" workbuddy Notification --installation-id "$INSTALLATION_ID"
+    if [[ -e "$NOTIFICATION_RECEIPT" ]]; then
+      echo "FAIL: WorkBuddy 非法 Notification 不得产生回执" >&2
+      exit 1
+    fi
+  done
+  for subtype in permission_prompt idle_prompt; do
+    printf '{"hook_event_name":"Notification","notification_type":"%s"}' "$subtype" | \
+      run_silent_hook "workbuddy-$subtype" "$WORKBUDDY_ROOT" workbuddy Notification --installation-id "$INSTALLATION_ID"
+    if [[ "$(receipt_result "$NOTIFICATION_RECEIPT")" != "muted" ]]; then
+      echo "FAIL: WorkBuddy $subtype 未形成当前 muted 回执" >&2
+      exit 1
+    fi
+  done
+  printf '%s' '{"hook_event_name":"SubagentStop"}' | run_silent_hook workbuddy-subagent \
+    "$WORKBUDDY_ROOT" workbuddy SubagentStop --installation-id "$INSTALLATION_ID"
+  if [[ "$(receipt_result "$WORKBUDDY_RECEIPT")" != "muted" ]]; then
+    echo "FAIL: WorkBuddy 有效 stdin 未形成 SubagentStop muted 回执" >&2
+    exit 1
+  fi
+
+else
+  echo "SKIP: WorkBuddy Desktop absent; valid-subtype receipt covered by injectable harness"
 fi
 
 echo "PASS: claudi0 hook 真实子进程 exit/stdout/stderr 与 Debug-only root 契约"

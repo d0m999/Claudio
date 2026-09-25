@@ -1329,18 +1329,98 @@
         }
       }
     },
-    "host.workbuddy.ready-detail": {
+    "qualification.notification-matchers-only": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Some events are not yet enabled"
+            "value": "Permission and idle prompts only (permission_prompt / idle_prompt)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "其余能力尚未启用"
+            "value": "仅授权与空闲提醒（permission_prompt / idle_prompt）"
+          }
+        }
+      }
+    },
+    "integrations.destination.workbuddy-sounds-caption": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WorkBuddy uses the Default Group. Notifications cover permission and idle prompts only; interruption is not implemented."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WorkBuddy 使用默认组。通知仅覆盖授权与空闲提醒；执行中断尚未实现。"
+          }
+        }
+      }
+    },
+    "integrations.destination.binding-no-receipt": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: No current receipt"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@：无当前回执"
+          }
+        }
+      }
+    },
+    "integrations.destination.binding-awaiting-receipt": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: Awaiting receipt"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@：待回执"
+          }
+        }
+      }
+    },
+    "integrations.destination.binding-current-receipt": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: Current receipt"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@：当前回执"
+          }
+        }
+      }
+    },
+    "host.workbuddy.ready-detail": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifications cover permission and idle prompts only; interruption is not implemented"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通知仅覆盖授权与空闲提醒；执行中断尚未实现"
           }
         }
       }
