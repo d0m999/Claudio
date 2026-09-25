@@ -1,6 +1,5 @@
 import ClaudioCore
 import ClaudioLocalization
-import Darwin
 import Foundation
 
 /// 菜单栏声音作用域的稳定身份。`global` 不是伪造的 Host；Surface 始终保留真实
@@ -82,50 +81,6 @@ public func eventPreviewFileURL(
         nonEmptyRegularFileExists(at: file)
     else { return nil }
     return file
-}
-
-/// A short-lived, selected-pack probe. Run it off MainActor after the shared library publishes
-/// rows; this does not scan the library or retain a second sound-pack snapshot. A broken mapping
-/// remains the library's missing/damaged fact unless a concrete safety/read failure is observed.
-public func eventPreviewSafetyFailures(
-    rows: [EventRow], packID: String, environment: AudioImportEnvironment
-) -> [Event: EventPreviewSafetyFailure] {
-    guard
-        let packDirectory = resolvePackDirectory(
-            id: packID,
-            userPacksDirectory: environment.userPacksDirectory,
-            bundledPacksDirectory: environment.bundledPacksDirectory)
-    else { return [:] }
-    var failures: [Event: EventPreviewSafetyFailure] = [:]
-    for row in rows {
-        let fileName: String
-        switch row.coverage {
-        case .unmapped: continue
-        case .present(let name), .broken(let name): fileName = name
-        }
-        guard let file = safePackFileURL(fileName, in: packDirectory) else {
-            failures[row.event] = .unsafeFile
-            continue
-        }
-        var status = stat()
-        let result = file.withUnsafeFileSystemRepresentation { path -> Int32 in
-            guard let path else { return -1 }
-            return stat(path, &status)
-        }
-        if result != 0 {
-            if errno == EACCES || errno == EPERM { failures[row.event] = .unreadableFile }
-            continue
-        }
-        guard (status.st_mode & S_IFMT) == S_IFREG else {
-            failures[row.event] = .unsafeFile
-            continue
-        }
-        guard status.st_size > 0 else { continue }
-        if (try? Data(contentsOf: file, options: .mappedIfSafe)) == nil {
-            failures[row.event] = .unreadableFile
-        }
-    }
-    return failures
 }
 
 /// Stable focus identities for the retained Events & Sounds window. The first scope is always the

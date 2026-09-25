@@ -535,8 +535,8 @@ func runPanelPresentationSuites() async {
         expect(readOnly.allSatisfy { !$0.controls.muteEnabled }, "配置不可写时不得展示可操作静音")
     }
 
-    suite("默认组与工作区共用安全试听投影，事件自动静音不影响手工试听") {
-        withTempDirectory { root in
+    await suite("默认组与工作区共用安全试听投影，事件自动静音不影响手工试听") {
+        await withTempDirectory { root in
             let packs = root.appendingPathComponent("packs")
             let pack = packs.appendingPathComponent("selected")
             writeFixture("audio", to: pack.appendingPathComponent("safe.aiff"))
@@ -558,8 +558,16 @@ func runPanelPresentationSuites() async {
                     event: .stopFailure, coverage: .broken(fileName: "missing.aiff"), enabled: true),
             ]
             let environment = makeAudioImportEnvironment(userPacksDirectory: packs)
-            let failures = eventPreviewSafetyFailures(
-                rows: rows, packID: "selected", environment: environment)
+            let fact = SoundPackFacts(
+                id: "selected", name: nil, isCC0: false, factoryIntegrity: nil,
+                eventCoverage: Dictionary(uniqueKeysWithValues: rows.map { ($0.event, $0.coverage) }),
+                cardState: .partial(present: 1, total: Event.allCases.count),
+                audioInventory: .deferred)
+            let library = SoundPackLibrary(
+                scanner: SoundPackLibraryScanner { _ in .success([fact]) },
+                previewSafetyEnvironment: environment)
+            _ = await library.refreshSnapshot(trigger: .initial)
+            let failures = await library.previewSafetyFailures(packID: "selected")
             expect(
                 failures == [.notification: .unsafeFile, .subagentStop: .unsafeFile],
                 "越界链接和非正规文件是实际安全失败；缺失文件仍归缺失原因")

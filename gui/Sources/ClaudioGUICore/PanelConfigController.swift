@@ -947,21 +947,18 @@ public final class PanelConfigController: ObservableObject {
 
     private func schedulePreviewSafetyCheck() {
         clearPreviewSafetyCheck()
+        guard readSource.readsSharedSnapshot else { return }
         guard eventRows.contains(where: { $0.coverage != .unmapped }) else { return }
         let revision = previewSafetyRevision
-        let rows = eventRows
         let packID = config.selectedPack
-        let environment = environment
-        previewSafetyTask = Task.detached(priority: .utility) { [weak self] in
-            let failures = eventPreviewSafetyFailures(
-                rows: rows, packID: packID, environment: environment)
+        let soundPackLibrary = soundPackLibrary
+        previewSafetyTask = Task { [weak self] in
+            let failures = await soundPackLibrary.previewSafetyFailures(packID: packID)
             guard !Task.isCancelled else { return }
-            await MainActor.run { [weak self] in
-                guard let self, self.previewSafetyRevision == revision,
-                    self.config.selectedPack == packID
-                else { return }
-                self.previewSafetyFailures = failures
-            }
+            guard let self, self.previewSafetyRevision == revision,
+                self.config.selectedPack == packID
+            else { return }
+            self.previewSafetyFailures = failures
         }
     }
 

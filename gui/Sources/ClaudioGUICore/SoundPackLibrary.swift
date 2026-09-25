@@ -385,6 +385,74 @@ private struct SoundPackAudioInventoryLoader: Sendable {
     }
 }
 
+/// One selected-pack safety read, owned by the same actor and blocking-I/O queue as the library's
+/// on-demand audio inventory. It does not publish another disk snapshot or cache file facts.
+private struct SoundPackPreviewSafetyLoader: Sendable {
+    let environment: AudioImportEnvironment
+
+    func load(packID: String, coverage: [Event: CoverageState]) async
+        -> [Event: EventPreviewSafetyFailure]
+    {
+        let cancellation = SoundPackBlockingIOCancellation()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                SoundPackBlockingIO.inventoryQueue.async {
+                    guard !cancellation.isCancelled else {
+                        continuation.resume(returning: [:])
+                        return
+                    }
+                    continuation.resume(
+                        returning: probePreviewSafety(
+                            packID: packID, coverage: coverage, environment: environment))
+                }
+            }
+        } onCancel: {
+            cancellation.cancel()
+        }
+    }
+}
+
+private func probePreviewSafety(
+    packID: String, coverage: [Event: CoverageState], environment: AudioImportEnvironment
+) -> [Event: EventPreviewSafetyFailure] {
+    guard
+        let packDirectory = resolvePackDirectory(
+            id: packID,
+            userPacksDirectory: environment.userPacksDirectory,
+            bundledPacksDirectory: environment.bundledPacksDirectory)
+    else { return [:] }
+    var failures: [Event: EventPreviewSafetyFailure] = [:]
+    for (event, state) in coverage {
+        let fileName: String
+        switch state {
+        case .unmapped: continue
+        case .present(let name), .broken(let name): fileName = name
+        }
+        guard let file = safePackFileURL(fileName, in: packDirectory) else {
+            failures[event] = .unsafeFile
+            continue
+        }
+        var status = stat()
+        let result = file.withUnsafeFileSystemRepresentation { path -> Int32 in
+            guard let path else { return -1 }
+            return stat(path, &status)
+        }
+        if result != 0 {
+            if errno == EACCES || errno == EPERM { failures[event] = .unreadableFile }
+            continue
+        }
+        guard (status.st_mode & S_IFMT) == S_IFREG else {
+            failures[event] = .unsafeFile
+            continue
+        }
+        guard status.st_size > 0 else { continue }
+        if (try? Data(contentsOf: file, options: .mappedIfSafe)) == nil {
+            failures[event] = .unreadableFile
+        }
+    }
+    return failures
+}
+
 private struct SoundPackLibraryInvalidation: Sendable {
     let revision: UInt64
     let packIDs: Set<String>
@@ -508,6 +576,7 @@ private final class SoundPackLibraryInvalidationMailbox: @unchecked Sendable {
 public actor SoundPackLibrary {
     private let scanner: SoundPackLibraryScanner
     private let inventoryLoader: SoundPackAudioInventoryLoader?
+    private let previewSafetyLoader: SoundPackPreviewSafetyLoader?
     #if DEBUG
     private let beforeReadyPublication: @Sendable () -> Void
     private let beforeFailurePublication: @Sendable () -> Void
@@ -529,6 +598,7 @@ public actor SoundPackLibrary {
     public init(environment: AudioImportEnvironment) {
         scanner = .live(environment: environment)
         inventoryLoader = .live(environment: environment)
+        previewSafetyLoader = SoundPackPreviewSafetyLoader(environment: environment)
         #if DEBUG
         beforeReadyPublication = {}
         beforeFailurePublication = {}
@@ -542,12 +612,16 @@ public actor SoundPackLibrary {
     public init(
         scanner: SoundPackLibraryScanner,
         inventoryOperation: (@Sendable (String) -> SoundPackAudioInventory)? = nil,
+        previewSafetyEnvironment: AudioImportEnvironment? = nil,
         beforeReadyPublication: @escaping @Sendable () -> Void = {},
         beforeFailurePublication: @escaping @Sendable () -> Void = {},
         onRejectedTerminalDeferred: @escaping @Sendable () -> Void = {}
     ) {
         self.scanner = scanner
         inventoryLoader = inventoryOperation.map { SoundPackAudioInventoryLoader(operation: $0) }
+        previewSafetyLoader = previewSafetyEnvironment.map {
+            SoundPackPreviewSafetyLoader(environment: $0)
+        }
         self.beforeReadyPublication = beforeReadyPublication
         self.beforeFailurePublication = beforeFailurePublication
         self.onRejectedTerminalDeferred = onRejectedTerminalDeferred
@@ -719,6 +793,25 @@ public actor SoundPackLibrary {
             return loaded
         }
         return .unavailable(.directoryUnreadable(reason: "声音包在读取期间持续变化，请稍后重试"))
+    }
+
+    /// The caller receives only the current selected pack's concrete unsafe/read failures.
+    /// Coverage and identity come from the actor-owned snapshot; the blocking probe runs on the
+    /// library inventory queue and an invalidated or replaced generation is never returned.
+    public func previewSafetyFailures(packID: String) async
+        -> [Event: EventPreviewSafetyFailure]
+    {
+        guard let current = snapshot, let fact = current.fact(for: packID),
+            let previewSafetyLoader
+        else { return [:] }
+        let invalidationRevision = invalidationMailbox.snapshot().revision
+        let failures = await previewSafetyLoader.load(
+            packID: packID, coverage: fact.eventCoverage)
+        guard !Task.isCancelled,
+            snapshot?.revision == current.revision,
+            invalidationMailbox.isCurrent(invalidationRevision)
+        else { return [:] }
+        return failures
     }
 
     private func removeContinuation(_ id: UUID) {
