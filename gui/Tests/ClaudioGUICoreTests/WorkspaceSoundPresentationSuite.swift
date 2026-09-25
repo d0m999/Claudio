@@ -152,6 +152,13 @@ func runWorkspaceSoundPresentationSuites() {
                 controller.setVolume(0.9, for: .workspace(original.id)) == nil
                     && controller.workspaceError == .staleRule,
                 "已选工作区音量不得写换绑目录")
+            expect(
+                controller.selectedWorkspaceWriteTarget == WorkspaceSoundWriteTarget(rule: original)
+                    && controller.setVolume(
+                        0.95, for: .workspace(original.id),
+                        workspaceTarget: WorkspaceSoundWriteTarget(rule: replacement)) == nil
+                    && controller.workspaceError == .staleRule,
+                "延迟音量不能绕过用户原先捕获的目录目标")
             controller.toggleMute(.stop)
             expect(controller.workspaceError == .staleRule, "事件开关不得写换绑目录")
             expect(

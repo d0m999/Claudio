@@ -88,7 +88,7 @@ public final class PanelConfigController: ObservableObject {
     /// `nil` 是全局默认 profile；非 nil 时 `config` 是该 surface 的 effective 投影。
     @Published public private(set) var selectedSurface: HostSurfaceID?
     @Published public private(set) var selectedWorkspaceID: UUID? = nil
-    private var selectedWorkspaceWriteTarget: WorkspaceSoundWriteTarget?
+    public private(set) var selectedWorkspaceWriteTarget: WorkspaceSoundWriteTarget?
     @Published public private(set) var workspaceError: WorkspaceSoundError? = nil
     @Published public private(set) var previewSafetyFailures: [Event: EventPreviewSafetyFailure] =
         [:]
@@ -548,6 +548,12 @@ public final class PanelConfigController: ObservableObject {
     ) -> Double? {
         if case .surface = scope { return nil }
         if let id = scope.workspaceID {
+            if selectedSoundScope == scope, let workspaceTarget,
+                selectedWorkspaceWriteTarget != workspaceTarget
+            {
+                workspaceError = .staleRule
+                return nil
+            }
             let target =
                 workspaceTarget
                 ?? (selectedSoundScope == scope

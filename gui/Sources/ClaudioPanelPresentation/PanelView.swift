@@ -843,10 +843,8 @@ public struct PanelView: View {
 
     private func playbackSettings(masterVolumeEnabled: Bool) -> some View {
         let scope = selectedScope.scope
-        let workspaceTarget = scope.workspaceID.flatMap { id in
-            panelModel.workspaceRules.first(where: { $0.id == id }).map { rule in
-                WorkspaceSoundWriteTarget(rule: rule)
-            }
+        let workspaceTarget = scope.workspaceID.flatMap { _ in
+            panelModel.selectedSoundScope == scope ? panelModel.selectedWorkspaceWriteTarget : nil
         }
         return VStack(alignment: .leading, spacing: 5) {
             Text(l10n.text(.panelPlaybackSettings))
