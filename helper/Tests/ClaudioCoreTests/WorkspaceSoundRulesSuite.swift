@@ -8,6 +8,33 @@ private final class WorkspacePlaybackRecorder: ProcessSpawning, @unchecked Senda
     }
 }
 
+private final class WorkspaceGitResultRunner: CommandRunning, @unchecked Sendable {
+    private var results: [CommandRunResult]
+    private(set) var calls: [(executable: String, arguments: [String], timeout: TimeInterval)] = []
+
+    init(_ results: [CommandRunResult]) { self.results = results }
+
+    func run(executablePath: String, arguments: [String], timeout: TimeInterval)
+        -> CommandRunResult
+    {
+        calls.append((executablePath, arguments, timeout))
+        return results.isEmpty ? .launchFailed : results.removeFirst()
+    }
+}
+
+private final class WorkspaceHangingGitRunner: CommandRunning, @unchecked Sendable {
+    private(set) var outcomes: [CommandRunResult] = []
+
+    func run(executablePath: String, arguments: [String], timeout: TimeInterval)
+        -> CommandRunResult
+    {
+        let outcome = SystemCommandRunner().run(
+            executablePath: "/bin/sleep", arguments: ["20"], timeout: timeout)
+        outcomes.append(outcome)
+        return outcome
+    }
+}
+
 @MainActor
 func runWorkspaceSoundRulesSuites() {
     suite("workspace directories: ordinary directory outside Git tree resolves") {
@@ -87,6 +114,76 @@ func runWorkspaceSoundRulesSuites() {
             expect(
                 try! config.resolveSoundProfile(for: .claudeCode, cwd: a.path).get().selectedPack
                     == "default", "inapplicable Surface uses Default Group")
+        }
+    }
+    suite("workspace Git lookup retries one transient deadline, but a persistent hang fails closed")
+    {
+        withTempDirectory { root in
+            let repository = root.appendingPathComponent("repository")
+            let git = Process()
+            git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            git.arguments = ["init", "-q", repository.path]
+            git.standardOutput = FileHandle.nullDevice
+            git.standardError = FileHandle.nullDevice
+            try! git.run()
+            git.waitUntilExit()
+            expect(git.terminationStatus == 0, "fixture repository is valid")
+
+            let canonical = repository.resolvingSymlinksInPath().standardizedFileURL
+            let output = "\(canonical.path)\n\(canonical.appendingPathComponent(".git").path)\n"
+            let delayed = WorkspaceGitResultRunner([
+                .timedOut, .completed(exitCode: 0, stdout: output),
+            ])
+            expect(
+                WorkspaceDirectoryResolver.resolve(repository.path, commandRunner: delayed)
+                    == .success(
+                        WorkspaceDirectory(
+                            kind: .git, path: canonical.path,
+                            commonGitDirectory: canonical.appendingPathComponent(".git").path)),
+                "a valid repository is not rejected after one transient Git deadline")
+            expect(
+                delayed.calls.count == 2 && delayed.calls[0].timeout == 0.5
+                    && delayed.calls[1].timeout > delayed.calls[0].timeout
+                    && delayed.calls[1].timeout <= 2.0,
+                "one bounded longer attempt follows the fast Git deadline")
+            expect(
+                delayed.calls.allSatisfy {
+                    $0.executable == "/usr/bin/env"
+                        && $0.arguments.starts(with: ["-i", "PATH=/usr/bin:/bin"])
+                        && $0.arguments.contains("/usr/bin/git")
+                }, "both attempts keep the sanitized shell-free Git invocation")
+
+            let hung = WorkspaceGitResultRunner([.timedOut, .timedOut])
+            expect(
+                WorkspaceDirectoryResolver.resolve(repository.path, commandRunner: hung)
+                    == .failure(.gitUnavailable),
+                "a persistently hung Git command never becomes an ordinary directory")
+            expect(
+                hung.calls.count == 2 && hung.calls.allSatisfy { $0.timeout > 0 },
+                "a persistent hang receives only two finite attempts")
+
+            let realHang = WorkspaceHangingGitRunner()
+            let started = Date()
+            expect(
+                WorkspaceDirectoryResolver.resolve(repository.path, commandRunner: realHang)
+                    == .failure(.gitUnavailable),
+                "a real sleeping child fails closed through the production process runner")
+            expect(
+                realHang.outcomes == [.timedOut, .timedOut]
+                    && Date().timeIntervalSince(started) < 10,
+                "both real child processes are stopped and the retry remains bounded")
+        }
+    }
+    suite("workspace Git lookup rejects stale .git targets") {
+        withTempDirectory { root in
+            let directory = root.appendingPathComponent("stale")
+            try! FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
+            writeFixture(
+                "gitdir: /no/such/claudio-git-target", to: directory.appendingPathComponent(".git"))
+            expect(
+                WorkspaceDirectoryResolver.resolve(directory.path) == .failure(.gitUnavailable),
+                "a stale .git marker cannot silently become an ordinary directory")
         }
     }
     suite(

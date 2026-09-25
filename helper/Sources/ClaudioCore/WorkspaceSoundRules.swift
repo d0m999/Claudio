@@ -57,6 +57,12 @@ public enum WorkspaceDirectoryResolver {
     public static func resolve(_ path: String) -> Result<
         WorkspaceDirectory, WorkspaceDirectoryError
     > {
+        resolve(path, commandRunner: SystemCommandRunner())
+    }
+
+    package static func resolve(
+        _ path: String, commandRunner: any CommandRunning
+    ) -> Result<WorkspaceDirectory, WorkspaceDirectoryError> {
         guard WorkspaceDirectory.validPath(path) else { return .failure(.invalidDirectory) }
         let url = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
         var isDirectory: ObjCBool = false
@@ -80,7 +86,7 @@ public enum WorkspaceDirectoryResolver {
             ancestor = parent
         }
         guard hasGit else { return .success(WorkspaceDirectory(kind: .directory, path: url.path)) }
-        guard let output = gitPaths(at: url.path), output.count == 2,
+        guard let output = gitPaths(at: url.path, commandRunner: commandRunner), output.count == 2,
             output.allSatisfy(WorkspaceDirectory.validPath)
         else { return .failure(.gitUnavailable) }
         return .success(
@@ -90,14 +96,21 @@ public enum WorkspaceDirectoryResolver {
                 commonGitDirectory: URL(fileURLWithPath: output[1]).resolvingSymlinksInPath().path))
     }
 
-    private static func gitPaths(at path: String) -> [String]? {
-        let result = SystemCommandRunner().run(
-            executablePath: "/usr/bin/env",
-            arguments: [
-                "-i", "PATH=/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
-                "GIT_TERMINAL_PROMPT=0", "/usr/bin/git", "--no-optional-locks", "-C", path,
-                "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir",
-            ], timeout: 0.5)
+    private static func gitPaths(at path: String, commandRunner: any CommandRunning) -> [String]? {
+        let arguments = [
+            "-i", "PATH=/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
+            "GIT_TERMINAL_PROMPT=0", "/usr/bin/git", "--no-optional-locks", "-C", path,
+            "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir",
+        ]
+        var result = commandRunner.run(
+            executablePath: "/usr/bin/env", arguments: arguments, timeout: 0.5)
+        // On a loaded CI host the 0.5s fast path can expire while a valid Git process is
+        // finishing. Retry only a confirmed timeout; malformed repositories and failed cleanup
+        // must remain failures. Both attempts use the same sanitized command and finite deadline.
+        if case .timedOut = result {
+            result = commandRunner.run(
+                executablePath: "/usr/bin/env", arguments: arguments, timeout: 2.0)
+        }
         guard case .completed(0, let output) = result, output.utf8.count <= 16_384 else {
             return nil
         }
