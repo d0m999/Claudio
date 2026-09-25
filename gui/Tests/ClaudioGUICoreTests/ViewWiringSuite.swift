@@ -716,10 +716,10 @@ func runViewWiringSuites() {
                 && !panel.contains("PanelPackSectionView("),
             "生产面板必须挂载不推移布局、可退出的全宽自绘选择器，且不再挂载来源卡片或包画廊")
         expect(
-            panel.contains("configWritesAllowed: panelModel.surfaceSoundIssue == nil")
+            panel.contains("configWritesAllowed: panelModel.soundControlsEnabled")
                 && panel.contains("libraryUnavailableSection")
                 && panel.contains("configFailureNotice()"),
-            "损坏 Surface 必须禁用事件写入；声音库与 config 失败必须在当前 Panel 显式呈现")
+            "事件写入必须消费共享可用性判断；声音库与 config 失败必须在当前 Panel 显式呈现")
 
         guard
             let showStart = panel.range(

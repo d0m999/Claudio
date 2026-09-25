@@ -266,10 +266,22 @@ func runWorkspaceSoundPresentationSuites() {
             try! JSONEncoder().encode(damaged).write(to: file)
             model.reloadConfigOnly()
             expect(model.workspaceError == .invalidRule, "损坏规则显示结构性错误")
+            let damagedEvents = panelEventPresentations(
+                rows: model.eventRows,
+                scope: model.selectedSoundScope,
+                masterVolume: model.config.masterVolume,
+                language: .zhHans,
+                configWritesAllowed: model.soundControlsEnabled)
+            expect(
+                !model.soundControlsEnabled
+                    && damagedEvents.count == Event.allCases.count
+                    && damagedEvents.allSatisfy { !$0.controls.muteEnabled },
+                "损坏工作区的包、音量与五个静音控件须呈现不可写状态")
             try! JSONEncoder().encode(config).write(to: file)
             model.reloadConfigOnly()
             expect(
-                model.workspaceError == nil && model.config.selectedPack == "workspace-pack",
+                model.workspaceError == nil && model.soundControlsEnabled
+                    && model.config.selectedPack == "workspace-pack",
                 "外部修复后按有效读回清除结构性错误")
             for event in Event.allCases { model.toggleMute(event) }
             expect(Event.allCases.allSatisfy { !model.config.isEnabled($0) }, "五个事件可独立静音")
@@ -303,6 +315,7 @@ func runWorkspaceSoundPresentationSuites() {
                 "陈旧详情不回退默认组")
             expect(model.setVolume(0.99, for: .workspace(stale)) == nil, "陈旧音量拒写")
             model.selectSoundScope(.surface(.codex))
+            expect(!model.soundControlsEnabled, "退役来源的面板写入控件保持禁用")
             expect(model.setMasterVolume(0.99) == nil, "旧来源音量入口拒写")
             expect(loadClaudioConfig(from: file)?.masterVolume == 0.21, "默认音量始终未变")
         }
