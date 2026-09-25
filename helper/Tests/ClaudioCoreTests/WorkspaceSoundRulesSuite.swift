@@ -10,6 +10,17 @@ private final class WorkspacePlaybackRecorder: ProcessSpawning, @unchecked Senda
 
 @MainActor
 func runWorkspaceSoundRulesSuites() {
+    suite("workspace directories: ordinary directory outside Git tree resolves") {
+        withTempDirectory { root in
+            let ordinary = root.appendingPathComponent("ordinary", isDirectory: true)
+            try! FileManager.default.createDirectory(
+                at: ordinary, withIntermediateDirectories: true)
+            expect(
+                (try? WorkspaceDirectoryResolver.resolve(ordinary.path).get())
+                    == WorkspaceDirectory(kind: .directory, path: ordinary.path),
+                "ancestor traversal reaches filesystem root and returns the ordinary directory")
+        }
+    }
     suite("workspace directories: two repositories, two worktrees, child and symlink identities") {
         withTempDirectory { root in
             @MainActor func git(_ args: [String]) {

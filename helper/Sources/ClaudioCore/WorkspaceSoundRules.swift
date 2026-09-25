@@ -74,6 +74,7 @@ public enum WorkspaceDirectoryResolver {
                 hasGit = true
                 break
             }
+            if ancestor.path == "/" { break }
             let parent = ancestor.deletingLastPathComponent()
             if parent.path == ancestor.path { break }
             ancestor = parent
