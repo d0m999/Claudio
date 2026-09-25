@@ -155,7 +155,7 @@ func runWorkspaceDeletionPresentationSuites() {
         let rule = deletionPresentationRule()
         let fixture = SettingsPresentationFixtures.generalLogin(
             route: .destination(.eventsAndSounds), workspaceRules: [rule])
-        let selection = fixture.session.eventSettingsSelection
+        let selection = fixture.eventSettingsSelection
         selection.select(EventSettingsWindowRoute(scope: .workspace(rule.id)))
         fixture.eventSettingsModel.selectSoundScope(.workspace(rule.id))
         _ = NSApplication.shared

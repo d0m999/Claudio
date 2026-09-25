@@ -27,6 +27,31 @@ func runLocalizationSuites() {
             english.text(.interfaceTitle) == "Interface",
             "explicit English lookup must not depend on Locale.current")
         expect(
+            chinese.text(.integrationsEventsAndSounds) == "默认组／工作区"
+                && chinese.text(.settingsDestinationEventsAndSounds) == "默认组／工作区"
+                && chinese.text(.settingsIntegrationsManageEvents) == "默认组／工作区…"
+                && chinese.text(.integrationsSurfaceEventsCaption)
+                    == "声音配置由默认组和各工作区独立管理。"
+                && chinese.text(.settingsIntegrationsManageEventsHint)
+                    == "在当前设置窗口中打开按默认组和工作区管理的声音设置。",
+            "集成行、目的页、按钮、说明和无障碍提示应使用同一默认组／工作区语义")
+        expect(
+            english.text(.integrationsEventsAndSounds) == "Default Group & Workspaces"
+                && english.text(.settingsDestinationEventsAndSounds)
+                    == "Default Group & Workspaces"
+                && english.text(.settingsIntegrationsManageEvents)
+                    == "Default Group & Workspaces…"
+                && english.text(.integrationsSurfaceEventsCaption)
+                    == "Sound settings are managed independently for the Default Group and each workspace."
+                && english.text(.settingsIntegrationsManageEventsHint)
+                    == "Opens sound settings for the Default Group and workspaces in this Settings window.",
+            "English sound entrance must describe the same destination without a selected-host target"
+        )
+        expect(
+            chinese.text(.workspaceChooseDefaultGroup) == "选择默认组"
+                && english.text(.workspaceChooseDefaultGroup) == "Select Default Group",
+            "失效工作区必须有双语显式重选动作")
+        expect(
             chinese.format(.panelHeader, Int64(2)).contains("2"),
             "Chinese format placeholders must be substituted")
         expect(

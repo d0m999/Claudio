@@ -159,6 +159,15 @@ struct EventSettingsWindowView: View {
                         }
                     } else {
                         Text(l10n.text(.workspaceUnavailable)).foregroundColor(.secondary)
+                            .settingsMountIdentity("workspace.scope.unavailable")
+                        if selection.route.scope != .global {
+                            Button(l10n.text(.workspaceChooseDefaultGroup)) {
+                                player.stop()
+                                selection.select(EventSettingsWindowRoute(scope: .global))
+                                model.selectSoundScope(.global)
+                            }
+                            .settingsMountIdentity("workspace.choose-default-group")
+                        }
                     }
                 }.padding(24).frame(maxWidth: 820, alignment: .leading)
             }

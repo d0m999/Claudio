@@ -255,9 +255,9 @@ package struct SettingsRootView: View {
                     model: integrationsModel,
                     focusCoordinator: integrationsFocusCoordinator,
                     languageStore: preferences,
-                    onManageEvents: { host in
+                    onManageSoundScopes: {
                         settingsPresentationSession.send(
-                            .route(.events(scope: .global, event: nil)))
+                            .route(.destination(.eventsAndSounds)))
                     },
                     onAnnouncement: onAnnouncement)
             case .eventsAndSounds:

@@ -75,6 +75,10 @@ package final class SettingsPresentationFixture: ObservableObject {
         session.dependencies.preferences.lastSettingsDestination
     }
 
+    package var eventSettingsSelection: EventSettingsWindowSelection {
+        session.eventSettingsSelection
+    }
+
     package var previewStopRequestRevisions: AnyPublisher<UInt64, Never> {
         session.eventSettingsSelection.$presentationState
             .map(\.previewStopRequestRevision)

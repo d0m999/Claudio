@@ -98,6 +98,33 @@ func runSettingsPresentationLifecycleSuites() async {
             "gallery 必须只组合 target-owned SettingsStateGalleryView，不得直接重建 destination/model")
     }
 
+    suite("Settings production sound entrance：集成按钮只提交普通目的页路由") {
+        let root = guiTestRepositoryRoot()
+        let rootURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift")
+        let integrationsURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift")
+        guard let rootSource = try? String(contentsOf: rootURL, encoding: .utf8),
+            let integrationsSource = try? String(contentsOf: integrationsURL, encoding: .utf8)
+        else {
+            expect(false, "读不到 production Settings 入口代码")
+            return
+        }
+        let forcedDefault = rootSource.replacingOccurrences(
+            of: ".route(.destination(.eventsAndSounds)))",
+            with: ".route(.events(scope: .global, event: nil)))")
+        let hostTarget = integrationsSource.replacingOccurrences(
+            of: "onManageSoundScopes()", with: "onManageSoundScopes(facts.host)")
+        expect(
+            settingsSoundEntranceUsesOrdinaryRoute(
+                rootSource: rootSource, integrationsSource: integrationsSource)
+                && !settingsSoundEntranceUsesOrdinaryRoute(
+                    rootSource: forcedDefault, integrationsSource: integrationsSource)
+                && !settingsSoundEntranceUsesOrdinaryRoute(
+                    rootSource: rootSource, integrationsSource: hostTarget),
+            "production button → root callback 必须保持无 Host 目标的普通 destination route")
+    }
+
     suite("Settings native announcement adapter：deferred exact-head post/ack 与 key retry") {
         let controllerURL = guiTestRepositoryRoot().appendingPathComponent(
             "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
@@ -140,6 +167,100 @@ func runSettingsPresentationLifecycleSuites() async {
     }
 
     #if DEBUG
+    suite("Settings sound entrance session：首次默认、手选工作区与失效目标") {
+        let first = SettingsPresentationFixtures.generalLogin(
+            route: .destination(.integrations))
+        let firstSession = first.session
+        expect(
+            firstSession.state.eventPresentation.route.scope == .global
+                && firstSession.send(.route(.destination(.eventsAndSounds))) == .routed
+                && firstSession.state.routeResolution.route == .destination(.eventsAndSounds)
+                && firstSession.state.eventPresentation.route.scope == .global
+                && first.eventSettingsModel.selectedSoundScope == .global,
+            "首次从集成进入声音设置应使用默认组")
+
+        let rule = WorkspaceSoundRule(
+            directory: WorkspaceDirectory(kind: .directory, path: "/fixture/sound-entrance"),
+            surfaces: [.codex],
+            profile: WorkspaceSoundProfile(selectedPack: "settings-fixture-pack", volume: 0.7))
+        let fixture = SettingsPresentationFixtures.generalLogin(
+            route: .destination(.eventsAndSounds), workspaceRules: [rule])
+        let session = fixture.session
+        let selected = PanelSoundScopeID.workspace(rule.id)
+        fixture.eventSettingsSelection.select(EventSettingsWindowRoute(scope: selected))
+        fixture.eventSettingsModel.selectSoundScope(selected)
+        let configBefore = fixture.eventSettingsModel.configState
+
+        for host in HostID.productVisibleCases {
+            expect(
+                session.send(.route(.integrations(surface: host.surfaceID))) == .routed
+                    && fixture.integrationsModel.selectedHost == host,
+                "应能分别从每个 Host 的集成页测试声音入口")
+            expect(
+                session.send(.route(.destination(.eventsAndSounds))) == .routed
+                    && session.state.routeResolution.route == .destination(.eventsAndSounds)
+                    && session.state.eventPresentation.route.scope == selected
+                    && fixture.integrationsModel.selectedHost == host
+                    && fixture.eventSettingsModel.selectedSoundScope == selected
+                    && fixture.eventSettingsModel.configState == configBefore,
+                "集成所选 Host 不得重选或写入手动声音作用域")
+        }
+
+        session.replaceAvailabilityForTesting(
+            SettingsRouteAvailability(
+                integrationSurfaces: Set(HostID.productVisibleCases.map(\.surfaceID)),
+                eventScopes: [.global], soundScopes: [.global], soundPackIDs: [],
+                events: Set(Event.allCases)))
+        _ = session.send(.route(.integrations(surface: .codex)))
+        expect(
+            session.send(.route(.destination(.eventsAndSounds))) == .routed
+                && session.state.eventPresentation.route.scope == selected
+                && session.state.eventPresentation.route
+                    .unavailableRequestedScopeStoredValue == selected.storedValue
+                && fixture.eventSettingsModel.selectedSoundScope == selected
+                && fixture.eventSettingsModel.configState == configBefore,
+            "失效工作区由普通入口保留为不可用目标，不静默切到可写默认组")
+        expect(
+            session.send(.route(.events(scope: selected, event: .stop)))
+                == .rejected(.staleSoundScope(selected))
+                && session.state.eventPresentation.route.scope == selected,
+            "显式工作区／事件深链接仍必须按可用性拒绝")
+    }
+
+    suite("Settings mounted sound entrance：失效工作区显示重选入口") {
+        let rule = WorkspaceSoundRule(
+            directory: WorkspaceDirectory(kind: .directory, path: "/fixture/stale-entrance"),
+            surfaces: [.codex],
+            profile: WorkspaceSoundProfile(selectedPack: "settings-fixture-pack", volume: 0.7))
+        let fixture = SettingsPresentationFixtures.generalLogin(
+            route: .destination(.eventsAndSounds), workspaceRules: [rule])
+        let selected = PanelSoundScopeID.workspace(rule.id)
+        fixture.eventSettingsSelection.select(EventSettingsWindowRoute(scope: selected))
+        fixture.eventSettingsModel.selectSoundScope(selected)
+        _ = fixture.session.send(.route(.integrations(surface: .codex)))
+        fixture.session.replaceAvailabilityForTesting(
+            SettingsRouteAvailability(
+                integrationSurfaces: Set(HostID.productVisibleCases.map(\.surfaceID)),
+                eventScopes: [.global], soundScopes: [.global], soundPackIDs: [],
+                events: Set(Event.allCases)))
+        let hostingView = NSHostingView(rootView: SettingsRootView(session: fixture.session))
+        hostingView.frame = NSRect(x: 0, y: 0, width: 1_240, height: 820)
+        hostingView.layoutSubtreeIfNeeded()
+        SettingsMountRecorder.reset()
+        _ = fixture.session.send(.route(.destination(.eventsAndSounds)))
+        for _ in 0..<3 {
+            hostingView.layoutSubtreeIfNeeded()
+            _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.03))
+        }
+        expect(
+            SettingsMountRecorder.identifiers.contains("settings.destination.events-and-sounds")
+                && SettingsMountRecorder.identifiers.contains("workspace.scope.unavailable")
+                && SettingsMountRecorder.identifiers.contains("workspace.choose-default-group")
+                && fixture.session.state.eventPresentation.route.scope == selected,
+            "production root 应挂载不可写说明与显式默认组重选按钮")
+        withExtendedLifetime(hostingView) {}
+    }
+
     suite("Settings session route：generic、explicit 与 repeated 请求保持单事务") {
         let fixture = SettingsPresentationFixtures.generalLogin(
             route: .destination(.usage),
@@ -804,6 +925,25 @@ private func settingsMenuRequestOwnsOnlyTypedRoute(_ source: String) -> Bool {
     return request.contains("host ?? integrationsModel.selectedHost ?? .claudeCode")
         && request.contains(".route(.integrations(surface: selectedHost.surfaceID))")
         && !request.contains("integrationsModel.selectHost")
+}
+
+private func settingsSoundEntranceUsesOrdinaryRoute(
+    rootSource: String,
+    integrationsSource: String
+) -> Bool {
+    let root = strippingComments(rootSource)
+    let integrations = strippingComments(integrationsSource)
+    guard root.unmodeledConstructs.isEmpty, integrations.unmodeledConstructs.isEmpty else {
+        return false
+    }
+    let rootCode = root.codeWithoutStringLiterals.filter { !$0.isWhitespace }
+    let integrationsCode = integrations.codeWithoutStringLiterals.filter { !$0.isWhitespace }
+    return rootCode.contains(
+        "onManageSoundScopes:{settingsPresentationSession.send(.route(.destination(.eventsAndSounds)))},"
+    )
+        && integrationsCode.contains(
+            "case.manageSoundScopes:Button(l10n.text(.settingsIntegrationsManageEvents)){onManageSoundScopes()}"
+        )
 }
 
 private func settingsNativeAnnouncementAdapterIsSound(_ source: String) -> Bool {

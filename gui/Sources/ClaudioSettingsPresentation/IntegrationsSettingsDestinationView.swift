@@ -11,7 +11,7 @@ struct IntegrationsSettingsDestinationView: View {
     @ObservedObject var model: IntegrationDestinationModel
     @ObservedObject var focusCoordinator: IntegrationDestinationFocusCoordinator
     @ObservedObject var languageStore: ClaudioPreferences
-    let onManageEvents: @MainActor (HostID) -> Void
+    let onManageSoundScopes: @MainActor () -> Void
     let onAnnouncement: @MainActor (String) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -26,13 +26,13 @@ struct IntegrationsSettingsDestinationView: View {
         model: IntegrationDestinationModel,
         focusCoordinator: IntegrationDestinationFocusCoordinator,
         languageStore: ClaudioPreferences,
-        onManageEvents: @escaping @MainActor (HostID) -> Void,
+        onManageSoundScopes: @escaping @MainActor () -> Void,
         onAnnouncement: @escaping @MainActor (String) -> Void
     ) {
         self.model = model
         self.focusCoordinator = focusCoordinator
         self.languageStore = languageStore
-        self.onManageEvents = onManageEvents
+        self.onManageSoundScopes = onManageSoundScopes
         self.onAnnouncement = onAnnouncement
     }
 
@@ -298,12 +298,13 @@ struct IntegrationsSettingsDestinationView: View {
                 .accessibilityValue(facts.configurationSource ?? "")
                 .accessibilityHint(l10n.text(.integrationsCopyPathHint))
                 .accessibilityIdentifier("integrations.destination.copy-source.\(host.rawValue)")
-            case .manageEvents(let host):
+            case .manageSoundScopes:
                 Button(l10n.text(.settingsIntegrationsManageEvents)) {
-                    onManageEvents(host)
+                    onManageSoundScopes()
                 }
                 .accessibilityHint(l10n.text(.settingsIntegrationsManageEventsHint))
-                .accessibilityIdentifier("integrations.destination.manage-events.\(host.rawValue)")
+                .accessibilityIdentifier(
+                    "integrations.destination.manage-events.\(facts.host.rawValue)")
             case .clearReceiptHistory(let host):
                 Button(l10n.format(.actionClearReceiptHistory, host.displayName)) {
                     model.requestClearReceiptHistory(for: host)
@@ -536,7 +537,7 @@ struct IntegrationsSettingsDestinationView: View {
                 abbreviatedConfigurationPath(source))
             return "\(mechanism) · \(configurationSourceValue)"
         case .eventsAndSounds:
-            return l10n.format(.integrationsSurfaceEventsCaption, facts.host.displayName)
+            return l10n.text(.integrationsSurfaceEventsCaption)
         case .receiptHistory:
             return l10n.text(.integrationsReceiptPolicy)
         }

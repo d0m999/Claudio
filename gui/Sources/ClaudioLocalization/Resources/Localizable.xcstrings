@@ -9736,13 +9736,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Events & Sounds"
+            "value": "Default Group & Workspaces"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "事件与提示音"
+            "value": "默认组／工作区"
           }
         }
       }
@@ -9880,13 +9880,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Only %@ changes; other apps' event switches and sounds stay unchanged."
+            "value": "Sound settings are managed independently for the Default Group and each workspace."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "只修改 %@；其他 app 的事件开关和声音保持不变"
+            "value": "声音配置由默认组和各工作区独立管理。"
           }
         }
       }
@@ -10472,7 +10472,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Default Group / Workspaces"
+            "value": "Default Group & Workspaces"
           }
         },
         "zh-Hans": {
@@ -10824,13 +10824,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Manage Events"
+            "value": "Default Group & Workspaces…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "管理事件"
+            "value": "默认组／工作区…"
           }
         }
       }
@@ -10840,13 +10840,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Opens Events & Sounds for the selected surface and event in this Settings window."
+            "value": "Opens sound settings for the Default Group and workspaces in this Settings window."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在当前设置窗口中打开所选事件来源和事件的“事件与提示音”。"
+            "value": "在当前设置窗口中打开按默认组和工作区管理的声音设置。"
           }
         }
       }
@@ -14223,6 +14223,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "此声音目标已失效，无法编辑。"
+          }
+        }
+      }
+    },
+    "workspace.choose-default-group": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select Default Group"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择默认组"
           }
         }
       }

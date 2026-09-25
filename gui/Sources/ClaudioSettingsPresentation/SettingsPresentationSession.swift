@@ -392,6 +392,11 @@ package final class SettingsPresentationSession: ObservableObject {
             }
             synchronizeIntegrationsLifecycle()
         case .eventsAndSounds:
+            if eventSettingsSelection.route.scope.workspaceID != nil,
+                !availability.eventScopes.contains(eventSettingsSelection.route.scope)
+            {
+                eventSettingsSelection.markCurrentScopeUnavailable()
+            }
             if requestsFocus {
                 eventSettingsSelection.requestInitialFocus(scopes: eventSettingsFocusScopes)
             }

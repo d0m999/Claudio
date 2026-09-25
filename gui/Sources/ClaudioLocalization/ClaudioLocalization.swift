@@ -1259,6 +1259,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let workspaceDismiss: Self = "workspace.dismiss"
     public static let workspaceAllSources: Self = "workspace.all-sources"
     public static let workspaceUnavailable: Self = "workspace.unavailable"
+    public static let workspaceChooseDefaultGroup: Self = "workspace.choose-default-group"
     public static let workspaceNoSurfaces: Self = "workspace.no-surfaces"
     public static let workspaceWriteFailure: Self = "workspace.write-failure"
     public static let workspaceCreate: Self = "workspace.create"
@@ -1307,6 +1308,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .workspaceDismiss,
         .workspaceAllSources,
         .workspaceUnavailable,
+        .workspaceChooseDefaultGroup,
         .workspaceNoSurfaces,
         .workspaceWriteFailure,
         .workspaceCreate,
