@@ -289,6 +289,35 @@ func runSettingsPresentationLifecycleSuites() async {
         expect(
             SettingsMountRecorder.identifiers.contains("settings.route.failure.events-and-sounds"),
             "失效显式深链必须挂载与焦点请求同身份的可见失败说明")
+
+        let soundFailures: [(SettingsRoute, SettingsRouteFailure)] = [
+            (
+                .sounds(.editEvent(scope: .global, packID: "missing-pack", event: .stop)),
+                .staleSoundPack("missing-pack")
+            ),
+            (
+                .sounds(.editEvent(scope: selected, packID: "settings-fixture-pack", event: .stop)),
+                .staleSoundScope(selected)
+            ),
+        ]
+        // The failure row stays mounted when a second Sounds request replaces its message.
+        SettingsMountRecorder.reset()
+        for (route, failure) in soundFailures {
+            let result = fixture.session.send(.route(route))
+            for _ in 0..<3 {
+                hostingView.layoutSubtreeIfNeeded()
+                _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.03))
+            }
+            let requestedFocus = settingsWindowRequestedFocusTarget(
+                resolution: fixture.session.state.routeResolution)
+            let failureIsMounted = SettingsMountRecorder.identifiers.contains(
+                "settings.route.failure.sounds")
+            expect(
+                result == .rejected(failure)
+                    && requestedFocus == .routeFailure(.sounds) && failureIsMounted,
+                "\(route) 必须请求并挂载 Sounds 失败说明：\(result), \(String(describing: requestedFocus)), mounted=\(failureIsMounted)"
+            )
+        }
         withExtendedLifetime(hostingView) {}
     }
 

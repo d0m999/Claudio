@@ -145,6 +145,13 @@ if CommandLine.arguments.contains("--workspace-sounds") {
     exit(failures == 0 ? 0 : 1)
 }
 
+if CommandLine.arguments.contains("--settings-lifecycle") {
+    runSettingsNavigationSuites()
+    await runSettingsPresentationLifecycleSuites()
+    print("Settings lifecycle: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
 if CommandLine.arguments.contains("--ai-cue-generation") {
     await runAICueGenerationViewModelSuites()
     await runAICueRuntimeSuites()

@@ -373,13 +373,12 @@ public enum SettingsWindowFocusTarget: Sendable, Equatable, Hashable {
 }
 
 /// Embedded destinations receive successful route focus from their own presentation owners.
-/// The shell owns the visible failure explanation when an Events deep link is rejected.
+/// The shell owns the visible failure explanation for every rejected deep link.
 public func settingsWindowRequestedFocusTarget(
     resolution: SettingsRouteResolution
 ) -> SettingsWindowFocusTarget? {
     if resolution.failure != nil {
-        return resolution.destination == .eventsAndSounds
-            ? .routeFailure(.eventsAndSounds) : .title(resolution.destination)
+        return .routeFailure(resolution.destination)
     }
     switch resolution.destination {
     case .integrations, .eventsAndSounds, .sounds:

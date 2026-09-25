@@ -172,6 +172,56 @@ func runSettingsNavigationSuites() {
 
     }
 
+    suite("Settings failed deep links：请求可见失败说明，普通导航保留标题焦点") {
+        let workspaceID = UUID(uuidString: "61E452D2-5895-4D4C-BF22-D8B0A8FEB2E7")!
+        let staleWorkspace = PanelSoundScopeID.workspace(workspaceID)
+        let availability = SettingsRouteAvailability(
+            integrationSurfaces: [],
+            eventScopes: [.global],
+            soundScopes: [.global],
+            soundPackIDs: ["valid-pack"],
+            events: Set(Event.allCases))
+        let failures: [(SettingsRoute, SettingsRouteFailure, SettingsWindowFocusTarget)] = [
+            (
+                .sounds(.editEvent(scope: .global, packID: "removed-pack", event: .stop)),
+                .staleSoundPack("removed-pack"),
+                .routeFailure(.sounds)
+            ),
+            (
+                .sounds(.editEvent(scope: staleWorkspace, packID: "valid-pack", event: .stop)),
+                .staleSoundScope(staleWorkspace),
+                .routeFailure(.sounds)
+            ),
+            (
+                .events(scope: staleWorkspace, event: .stop),
+                .staleSoundScope(staleWorkspace),
+                .routeFailure(.eventsAndSounds)
+            ),
+            (
+                .integrations(surface: .workBuddy),
+                .staleSurface(.workBuddy),
+                .routeFailure(.integrations)
+            ),
+        ]
+        for (route, failure, target) in failures {
+            let resolution = resolveSettingsRoute(route, availability: availability)
+            expect(
+                resolution.failure == failure
+                    && settingsWindowRequestedFocusTarget(resolution: resolution) == target,
+                "\(route) 失败后必须请求对应目的页的可见失败说明焦点")
+        }
+        expect(
+            settingsWindowRequestedFocusTarget(
+                resolution: resolveSettingsRoute(
+                    .destination(.general), availability: availability)) == .title(.general),
+            "普通 Settings 导航仍请求页面标题焦点")
+        expect(
+            settingsWindowRequestedFocusTarget(
+                resolution: resolveSettingsRoute(
+                    .destination(.eventsAndSounds), availability: availability)) == nil,
+            "普通 Events 导航仍由嵌入页请求标题焦点")
+    }
+
     suite("Settings Sounds 工作区路由：身份、缺包回退与失效拒绝") {
         let id = UUID(uuidString: "61E452D2-5895-4D4C-BF22-D8B0A8FEB2E7")!
         let route = SoundPacksWindowRoute.copyAndApply(
