@@ -9293,6 +9293,18 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "已重新读取当前配置；原写入结果仍不确定。" } }
       }
     },
+    "event-settings.retry-target-changed": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The original target changed after reloading. No retry was sent. Review the current setting and choose again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "重新载入后原操作目标已变化。没有重试写入；请核对当前设置后重新选择。" } }
+      }
+    },
+    "event-settings.retry-readback-unavailable": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The current configuration could not be verified. No retry was sent. Repair the configuration, then reload before trying again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无法核实当前配置。没有重试写入；请修复配置并重新载入后再操作。" } }
+      }
+    },
     "event-settings.shortcut-scope.unavailable": {
       "localizations": {
         "en": {

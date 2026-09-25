@@ -58,32 +58,26 @@ package struct EventSettingsWriteRetry: Equatable {
         self.operation = operation
     }
 
-    package func canRetry(
-        route: EventSettingsWindowRoute,
-        selectedScope: PanelSoundScopeID,
-        configState: PanelConfigState,
-        config: ClaudioConfig,
-        workspaceRule: WorkspaceSoundRule?
-    ) -> Bool {
-        guard case .operational = configState else { return false }
-        guard route.scope == scope, route.unavailableRequestedScopeStoredValue == nil,
-            selectedScope == scope
-        else { return false }
-        if let workspaceID = scope.workspaceID {
-            guard workspaceRule?.id == workspaceID,
-                workspaceRule?.directory == workspaceDirectory,
-                workspaceRule?.profile?.isValid == true
-            else { return false }
-        } else if workspaceDirectory != nil {
-            return false
-        }
+    @MainActor
+    package func failedWithLockBusy(in model: PanelConfigController) -> Bool {
+        if scope.workspaceID != nil { return model.workspaceError == .lockBusy }
         switch operation {
-        case .pack(let before, _): return config.selectedPack == before
-        case .volume(let before, _): return config.masterVolume == before
-        case .event(let event, let before): return config.isEnabled(event) == before
-        case .surfaces(let before, _): return workspaceRule?.surfaces == before
+        case .pack:
+            if case .lockBusy? = model.packSwitchError { return true }
+        case .volume:
+            if case .lockBusy? = model.masterVolumeError { return true }
+        case .event:
+            if case .lockBusy? = model.muteError { return true }
+        case .surfaces:
+            break
         }
+        return false
     }
+}
+
+package enum EventSettingsWriteRetryFailure: Equatable {
+    case targetChanged
+    case readbackUnavailable
 }
 
 /// App-lifetime typed selection shared by the unified Events & Sounds destination and its routes.
@@ -93,6 +87,7 @@ package final class EventSettingsWindowSelection: ObservableObject {
     @Published package private(set) var deletionPresentation = WorkspaceDeletionPresentation()
     @Published package private(set) var previewFailure: EventSettingsPreviewFailure?
     @Published package private(set) var writeRetry: EventSettingsWriteRetry?
+    @Published package private(set) var writeRetryFailure: EventSettingsWriteRetryFailure?
     @Published package private(set) var conflictReadbackState: EventSettingsConflictReadbackState =
         .idle
 
@@ -134,6 +129,7 @@ package final class EventSettingsWindowSelection: ObservableObject {
         deletionPresentation = WorkspaceDeletionPresentation()
         previewFailure = nil
         writeRetry = nil
+        writeRetryFailure = nil
         conflictReadbackState = .idle
         consumedDeleteRequest = nil
         storage.route = route
@@ -148,6 +144,7 @@ package final class EventSettingsWindowSelection: ObservableObject {
         deletionPresentation.pending = nil
         previewFailure = nil
         writeRetry = nil
+        writeRetryFailure = nil
         conflictReadbackState = .idle
         storage.route = EventSettingsWindowRoute(
             scope: storage.route.scope,
@@ -264,16 +261,34 @@ package final class EventSettingsWindowSelection: ObservableObject {
         requestFocus(.workspaceDeleteFeedback)
     }
 
-    /// A retry of deletion opens a new confirmation only for the same read-back rule identity.
-    /// It never submits the old deletion request or writes from a stale route.
+    /// Reloads before opening a fresh confirmation. A changed or missing rule cannot reuse the
+    /// consumed request; the readback becomes visible feedback for the original target.
     @discardableResult
-    package func requestDeletionRetry(of rule: WorkspaceSoundRule) -> Bool {
+    package func retryDeletion(using model: PanelConfigController) -> Bool {
         guard case .failed(let target, .lockBusy, _) = deletionPresentation.feedback,
-            WorkspaceSoundDeleteTarget(rule: rule) == target,
             storage.route.scope == .workspace(target.id),
             storage.route.unavailableRequestedScopeStoredValue == nil
         else { return false }
-        return requestDeletion(of: rule)
+        model.reload()
+        guard storage.route.scope == .workspace(target.id),
+            storage.route.unavailableRequestedScopeStoredValue == nil
+        else { return false }
+        let readback = WorkspaceDeleteReadback(target: target, configState: model.configState)
+        switch readback {
+        case .originalPresent:
+            guard case .operational(let config) = model.configState,
+                let rule = config.workspaceRules.first(where: { $0.id == target.id }),
+                WorkspaceSoundDeleteTarget(rule: rule) == target
+            else { return false }
+            return requestDeletion(of: rule)
+        case .absent, .replaced:
+            markCurrentScopeUnavailable()
+            deletionPresentation.feedback = .failed(target, .staleRule, readback)
+        case .unavailable:
+            deletionPresentation.feedback = .failed(target, .lockBusy, .unavailable)
+        }
+        requestFocus(.workspaceDeleteFeedback)
+        return false
     }
 
     @discardableResult
@@ -304,18 +319,90 @@ package final class EventSettingsWindowSelection: ObservableObject {
         previewFailure = nil
     }
 
-    package func noteLockFailureRetry(_ retry: EventSettingsWriteRetry?) {
-        guard let retry, storage.route.scope == retry.scope,
+    package func noteWriteResult(
+        _ retry: EventSettingsWriteRetry, using model: PanelConfigController
+    ) {
+        writeRetryFailure = nil
+        guard storage.route.scope == retry.scope,
             storage.route.unavailableRequestedScopeStoredValue == nil
         else {
             writeRetry = nil
             return
         }
-        writeRetry = retry
+        writeRetry = retry.failedWithLockBusy(in: model) ? retry : nil
+        if retry.scope.workspaceID != nil, model.workspaceError == .staleRule {
+            markCurrentScopeUnavailable()
+        }
     }
 
     package func clearWriteRetry() {
         writeRetry = nil
+        writeRetryFailure = nil
+    }
+
+    /// This is the only replay path: reload first, compare the original target and value, then
+    /// use the existing controller write. The operation switch keeps comparison next to its write.
+    @discardableResult
+    package func retryWrite(using model: PanelConfigController) -> Bool {
+        guard let retry = writeRetry else { return false }
+        model.reload()
+        guard storage.route.scope == retry.scope,
+            storage.route.unavailableRequestedScopeStoredValue == nil,
+            model.selectedSoundScope == retry.scope
+        else { return rejectWriteRetry(.targetChanged) }
+        guard case .operational(let config) = model.configState,
+            !config.workspaceRulesMalformed
+        else { return rejectWriteRetry(.readbackUnavailable) }
+
+        let currentRule = retry.scope.workspaceID.flatMap { id in
+            config.workspaceRules.first { $0.id == id }
+        }
+        if retry.scope.workspaceID != nil {
+            guard currentRule?.directory == retry.workspaceDirectory,
+                currentRule?.profile?.isValid == true
+            else { return rejectWriteRetry(.targetChanged, scopeUnavailable: true) }
+        } else if retry.workspaceDirectory != nil {
+            return rejectWriteRetry(.targetChanged)
+        }
+
+        switch retry.operation {
+        case .pack(let before, let requested):
+            guard model.config.selectedPack == before else {
+                return rejectWriteRetry(.targetChanged)
+            }
+            clearConflictReadback()
+            _ = model.switchPack(to: requested)
+        case .volume(let before, let requested):
+            guard model.config.masterVolume == before else {
+                return rejectWriteRetry(.targetChanged)
+            }
+            clearConflictReadback()
+            _ = model.setVolume(requested, for: retry.scope)
+        case .event(let event, let before):
+            guard model.config.isEnabled(event) == before else {
+                return rejectWriteRetry(.targetChanged)
+            }
+            clearConflictReadback()
+            model.toggleMute(event)
+        case .surfaces(let before, let requested):
+            guard let id = retry.scope.workspaceID, currentRule?.surfaces == before else {
+                return rejectWriteRetry(.targetChanged)
+            }
+            clearConflictReadback()
+            _ = model.changeWorkspace(.surfaces(id, requested))
+        }
+        noteWriteResult(retry, using: model)
+        clearPreviewFailure()
+        return true
+    }
+
+    private func rejectWriteRetry(
+        _ failure: EventSettingsWriteRetryFailure, scopeUnavailable: Bool = false
+    ) -> Bool {
+        if scopeUnavailable { markCurrentScopeUnavailable() }
+        writeRetry = nil
+        writeRetryFailure = failure
+        return false
     }
 
     /// Call only after a user-requested reload. A failed readback must keep the original typed
@@ -409,6 +496,7 @@ package final class EventSettingsWindowSelection: ObservableObject {
         deletionPresentation = WorkspaceDeletionPresentation()
         previewFailure = nil
         writeRetry = nil
+        writeRetryFailure = nil
         conflictReadbackState = .idle
         consumedDeleteRequest = nil
         publishState()

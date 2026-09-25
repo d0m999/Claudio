@@ -30,6 +30,8 @@ struct EventSettingsWindowView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focusedTarget: EventSettingsFocusTarget?
     @State private var isAddingWorkspace = false
+    @State private var deletionCancelFocusID: UUID?
+    @State private var deletionAlertOwnerID: ObjectIdentifier?
     @State private var player = NSSoundAudioPreviewPlayer()
     @State private var previewPulseTriggers: [Event: Int] = [:]
     @State private var previewSuccessTokens: [Event: UUID] = [:]
@@ -190,10 +192,16 @@ struct EventSettingsWindowView: View {
                                 identifierPrefix: "workspace.write.conflict-recovery-file")
                         }
                         unresolvedConflictNotice
+                        if let failure = selection.writeRetryFailure {
+                            FailureRow(message: writeRetryFailureMessage(failure))
+                                .focusable()
+                                .settingsMountIdentity("workspace.write.retry-failure")
+                        }
                         if let feedback = selection.deletionPresentation.feedback {
                             deletionFeedback(feedback)
                         } else if let error = model.workspaceError,
-                            !isRetainedWorkspaceConflict(error)
+                            !isRetainedWorkspaceConflict(error),
+                            !(error == .lockBusy && selection.writeRetryFailure != nil)
                         {
                             workspaceFailure(error)
                         }
@@ -245,12 +253,30 @@ struct EventSettingsWindowView: View {
         }
         .onChange(of: selection.route) { _ in
             previewSuccessTokens.removeAll()
+            deletionCancelFocusID = nil
+            deletionAlertOwnerID = nil
             synchronize()
         }
         .onChange(of: selection.presentationState.focusRequestRevision) { _ in synchronize() }
+        .onChange(of: selection.deletionPresentation.pending?.id) { pendingID in
+            if pendingID != nil {
+                deletionCancelFocusID = nil
+                deletionAlertOwnerID = nil
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEndSheetNotification)) {
+            notification in
+            guard let ownerID = deletionAlertOwnerID,
+                let owner = notification.object as? NSWindow,
+                ObjectIdentifier(owner) == ownerID
+            else { return }
+            restoreDeletionCancelFocus(clearRequest: true)
+        }
         .onDisappear {
             player.stop()
             previewSuccessTokens.removeAll()
+            deletionCancelFocusID = nil
+            deletionAlertOwnerID = nil
             selection.cancelDeletion()
         }
         .sheet(
@@ -289,14 +315,14 @@ struct EventSettingsWindowView: View {
                     // until the action has had a chance to consume the captured target.
                     Task { @MainActor in
                         if selection.deletionPresentation.pending == pending {
-                            selection.cancelDeletion()
+                            cancelDeletionFromAlert(pending)
                         }
                     }
                 }),
             presenting: selection.deletionPresentation.pending
         ) { request in
             Button(l10n.text(.workspaceCancel), role: .cancel) {
-                selection.cancelDeletion()
+                cancelDeletionFromAlert(request)
             }
             .keyboardShortcut(.defaultAction)
             Button(l10n.text(.workspaceDeleteAction), role: .destructive) {
@@ -304,6 +330,38 @@ struct EventSettingsWindowView: View {
             }
         } message: { request in
             Text(l10n.format(.workspaceDeleteConfirmMessage, request.target.directory.path))
+        }
+    }
+
+    private func cancelDeletionFromAlert(_ request: WorkspaceDeletionRequest) {
+        guard selection.deletionPresentation.pending == request else { return }
+        let keyWindow = NSApp.keyWindow
+        deletionAlertOwnerID = (keyWindow?.sheetParent ?? keyWindow).map(ObjectIdentifier.init)
+        deletionCancelFocusID = request.target.id
+        selection.cancelDeletion()
+        // SwiftUI can restore the title while its native alert is closing. Reapply the request
+        // after dismissal; the sheet-end callback above handles the later AppKit focus handback.
+        restoreDeletionCancelFocus()
+    }
+
+    private func restoreDeletionCancelFocus(clearRequest: Bool = false) {
+        guard let id = deletionCancelFocusID,
+            selection.deletionPresentation.pending == nil,
+            selection.route.scope == .workspace(id),
+            selection.presentationState.focusTarget == .workspaceRemove(id)
+        else { return }
+        focusedTarget = nil
+        DispatchQueue.main.async {
+            guard deletionCancelFocusID == id,
+                selection.deletionPresentation.pending == nil,
+                selection.route.scope == .workspace(id),
+                selection.presentationState.focusTarget == .workspaceRemove(id)
+            else { return }
+            focusedTarget = .workspaceRemove(id)
+            if clearRequest {
+                deletionCancelFocusID = nil
+                deletionAlertOwnerID = nil
+            }
         }
     }
 
@@ -362,8 +420,7 @@ struct EventSettingsWindowView: View {
                             operation: .pack(before: model.config.selectedPack, requested: $0))
                         selection.clearConflictReadback()
                         _ = model.switchPack(to: $0)
-                        selection.noteLockFailureRetry(retryIsLockBusy(retry) ? retry : nil)
-                        markStaleWorkspaceTarget(scope)
+                        selection.noteWriteResult(retry, using: model)
                         selection.clearPreviewFailure()
                         onAudibilityInputsChanged()
                     })
@@ -386,8 +443,7 @@ struct EventSettingsWindowView: View {
                     operation: .volume(before: model.config.masterVolume, requested: volume))
                 selection.clearConflictReadback()
                 let landed = model.setVolume(volume, for: scope)
-                selection.noteLockFailureRetry(retryIsLockBusy(retry) ? retry : nil)
-                markStaleWorkspaceTarget(scope)
+                selection.noteWriteResult(retry, using: model)
                 selection.clearPreviewFailure()
                 onAudibilityInputsChanged()
                 return landed
@@ -429,8 +485,7 @@ struct EventSettingsWindowView: View {
                                 operation: .surfaces(before: rule.surfaces, requested: surfaces))
                             selection.clearConflictReadback()
                             _ = model.changeWorkspace(.surfaces(rule.id, surfaces))
-                            selection.noteLockFailureRetry(retryIsLockBusy(retry) ? retry : nil)
-                            markStaleWorkspaceTarget(.workspace(rule.id))
+                            selection.noteWriteResult(retry, using: model)
                         })
                 ) {
                     VStack(alignment: .leading) {
@@ -486,14 +541,14 @@ struct EventSettingsWindowView: View {
             .accessibilityIdentifier("workspace.delete.reload")
             if error == .lockBusy {
                 Button(l10n.text(.commonRetry)) {
-                    model.reload()
-                    guard
-                        let currentRule = model.workspaceRules.first(where: { $0.id == target.id })
-                    else {
-                        selection.refreshDeletionReadback(configState: model.configState)
-                        return
+                    if !selection.retryDeletion(using: model),
+                        case .failed(let failedTarget, let reason, let readback)? =
+                            selection.deletionPresentation.feedback
+                    {
+                        onAnnouncement(
+                            deletionFailureMessage(
+                                failedTarget, error: reason, readback: readback))
                     }
-                    _ = selection.requestDeletionRetry(of: currentRule)
                 }
                 .accessibilityIdentifier("workspace.delete.retry-confirmation")
             }
@@ -650,68 +705,23 @@ struct EventSettingsWindowView: View {
             recoveryFiles: recoveryFiles)
     }
 
-    private func retryIsLockBusy(_ retry: EventSettingsWriteRetry) -> Bool {
-        if retry.scope.workspaceID != nil { return model.workspaceError == .lockBusy }
-        switch retry.operation {
-        case .pack:
-            if case .lockBusy? = model.packSwitchError { return true }
-        case .volume:
-            if case .lockBusy? = model.masterVolumeError { return true }
-        case .event:
-            if case .lockBusy? = model.muteError { return true }
-        case .surfaces:
-            return false
-        }
-        return false
-    }
-
-    private func markStaleWorkspaceTarget(_ scope: PanelSoundScopeID) {
-        if scope.workspaceID != nil, model.workspaceError == .staleRule {
-            selection.markCurrentScopeUnavailable()
-        }
-    }
-
     private var canRetryCurrentWrite: Bool {
-        guard let retry = selection.writeRetry else { return false }
-        return retry.canRetry(
-            route: selection.route,
-            selectedScope: model.selectedSoundScope,
-            configState: model.configState,
-            config: model.config,
-            workspaceRule: model.workspaceRules.first { $0.id == retry.scope.workspaceID })
+        selection.writeRetry != nil
     }
 
     private func retryCurrentWrite() {
-        guard let retry = selection.writeRetry else { return }
-        model.reload()
-        guard canRetryCurrentWrite else {
-            selection.clearWriteRetry()
-            if retry.scope.workspaceID != nil,
-                !model.workspaceRules.contains(where: { $0.id == retry.scope.workspaceID })
-            {
-                selection.markCurrentScopeUnavailable()
-            }
-            return
+        if selection.retryWrite(using: model) {
+            onAudibilityInputsChanged()
+        } else if let failure = selection.writeRetryFailure {
+            onAnnouncement(writeRetryFailureMessage(failure))
         }
-        switch retry.operation {
-        case .pack(_, let requested):
-            selection.clearConflictReadback()
-            _ = model.switchPack(to: requested)
-        case .volume(_, let requested):
-            selection.clearConflictReadback()
-            _ = model.setVolume(requested, for: retry.scope)
-        case .event(let event, _):
-            selection.clearConflictReadback()
-            model.toggleMute(event)
-        case .surfaces(_, let requested):
-            guard let workspaceID = retry.scope.workspaceID else { return }
-            selection.clearConflictReadback()
-            _ = model.changeWorkspace(.surfaces(workspaceID, requested))
+    }
+
+    private func writeRetryFailureMessage(_ failure: EventSettingsWriteRetryFailure) -> String {
+        switch failure {
+        case .targetChanged: l10n.text(.eventSettingsRetryTargetChanged)
+        case .readbackUnavailable: l10n.text(.eventSettingsRetryReadbackUnavailable)
         }
-        selection.noteLockFailureRetry(retryIsLockBusy(retry) ? retry : nil)
-        markStaleWorkspaceTarget(retry.scope)
-        selection.clearPreviewFailure()
-        onAudibilityInputsChanged()
     }
 
     private func deletionFailureMessage(
@@ -850,8 +860,7 @@ struct EventSettingsWindowView: View {
                                     event.event, before: model.config.isEnabled(event.event)))
                             selection.clearConflictReadback()
                             model.toggleMute(event.event)
-                            selection.noteLockFailureRetry(retryIsLockBusy(retry) ? retry : nil)
-                            markStaleWorkspaceTarget(scope)
+                            selection.noteWriteResult(retry, using: model)
                             selection.clearPreviewFailure()
                             onAudibilityInputsChanged()
                         })

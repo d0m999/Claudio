@@ -5,6 +5,27 @@ import Combine
 import Foundation
 
 @MainActor
+private func makeWriteRetryModel(
+    config: ClaudioConfig, root: URL
+) -> (model: PanelConfigController, configFile: URL, lockFile: URL) {
+    let configFile = root.appendingPathComponent("config.json")
+    let lockFile = root.appendingPathComponent("config.lock")
+    let packs = root.appendingPathComponent("packs")
+    for id in ["default-pack", "workspace-pack"] {
+        writeFixture(
+            "{\"id\":\"\(id)\",\"name\":\"\(id)\",\"events\":{}}",
+            to: packs.appendingPathComponent("\(id)/manifest.json"))
+    }
+    writeFixture(try! JSONEncoder().encode(config), to: configFile)
+    return (
+        PanelConfigController(
+            configFile: configFile, lockFile: lockFile,
+            environment: makeAudioImportEnvironment(userPacksDirectory: packs)),
+        configFile, lockFile
+    )
+}
+
+@MainActor
 func runEventSettingsWindowSelectionSuites() {
     suite("事件设置 selection：route/focus/preview/AI 生命周期单点收敛") {
         let selection = EventSettingsWindowSelection()
@@ -149,90 +170,200 @@ func runEventSettingsWindowSelectionSuites() {
             "旧作用域的迟到结果与恢复请求不能影响新作用域")
     }
 
-    suite("设置锁忙重试：读回变更或失效作用域时拒绝旧动作") {
-        let selection = EventSettingsWindowSelection()
-        let config = ClaudioConfig(selectedPack: "before", masterVolume: 0.4)
-        let retry = EventSettingsWriteRetry(
-            scope: .global, workspaceDirectory: nil,
-            operation: .pack(before: "before", requested: "after"))
-        selection.noteLockFailureRetry(retry)
-        expect(
-            selection.writeRetry == retry
-                && retry.canRetry(
-                    route: selection.route, selectedScope: .global,
-                    configState: .operational(config),
-                    config: config, workspaceRule: nil),
-            "锁忙原动作仅在原作用域和原配置仍成立时可显式重试")
-        expect(
-            !retry.canRetry(
-                route: selection.route, selectedScope: .global,
-                configState: .operational(config),
-                config: ClaudioConfig(selectedPack: "changed"), workspaceRule: nil),
-            "读回显示包已变化时不得重复旧切包")
-        expect(
-            !retry.canRetry(
-                route: selection.route, selectedScope: .global,
-                configState: .malformed(reason: "invalid"),
-                config: config, workspaceRule: nil),
-            "配置读回不可写时不得重放锁忙动作")
-        selection.markCurrentScopeUnavailable()
-        expect(
-            selection.writeRetry == nil
-                && !retry.canRetry(
-                    route: selection.route, selectedScope: .global,
-                    configState: .operational(config),
-                    config: config, workspaceRule: nil),
-            "失效目标不得退回默认组重试")
+    suite("默认组锁忙重试：原值不变才显式提交，旧动作只消费一次") {
+        withTempDirectory { root in
+            let config = ClaudioConfig(selectedPack: "default-pack", masterVolume: 0.4)
+            let fixture = makeWriteRetryModel(config: config, root: root)
+            let selection = EventSettingsWindowSelection()
+            let holder = FileLock(path: fixture.lockFile.path)
+            guard holder.tryLock() else { expect(false, "前提：取得配置锁"); return }
+            let retry = EventSettingsWriteRetry(
+                scope: .global, workspaceDirectory: nil,
+                operation: .volume(before: 0.4, requested: 0.7))
+            expect(fixture.model.setVolume(0.7, for: .global) == nil, "锁忙不得写入音量")
+            selection.noteWriteResult(retry, using: fixture.model)
+            expect(selection.writeRetry == retry, "仅锁忙结果保留原动作")
+            holder.unlock()
 
+            expect(selection.retryWrite(using: fixture.model), "用户点击重试后可写原作用域")
+            expect(
+                loadClaudioConfig(from: fixture.configFile)?.masterVolume == 0.7
+                    && selection.writeRetry == nil && selection.writeRetryFailure == nil,
+                "重读原值后写入一次，成功清理重试状态")
+            let landed = try! Data(contentsOf: fixture.configFile)
+            expect(
+                !selection.retryWrite(using: fixture.model)
+                    && (try! Data(contentsOf: fixture.configFile)) == landed,
+                "旧动作已消费，第二次调用不重放")
+        }
+    }
+
+    suite("默认组锁忙重试：外部改值或配置损坏均拒绝重放并给出原因") {
+        for damagedReadback in [false, true] {
+            withTempDirectory { root in
+                let config = ClaudioConfig(selectedPack: "default-pack", masterVolume: 0.4)
+                let fixture = makeWriteRetryModel(config: config, root: root)
+                let selection = EventSettingsWindowSelection()
+                let holder = FileLock(path: fixture.lockFile.path)
+                guard holder.tryLock() else { expect(false, "前提：取得配置锁"); return }
+                let retry = EventSettingsWriteRetry(
+                    scope: .global, workspaceDirectory: nil,
+                    operation: .volume(before: 0.4, requested: 0.7))
+                _ = fixture.model.setVolume(0.7, for: .global)
+                selection.noteWriteResult(retry, using: fixture.model)
+                holder.unlock()
+                if damagedReadback {
+                    writeFixture("{broken", to: fixture.configFile)
+                } else {
+                    var changed = config
+                    changed.masterVolume = 0.6
+                    writeFixture(try! JSONEncoder().encode(changed), to: fixture.configFile)
+                }
+                let beforeRetry = try! Data(contentsOf: fixture.configFile)
+                expect(!selection.retryWrite(using: fixture.model), "读回异常不得提交旧音量")
+                expect(
+                    (try! Data(contentsOf: fixture.configFile)) == beforeRetry
+                        && selection.writeRetry == nil
+                        && selection.writeRetryFailure
+                            == (damagedReadback ? .readbackUnavailable : .targetChanged),
+                    "失败原因留在 selection 中供可见错误与播报使用")
+            }
+        }
+    }
+
+    suite("切包与事件开关：读回已变化时不重放旧请求") {
+        for retryingPack in [true, false] {
+            withTempDirectory { root in
+                let config = ClaudioConfig(selectedPack: "default-pack", masterVolume: 0.4)
+                let fixture = makeWriteRetryModel(config: config, root: root)
+                let selection = EventSettingsWindowSelection()
+                let holder = FileLock(path: fixture.lockFile.path)
+                guard holder.tryLock() else { expect(false, "前提：取得配置锁"); return }
+                let retry: EventSettingsWriteRetry
+                if retryingPack {
+                    retry = EventSettingsWriteRetry(
+                        scope: .global, workspaceDirectory: nil,
+                        operation: .pack(before: "default-pack", requested: "workspace-pack"))
+                    _ = fixture.model.switchPack(to: "workspace-pack")
+                } else {
+                    retry = EventSettingsWriteRetry(
+                        scope: .global, workspaceDirectory: nil,
+                        operation: .event(.stop, before: config.isEnabled(.stop)))
+                    fixture.model.toggleMute(.stop)
+                }
+                selection.noteWriteResult(retry, using: fixture.model)
+                holder.unlock()
+                expect(selection.writeRetry == retry, "锁忙保留被点击的原操作")
+
+                var changed = config
+                if retryingPack {
+                    changed.selectedPack = "workspace-pack"
+                } else {
+                    changed.eventsEnabled[Event.stop.cliName] = false
+                }
+                writeFixture(try! JSONEncoder().encode(changed), to: fixture.configFile)
+                let beforeRetry = try! Data(contentsOf: fixture.configFile)
+                expect(
+                    !selection.retryWrite(using: fixture.model)
+                        && selection.writeRetryFailure == .targetChanged
+                        && (try! Data(contentsOf: fixture.configFile)) == beforeRetry,
+                    "外部写者改变原值后，切包和开关均不得被重放")
+            }
+        }
+    }
+
+    suite("工作区锁忙重试：同一 ID 改绑目录不可写入新目标或默认组") {
+        withTempDirectory { root in
+            let rule = WorkspaceSoundRule(
+                directory: WorkspaceDirectory(kind: .directory, path: root.path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "workspace-pack", volume: 0.5))
+            var config = ClaudioConfig(selectedPack: "default-pack", masterVolume: 0.21)
+            config.workspaceRules = [rule]
+            let fixture = makeWriteRetryModel(config: config, root: root)
+            fixture.model.selectSoundScope(.workspace(rule.id))
+            let selection = EventSettingsWindowSelection(
+                route: EventSettingsWindowRoute(scope: .workspace(rule.id)))
+            let holder = FileLock(path: fixture.lockFile.path)
+            guard holder.tryLock() else { expect(false, "前提：取得配置锁"); return }
+            let retry = EventSettingsWriteRetry(
+                scope: .workspace(rule.id), workspaceDirectory: rule.directory,
+                operation: .volume(before: 0.5, requested: 0.9))
+            expect(fixture.model.setVolume(0.9, for: .workspace(rule.id)) == nil, "锁忙拒写")
+            selection.noteWriteResult(retry, using: fixture.model)
+            holder.unlock()
+            expect(selection.writeRetry == retry, "工作区锁忙保留捕获的 ID 与目录")
+
+            let replacement = WorkspaceSoundRule(
+                id: rule.id,
+                directory: WorkspaceDirectory(
+                    kind: .directory, path: root.appendingPathComponent("other").path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "workspace-pack", volume: 0.5))
+            config.workspaceRules = [replacement]
+            writeFixture(try! JSONEncoder().encode(config), to: fixture.configFile)
+            let beforeRetry = try! Data(contentsOf: fixture.configFile)
+            expect(!selection.retryWrite(using: fixture.model), "改绑目录使旧目标失效")
+            expect(
+                (try! Data(contentsOf: fixture.configFile)) == beforeRetry
+                    && loadClaudioConfig(from: fixture.configFile)?.masterVolume == 0.21
+                    && selection.unavailableRequestedScopeStoredValue
+                        == PanelSoundScopeID.workspace(rule.id).storedValue
+                    && selection.writeRetryFailure == .targetChanged,
+                "无写入、无默认组回落，原工作区呈现失效与重试取消反馈")
+        }
+    }
+
+    suite("工作区适用来源：原列表变化后拒绝重放") {
+        withTempDirectory { root in
+            let rule = WorkspaceSoundRule(
+                directory: WorkspaceDirectory(kind: .directory, path: root.path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "workspace-pack", volume: 0.5))
+            var config = ClaudioConfig(selectedPack: "default-pack")
+            config.workspaceRules = [rule]
+            let fixture = makeWriteRetryModel(config: config, root: root)
+            fixture.model.selectSoundScope(.workspace(rule.id))
+            let selection = EventSettingsWindowSelection(
+                route: EventSettingsWindowRoute(scope: .workspace(rule.id)))
+            let holder = FileLock(path: fixture.lockFile.path)
+            guard holder.tryLock() else { expect(false, "前提：取得配置锁"); return }
+            let retry = EventSettingsWriteRetry(
+                scope: .workspace(rule.id), workspaceDirectory: rule.directory,
+                operation: .surfaces(before: [.codex], requested: [.codex, .claudeCode]))
+            expect(
+                !fixture.model.changeWorkspace(.surfaces(rule.id, [.codex, .claudeCode])),
+                "锁忙拒绝适用来源写入")
+            selection.noteWriteResult(retry, using: fixture.model)
+            holder.unlock()
+            expect(selection.writeRetry == retry, "捕获原工作区及适用来源")
+
+            config.workspaceRules[0].surfaces = [.claudeCode]
+            writeFixture(try! JSONEncoder().encode(config), to: fixture.configFile)
+            let beforeRetry = try! Data(contentsOf: fixture.configFile)
+            expect(
+                !selection.retryWrite(using: fixture.model)
+                    && selection.writeRetryFailure == .targetChanged
+                    && (try! Data(contentsOf: fixture.configFile)) == beforeRetry,
+                "原工作区仍在但适用来源变更时不重放旧写入")
+        }
+    }
+
+    suite("发布冲突的读回仍保留 typed 恢复事实") {
+        let selection = EventSettingsWindowSelection()
+        let config = ClaudioConfig(selectedPack: "default-pack")
         let recovery = URL(fileURLWithPath: "/fixture/recovery.json")
-        selection.clearUnavailableScope()
         _ = selection.finishConflictReadback(
             scope: .global, configState: .operational(config),
             source: .workspace(.publishedConflict(recoveryPath: recovery.path)),
             recoveryFiles: [recovery])
         expect(
             selection.conflictWasReadBack && selection.conflictRecoveryFiles == [recovery],
-            "发布冲突的手动读回保留结果不确定性与真实恢复路径")
+            "手动读回保留结果不确定性与真实恢复路径")
         selection.select(EventSettingsWindowRoute(scope: .workspace(UUID())))
         expect(
             !selection.conflictWasReadBack && selection.conflictRecoveryFiles.isEmpty,
-            "换作用域后不能展示旧冲突的恢复文件")
-
-        let rule = WorkspaceSoundRule(
-            directory: WorkspaceDirectory(kind: .directory, path: "/fixture/workspace"),
-            surfaces: [.codex],
-            profile: WorkspaceSoundProfile(selectedPack: "before", volume: 0.4))
-        let scoped = EventSettingsWriteRetry(
-            scope: .workspace(rule.id), workspaceDirectory: rule.directory,
-            operation: .event(.stop, before: true))
-        let scopedRoute = EventSettingsWindowRoute(scope: .workspace(rule.id))
-        expect(
-            scoped.canRetry(
-                route: scopedRoute, selectedScope: .workspace(rule.id),
-                configState: .operational(config),
-                config: config, workspaceRule: rule),
-            "工作区重试应命中原规则身份")
-        expect(
-            !scoped.canRetry(
-                route: scopedRoute, selectedScope: .workspace(rule.id),
-                configState: .operational(config),
-                config: config, workspaceRule: nil),
-            "工作区被移除后不能重放事件开关")
-        let surfaceRetry = EventSettingsWriteRetry(
-            scope: .workspace(rule.id), workspaceDirectory: rule.directory,
-            operation: .surfaces(before: [.codex], requested: [.codex, .claudeCode]))
-        var changedRule = rule
-        changedRule.surfaces = [.claudeCode]
-        expect(
-            surfaceRetry.canRetry(
-                route: scopedRoute, selectedScope: .workspace(rule.id),
-                configState: .operational(config),
-                config: config, workspaceRule: rule)
-                && !surfaceRetry.canRetry(
-                    route: scopedRoute, selectedScope: .workspace(rule.id),
-                    configState: .operational(config),
-                    config: config, workspaceRule: changedRule),
-            "适用来源读回变化后不得重放旧切换")
+            "换作用域后不展示旧冲突的恢复文件")
     }
 
     suite("冲突读回：不可用配置保留 typed 失败，不宣称已读回") {
@@ -295,24 +426,73 @@ func runEventSettingsWindowSelectionSuites() {
     }
 
     suite("删除锁忙重试：原目标重新确认，不复用已消费请求") {
-        let rule = WorkspaceSoundRule(
-            directory: WorkspaceDirectory(kind: .directory, path: "/fixture/retry-workspace"),
-            surfaces: [.codex],
-            profile: WorkspaceSoundProfile(selectedPack: "pack-a", volume: 0.5))
-        let selection = EventSettingsWindowSelection(
-            route: EventSettingsWindowRoute(scope: .workspace(rule.id)))
-        expect(selection.requestDeletion(of: rule), "首次删除应要求确认")
-        let first = selection.deletionPresentation.pending!
-        expect(selection.consumeDeletion(first), "首次确认只消费一次")
-        var config = ClaudioConfig(selectedPack: "pack-a")
-        config.workspaceRules = [rule]
-        _ = selection.finishDeletion(
-            first, succeeded: false, error: .lockBusy, configState: .operational(config))
-        expect(selection.requestDeletionRetry(of: rule), "锁忙后的显式重试应重新打开确认")
-        let second = selection.deletionPresentation.pending!
-        expect(second.id != first.id && !selection.consumeDeletion(first), "旧确认令牌不得重放")
-        selection.cancelDeletion()
-        expect(selection.deletionPresentation.pending == nil, "取消新确认不执行删除")
+        withTempDirectory { root in
+            let rule = WorkspaceSoundRule(
+                directory: WorkspaceDirectory(kind: .directory, path: root.path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "workspace-pack", volume: 0.5))
+            var config = ClaudioConfig(selectedPack: "default-pack")
+            config.workspaceRules = [rule]
+            let fixture = makeWriteRetryModel(config: config, root: root)
+            fixture.model.selectSoundScope(.workspace(rule.id))
+            let selection = EventSettingsWindowSelection(
+                route: EventSettingsWindowRoute(scope: .workspace(rule.id)))
+            expect(selection.requestDeletion(of: rule), "首次删除应要求确认")
+            let first = selection.deletionPresentation.pending!
+            expect(selection.consumeDeletion(first), "首次确认只消费一次")
+            _ = selection.finishDeletion(
+                first, succeeded: false, error: .lockBusy,
+                configState: fixture.model.configState)
+            let beforeRetry = try! Data(contentsOf: fixture.configFile)
+            expect(selection.retryDeletion(using: fixture.model), "锁忙后的显式重试只重新打开确认")
+            let second = selection.deletionPresentation.pending!
+            expect(second.id != first.id && !selection.consumeDeletion(first), "旧确认令牌不得重放")
+            selection.cancelDeletion()
+            expect(
+                selection.deletionPresentation.pending == nil
+                    && selection.presentationState.focusTarget == .workspaceRemove(rule.id)
+                    && (try! Data(contentsOf: fixture.configFile)) == beforeRetry,
+                "取消新确认返回原删除按钮，不产生写入")
+        }
+    }
+
+    suite("删除锁忙重试：同一 ID 改绑目录时明确拒绝旧目标") {
+        withTempDirectory { root in
+            let rule = WorkspaceSoundRule(
+                directory: WorkspaceDirectory(kind: .directory, path: root.path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "workspace-pack", volume: 0.5))
+            let target = WorkspaceSoundDeleteTarget(rule: rule)
+            var config = ClaudioConfig(selectedPack: "default-pack")
+            config.workspaceRules = [rule]
+            let fixture = makeWriteRetryModel(config: config, root: root)
+            fixture.model.selectSoundScope(.workspace(rule.id))
+            let selection = EventSettingsWindowSelection(
+                route: EventSettingsWindowRoute(scope: .workspace(rule.id)))
+            expect(selection.requestDeletion(of: rule), "首次删除必须先请求确认")
+            let request = selection.deletionPresentation.pending!
+            expect(selection.consumeDeletion(request), "首次确认只消费一次")
+            _ = selection.finishDeletion(
+                request, succeeded: false, error: .lockBusy,
+                configState: fixture.model.configState)
+
+            let replacement = WorkspaceSoundRule(
+                id: rule.id,
+                directory: WorkspaceDirectory(
+                    kind: .directory, path: root.appendingPathComponent("other").path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "workspace-pack", volume: 0.5))
+            config.workspaceRules = [replacement]
+            writeFixture(try! JSONEncoder().encode(config), to: fixture.configFile)
+            let beforeRetry = try! Data(contentsOf: fixture.configFile)
+            expect(
+                !selection.retryDeletion(using: fixture.model)
+                    && selection.deletionPresentation.pending == nil
+                    && selection.deletionPresentation.feedback
+                        == .failed(target, .staleRule, .replaced)
+                    && (try! Data(contentsOf: fixture.configFile)) == beforeRetry,
+                "读回同 ID 的新目录不得发确认或写入，必须告知旧目标已变化")
+        }
     }
 
     suite("删除发布冲突：关联恢复路径不会吞掉实际读回") {

@@ -495,6 +495,10 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let eventSettingsManageSounds: Self = "event-settings.manage-sounds"
     public static let eventSettingsManageSoundsHint: Self = "event-settings.manage-sounds.hint"
     public static let eventSettingsConflictReadback: Self = "event-settings.conflict-readback"
+    public static let eventSettingsRetryTargetChanged: Self =
+        "event-settings.retry-target-changed"
+    public static let eventSettingsRetryReadbackUnavailable: Self =
+        "event-settings.retry-readback-unavailable"
     public static let eventSettingsWindowTitle: Self = "window.event-settings.title"
     public static let eventSettingsUnavailableShortcutScope: Self =
         "event-settings.shortcut-scope.unavailable"
@@ -1408,7 +1412,9 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .eventSettingsPreviewAllFailure,
         .eventSettingsAutomaticPlayback, .eventSettingsAutomaticPlaybackFor,
         .eventSettingsManageSounds,
-        .eventSettingsManageSoundsHint, .eventSettingsConflictReadback, .eventSettingsWindowTitle,
+        .eventSettingsManageSoundsHint, .eventSettingsConflictReadback,
+        .eventSettingsRetryTargetChanged, .eventSettingsRetryReadbackUnavailable,
+        .eventSettingsWindowTitle,
         .eventSettingsUnavailableShortcutScope,
         .integrationsWindowTitle,
         .settingsWindowTitle, .settingsDestinationGeneral, .settingsDestinationIntegrations,

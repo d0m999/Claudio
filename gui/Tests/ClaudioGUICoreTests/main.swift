@@ -125,6 +125,12 @@ if CommandLine.arguments.contains("--sound-editor-interface") {
     exit(failures == 0 ? 0 : 1)
 }
 
+if CommandLine.arguments.contains("--event-settings-retry") {
+    runEventSettingsWindowSelectionSuites()
+    print("Event settings retry: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
 if CommandLine.arguments.contains("--workspace-sounds") {
     runLocalizationSuites()
     runPanelFocusOrderSuites()
