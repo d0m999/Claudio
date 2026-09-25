@@ -88,7 +88,7 @@ public final class PanelConfigController: ObservableObject {
     /// `nil` 是全局默认 profile；非 nil 时 `config` 是该 surface 的 effective 投影。
     @Published public private(set) var selectedSurface: HostSurfaceID?
     @Published public private(set) var selectedWorkspaceID: UUID? = nil
-    private var selectedWorkspacePackTarget: WorkspaceSoundPackTarget?
+    private var selectedWorkspaceWriteTarget: WorkspaceSoundWriteTarget?
     @Published public private(set) var workspaceError: WorkspaceSoundError? = nil
     @Published public private(set) var previewSafetyFailures: [Event: EventPreviewSafetyFailure] =
         [:]
@@ -159,12 +159,18 @@ public final class PanelConfigController: ObservableObject {
             return false
         }
     }
-    public func selectSoundScope(_ scope: PanelSoundScopeID) {
-        guard selectedSoundScope != scope else { return }
+    /// Rebinding the same workspace is only for an explicit user selection after a stale readback.
+    public func selectSoundScope(
+        _ scope: PanelSoundScopeID, rebindSelectedWorkspace: Bool = false
+    ) {
+        guard selectedSoundScope != scope || rebindSelectedWorkspace else { return }
+        if rebindSelectedWorkspace {
+            reload(origin: .external, refreshSoundPackLibrary: false)
+        }
         selectedWorkspaceID = scope.workspaceID
-        selectedWorkspacePackTarget = scope.workspaceID.flatMap { id in
+        selectedWorkspaceWriteTarget = scope.workspaceID.flatMap { id in
             baseConfig.workspaceRules.first(where: { $0.id == id }).map { rule in
-                WorkspaceSoundPackTarget(rule: rule)
+                WorkspaceSoundWriteTarget(rule: rule)
             }
         }
         selectedSurface = scope.surface
@@ -460,7 +466,11 @@ public final class PanelConfigController: ObservableObject {
     /// 位置上两套测试全绿。搬过来后，`PanelConfigControllerSuite` 对这三样各有一条行为断言。
     public func toggleMute(_ event: Event) {
         if let id = selectedWorkspaceID {
-            _ = changeWorkspace(.event(id, event, !config.isEnabled(event)))
+            guard let target = selectedWorkspaceWriteTarget, target.id == id else {
+                workspaceError = .staleRule
+                return
+            }
+            _ = changeWorkspace(.event(target, event, !config.isEnabled(event)))
             return
         }
         let currentlyEnabled = eventRows.first(where: { $0.event == event })?.enabled ?? true
@@ -532,10 +542,21 @@ public final class PanelConfigController: ObservableObject {
 
     /// A pending slider commit retains its original target across selection changes.
     @discardableResult
-    public func setVolume(_ volume: Double, for scope: PanelSoundScopeID) -> Double? {
+    public func setVolume(
+        _ volume: Double, for scope: PanelSoundScopeID,
+        workspaceTarget: WorkspaceSoundWriteTarget? = nil
+    ) -> Double? {
         if case .surface = scope { return nil }
         if let id = scope.workspaceID {
-            return changeWorkspace(.volume(id, volume)) ? volume : nil
+            let target =
+                workspaceTarget
+                ?? (selectedSoundScope == scope
+                    ? selectedWorkspaceWriteTarget : nil)
+            guard let target, target.id == id else {
+                workspaceError = .staleRule
+                return nil
+            }
+            return changeWorkspace(.volume(target, volume)) ? volume : nil
         }
         let landed = masterVolumeController.setVolume(volume)
         // republish：面板读 `panelModel.masterVolumeError`，不直接读 masterVolumeController（那会开
@@ -579,7 +600,7 @@ public final class PanelConfigController: ObservableObject {
     @discardableResult
     public func switchPack(to packID: String) -> PanelPackSwitchOutcome {
         if let id = selectedWorkspaceID {
-            guard let target = selectedWorkspacePackTarget, target.id == id else {
+            guard let target = selectedWorkspaceWriteTarget, target.id == id else {
                 workspaceError = .staleRule
                 return .failed(
                     .configWriteFailure(reason: WorkspaceSoundError.staleRule.description))
@@ -861,6 +882,19 @@ public final class PanelConfigController: ObservableObject {
     }
 
     private func applyEffectiveConfig() {
+        if let id = selectedWorkspaceID {
+            guard let target = selectedWorkspaceWriteTarget,
+                baseConfig.workspaceRules.first(where: { $0.id == id })?.directory
+                    == target.directory
+            else {
+                workspaceError = .staleRule
+                config = ClaudioConfig(
+                    selectedPack: "", masterVolume: baseConfig.masterVolume,
+                    eventsEnabled: Dictionary(
+                        uniqueKeysWithValues: Event.allCases.map { ($0.cliName, false) }))
+                return
+            }
+        }
         let resolved =
             selectedWorkspaceID.map { baseConfig.resolveWorkspaceProfile(id: $0) }
             ?? baseConfig.resolveSoundProfile(for: nil)

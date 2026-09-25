@@ -388,11 +388,12 @@ package final class EventSettingsWindowSelection: ObservableObject {
             clearConflictReadback()
             model.toggleMute(event)
         case .surfaces(let before, let requested):
-            guard let id = retry.scope.workspaceID, currentRule?.surfaces == before else {
+            guard let currentRule, currentRule.surfaces == before else {
                 return rejectWriteRetry(.targetChanged)
             }
             clearConflictReadback()
-            _ = model.changeWorkspace(.surfaces(id, requested))
+            _ = model.changeWorkspace(
+                .surfaces(WorkspaceSoundWriteTarget(rule: currentRule), requested))
         }
         noteWriteResult(retry, using: model)
         clearPreviewFailure()

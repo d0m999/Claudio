@@ -334,7 +334,8 @@ func runEventSettingsWindowSelectionSuites() {
                 scope: .workspace(rule.id), workspaceDirectory: rule.directory,
                 operation: .surfaces(before: [.codex], requested: [.codex, .claudeCode]))
             expect(
-                !fixture.model.changeWorkspace(.surfaces(rule.id, [.codex, .claudeCode])),
+                !fixture.model.changeWorkspace(
+                    .surfaces(WorkspaceSoundWriteTarget(rule: rule), [.codex, .claudeCode])),
                 "锁忙拒绝适用来源写入")
             selection.noteWriteResult(retry, using: fixture.model)
             holder.unlock()

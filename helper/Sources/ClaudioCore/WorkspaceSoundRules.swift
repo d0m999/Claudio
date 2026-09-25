@@ -178,14 +178,18 @@ public struct WorkspaceSoundDeleteTarget: Sendable, Equatable {
     }
 }
 
-/// The workspace selected for a pack write, captured before another process can rebind its ID.
-public struct WorkspaceSoundPackTarget: Sendable, Equatable {
+/// The selected workspace, captured before another process can rebind its ID.
+public struct WorkspaceSoundWriteTarget: Sendable, Equatable {
     public let id: UUID
     public let directory: WorkspaceDirectory
 
+    public init(id: UUID, directory: WorkspaceDirectory) {
+        self.id = id
+        self.directory = directory
+    }
+
     public init(rule: WorkspaceSoundRule) {
-        id = rule.id
-        directory = rule.directory
+        self.init(id: rule.id, directory: rule.directory)
     }
 }
 
@@ -301,10 +305,10 @@ extension ClaudioConfig {
 public enum WorkspaceSoundMutation: Sendable {
     case add(WorkspaceSoundRule)
     case remove(WorkspaceSoundDeleteTarget)
-    case pack(WorkspaceSoundPackTarget, String)
-    case volume(UUID, Double)
-    case event(UUID, Event, Bool)
-    case surfaces(UUID, [HostSurfaceID])
+    case pack(WorkspaceSoundWriteTarget, String)
+    case volume(WorkspaceSoundWriteTarget, Double)
+    case event(WorkspaceSoundWriteTarget, Event, Bool)
+    case surfaces(WorkspaceSoundWriteTarget, [HostSurfaceID])
 }
 
 public func mutateWorkspaceSound(
@@ -361,14 +365,13 @@ public func mutateWorkspaceSound(
                 }
                 json["workspace_rules"] = rules
                 return .success(())
-            case .pack(let target, _):
+            case .pack(let target, _), .volume(let target, _), .event(let target, _, _),
+                .surfaces(let target, _):
                 guard
                     config.workspaceRules.first(where: { $0.id == target.id })?.directory
                         == target.directory
                 else { return reject(.staleRule) }
                 id = target.id
-            case .volume(let target, _), .event(let target, _, _), .surfaces(let target, _):
-                id = target
             }
             guard var rule = rules[id.uuidString] as? [String: Any],
                 var profile = rule["profile"] as? [String: Any]

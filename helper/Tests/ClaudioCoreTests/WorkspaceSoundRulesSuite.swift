@@ -273,18 +273,25 @@ func runWorkspaceSoundRulesSuites() {
                 "explicit selected pack and volume create full rule")
             expect(mutate(.add(rule)).isWorkspaceFailure(.duplicateDirectory), "duplicate rejected")
             expect(
-                mutate(.volume(UUID(), 0.2)).isWorkspaceFailure(.staleRule),
+                mutate(
+                    .volume(
+                        WorkspaceSoundWriteTarget(id: UUID(), directory: rule.directory), 0.2)
+                ).isWorkspaceFailure(.staleRule),
                 "stale UUID never writes defaults")
             expect(
-                mutate(.surfaces(rule.id, [.workBuddy])).isWorkspaceFailure(.unsupportedSurface),
+                mutate(
+                    .surfaces(WorkspaceSoundWriteTarget(rule: rule), [.workBuddy])
+                ).isWorkspaceFailure(.unsupportedSurface),
                 "unverified WorkBuddy rejected")
             for event in Event.allCases {
                 expect(
-                    (try? mutate(.event(rule.id, event, false)).get()) != nil,
+                    (try? mutate(
+                        .event(WorkspaceSoundWriteTarget(rule: rule), event, false)
+                    ).get()) != nil,
                     "all five event switches independently writable")
             }
             expect(
-                (try? mutate(.volume(rule.id, 0.61)).get()) != nil,
+                (try? mutate(.volume(WorkspaceSoundWriteTarget(rule: rule), 0.61)).get()) != nil,
                 "workspace independent volume writes")
             let decoded = loadClaudioConfig(from: file)!
             let profile = try! decoded.resolveWorkspaceProfile(id: rule.id).get()
@@ -336,7 +343,7 @@ func runWorkspaceSoundRulesSuites() {
                 "rejected growth preserves exact original bytes")
         }
     }
-    suite("workspace pack write rejects a different directory reusing the same UUID") {
+    suite("workspace edits reject a different directory reusing the same UUID") {
         withTempDirectory { root in
             let file = root.appendingPathComponent("config.json")
             let lock = root.appendingPathComponent("config.lock")
@@ -359,13 +366,26 @@ func runWorkspaceSoundRulesSuites() {
             config.workspaceRules = [replacement]
             let before = try! JSONEncoder().encode(config)
             try! before.write(to: file)
-            let target = WorkspaceSoundPackTarget(rule: original)
+            let target = WorkspaceSoundWriteTarget(rule: original)
             expect(
                 mutateWorkspaceSound(
                     .pack(target, "next"), configFile: file, lockFile: lock,
                     userPacksDirectory: packs
                 ).isWorkspaceFailure(.staleRule),
                 "rebound UUID must fail closed inside the config lock")
+            let staleMutations: [WorkspaceSoundMutation] = [
+                .volume(target, 0.8),
+                .event(target, .stop, false),
+                .surfaces(target, [.codex, .claudeCode]),
+            ]
+            for mutation in staleMutations {
+                expect(
+                    mutateWorkspaceSound(
+                        mutation, configFile: file, lockFile: lock,
+                        userPacksDirectory: packs
+                    ).isWorkspaceFailure(.staleRule),
+                    "every edit must reject a directory rebound under the same UUID")
+            }
             expect((try! Data(contentsOf: file)) == before, "failed write preserves config bytes")
             config.workspaceRules = [original]
             try! JSONEncoder().encode(config).write(to: file)

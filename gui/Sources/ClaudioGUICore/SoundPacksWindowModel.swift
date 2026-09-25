@@ -550,9 +550,9 @@ package final class SoundPacksWindowModel {
     package private(set) var config: ClaudioConfig
     package private(set) var managedScope: PanelSoundScopeID = .global
     package var managedSurface: HostSurfaceID? { managedScope.surface }
-    private var managedWorkspacePackTarget: WorkspaceSoundPackTarget?
+    private var managedWorkspacePackTarget: WorkspaceSoundWriteTarget?
     private var workspacePackWriter:
-        (@MainActor (WorkspaceSoundPackTarget, String) -> Result<Void, WorkspaceSoundError>)?
+        (@MainActor (WorkspaceSoundWriteTarget, String) -> Result<Void, WorkspaceSoundError>)?
     package private(set) var managedScopeFailureReason: String?
     /// Every production mutation consumes this one fail-closed scope decision. Browsing, preview,
     /// Finder reveal, and route changes remain read-only and available when writes are stopped.
@@ -919,7 +919,7 @@ package final class SoundPacksWindowModel {
 
     package func setWorkspacePackWriter(
         _ writer:
-            @escaping @MainActor (WorkspaceSoundPackTarget, String) -> Result<
+            @escaping @MainActor (WorkspaceSoundWriteTarget, String) -> Result<
                 Void, WorkspaceSoundError
             >
     ) {
@@ -958,7 +958,7 @@ package final class SoundPacksWindowModel {
     private func captureManagedWorkspacePackTarget() {
         managedWorkspacePackTarget = managedScope.workspaceID.flatMap { id in
             baseConfig.workspaceRules.first(where: { $0.id == id }).map { rule in
-                WorkspaceSoundPackTarget(rule: rule)
+                WorkspaceSoundWriteTarget(rule: rule)
             }
         }
     }

@@ -58,7 +58,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
 
     package func configureWorkspacePackWriter(
         _ writer:
-            @escaping @MainActor (WorkspaceSoundPackTarget, String) -> Result<
+            @escaping @MainActor (WorkspaceSoundWriteTarget, String) -> Result<
                 Void, WorkspaceSoundError
             >
     ) {

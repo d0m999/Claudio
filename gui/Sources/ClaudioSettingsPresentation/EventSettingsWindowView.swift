@@ -109,12 +109,14 @@ struct EventSettingsWindowView: View {
                                     selection.select(EventSettingsWindowRoute(scope: scope.scope))
                                     let reselectsCurrentScope =
                                         model.selectedSoundScope == scope.scope
-                                    model.selectSoundScope(scope.scope)
                                     if reselectsCurrentScope,
                                         model.workspaceError == .staleRule
                                             || model.workspaceError == .invalidRule
                                     {
-                                        model.reload()
+                                        model.selectSoundScope(
+                                            scope.scope, rebindSelectedWorkspace: true)
+                                    } else {
+                                        model.selectSoundScope(scope.scope)
                                     }
                                 } label: {
                                     HStack {
@@ -402,6 +404,7 @@ struct EventSettingsWindowView: View {
 
     private var soundControls: some View {
         let scope = selection.route.scope
+        let workspaceTarget = rule.map { WorkspaceSoundWriteTarget(rule: $0) }
         return VStack(alignment: .leading, spacing: 14) {
             Picker(
                 l10n.text(.panelSoundPackLabel),
@@ -433,10 +436,11 @@ struct EventSettingsWindowView: View {
                 language: languageStore.language, focusedTarget: $focusedTarget
             ) { volume in
                 let retry = EventSettingsWriteRetry(
-                    scope: scope, workspaceDirectory: rule?.directory,
+                    scope: scope, workspaceDirectory: workspaceTarget?.directory,
                     operation: .volume(before: model.config.masterVolume, requested: volume))
                 selection.clearConflictReadback()
-                let landed = model.setVolume(volume, for: scope)
+                let landed = model.setVolume(
+                    volume, for: scope, workspaceTarget: workspaceTarget)
                 selection.noteWriteResult(retry, using: model)
                 selection.clearPreviewFailure()
                 onAudibilityInputsChanged()
@@ -478,7 +482,8 @@ struct EventSettingsWindowView: View {
                                 scope: .workspace(rule.id), workspaceDirectory: rule.directory,
                                 operation: .surfaces(before: rule.surfaces, requested: surfaces))
                             selection.clearConflictReadback()
-                            _ = model.changeWorkspace(.surfaces(rule.id, surfaces))
+                            _ = model.changeWorkspace(
+                                .surfaces(WorkspaceSoundWriteTarget(rule: rule), surfaces))
                             selection.noteWriteResult(retry, using: model)
                         })
                 ) {

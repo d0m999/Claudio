@@ -99,7 +99,7 @@ func runWorkspaceSoundPresentationSuites() {
                 "陈旧写入不得回退默认组，读回后应停止继续写入")
         }
     }
-    suite("工作区切包与复制应用拒绝同 UUID 换绑的目录") {
+    suite("工作区编辑与复制应用拒绝同 UUID 换绑的目录") {
         withTempDirectory { root in
             let file = root.appendingPathComponent("config.json")
             let lock = root.appendingPathComponent("config.lock")
@@ -139,10 +139,26 @@ func runWorkspaceSoundPresentationSuites() {
                 profile: WorkspaceSoundProfile(selectedPack: "workspace-pack", volume: 0.7))
             config.workspaceRules = [replacement]
             try! JSONEncoder().encode(config).write(to: file)
+            controller.reload()
+            expect(
+                controller.workspaceError == .staleRule
+                    && controller.config.selectedPack.isEmpty,
+                "外部读回换绑不得自动接受新目录")
             expect(
                 controller.switchPack(to: "next-pack") != .succeeded
                     && controller.workspaceError == .staleRule,
                 "面板切包保留用户原先选中的目录")
+            expect(
+                controller.setVolume(0.9, for: .workspace(original.id)) == nil
+                    && controller.workspaceError == .staleRule,
+                "已选工作区音量不得写换绑目录")
+            controller.toggleMute(.stop)
+            expect(controller.workspaceError == .staleRule, "事件开关不得写换绑目录")
+            expect(
+                !controller.changeWorkspace(
+                    .surfaces(WorkspaceSoundWriteTarget(rule: original), [.claudeCode]))
+                    && controller.workspaceError == .staleRule,
+                "适用来源不得写换绑目录")
             expect(
                 model.useSelectedPack() == .failure(.workspace(.staleRule)),
                 "使用按钮不能写同 UUID 的新目录")
@@ -159,12 +175,20 @@ func runWorkspaceSoundPresentationSuites() {
             expect(
                 readback.selectedPack == "default-pack"
                     && readback.workspaceRules.first?.directory == replacement.directory
-                    && readback.workspaceRules.first?.profile?.selectedPack == "workspace-pack",
+                    && readback.workspaceRules.first?.profile == replacement.profile
+                    && readback.workspaceRules.first?.surfaces == replacement.surfaces,
                 "拒写保留默认组与换绑后的工作区")
             expect(
                 FileManager.default.fileExists(
                     atPath: packs.appendingPathComponent("\(copy.newPackID)/manifest.json").path),
                 "应用失败仍保留可找回的副本")
+            controller.selectSoundScope(
+                .workspace(original.id), rebindSelectedWorkspace: true)
+            expect(
+                controller.workspaceError == nil
+                    && controller.setVolume(0.8, for: .workspace(original.id)) == 0.8
+                    && loadClaudioConfig(from: file)?.workspaceRules.first?.profile?.volume == 0.8,
+                "用户显式重新选择后可编辑当前目录")
         }
     }
     suite("工作区控制器：独立配置、失败原值、失效路由和延迟音量目标") {
@@ -213,8 +237,12 @@ func runWorkspaceSoundPresentationSuites() {
                 model.config.selectedPack == "workspace-pack"
                     && model.workspaceError == .invalidPack, "失败保留原包并显示原因")
             expect((try! Data(contentsOf: file)) == bytes, "失败不写配置")
+            let delayedVolumeTarget = WorkspaceSoundWriteTarget(rule: rule)
             model.selectSoundScope(.global)
-            expect(model.setVolume(0.55, for: .workspace(rule.id)) == 0.55, "切换后滑块仍写捕获的原工作区")
+            expect(
+                model.setVolume(
+                    0.55, for: .workspace(rule.id), workspaceTarget: delayedVolumeTarget) == 0.55,
+                "切换后滑块仍写捕获的原工作区")
             expect(model.config.masterVolume == 0.21, "延迟提交不污染当前默认组")
             expect(
                 loadClaudioConfig(from: file)?.workspaceRules.first?.profile?.volume == 0.55,
