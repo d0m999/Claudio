@@ -772,18 +772,6 @@ struct EventSettingsWindowView: View {
                     Text(event.title)
                         .font(ClaudioTheme.font(.body).weight(.semibold))
                     Text(event.soundFileText).font(.caption).foregroundColor(.secondary)
-                    if !event.controls.previewEnabled {
-                        Text(
-                            localizedEventPreviewHint(
-                                event.controls.previewAvailability,
-                                language: languageStore.language)
-                        )
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier(
-                            "workspace.event.preview-reason.\(event.event.cliName)")
-                    }
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityHint(
@@ -828,13 +816,6 @@ struct EventSettingsWindowView: View {
                         language: languageStore.language)
                 )
                 .focused($focusedTarget, equals: .preview(event.event))
-                if recovery == .adjustGroupVolume {
-                    Button(l10n.text(.eventPreviewAdjustGroupVolume)) {
-                        guard selection.requestGroupVolumeFocus(for: scope) else { return }
-                        focusedTarget = .masterVolume
-                    }
-                    .accessibilityIdentifier("workspace.event.adjust-volume.\(event.event.cliName)")
-                }
                 Button(
                     l10n.text(
                         recovery == .repairSound
@@ -862,6 +843,29 @@ struct EventSettingsWindowView: View {
                         })
                 ).labelsHidden().toggleStyle(.switch).disabled(!event.controls.muteEnabled)
                     .focused($focusedTarget, equals: .mute(event.event))
+            }
+            if !event.controls.previewEnabled {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(
+                        localizedEventPreviewHint(
+                            event.controls.previewAvailability,
+                            language: languageStore.language)
+                    )
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier(
+                        "workspace.event.preview-reason.\(event.event.cliName)")
+                    if recovery == .adjustGroupVolume {
+                        Button(l10n.text(.eventPreviewAdjustGroupVolume)) {
+                            guard selection.requestGroupVolumeFocus(for: scope) else { return }
+                            focusedTarget = .masterVolume
+                        }
+                        .accessibilityIdentifier(
+                            "workspace.event.adjust-volume.\(event.event.cliName)")
+                    }
+                }
+                .padding(.leading, 36)
             }
             if reduceMotion && previewSuccessTokens[event.event] != nil {
                 Label(l10n.text(.eventPreviewStarted), systemImage: "checkmark.circle.fill")
