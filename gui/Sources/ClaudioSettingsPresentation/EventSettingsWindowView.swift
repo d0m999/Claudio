@@ -30,6 +30,7 @@ struct EventSettingsWindowView: View {
     @FocusState private var focusedTarget: EventSettingsFocusTarget?
     @State private var isAddingWorkspace = false
     @State private var player = NSSoundAudioPreviewPlayer()
+    @State private var previewPulseTriggers: [Event: Int] = [:]
     @AppStorage("claudio.workspace-migration-notice-seen") private var migrationSeen = false
 
     init(
@@ -92,9 +93,9 @@ struct EventSettingsWindowView: View {
                 .focusable()
                 .focused($focusedTarget, equals: .title)
                 .settingsMountIdentity("settings.title.events-and-sounds")
-                .padding(.horizontal, 28)
-                .padding(.top, 28)
-                .padding(.bottom, 16)
+                .padding(.horizontal, 52)
+                .padding(.top, 60)
+                .padding(.bottom, 24)
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 12) {
                     ScrollView {
@@ -220,7 +221,9 @@ struct EventSettingsWindowView: View {
                             }
                         }
                         writeFailures
-                    }.padding(24).frame(maxWidth: 820, alignment: .leading)
+                    }
+                    .frame(maxWidth: 820, alignment: .leading)
+                    .padding(24)
                 }
                 .id(selection.route.scope)
             }
@@ -749,8 +752,10 @@ struct EventSettingsWindowView: View {
         }
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
+                ClaudioEventGlyph(event: event.event, size: 24)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(event.title).fontWeight(.semibold)
+                    Text(event.title)
+                        .font(ClaudioTheme.font(.body).weight(.semibold))
                     Text(event.soundFileText).font(.caption).foregroundColor(.secondary)
                     if !event.controls.previewEnabled {
                         Text(
@@ -779,12 +784,15 @@ struct EventSettingsWindowView: View {
                     switch model.attemptPreview(event.event, using: player) {
                     case .started:
                         selection.clearPreviewFailure()
+                        previewPulseTriggers[event.event, default: 0] &+= 1
                     case .failed(let failure):
                         reportPreviewFailure(
                             failure, event: event.event, scope: scope, packID: packID)
                     }
                 } label: {
                     Image(systemName: "play.fill")
+                        .claudioPreviewPulse(
+                            trigger: previewPulseTriggers[event.event, default: 0])
                 }
                 .disabled(!event.controls.previewEnabled)
                 .accessibilityLabel(l10n.format(.eventPreviewLabel, event.title))
@@ -837,7 +845,8 @@ struct EventSettingsWindowView: View {
                 )
                 .settingsMountIdentity("workspace.event.preview-failure.\(event.event.cliName)")
             }
-        }.padding(12).background(ClaudioTheme.elevated(colorScheme)).cornerRadius(10)
+        }.padding(12).background(ClaudioTheme.elevated(colorScheme))
+            .cornerRadius(ClaudioTheme.Radius.row)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("workspace.event.\(event.event.cliName)")
     }
