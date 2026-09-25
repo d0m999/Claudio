@@ -401,8 +401,8 @@ public func panelSoundScopeIntegrationActionLabel(
     ClaudioL10n(language: language).format(.panelSoundScopeIntegrationAction, name)
 }
 
-/// 持久化选择的恢复规则：显式 `global` 永远保留；合法历史 Surface 原样恢复；从未选择或
-/// 失效值优先首个可用 Surface，没有 Surface 才回退 Global。
+/// A missing Workspace keeps its typed identity so a refreshed panel cannot silently turn the
+/// next sound edit into a Default Group write. Unknown legacy values still display Global.
 public func resolvedPanelSoundScopeSelection(
     storedValue: String?,
     scopes: [PanelSoundScopePresentation]
@@ -413,7 +413,34 @@ public func resolvedPanelSoundScopeSelection(
     {
         return exact.scope
     }
+    if let storedValue, storedValue.hasPrefix("workspace:"),
+        let id = UUID(uuidString: String(storedValue.dropFirst("workspace:".count)))
+    {
+        return .workspace(id)
+    }
     return .global
+}
+
+/// The retained selection stays visibly unavailable until the user picks a current scope.
+public func panelSoundScopeSelectionPresentation(
+    storedValue: String?,
+    scopes: [PanelSoundScopePresentation],
+    language: ClaudioAppLanguage
+) -> PanelSoundScopePresentation {
+    let selection = resolvedPanelSoundScopeSelection(storedValue: storedValue, scopes: scopes)
+    if let current = scopes.first(where: { $0.scope == selection }) { return current }
+    if case .workspace = selection {
+        let l10n = ClaudioL10n(language: language)
+        let name = l10n.text(.workspaceLabel)
+        let reason = l10n.text(.workspaceUnavailable)
+        return PanelSoundScopePresentation(
+            scope: selection, host: nil, name: name,
+            supportedCount: 0, totalCount: Event.allCases.count,
+            status: .needsAttention, coverageText: "", stateText: reason,
+            summaryText: reason, hasSparseOverride: false,
+            accessibilityLabel: name + (language == .english ? ", " : "，") + reason)
+    }
+    return scopes[0]
 }
 
 /// 延迟执行的选择动作在写入前必须针对最新可用集合重验目标。失效目标返回 `nil`，调用方据此
@@ -477,7 +504,7 @@ public func resolvedEventSettingsScope(
 }
 
 /// A first launch displays the Default Group; only a manual choice persists a different scope.
-/// Host callbacks and integration refreshes never select a Workspace.
+/// Refreshes retain a missing Workspace's stored identity until the user selects another scope.
 public func panelSoundScopeStoredValueToPersist(
     storedValue: String?,
     resolvedSelection: PanelSoundScopeID

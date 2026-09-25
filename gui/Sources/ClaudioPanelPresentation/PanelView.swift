@@ -349,18 +349,19 @@ public struct PanelView: View {
     // MARK: - Sound scope
 
     private var soundScopePresentations: [PanelSoundScopePresentation] {
-        panelSoundScopePresentations(
+        var scopeConfig = panelModel.config
+        scopeConfig.workspaceRules = panelModel.workspaceRules
+        return panelSoundScopePresentations(
             sourceRows: hostIntegrations.content.sourceRows,
-            config: panelModel.config,
+            config: scopeConfig,
             language: languageStore.language)
     }
 
     private var selectedScope: PanelSoundScopePresentation {
-        let resolved = resolvedPanelSoundScopeSelection(
+        panelSoundScopeSelectionPresentation(
             storedValue: selectedSurfaceRaw,
-            scopes: soundScopePresentations)
-        return soundScopePresentations.first(where: { $0.scope == resolved })
-            ?? soundScopePresentations[0]
+            scopes: soundScopePresentations,
+            language: languageStore.language)
     }
 
     private func soundScopePicker(availableMenuHeight: CGFloat) -> some View {
@@ -385,7 +386,10 @@ public struct PanelView: View {
             return
         }
         selectedSurfaceRaw = scope.storedValue
-        panelModel.selectSoundScope(scope)
+        panelModel.selectSoundScope(
+            scope,
+            rebindSelectedWorkspace: panelModel.selectedSoundScope == scope
+                && panelModel.workspaceError == .staleRule)
         previewAttemptFailures = [:]
         applyFirstFocus()
     }

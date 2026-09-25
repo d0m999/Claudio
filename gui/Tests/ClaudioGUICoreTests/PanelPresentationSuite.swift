@@ -370,7 +370,7 @@ func runPanelPresentationSuites() async {
         expect(scopes.first?.summaryText == "5 events · Default", "默认组摘要错误")
     }
 
-    suite("面板作用域恢复：显式 Global/合法历史值保留，首次与失效值选首个可用来源") {
+    suite("面板作用域恢复：失效工作区保留身份，未知旧值显示默认组") {
         let scopes = panelSoundScopePresentations(
             sourceRows: [
                 panelPresentationRow(.claudeCode, status: .ready, supported: 5),
@@ -394,7 +394,34 @@ func runPanelPresentationSuites() async {
         expect(
             resolvedPanelSoundScopeSelection(storedValue: "stale", scopes: scopes)
                 == .global,
-            "失效值应选首个可用来源")
+            "未知旧值仅借用默认组展示")
+        let missingWorkspace = PanelSoundScopeID.workspace(UUID())
+        let missingValue = missingWorkspace.storedValue
+        expect(
+            resolvedPanelSoundScopeSelection(storedValue: missingValue, scopes: scopes)
+                == missingWorkspace,
+            "失效工作区不能静默改成默认组写入目标")
+        expect(
+            panelSoundScopeStoredValueToPersist(
+                storedValue: missingValue, resolvedSelection: missingWorkspace) == missingValue,
+            "刷新不能覆盖用户存储的失效工作区身份")
+        let unavailableEnglish = panelSoundScopeSelectionPresentation(
+            storedValue: missingValue, scopes: scopes, language: .english)
+        let unavailableChinese = panelSoundScopeSelectionPresentation(
+            storedValue: missingValue, scopes: scopes, language: .zhHans)
+        expect(
+            unavailableEnglish.scope == missingWorkspace
+                && unavailableEnglish.status == .needsAttention
+                && unavailableEnglish.summaryText.contains("no longer available"),
+            "英文选择器须明确显示失效作用域")
+        expect(
+            unavailableChinese.scope == missingWorkspace
+                && unavailableChinese.summaryText.contains("已失效"),
+            "中文选择器须明确显示失效作用域")
+        expect(
+            validatedPanelSoundScopeSelection(
+                missingWorkspace, availableScopes: scopes.map(\.scope)) == nil,
+            "失效工作区不能被菜单选成可写目标")
         expect(
             resolvedPanelSoundScopeSelection(storedValue: nil, scopes: [scopes[0]]) == .global,
             "没有可用来源时必须回退 Global")
