@@ -101,7 +101,8 @@ public struct EmbeddedSoundPacksEditorView: View {
         guard case .sounds(let sounds) = editorOwner.presentation.mode else { return }
         let projection = SoundPacksEditorFocusProjection(
             requestRevision: sounds.requestRevision,
-            routeState: sounds.routeState)
+            routeState: sounds.routeState,
+            scopeAvailability: sounds.scope)
         guard
             focusApplicationTracker.recordAndShouldApply(
                 projection,
@@ -125,17 +126,24 @@ public struct EmbeddedSoundPacksEditorView: View {
         guard case .sounds(let sounds) = editorOwner.presentation.mode else { return nil }
         return SoundPacksEditorFocusProjection(
             requestRevision: sounds.requestRevision,
-            routeState: sounds.routeState)
+            routeState: sounds.routeState,
+            scopeAvailability: sounds.scope)
     }
 }
 
 package struct SoundPacksEditorFocusProjection: Equatable {
     package let requestRevision: UInt64
     package let routeState: SoundPacksEditorRouteState
+    package let scopeAvailability: SoundPackEditorScopeAvailability
 
-    package init(requestRevision: UInt64, routeState: SoundPacksEditorRouteState) {
+    package init(
+        requestRevision: UInt64,
+        routeState: SoundPacksEditorRouteState,
+        scopeAvailability: SoundPackEditorScopeAvailability
+    ) {
         self.requestRevision = requestRevision
         self.routeState = routeState
+        self.scopeAvailability = scopeAvailability
     }
 }
 
@@ -410,6 +418,9 @@ private struct SoundPacksWindowContentView: View {
             }
             if let reason = localizedManagedScopeFailure {
                 FailureRow(message: reason)
+                    .focusable()
+                    .focused($focusedTarget, equals: .managedScopeFailure)
+                    .accessibilityIdentifier("sound-packs.scope.failure")
             }
         }
         .padding(.horizontal, 12)
@@ -1578,6 +1589,7 @@ private struct SoundPacksWindowContentView: View {
         return SoundPacksWindowFocusScope(
             packIDs: activeSounds.packs.map(\.id),
             selectedPackID: activeSounds.selectedPack?.id,
+            hasManagedScopeFailure: localizedManagedScopeFailure != nil,
             editableEvents: canEditSelectedPack ? activeSounds.eventRows.map(\.event) : [],
             previewableEvents: activeSounds.eventRows.filter {
                 $0.previewAction != nil
@@ -1598,12 +1610,17 @@ private struct SoundPacksWindowContentView: View {
 
     private func applyInitialFocus() {
         let visibleEvents = Set(activeSounds.eventRows.map(\.event))
-        awaitsDeepLinkFocus =
-            requestedRoute.editTarget.map {
-                activeSounds.selectedPack?.id != $0.packID || !visibleEvents.contains($0.event)
-            } ?? false
+        if case .unavailable = activeSounds.scope {
+            awaitsDeepLinkFocus = false
+        } else {
+            awaitsDeepLinkFocus =
+                requestedRoute.editTarget.map {
+                    activeSounds.selectedPack?.id != $0.packID || !visibleEvents.contains($0.event)
+                } ?? false
+        }
         focusedTarget = soundPacksWindowDeepLinkFocusTarget(
             route: requestedRoute,
+            scopeAvailability: activeSounds.scope,
             selectedPackID: activeSounds.selectedPack?.id,
             visibleEvents: visibleEvents,
             fallback: soundPacksWindowFirstFocusTarget(focusScope))
@@ -1620,6 +1637,14 @@ private struct SoundPacksWindowContentView: View {
     }
 
     private func reconcileFocusWithVisibleControls(assignFirstIfNil: Bool = false) {
+        if case .unavailable = activeSounds.scope {
+            awaitsDeepLinkFocus = false
+            if let focusedTarget, soundPacksWindowFocusOrder(focusScope).contains(focusedTarget) {
+                return
+            }
+            focusedTarget = .managedScopeFailure
+            return
+        }
         if awaitsDeepLinkFocus, let target = requestedRoute.editTarget,
             activeSounds.selectedPack?.id == target.packID,
             activeSounds.eventRows.contains(where: { $0.event == target.event })
@@ -1718,11 +1743,13 @@ private struct SoundPacksWindowContentView: View {
 /// Route focus names the inspected event even when its read-only mapping has no preview action.
 package func soundPacksWindowDeepLinkFocusTarget(
     route: SoundPacksWindowRoute,
+    scopeAvailability: SoundPackEditorScopeAvailability,
     selectedPackID: String?,
     visibleEvents: Set<Event>,
     fallback: SoundPacksWindowFocusTarget?
 ) -> SoundPacksWindowFocusTarget? {
-    switch route.destination {
+    if case .unavailable = scopeAvailability { return .managedScopeFailure }
+    return switch route.destination {
     case .overview: fallback
     case .editEvent(let packID, let event), .copyAndApply(let packID, let event):
         selectedPackID == packID && visibleEvents.contains(event)

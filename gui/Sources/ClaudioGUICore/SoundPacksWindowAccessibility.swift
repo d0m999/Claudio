@@ -9,6 +9,8 @@ import Foundation
 /// different visual order and lifetime from the transient menu-bar panel, so none of the
 /// `Panel*` accessibility types participate here.
 public enum SoundPacksWindowFocusTarget: Sendable, Hashable {
+    /// Visible managed-scope failure for an invalid Sounds deep link.
+    case managedScopeFailure
     /// Library-level retry rendered in the status bar after an initial or refresh failure.
     case retryLibraryLoad
     /// The native pack `List` is one Tab stop; arrow keys move between its rows.
@@ -39,6 +41,7 @@ public enum SoundPacksWindowFocusTarget: Sendable, Hashable {
 public struct SoundPacksWindowFocusScope: Sendable, Equatable {
     public let packIDs: [String]
     public let selectedPackID: String?
+    public let hasManagedScopeFailure: Bool
     public let editableEvents: [Event]
     public let previewableEvents: [Event]
     public let orphanFileNames: [String]
@@ -56,6 +59,7 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
     public init(
         packIDs: [String],
         selectedPackID: String?,
+        hasManagedScopeFailure: Bool = false,
         editableEvents: [Event] = [],
         previewableEvents: [Event] = [],
         orphanFileNames: [String] = [],
@@ -72,6 +76,7 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
     ) {
         self.packIDs = packIDs
         self.selectedPackID = selectedPackID
+        self.hasManagedScopeFailure = hasManagedScopeFailure
         self.editableEvents = editableEvents
         self.previewableEvents = previewableEvents
         self.orphanFileNames = orphanFileNames
@@ -96,6 +101,9 @@ public func soundPacksWindowFocusOrder(
     _ scope: SoundPacksWindowFocusScope
 ) -> [SoundPacksWindowFocusTarget] {
     var order: [SoundPacksWindowFocusTarget] = []
+    if scope.hasManagedScopeFailure {
+        order.append(.managedScopeFailure)
+    }
     if scope.canRetryLibraryLoad {
         order.append(.retryLibraryLoad)
     }

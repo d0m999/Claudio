@@ -101,30 +101,121 @@ func runSoundPacksEditorViewSuites() async {
         let fallback = SoundPacksWindowFocusTarget.packList
         expect(
             soundPacksWindowDeepLinkFocusTarget(
-                route: route, selectedPackID: "builtin",
+                route: route, scopeAvailability: .available(.global), selectedPackID: "builtin",
                 visibleEvents: Set(Event.allCases), fallback: fallback)
                 == .eventAudio(.stop),
             "只读包的缺声事件仍应聚焦目标映射行")
         expect(
             soundPacksWindowDeepLinkFocusTarget(
-                route: route, selectedPackID: "builtin",
+                route: route, scopeAvailability: .available(.global), selectedPackID: "builtin",
                 visibleEvents: [], fallback: fallback) == fallback,
             "目标事件不在实际渲染行中时应回到安全焦点")
         expect(
             soundPacksWindowDeepLinkFocusTarget(
-                route: route, selectedPackID: "other",
+                route: route, scopeAvailability: .available(.global), selectedPackID: "other",
                 visibleEvents: Set(Event.allCases), fallback: fallback) == fallback,
             "目标包尚未显示时不能把焦点交给其他包的同名事件")
+    }
+
+    suite("Sound editor stale workspace deep link：失效说明取得请求焦点") {
+        withTempDirectory { root in
+            let original = WorkspaceSoundRule(
+                directory: WorkspaceDirectory(
+                    kind: .directory, path: root.appendingPathComponent("before").path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "pack-a", volume: 0.7))
+            let replacement = WorkspaceSoundRule(
+                id: original.id,
+                directory: WorkspaceDirectory(
+                    kind: .directory, path: root.appendingPathComponent("after").path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "pack-a", volume: 0.7))
+            var config = ClaudioConfig(selectedPack: "pack-a", masterVolume: 0.4)
+            config.workspaceRules = [replacement]
+            let owner = SoundPacksEditorOwner.stateGalleryFixture(
+                previewConfig: config,
+                packCards: [
+                    PackCard(
+                        id: "pack-a", name: "Pack A", isCC0: false,
+                        presentEvents: [.stop],
+                        state: .partial(present: 1, total: Event.allCases.count),
+                        isSelected: true)
+                ],
+                selectedPackID: "pack-a",
+                selectedEventRows: [
+                    EventRow(event: .stop, coverage: .present(fileName: "stop.mp3"), enabled: true)
+                ],
+                environment: makeAudioImportEnvironment(
+                    userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true)),
+                activation: nil)
+            owner.configureWorkspacePackWriter { _, _ in .success(()) }
+            let scope = PanelSoundScopeID.workspace(original.id)
+            let route = SoundPacksWindowRoute.editEvent(
+                scope: scope, packID: "pack-a", event: .stop,
+                workspaceTarget: WorkspaceSoundWriteTarget(rule: original))
+            _ = owner.send(.activate(.sounds(route: route, requestRevision: 803)))
+            guard case .sounds(let sounds) = owner.presentation.mode else {
+                expect(false, "失效工作区必须交付 Sounds presentation")
+                return
+            }
+            expect(
+                sounds.scope == .unavailable(scope: scope, reason: .scopeUnavailable),
+                "同 UUID 新目录必须先由真实 editor owner 判为不可用")
+            expect(
+                soundPacksWindowDeepLinkFocusTarget(
+                    route: route, scopeAvailability: sounds.scope,
+                    selectedPackID: sounds.selectedPack?.id,
+                    visibleEvents: Set(sounds.eventRows.map(\.event)), fallback: .packList)
+                    == .managedScopeFailure,
+                "包与事件仍可见时，旧工作区深链仍须优先聚焦失效说明")
+            let focusScope = SoundPacksWindowFocusScope(
+                packIDs: sounds.packs.map(\.id), selectedPackID: sounds.selectedPack?.id,
+                hasManagedScopeFailure: true)
+            expect(
+                Array(soundPacksWindowFocusOrder(focusScope).prefix(2))
+                    == [.managedScopeFailure, .packList],
+                "失效说明须成为首个焦点，包列表仍可经键盘到达")
+            var tracker = SoundPacksEditorFocusApplicationTracker()
+            let available = SoundPacksEditorFocusProjection(
+                requestRevision: sounds.requestRevision, routeState: sounds.routeState,
+                scopeAvailability: .available(scope))
+            let unavailable = SoundPacksEditorFocusProjection(
+                requestRevision: sounds.requestRevision, routeState: sounds.routeState,
+                scopeAvailability: sounds.scope)
+            expect(
+                tracker.recordAndShouldApply(available, force: false)
+                    && tracker.recordAndShouldApply(unavailable, force: false),
+                "同一路由的读回失效必须重新发出焦点请求")
+
+            let reboundRoute = SoundPacksWindowRoute.editEvent(
+                scope: scope, packID: "pack-a", event: .stop,
+                workspaceTarget: WorkspaceSoundWriteTarget(rule: replacement))
+            _ = owner.send(.activate(.sounds(route: reboundRoute, requestRevision: 804)))
+            guard case .sounds(let rebound) = owner.presentation.mode else {
+                expect(false, "新目录深链必须交付 Sounds presentation")
+                return
+            }
+            expect(
+                rebound.scope == .available(scope)
+                    && soundPacksWindowDeepLinkFocusTarget(
+                        route: reboundRoute, scopeAvailability: rebound.scope,
+                        selectedPackID: rebound.selectedPack?.id,
+                        visibleEvents: Set(rebound.eventRows.map(\.event)), fallback: .packList)
+                        == .eventAudio(.stop),
+                "新目录深链恢复目标事件焦点，不保留旧失败焦点")
+        }
     }
 
     suite("Sound editor focus：同一 route request 只推进一次，settlement 与重新打开仍推进") {
         var tracker = SoundPacksEditorFocusApplicationTracker()
         let pending = SoundPacksEditorFocusProjection(
             requestRevision: 801,
-            routeState: .pendingFreshSnapshot)
+            routeState: .pendingFreshSnapshot,
+            scopeAvailability: .available(.global))
         let resolved = SoundPacksEditorFocusProjection(
             requestRevision: 801,
-            routeState: .resolved(.overview))
+            routeState: .resolved(.overview),
+            scopeAvailability: .available(.global))
         expect(
             tracker.recordAndShouldApply(pending, force: false),
             "新 route request 必须推进一次 focus")
