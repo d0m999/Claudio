@@ -468,10 +468,11 @@ public struct PanelView: View {
                             : activityPresentation.sevenDayStatus)
                 )
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                .lineLimit(1)
-                .truncationMode(.tail)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.trailing)
             }
-            .font(.system(size: 9, weight: .medium, design: .rounded))
+            .font(.system(size: 10.5, weight: .medium, design: .rounded))
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("panel.activity.messages")
 
@@ -525,8 +526,10 @@ public struct PanelView: View {
     private func activityMetric(title: String, value: UInt64?, identifier: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.system(size: 8.5, weight: .medium, design: .rounded))
+                .font(.system(size: 10.5, weight: .medium, design: .rounded))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
             Text(value.map { String($0) } ?? "—")
                 .font(.system(size: 18, weight: .bold, design: .rounded))
                 .monospacedDigit()
