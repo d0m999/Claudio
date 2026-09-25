@@ -428,6 +428,5 @@ private func readLastPlayedTimestamp(from stateFile: URL) -> Date? {
 /// Must only ever be called from inside `play.lock`'s critical section — see
 /// ``readLastPlayedTimestamp(from:)``.
 private func writeLastPlayedTimestamp(_ date: Date, to stateFile: URL) {
-    try? ensurePrivateDirectoryTree(at: stateFile.deletingLastPathComponent())
-    try? String(date.timeIntervalSince1970).write(to: stateFile, atomically: true, encoding: .utf8)
+    try? writePrivateAtomic(Data(String(date.timeIntervalSince1970).utf8), to: stateFile)
 }
