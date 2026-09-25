@@ -550,8 +550,9 @@ package final class SoundPacksWindowModel {
     package private(set) var config: ClaudioConfig
     package private(set) var managedScope: PanelSoundScopeID = .global
     package var managedSurface: HostSurfaceID? { managedScope.surface }
+    private var managedWorkspacePackTarget: WorkspaceSoundPackTarget?
     private var workspacePackWriter:
-        (@MainActor (UUID, String) -> Result<Void, WorkspaceSoundError>)?
+        (@MainActor (WorkspaceSoundPackTarget, String) -> Result<Void, WorkspaceSoundError>)?
     package private(set) var managedScopeFailureReason: String?
     /// Every production mutation consumes this one fail-closed scope decision. Browsing, preview,
     /// Finder reveal, and route changes remain read-only and available when writes are stopped.
@@ -917,7 +918,10 @@ package final class SoundPacksWindowModel {
     }
 
     package func setWorkspacePackWriter(
-        _ writer: @escaping @MainActor (UUID, String) -> Result<Void, WorkspaceSoundError>
+        _ writer:
+            @escaping @MainActor (WorkspaceSoundPackTarget, String) -> Result<
+                Void, WorkspaceSoundError
+            >
     ) {
         workspacePackWriter = writer
     }
@@ -935,6 +939,7 @@ package final class SoundPacksWindowModel {
         // reading the sentinel /dev/null URL would turn a no-I/O fixture into a false missing state.
         if isStateGalleryFixture {
             configState = .operational(baseConfig)
+            captureManagedWorkspacePackTarget()
             applyManagedScopeConfig()
             if packCards.contains(where: { $0.id == config.selectedPack }) {
                 selectedPackID = config.selectedPack
@@ -945,8 +950,16 @@ package final class SoundPacksWindowModel {
         let loadedState = loadPanelConfig(from: configFile)
         configState = loadedState
         baseConfig = loadedState.resolvedConfig
+        captureManagedWorkspacePackTarget()
         applyManagedScopeConfig()
         reload(followActivePack: true, refreshSoundPackLibrary: false)
+    }
+
+    private func captureManagedWorkspacePackTarget() {
+        managedWorkspacePackTarget = managedScope.workspaceID.flatMap { id in
+            baseConfig.workspaceRules.first(where: { $0.id == id }).map(
+                WorkspaceSoundPackTarget.init)
+        }
     }
 
     /// The public entry point represents a user-owned selection, so it cancels both halves of a
@@ -1269,10 +1282,12 @@ package final class SoundPacksWindowModel {
             return finishPackUse(.failure(.writesStopped(statusText: writesStoppedStatusText)))
         }
         if case .workspace(let id) = managedScope {
-            guard let workspacePackWriter else {
-                return finishPackUse(.failure(.workspace(.configFailure)))
+            guard let workspacePackWriter, let target = managedWorkspacePackTarget,
+                target.id == id
+            else {
+                return finishPackUse(.failure(.workspace(.staleRule)))
             }
-            switch workspacePackWriter(id, selectedPackID) {
+            switch workspacePackWriter(target, selectedPackID) {
             case .success:
                 return finishPackUse(.success(.selected(packID: selectedPackID)))
             case .failure(let error):
@@ -1357,10 +1372,12 @@ package final class SoundPacksWindowModel {
             return finishPackUse(.failure(.writesStopped(statusText: writesStoppedStatusText)))
         }
         if case .workspace(let id) = scope {
-            guard let workspacePackWriter else {
-                return finishPackUse(.failure(.workspace(.configFailure)))
+            guard let workspacePackWriter, let target = managedWorkspacePackTarget,
+                target.id == id
+            else {
+                return finishPackUse(.failure(.workspace(.staleRule)))
             }
-            switch workspacePackWriter(id, packID) {
+            switch workspacePackWriter(target, packID) {
             case .success:
                 return finishPackUse(.success(.selected(packID: packID)))
             case .failure(let error):

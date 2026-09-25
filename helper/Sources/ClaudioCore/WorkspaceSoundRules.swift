@@ -178,6 +178,17 @@ public struct WorkspaceSoundDeleteTarget: Sendable, Equatable {
     }
 }
 
+/// The workspace selected for a pack write, captured before another process can rebind its ID.
+public struct WorkspaceSoundPackTarget: Sendable, Equatable {
+    public let id: UUID
+    public let directory: WorkspaceDirectory
+
+    public init(rule: WorkspaceSoundRule) {
+        id = rule.id
+        directory = rule.directory
+    }
+}
+
 public enum WorkspaceSoundError: Error, Sendable, Equatable, CustomStringConvertible {
     case invalidRule, duplicateDirectory, staleRule, unsupportedSurface, invalidPack, configFailure,
         lockBusy, tooLarge
@@ -290,7 +301,7 @@ extension ClaudioConfig {
 public enum WorkspaceSoundMutation: Sendable {
     case add(WorkspaceSoundRule)
     case remove(WorkspaceSoundDeleteTarget)
-    case pack(UUID, String)
+    case pack(WorkspaceSoundPackTarget, String)
     case volume(UUID, Double)
     case event(UUID, Event, Bool)
     case surfaces(UUID, [HostSurfaceID])
@@ -350,8 +361,13 @@ public func mutateWorkspaceSound(
                 }
                 json["workspace_rules"] = rules
                 return .success(())
-            case .pack(let target, _), .volume(let target, _), .event(let target, _, _),
-                .surfaces(let target, _):
+            case .pack(let target, _):
+                guard
+                    config.workspaceRules.first(where: { $0.id == target.id })?.directory
+                        == target.directory
+                else { return reject(.staleRule) }
+                id = target.id
+            case .volume(let target, _), .event(let target, _, _), .surfaces(let target, _):
                 id = target
             }
             guard var rule = rules[id.uuidString] as? [String: Any],

@@ -57,7 +57,10 @@ package final class SoundPacksEditorOwner: ObservableObject {
     private var interfaceHasActivated = false
 
     package func configureWorkspacePackWriter(
-        _ writer: @escaping @MainActor (UUID, String) -> Result<Void, WorkspaceSoundError>
+        _ writer:
+            @escaping @MainActor (WorkspaceSoundPackTarget, String) -> Result<
+                Void, WorkspaceSoundError
+            >
     ) {
         model.setWorkspacePackWriter(writer)
     }

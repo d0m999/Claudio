@@ -88,6 +88,7 @@ public final class PanelConfigController: ObservableObject {
     /// `nil` 是全局默认 profile；非 nil 时 `config` 是该 surface 的 effective 投影。
     @Published public private(set) var selectedSurface: HostSurfaceID?
     @Published public private(set) var selectedWorkspaceID: UUID? = nil
+    private var selectedWorkspacePackTarget: WorkspaceSoundPackTarget?
     @Published public private(set) var workspaceError: WorkspaceSoundError? = nil
     @Published public private(set) var previewSafetyFailures: [Event: EventPreviewSafetyFailure] =
         [:]
@@ -161,6 +162,10 @@ public final class PanelConfigController: ObservableObject {
     public func selectSoundScope(_ scope: PanelSoundScopeID) {
         guard selectedSoundScope != scope else { return }
         selectedWorkspaceID = scope.workspaceID
+        selectedWorkspacePackTarget = scope.workspaceID.flatMap { id in
+            baseConfig.workspaceRules.first(where: { $0.id == id }).map(
+                WorkspaceSoundPackTarget.init)
+        }
         selectedSurface = scope.surface
         workspaceError = nil
         surfaceSoundIssueState = nil
@@ -573,7 +578,12 @@ public final class PanelConfigController: ObservableObject {
     @discardableResult
     public func switchPack(to packID: String) -> PanelPackSwitchOutcome {
         if let id = selectedWorkspaceID {
-            return changeWorkspace(.pack(id, packID))
+            guard let target = selectedWorkspacePackTarget, target.id == id else {
+                workspaceError = .staleRule
+                return .failed(
+                    .configWriteFailure(reason: WorkspaceSoundError.staleRule.description))
+            }
+            return changeWorkspace(.pack(target, packID))
                 ? .succeeded
                 : .failed(.configWriteFailure(reason: workspaceError?.description ?? ""))
         }

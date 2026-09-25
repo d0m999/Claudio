@@ -79,8 +79,8 @@ package final class SettingsPresentationSession: ObservableObject {
             presentationRevision: 0)
 
         let workspaceConfig = dependencies.eventSettingsModel
-        dependencies.soundPacksEditorOwner.configureWorkspacePackWriter { id, packID in
-            workspaceConfig.changeWorkspace(.pack(id, packID))
+        dependencies.soundPacksEditorOwner.configureWorkspacePackWriter { target, packID in
+            workspaceConfig.changeWorkspace(.pack(target, packID))
                 ? .success(()) : .failure(workspaceConfig.workspaceError ?? .configFailure)
         }
 

@@ -336,6 +336,51 @@ func runWorkspaceSoundRulesSuites() {
                 "rejected growth preserves exact original bytes")
         }
     }
+    suite("workspace pack write rejects a different directory reusing the same UUID") {
+        withTempDirectory { root in
+            let file = root.appendingPathComponent("config.json")
+            let lock = root.appendingPathComponent("config.lock")
+            let packs = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{"id":"next","events":{}}"#,
+                to: packs.appendingPathComponent("next/manifest.json"))
+            let original = WorkspaceSoundRule(
+                directory: WorkspaceDirectory(
+                    kind: .directory, path: root.appendingPathComponent("a").path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "old", volume: 0.5))
+            let replacement = WorkspaceSoundRule(
+                id: original.id,
+                directory: WorkspaceDirectory(
+                    kind: .directory, path: root.appendingPathComponent("b").path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "old", volume: 0.5))
+            var config = ClaudioConfig(selectedPack: "default", masterVolume: 0.2)
+            config.workspaceRules = [replacement]
+            let before = try! JSONEncoder().encode(config)
+            try! before.write(to: file)
+            let target = WorkspaceSoundPackTarget(rule: original)
+            expect(
+                mutateWorkspaceSound(
+                    .pack(target, "next"), configFile: file, lockFile: lock,
+                    userPacksDirectory: packs
+                ).isWorkspaceFailure(.staleRule),
+                "rebound UUID must fail closed inside the config lock")
+            expect((try! Data(contentsOf: file)) == before, "failed write preserves config bytes")
+            config.workspaceRules = [original]
+            try! JSONEncoder().encode(config).write(to: file)
+            expect(
+                (try? mutateWorkspaceSound(
+                    .pack(target, "next"), configFile: file, lockFile: lock,
+                    userPacksDirectory: packs
+                ).get()) != nil,
+                "unchanged ID and directory still accept the pack write")
+            expect(
+                loadClaudioConfig(from: file)?.workspaceRules.first?.profile?.selectedPack == "next"
+                    && loadClaudioConfig(from: file)?.selectedPack == "default",
+                "accepted workspace pack write leaves Default Group unchanged")
+        }
+    }
     suite(
         "workspace playback: independent volume, five switches, damaged pack stops without fallback"
     ) {
