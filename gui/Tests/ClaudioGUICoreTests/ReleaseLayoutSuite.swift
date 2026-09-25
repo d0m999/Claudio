@@ -1185,7 +1185,7 @@ func runReleaseLayoutSuites() {
 
         expect(
             gate.contains(
-                #"GUI_BYTES_PER_ARCH="${CLAUDIO_GUI_BYTES_PER_ARCH:-6900000}""#)
+                #"GUI_BYTES_PER_ARCH="${CLAUDIO_GUI_BYTES_PER_ARCH:-7000000}""#)
                 && gate.contains(
                     #"HELPER_BYTES_PER_ARCH="${CLAUDIO_HELPER_BYTES_PER_ARCH:-3250000}""#)
                 && gate.contains(
@@ -1193,13 +1193,17 @@ func runReleaseLayoutSuites() {
                 && gate.contains(
                     #"NON_EXECUTABLE_BUNDLE_BYTES="${CLAUDIO_NON_EXECUTABLE_BUNDLE_BYTES:-1500000}""#
                 )
-                && environment.contains("default `6900000`")
+                && environment.contains("default `7000000`")
                 && environment.contains("default `3250000`")
                 && environment.contains("default `500000`")
                 && environment.contains("default `1500000`")
                 && budget.contains("`5,500,000 B`")
                 && budget.contains("`5,600,000 B`")
                 && budget.contains("`6,900,000 B`")
+                && budget.contains("`7,000,000 B`")
+                && budget.contains("`6,737,128 B`")
+                && budget.contains("`6,755,264 B`")
+                && budget.contains("actions/runs/36120401072")
                 && budget.contains("`5,820,216 B`")
                 && budget.contains("`3,250,000 B`")
                 && budget.contains("`500,000 B`")
