@@ -5,6 +5,46 @@ import Foundation
 
 @MainActor
 func runSoundPacksEditorOwnerSuites() {
+    suite("Sounds 普通同作用域导航保留正在检查的包并读回配置") {
+        withTempDirectory { root in
+            let file = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs", isDirectory: true)
+            for id in ["active-pack", "inspected-pack"] {
+                writeFixture(
+                    "{\"id\":\"\(id)\",\"name\":\"\(id)\",\"events\":{}}",
+                    to: packs.appendingPathComponent("\(id)/manifest.json"))
+            }
+            var config = ClaudioConfig(selectedPack: "active-pack", masterVolume: 0.2)
+            try! JSONEncoder().encode(config).write(to: file)
+            let owner = SoundPacksEditorOwner(
+                configFile: file, lockFile: root.appendingPathComponent("config.lock"),
+                environment: makeAudioImportEnvironment(userPacksDirectory: packs),
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+            let route = SoundPacksWindowRoute.overview(scope: .global)
+            _ = owner.send(.activate(.sounds(route: route, requestRevision: 1)))
+            guard case .sounds(let initial) = owner.presentation.mode,
+                let inspect = initial.packs.first(where: { $0.id == "inspected-pack" })?
+                    .inspectAction
+            else {
+                expect(false, "Sounds 应提供另一声音包的检查动作")
+                return
+            }
+            expect(owner.send(.invoke(inspect)) == .applied, "用户可检查非当前使用的包")
+            // Other Settings destinations leave this retained owner untouched.
+            config.masterVolume = 0.4
+            try! JSONEncoder().encode(config).write(to: file)
+            _ = owner.send(.activate(.sounds(route: route, requestRevision: 2)))
+            guard case .sounds(let revisited) = owner.presentation.mode else {
+                expect(false, "返回 Sounds 应交付编辑器")
+                return
+            }
+            expect(
+                revisited.selectedPack?.id == "inspected-pack"
+                    && revisited.masterVolume == 0.4,
+                "普通同作用域导航保留检查选择，同时读回新的配置")
+        }
+    }
+
     suite("SoundPacks editor route：试听失败保留旧目录，激活时拒绝同 UUID 换绑") {
         withTempDirectory { root in
             let file = root.appendingPathComponent("config.json")

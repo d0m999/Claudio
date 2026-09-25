@@ -679,7 +679,7 @@ public struct PanelView: View {
             scope: selectedScope.scope,
             masterVolume: panelModel.config.masterVolume,
             language: languageStore.language,
-            configWritesAllowed: panelModel.surfaceSoundIssue == nil,
+            configWritesAllowed: panelModel.soundControlsEnabled,
             safetyFailures: panelModel.previewSafetyFailures)
     }
 
@@ -885,12 +885,13 @@ public struct PanelView: View {
                             pack.id)
                     }
                 }.padding(.horizontal, 9).padding(.top, 7)
+                    .disabled(!panelModel.soundControlsEnabled)
                     .accessibilityLabel(l10n.text(.panelSoundPackLabel))
                     .accessibilityIdentifier("panel.workspace.pack-picker")
                     .focused($focusedTarget, equals: .soundPackPicker)
                 MasterVolumeRow(
                     diskVolume: panelModel.config.masterVolume,
-                    isEnabled: masterVolumeEnabled,
+                    isEnabled: masterVolumeEnabled && panelModel.soundControlsEnabled,
                     onCommit: { volume in
                         let landed = panelModel.setVolume(
                             volume, for: scope, workspaceTarget: workspaceTarget)

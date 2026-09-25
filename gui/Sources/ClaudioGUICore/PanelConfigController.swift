@@ -107,6 +107,11 @@ public final class PanelConfigController: ObservableObject {
         if let selectedSurface { return .surface(selectedSurface) }
         return .global
     }
+    /// A retired Surface or retained stale Workspace stays visible without panel write controls.
+    public var soundControlsEnabled: Bool {
+        surfaceSoundIssue == nil
+            && !(selectedWorkspaceID != nil && workspaceError == .staleRule)
+    }
     /// The directory pinned by the last explicit selection, even after a stale config readback.
     public var selectedWorkspaceTarget: WorkspaceSoundWriteTarget? {
         selectedWorkspaceWriteTarget

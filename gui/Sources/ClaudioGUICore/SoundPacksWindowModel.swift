@@ -947,6 +947,9 @@ package final class SoundPacksWindowModel {
         rebindSelectedWorkspace: Bool = false
     ) {
         let scopeChanged = managedScope != scope
+        let followActivePack =
+            scopeChanged || rebindSelectedWorkspace
+            || (workspaceTarget != nil && workspaceTarget != managedWorkspacePackTarget)
         managedScope = scope
         #if DEBUG
         // State-gallery models retain their injected projection across typed route activation;
@@ -959,7 +962,7 @@ package final class SoundPacksWindowModel {
                 captureManagedWorkspacePackTarget()
             }
             applyManagedScopeConfig()
-            if packCards.contains(where: { $0.id == config.selectedPack }) {
+            if followActivePack, packCards.contains(where: { $0.id == config.selectedPack }) {
                 selectedPackID = config.selectedPack
             }
             return
@@ -974,7 +977,7 @@ package final class SoundPacksWindowModel {
             captureManagedWorkspacePackTarget()
         }
         applyManagedScopeConfig()
-        reload(followActivePack: true, refreshSoundPackLibrary: false)
+        reload(followActivePack: followActivePack, refreshSoundPackLibrary: false)
     }
 
     private func captureManagedWorkspacePackTarget() {

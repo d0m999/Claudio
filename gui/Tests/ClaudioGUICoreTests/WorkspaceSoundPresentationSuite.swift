@@ -129,6 +129,7 @@ func runWorkspaceSoundPresentationSuites() {
             }
             model.setManagedScope(.workspace(original.id))
             controller.selectSoundScope(.workspace(original.id))
+            expect(controller.soundControlsEnabled, "有效工作区面板控件应可操作")
             expect(model.selectPackForInspection("next-pack"), "新包可检查")
 
             let replacement = WorkspaceSoundRule(
@@ -154,6 +155,17 @@ func runWorkspaceSoundPresentationSuites() {
                     && controller.selectedWorkspaceTarget
                         == WorkspaceSoundWriteTarget(rule: original),
                 "外部读回换绑不得自动接受新目录")
+            let staleEvents = panelEventPresentations(
+                rows: controller.eventRows,
+                scope: controller.selectedSoundScope,
+                masterVolume: controller.config.masterVolume,
+                language: .zhHans,
+                configWritesAllowed: controller.soundControlsEnabled)
+            expect(
+                !controller.soundControlsEnabled
+                    && staleEvents.count == Event.allCases.count
+                    && staleEvents.allSatisfy { !$0.controls.muteEnabled },
+                "失效工作区的包、音量与五个静音控件须呈现不可写状态")
             expect(
                 controller.switchPack(to: "next-pack") != .succeeded
                     && controller.workspaceError == .staleRule,
@@ -204,7 +216,7 @@ func runWorkspaceSoundPresentationSuites() {
             controller.selectSoundScope(
                 .workspace(original.id), rebindSelectedWorkspace: true)
             expect(
-                controller.workspaceError == nil
+                controller.workspaceError == nil && controller.soundControlsEnabled
                     && controller.setVolume(0.8, for: .workspace(original.id)) == 0.8
                     && loadClaudioConfig(from: file)?.workspaceRules.first?.profile?.volume == 0.8,
                 "用户显式重新选择后可编辑当前目录")
@@ -212,8 +224,9 @@ func runWorkspaceSoundPresentationSuites() {
                 .workspace(original.id), rebindSelectedWorkspace: true)
             expect(
                 model.writesAllowed && model.config.selectedPack == "workspace-pack"
+                    && model.selectedPackID == "workspace-pack"
                     && model.managedScopeFailureStatusText == nil,
-                "声音编辑显式重选同一 UUID 后才绑定当前目录")
+                "声音编辑显式重选同一 UUID 后绑定当前目录并跟随其使用包")
             expect(
                 model.applyPackSelection("next-pack", toScope: .workspace(original.id))
                     == .success(.selected(packID: "next-pack"))
@@ -285,7 +298,8 @@ func runWorkspaceSoundPresentationSuites() {
             let stale = UUID()
             model.selectSoundScope(.workspace(stale))
             expect(
-                model.workspaceError == .staleRule && model.config.selectedPack.isEmpty,
+                model.workspaceError == .staleRule && model.config.selectedPack.isEmpty
+                    && !model.soundControlsEnabled,
                 "陈旧详情不回退默认组")
             expect(model.setVolume(0.99, for: .workspace(stale)) == nil, "陈旧音量拒写")
             model.selectSoundScope(.surface(.codex))
