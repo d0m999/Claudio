@@ -47,11 +47,21 @@ func runEventSettingsWindowSelectionSuites() {
             !selection.completePreviewSequence(generation: previewGeneration),
             "route 变化后旧 preview generation 不得重新发布完成态")
 
-        selection.requestInitialFocus(scopes: [.global, .surface(.workBuddy)])
+        selection.requestInitialFocus(
+            scopes: [.global, .surface(.workBuddy)],
+            for: .events(scope: .surface(.workBuddy), event: .stop))
         expect(
             selection.presentationState.focusRequestRevision == 1
                 && selection.presentationState.focusTarget == .event(.stop),
             "合法 route 必须生成精确 Event 焦点命令")
+
+        selection.requestInitialFocus(
+            scopes: [.global, .surface(.workBuddy)], for: .destination(.eventsAndSounds))
+        expect(
+            selection.presentationState.focusRequestRevision == 2
+                && selection.presentationState.focusTarget == .title
+                && selection.route == route,
+            "普通导航必须聚焦标题，同时保留上次深链的选择与事件")
 
         selection.markCurrentScopeUnavailable()
         expect(
@@ -60,10 +70,11 @@ func runEventSettingsWindowSelectionSuites() {
                 && selection.presentationState.route.unavailableRequestedScopeStoredValue
                     == PanelSoundScopeID.surface(.workBuddy).storedValue,
             "陈旧 Surface 必须保留原 scope/Event，不能改写为 Global")
-        selection.requestInitialFocus(scopes: [.global])
+        selection.requestInitialFocus(
+            scopes: [.global], for: .destination(.eventsAndSounds))
         expect(
-            selection.presentationState.focusTarget == .scope(.global),
-            "陈旧 scope 只能把焦点交给恢复入口，不得制造可写 Event 焦点")
+            selection.presentationState.focusTarget == .unavailableScope,
+            "陈旧 scope 必须聚焦可见不可用说明，不得制造可写 Event 焦点")
 
         selection.clearUnavailableScope()
         _ = selection.beginPreviewSequence()

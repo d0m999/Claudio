@@ -132,8 +132,11 @@ public func eventPreviewSafetyFailures(
 /// deterministic entry point; event controls follow the visible row order through SwiftUI's key
 /// view loop.
 public enum EventSettingsFocusTarget: Sendable, Equatable, Hashable {
+    case title
     case scope(PanelSoundScopeID)
+    case unavailableScope
     case workspaceRemove(UUID)
+    case workspaceDeleteResult
     case workspaceDeleteFeedback
     case event(Event)
     case previewAll

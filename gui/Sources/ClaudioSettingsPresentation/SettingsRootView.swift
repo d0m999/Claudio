@@ -113,12 +113,8 @@ package struct SettingsRootView: View {
             debt.revision > handledFocusDebtRevision
         else { return }
         handledFocusDebtRevision = debt.revision
-        if state.routeResolution.failure != nil
-            || (debt.destination != .integrations
-                && debt.destination != .eventsAndSounds
-                && debt.destination != .sounds)
-        {
-            focusedTarget = SettingsWindowFocusTarget.title(state.routeResolution.destination)
+        if let target = settingsWindowRequestedFocusTarget(resolution: state.routeResolution) {
+            focusedTarget = target
         }
         _ = settingsPresentationSession.send(.acknowledgeFocus(revision: debt.revision))
     }
@@ -721,7 +717,10 @@ package struct SettingsRootView: View {
         .padding(14)
         .background(Color.red.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+        .focusable()
+        .focused($focusedTarget, equals: .routeFailure(destination))
         .accessibilityIdentifier("settings.route.failure.\(destination.rawValue)")
+        .settingsMountIdentity("settings.route.failure.\(destination.rawValue)")
     }
 
     private func settingsFailureMessage(_ failure: SettingsRouteFailure) -> String {

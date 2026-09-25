@@ -368,8 +368,26 @@ public func settingsEmbeddedDestinationState(
 public enum SettingsWindowFocusTarget: Sendable, Equatable, Hashable {
     case sidebar(SettingsDestination)
     case title(SettingsDestination)
+    case routeFailure(SettingsDestination)
     case firstAction(SettingsDestination)
     case shortcutAction(GlobalShortcutAction)
+}
+
+/// Embedded destinations receive successful route focus from their own presentation owners.
+/// The shell owns the visible failure explanation when an Events deep link is rejected.
+public func settingsWindowRequestedFocusTarget(
+    resolution: SettingsRouteResolution
+) -> SettingsWindowFocusTarget? {
+    if resolution.failure != nil {
+        return resolution.destination == .eventsAndSounds
+            ? .routeFailure(.eventsAndSounds) : .title(resolution.destination)
+    }
+    switch resolution.destination {
+    case .integrations, .eventsAndSounds, .sounds:
+        return nil
+    case .general, .notifications, .display, .usage, .shortcuts, .about:
+        return .title(resolution.destination)
+    }
 }
 
 public func settingsWindowFocusOrder(

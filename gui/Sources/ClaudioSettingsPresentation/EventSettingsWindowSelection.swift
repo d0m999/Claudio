@@ -167,14 +167,18 @@ package final class EventSettingsWindowSelection: ObservableObject {
         publishState()
     }
 
-    package func requestInitialFocus(scopes: [PanelSoundScopeID]) {
-        if storage.route.unavailableRequestedScopeStoredValue != nil {
-            storage.focusTarget = eventSettingsFirstFocusTarget(scopes: scopes)
-        } else {
+    package func requestInitialFocus(scopes: [PanelSoundScopeID], for request: SettingsRoute) {
+        if storage.route.unavailableRequestedScopeStoredValue != nil
+            || !scopes.contains(storage.route.scope)
+        {
+            storage.focusTarget = .unavailableScope
+        } else if case .events = request {
             storage.focusTarget = eventSettingsRouteFocusTarget(
                 route: storage.route,
                 scopes: scopes,
                 events: Set(Event.allCases))
+        } else {
+            storage.focusTarget = .title
         }
         storage.focusRequestRevision &+= 1
         publishState()
@@ -228,7 +232,7 @@ package final class EventSettingsWindowSelection: ObservableObject {
         if succeeded {
             select(EventSettingsWindowRoute(scope: .global))
             deletionPresentation.feedback = .succeeded(target)
-            requestFocus(.scope(.global))
+            requestFocus(.workspaceDeleteResult)
             return true
         }
         let reason = error ?? .configFailure

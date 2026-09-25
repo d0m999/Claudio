@@ -191,6 +191,23 @@ func runSettingsPresentationLifecycleSuites() async {
         fixture.eventSettingsModel.selectSoundScope(selected)
         let configBefore = fixture.eventSettingsModel.configState
 
+        expect(
+            session.send(.route(.events(scope: selected, event: .stop))) == .routed
+                && session.state.eventPresentation.focusTarget == .event(.stop),
+            "显式事件深链必须聚焦所选工作区的事件")
+        _ = session.send(.route(.destination(.integrations)))
+        expect(
+            session.send(.route(.destination(.eventsAndSounds))) == .routed
+                && session.state.eventPresentation.route.event == .stop
+                && session.state.eventPresentation.focusTarget == .title
+                && settingsWindowRequestedFocusTarget(resolution: session.state.routeResolution)
+                    == nil,
+            "旧事件深链后从集成通用入口返回必须聚焦页面标题")
+        expect(
+            session.send(.route(.events(scope: selected, event: nil))) == .routed
+                && session.state.eventPresentation.focusTarget == .scope(selected),
+            "显式工作区深链必须聚焦该工作区行")
+
         for host in HostID.productVisibleCases {
             expect(
                 session.send(.route(.integrations(surface: host.surfaceID))) == .routed
@@ -202,6 +219,7 @@ func runSettingsPresentationLifecycleSuites() async {
                     && session.state.eventPresentation.route.scope == selected
                     && fixture.integrationsModel.selectedHost == host
                     && fixture.eventSettingsModel.selectedSoundScope == selected
+                    && session.state.eventPresentation.focusTarget == .title
                     && fixture.eventSettingsModel.configState == configBefore,
                 "集成所选 Host 不得重选或写入手动声音作用域")
         }
@@ -217,13 +235,16 @@ func runSettingsPresentationLifecycleSuites() async {
                 && session.state.eventPresentation.route.scope == selected
                 && session.state.eventPresentation.route
                     .unavailableRequestedScopeStoredValue == selected.storedValue
+                && session.state.eventPresentation.focusTarget == .unavailableScope
                 && fixture.eventSettingsModel.selectedSoundScope == selected
                 && fixture.eventSettingsModel.configState == configBefore,
             "失效工作区由普通入口保留为不可用目标，不静默切到可写默认组")
         expect(
             session.send(.route(.events(scope: selected, event: .stop)))
                 == .rejected(.staleSoundScope(selected))
-                && session.state.eventPresentation.route.scope == selected,
+                && session.state.eventPresentation.route.scope == selected
+                && settingsWindowRequestedFocusTarget(resolution: session.state.routeResolution)
+                    == .routeFailure(.eventsAndSounds),
             "显式工作区／事件深链接仍必须按可用性拒绝")
     }
 
@@ -254,10 +275,20 @@ func runSettingsPresentationLifecycleSuites() async {
         }
         expect(
             SettingsMountRecorder.identifiers.contains("settings.destination.events-and-sounds")
+                && SettingsMountRecorder.identifiers.contains("settings.title.events-and-sounds")
                 && SettingsMountRecorder.identifiers.contains("workspace.scope.unavailable")
                 && SettingsMountRecorder.identifiers.contains("workspace.choose-default-group")
                 && fixture.session.state.eventPresentation.route.scope == selected,
             "production root 应挂载不可写说明与显式默认组重选按钮")
+        SettingsMountRecorder.reset()
+        _ = fixture.session.send(.route(.events(scope: selected, event: .stop)))
+        for _ in 0..<3 {
+            hostingView.layoutSubtreeIfNeeded()
+            _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.03))
+        }
+        expect(
+            SettingsMountRecorder.identifiers.contains("settings.route.failure.events-and-sounds"),
+            "失效显式深链必须挂载与焦点请求同身份的可见失败说明")
         withExtendedLifetime(hostingView) {}
     }
 

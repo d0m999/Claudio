@@ -146,8 +146,8 @@ func runWorkspaceDeletionPresentationSuites() {
                 configState: .operational(deletionPresentationConfig(rule: rule)))
                 && successful.route.scope == .global
                 && successful.deletionPresentation.feedback == .succeeded(target)
-                && successful.presentationState.focusTarget == .scope(.global),
-            "successful deletion selects Default Group and focuses its reachable scope row")
+                && successful.presentationState.focusTarget == .workspaceDeleteResult,
+            "successful deletion selects Default Group and focuses its visible result")
     }
 
     #if DEBUG

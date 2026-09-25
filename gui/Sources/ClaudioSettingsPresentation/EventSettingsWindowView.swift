@@ -85,130 +85,147 @@ struct EventSettingsWindowView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(l10n.text(.settingsDestinationEventsAndSounds)).font(.headline)
-                ScrollView {
-                    VStack(spacing: 6) {
-                        ForEach(scopes) { scope in
-                            Button {
-                                player.stop()
-                                selection.select(EventSettingsWindowRoute(scope: scope.scope))
-                                let reselectsCurrentScope = model.selectedSoundScope == scope.scope
-                                model.selectSoundScope(scope.scope)
-                                if reselectsCurrentScope,
-                                    model.workspaceError == .staleRule
-                                        || model.workspaceError == .invalidRule
-                                {
-                                    model.reload()
+        VStack(alignment: .leading, spacing: 0) {
+            Text(l10n.text(.settingsDestinationEventsAndSounds))
+                .font(.system(size: 30, weight: .bold))
+                .accessibilityAddTraits(.isHeader)
+                .focusable()
+                .focused($focusedTarget, equals: .title)
+                .settingsMountIdentity("settings.title.events-and-sounds")
+                .padding(.horizontal, 28)
+                .padding(.top, 28)
+                .padding(.bottom, 16)
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 12) {
+                    ScrollView {
+                        VStack(spacing: 6) {
+                            ForEach(scopes) { scope in
+                                Button {
+                                    player.stop()
+                                    selection.select(EventSettingsWindowRoute(scope: scope.scope))
+                                    let reselectsCurrentScope =
+                                        model.selectedSoundScope == scope.scope
+                                    model.selectSoundScope(scope.scope)
+                                    if reselectsCurrentScope,
+                                        model.workspaceError == .staleRule
+                                            || model.workspaceError == .invalidRule
+                                    {
+                                        model.reload()
+                                    }
+                                } label: {
+                                    HStack {
+                                        VStack(alignment: .leading) {
+                                            Text(scope.name).fontWeight(.semibold)
+                                            Text(scope.summaryText).font(.caption).foregroundColor(
+                                                .secondary)
+                                        }
+                                        Spacer()
+                                        if selection.route.scope == scope.scope {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(
+                                            selection.route.scope == scope.scope
+                                                ? ClaudioTheme.elevated(colorScheme) : Color.clear)
                                 }
-                            } label: {
-                                HStack {
-                                    VStack(alignment: .leading) {
-                                        Text(scope.name).fontWeight(.semibold)
-                                        Text(scope.summaryText).font(.caption).foregroundColor(
-                                            .secondary)
-                                    }
-                                    Spacer()
-                                    if selection.route.scope == scope.scope {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(
-                                        selection.route.scope == scope.scope
-                                            ? ClaudioTheme.elevated(colorScheme) : Color.clear)
+                                .buttonStyle(.plain)
+                                .focused($focusedTarget, equals: .scope(scope.scope))
+                                .accessibilityLabel(scope.accessibilityLabel)
+                                .accessibilityIdentifier(
+                                    "event-settings.scope.\(scope.scope.storedValue)")
                             }
-                            .buttonStyle(.plain)
-                            .focused($focusedTarget, equals: .scope(scope.scope))
-                            .accessibilityLabel(scope.accessibilityLabel)
-                            .accessibilityIdentifier(
-                                "event-settings.scope.\(scope.scope.storedValue)")
                         }
                     }
+                    Button(l10n.text(.workspaceAdd)) { isAddingWorkspace = true }
+                        .accessibilityIdentifier("workspace.add")
+                }.padding(16).frame(width: 225)
+                Divider()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text(current?.name ?? l10n.text(.workspaceUnavailable)).font(.title2)
+                            .fontWeight(.bold)
+                            .accessibilityAddTraits(.isHeader)
+                        if !migrationSeen && !model.configState.resolvedConfig.selectedPack.isEmpty
+                        {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(l10n.text(.workspaceMigration))
+                                Button(l10n.text(.workspaceDismiss)) { migrationSeen = true }
+                            }.padding(12).background(ClaudioTheme.elevated(colorScheme))
+                                .accessibilityIdentifier("workspace.migration-notice")
+                        }
+                        if model.workspaceRulesMalformed {
+                            FailureRow(message: l10n.text(.workspaceInvalidRule))
+                        }
+                        if let category = model.configState.errorCopyCategory {
+                            FailureRow(message: l10n.text(category.key))
+                            configRevealButton
+                        }
+                        if let failure = selection.previewFailure,
+                            failure.scope == selection.route.scope,
+                            (failure.packID != model.config.selectedPack || !writable
+                                || !model.libraryPresentationState.hasUsableSnapshot)
+                        {
+                            FailureRow(
+                                message: localizedEventPreviewAttemptFailure(
+                                    failure.reason, language: languageStore.language)
+                            )
+                            .settingsMountIdentity("workspace.event.preview-failure-readback")
+                            Button(l10n.text(.eventPreviewRepairSound)) {
+                                onConfigureSound(
+                                    .editEvent(
+                                        surface: nil, packID: failure.packID, event: failure.event))
+                            }
+                            .accessibilityIdentifier("workspace.event.preview-failure-repair")
+                        }
+                        if selection.conflictWasReadBack {
+                            FailureRow(message: l10n.text(.eventSettingsConflictReadback))
+                                .settingsMountIdentity("workspace.write.conflict-readback")
+                            recoveryFileButtons(
+                                selection.conflictRecoveryFiles,
+                                identifierPrefix: "workspace.write.conflict-recovery-file")
+                        }
+                        unresolvedConflictNotice
+                        if let feedback = selection.deletionPresentation.feedback {
+                            deletionFeedback(feedback)
+                        } else if let error = model.workspaceError,
+                            !isRetainedWorkspaceConflict(error)
+                        {
+                            workspaceFailure(error)
+                        }
+                        libraryNotice
+                        if writable {
+                            if let rule { workspaceDetails(rule) }
+                            if model.libraryPresentationState.hasUsableSnapshot {
+                                soundControls
+                                Text(l10n.text(.workspacePreviewNote)).font(.caption)
+                                    .foregroundColor(
+                                        .secondary)
+                                ForEach(events) { event in eventRow(event) }
+                            }
+                            Button(l10n.text(.eventSettingsManageSounds)) {
+                                onConfigureSound(.overview(surface: nil))
+                            }
+                        } else {
+                            Text(l10n.text(.workspaceUnavailable)).foregroundColor(.secondary)
+                                .focusable()
+                                .focused($focusedTarget, equals: .unavailableScope)
+                                .settingsMountIdentity("workspace.scope.unavailable")
+                            if selection.route.scope != .global {
+                                Button(l10n.text(.workspaceChooseDefaultGroup)) {
+                                    player.stop()
+                                    selection.select(EventSettingsWindowRoute(scope: .global))
+                                    model.selectSoundScope(.global)
+                                }
+                                .settingsMountIdentity("workspace.choose-default-group")
+                            }
+                        }
+                        writeFailures
+                    }.padding(24).frame(maxWidth: 820, alignment: .leading)
                 }
-                Button(l10n.text(.workspaceAdd)) { isAddingWorkspace = true }
-                    .accessibilityIdentifier("workspace.add")
-            }.padding(16).frame(width: 225)
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text(current?.name ?? l10n.text(.workspaceUnavailable)).font(.title2)
-                        .fontWeight(.bold)
-                    if !migrationSeen && !model.configState.resolvedConfig.selectedPack.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(l10n.text(.workspaceMigration))
-                            Button(l10n.text(.workspaceDismiss)) { migrationSeen = true }
-                        }.padding(12).background(ClaudioTheme.elevated(colorScheme))
-                            .accessibilityIdentifier("workspace.migration-notice")
-                    }
-                    if model.workspaceRulesMalformed {
-                        FailureRow(message: l10n.text(.workspaceInvalidRule))
-                    }
-                    if let category = model.configState.errorCopyCategory {
-                        FailureRow(message: l10n.text(category.key))
-                        configRevealButton
-                    }
-                    if let failure = selection.previewFailure,
-                        failure.scope == selection.route.scope,
-                        (failure.packID != model.config.selectedPack || !writable
-                            || !model.libraryPresentationState.hasUsableSnapshot)
-                    {
-                        FailureRow(
-                            message: localizedEventPreviewAttemptFailure(
-                                failure.reason, language: languageStore.language)
-                        )
-                        .settingsMountIdentity("workspace.event.preview-failure-readback")
-                        Button(l10n.text(.eventPreviewRepairSound)) {
-                            onConfigureSound(
-                                .editEvent(
-                                    surface: nil, packID: failure.packID, event: failure.event))
-                        }
-                        .accessibilityIdentifier("workspace.event.preview-failure-repair")
-                    }
-                    if selection.conflictWasReadBack {
-                        FailureRow(message: l10n.text(.eventSettingsConflictReadback))
-                            .settingsMountIdentity("workspace.write.conflict-readback")
-                        recoveryFileButtons(
-                            selection.conflictRecoveryFiles,
-                            identifierPrefix: "workspace.write.conflict-recovery-file")
-                    }
-                    unresolvedConflictNotice
-                    if let feedback = selection.deletionPresentation.feedback {
-                        deletionFeedback(feedback)
-                    } else if let error = model.workspaceError,
-                        !isRetainedWorkspaceConflict(error)
-                    {
-                        workspaceFailure(error)
-                    }
-                    libraryNotice
-                    if writable {
-                        if let rule { workspaceDetails(rule) }
-                        if model.libraryPresentationState.hasUsableSnapshot {
-                            soundControls
-                            Text(l10n.text(.workspacePreviewNote)).font(.caption).foregroundColor(
-                                .secondary)
-                            ForEach(events) { event in eventRow(event) }
-                        }
-                        Button(l10n.text(.eventSettingsManageSounds)) {
-                            onConfigureSound(.overview(surface: nil))
-                        }
-                    } else {
-                        Text(l10n.text(.workspaceUnavailable)).foregroundColor(.secondary)
-                            .settingsMountIdentity("workspace.scope.unavailable")
-                        if selection.route.scope != .global {
-                            Button(l10n.text(.workspaceChooseDefaultGroup)) {
-                                player.stop()
-                                selection.select(EventSettingsWindowRoute(scope: .global))
-                                model.selectSoundScope(.global)
-                            }
-                            .settingsMountIdentity("workspace.choose-default-group")
-                        }
-                    }
-                    writeFailures
-                }.padding(24).frame(maxWidth: 820, alignment: .leading)
+                .id(selection.route.scope)
             }
-            .id(selection.route.scope)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(ClaudioTheme.panel(colorScheme))
         .accessibilityIdentifier("workspace.settings")
         .onAppear {
@@ -283,10 +300,15 @@ struct EventSettingsWindowView: View {
         player.stop()
         // Preserve invalid identities so delayed actions cannot write the Default Group.
         model.selectSoundScope(selection.route.scope)
-        focusedTarget =
-            selection.presentationState.focusTarget
-            ?? selection.route.event.map(EventSettingsFocusTarget.event)
-            ?? .scope(selection.route.scope)
+        if let target = selection.presentationState.focusTarget {
+            focusedTarget = target
+        } else if selection.unavailableRequestedScopeStoredValue != nil {
+            focusedTarget = .unavailableScope
+        } else {
+            focusedTarget =
+                selection.route.event.map(EventSettingsFocusTarget.event)
+                ?? .scope(selection.route.scope)
+        }
     }
 
     private var libraryNotice: some View {
@@ -429,6 +451,8 @@ struct EventSettingsWindowView: View {
                 l10n.format(.workspaceDeleteSucceeded, target.name),
                 systemImage: "checkmark.circle.fill"
             )
+            .focusable()
+            .focused($focusedTarget, equals: .workspaceDeleteResult)
             .settingsMountIdentity("workspace.delete.result")
         case .failed(let target, let error, let readback):
             FailureRow(message: deletionFailureMessage(target, error: error, readback: readback))

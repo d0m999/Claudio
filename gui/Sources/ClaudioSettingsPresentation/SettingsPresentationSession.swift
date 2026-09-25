@@ -398,7 +398,8 @@ package final class SettingsPresentationSession: ObservableObject {
                 eventSettingsSelection.markCurrentScopeUnavailable()
             }
             if requestsFocus {
-                eventSettingsSelection.requestInitialFocus(scopes: eventSettingsFocusScopes)
+                eventSettingsSelection.requestInitialFocus(
+                    scopes: eventSettingsFocusScopes, for: route)
             }
             activateEventsEditor()
         case .sounds:
