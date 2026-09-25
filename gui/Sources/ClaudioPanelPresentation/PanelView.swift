@@ -839,6 +839,11 @@ public struct PanelView: View {
 
     private func playbackSettings(masterVolumeEnabled: Bool) -> some View {
         let scope = selectedScope.scope
+        let workspaceTarget = scope.workspaceID.flatMap { id in
+            panelModel.workspaceRules.first(where: { $0.id == id }).map { rule in
+                WorkspaceSoundWriteTarget(rule: rule)
+            }
+        }
         return VStack(alignment: .leading, spacing: 5) {
             Text(l10n.text(.panelPlaybackSettings))
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
@@ -870,7 +875,8 @@ public struct PanelView: View {
                     diskVolume: panelModel.config.masterVolume,
                     isEnabled: masterVolumeEnabled,
                     onCommit: { volume in
-                        let landed = panelModel.setVolume(volume, for: scope)
+                        let landed = panelModel.setVolume(
+                            volume, for: scope, workspaceTarget: workspaceTarget)
                         onAudibilityInputsChanged()
                         return landed
                     },
