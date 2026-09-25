@@ -221,6 +221,49 @@ func runSettingsPresentationLifecycleSuites() async {
             "显式工作区／事件深链接仍必须按可用性拒绝")
     }
 
+    suite("Settings panel workspace shortcut：同 UUID 换绑保留旧目录并定位不可用说明") {
+        let id = UUID(uuidString: "5DA1F0E5-488F-4EE1-8F20-EC0B75A3A74D")!
+        let original = WorkspaceSoundRule(
+            id: id,
+            directory: WorkspaceDirectory(kind: .directory, path: "/fixture/panel-before"),
+            surfaces: [.codex],
+            profile: WorkspaceSoundProfile(selectedPack: "settings-fixture-pack", volume: 0.7))
+        let replacement = WorkspaceSoundRule(
+            id: id,
+            directory: WorkspaceDirectory(kind: .directory, path: "/fixture/panel-after"),
+            surfaces: [.codex],
+            profile: WorkspaceSoundProfile(selectedPack: "settings-fixture-pack", volume: 0.7))
+        let fixture = SettingsPresentationFixtures.generalLogin(
+            route: .destination(.integrations), workspaceRules: [replacement])
+        let oldTarget = WorkspaceSoundWriteTarget(rule: original)
+        let delayed = EventSettingsWindowRoute(
+            scope: .workspace(id), event: .stop, workspaceTarget: oldTarget)
+        expect(
+            fixture.session.send(.present(.eventShortcut(delayed)))
+                == .presented(wasAlreadyPresented: true)
+                && fixture.session.state.eventPresentation.route.workspaceTarget == oldTarget
+                && fixture.session.state.eventPresentation.route
+                    .unavailableRequestedScopeStoredValue == delayed.scope.storedValue
+                && fixture.session.state.eventPresentation.focusTarget == .unavailableScope
+                && fixture.eventSettingsModel.selectedSoundScope == .global,
+            "面板旧目录快捷入口不能把新目录选成可写目标，并须聚焦可见失败说明")
+
+        let currentTarget = WorkspaceSoundWriteTarget(rule: replacement)
+        let current = EventSettingsWindowRoute(
+            scope: .workspace(id), workspaceTarget: currentTarget)
+        expect(
+            fixture.session.send(.present(.eventShortcut(current)))
+                == .presented(wasAlreadyPresented: true)
+                && fixture.session.state.eventPresentation.route == current
+                && fixture.session.state.eventPresentation.focusTarget == .scope(.workspace(id))
+                && fixture.eventSettingsModel.selectedWorkspaceTarget == currentTarget,
+            "新目录的显式入口才可选择该工作区并请求工作区焦点")
+        fixture.eventSettingsSelection.markCurrentScopeUnavailable()
+        expect(
+            fixture.eventSettingsSelection.route.workspaceTarget == currentTarget,
+            "后续失效标记仍须保留原目录身份")
+    }
+
     suite("Settings mounted sound entrance：失效工作区显示重选入口") {
         let rule = WorkspaceSoundRule(
             directory: WorkspaceDirectory(kind: .directory, path: "/fixture/stale-entrance"),

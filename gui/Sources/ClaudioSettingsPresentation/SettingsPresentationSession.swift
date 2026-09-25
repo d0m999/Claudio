@@ -271,7 +271,18 @@ package final class SettingsPresentationSession: ObservableObject {
             guard let route else { return .unchanged }
             requestedRoute = route
             eventShortcut = nil
-        case .eventShortcut(let route):
+        case .eventShortcut(let requested):
+            let route: EventSettingsWindowRoute
+            if requested.workspaceTargetIsCurrent(
+                in: dependencies.eventSettingsModel.configState.resolvedConfig)
+            {
+                route = requested
+            } else {
+                route = EventSettingsWindowRoute(
+                    scope: requested.scope, event: requested.event,
+                    workspaceTarget: requested.workspaceTarget,
+                    unavailableRequestedScopeStoredValue: requested.scope.storedValue)
+            }
             requestedRoute =
                 route.unavailableRequestedScopeStoredValue == nil
                 ? .events(scope: route.scope, event: route.event)
@@ -340,7 +351,19 @@ package final class SettingsPresentationSession: ObservableObject {
                     generation: nil)
             }
             if eventRoute.unavailableRequestedScopeStoredValue == nil {
-                dependencies.eventSettingsModel.selectSoundScope(eventRoute.scope)
+                let model = dependencies.eventSettingsModel
+                let rebindsExplicitSelection =
+                    eventRoute.workspaceTarget != nil
+                    && model.selectedSoundScope == eventRoute.scope
+                    && model.selectedWorkspaceTarget != eventRoute.workspaceTarget
+                model.selectSoundScope(
+                    eventRoute.scope, rebindSelectedWorkspace: rebindsExplicitSelection)
+                if !eventRoute.workspaceTargetIsCurrent(in: model.configState.resolvedConfig)
+                    || (eventRoute.workspaceTarget != nil
+                        && model.selectedWorkspaceTarget != eventRoute.workspaceTarget)
+                {
+                    eventSettingsSelection.markCurrentScopeUnavailable()
+                }
             }
         case .destination(.eventsAndSounds):
             if let eventShortcut {

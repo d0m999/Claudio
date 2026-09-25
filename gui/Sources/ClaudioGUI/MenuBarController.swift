@@ -267,9 +267,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             onOpenSettings: { [weak actionRouter] in
                 actionRouter?.owner?.requestSettingsWindowPresentation()
             },
-            onEditSoundScope: { [weak actionRouter] scope in
+            onEditSoundScope: { [weak actionRouter] route in
                 actionRouter?.requestEventsSettings(
-                    route: EventSettingsWindowRoute(scope: scope), returnFocusTo: .soundScope)
+                    route: route, returnFocusTo: .soundScope)
             },
             onConfigureSound: { [weak actionRouter] route in
                 actionRouter?.requestSoundsSettings(route: route, returnFocusTo: .soundScope)
@@ -594,7 +594,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         returnFocusTo target: PanelFocusTarget
     ) {
         requestSettingsPresentation(
-            request: .route(.events(scope: route.scope, event: route.event)),
+            request: .eventShortcut(route),
             returnFocusTo: target)
     }
 

@@ -151,6 +151,7 @@ package final class EventSettingsWindowSelection: ObservableObject {
         storage.route = EventSettingsWindowRoute(
             scope: storage.route.scope,
             event: storage.route.event,
+            workspaceTarget: storage.route.workspaceTarget,
             unavailableRequestedScopeStoredValue: storage.route.scope.storedValue)
         storage.routeRequestRevision &+= 1
         storage.focusTarget = nil
@@ -161,7 +162,8 @@ package final class EventSettingsWindowSelection: ObservableObject {
         guard storage.route.unavailableRequestedScopeStoredValue != nil else { return }
         storage.route = EventSettingsWindowRoute(
             scope: storage.route.scope,
-            event: storage.route.event)
+            event: storage.route.event,
+            workspaceTarget: storage.route.workspaceTarget)
         storage.routeRequestRevision &+= 1
         publishState()
     }

@@ -37,7 +37,7 @@ public struct PanelView: View {
     private let refreshesActivityOnLifecycle: Bool
     private let onAudibilityInputsChanged: @MainActor () -> Void
     private let onOpenSettings: @MainActor () -> Void
-    private let onEditSoundScope: @MainActor (PanelSoundScopeID) -> Void
+    private let onEditSoundScope: @MainActor (EventSettingsWindowRoute) -> Void
     private let onConfigureSound: @MainActor (SoundPacksWindowRoute) -> Void
     private let onOpenRecentNotices: @MainActor () -> Void
     private let onOpenIntegration: @MainActor (HostID) -> Void
@@ -58,7 +58,7 @@ public struct PanelView: View {
         eventNoticeModel: EventNoticeModel,
         onAudibilityInputsChanged: @escaping @MainActor () -> Void,
         onOpenSettings: @escaping @MainActor () -> Void,
-        onEditSoundScope: @escaping @MainActor (PanelSoundScopeID) -> Void = { _ in },
+        onEditSoundScope: @escaping @MainActor (EventSettingsWindowRoute) -> Void = { _ in },
         onConfigureSound: @escaping @MainActor (SoundPacksWindowRoute) -> Void = { _ in },
         onOpenRecentNotices: @escaping @MainActor () -> Void,
         onOpenIntegration: @escaping @MainActor (HostID) -> Void,
@@ -916,10 +916,22 @@ public struct PanelView: View {
                             }.joined(separator: ", ")
                     )
                     .font(.caption).foregroundColor(.secondary)
-                    Button(l10n.text(.workspaceEdit)) { onEditSoundScope(.workspace(id)) }
-                        .accessibilityLabel(l10n.text(.workspaceEdit))
-                        .accessibilityIdentifier("panel.workspace.edit")
-                        .focused($focusedTarget, equals: .workspaceDetails)
+                    Button(l10n.text(.workspaceEdit)) {
+                        guard panelModel.selectedSoundScope == .workspace(id),
+                            let target = panelModel.selectedWorkspaceTarget, target.id == id
+                        else {
+                            onAnnounce(
+                                localizedWorkspaceError(
+                                    .staleRule, language: languageStore.language))
+                            return
+                        }
+                        onEditSoundScope(
+                            EventSettingsWindowRoute(
+                                scope: .workspace(id), workspaceTarget: target))
+                    }
+                    .accessibilityLabel(l10n.text(.workspaceEdit))
+                    .accessibilityIdentifier("panel.workspace.edit")
+                    .focused($focusedTarget, equals: .workspaceDetails)
                 }
                 Text(l10n.text(.workspacePreviewNote)).font(.caption).foregroundColor(.secondary)
                     .padding(9)

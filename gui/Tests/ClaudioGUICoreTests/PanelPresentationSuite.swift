@@ -49,6 +49,35 @@ func runPanelPresentationSuites() async {
                 == .copyAndApply(
                     scope: .workspace(workspaceID), packID: "factory-pack", event: .stop),
             "只读包复制并应用必须保留工作区目标")
+        let original = WorkspaceSoundRule(
+            id: workspaceID,
+            directory: WorkspaceDirectory(kind: .directory, path: "/tmp/route-before"),
+            surfaces: [.codex],
+            profile: WorkspaceSoundProfile(selectedPack: "user-pack", volume: 0.7))
+        let rebound = WorkspaceSoundRule(
+            id: workspaceID,
+            directory: WorkspaceDirectory(kind: .directory, path: "/tmp/route-after"),
+            surfaces: [.codex],
+            profile: WorkspaceSoundProfile(selectedPack: "user-pack", volume: 0.7))
+        let pinned = EventSettingsWindowRoute(
+            scope: .workspace(workspaceID),
+            workspaceTarget: WorkspaceSoundWriteTarget(rule: original))
+        var reboundConfig = ClaudioConfig(selectedPack: "default")
+        reboundConfig.workspaceRules = [rebound]
+        expect(
+            !pinned.workspaceTargetIsCurrent(in: reboundConfig)
+                && Set([
+                    pinned,
+                    EventSettingsWindowRoute(
+                        scope: .workspace(workspaceID),
+                        workspaceTarget: WorkspaceSoundWriteTarget(rule: rebound)),
+                ]).count == 2
+                && pinned.soundPacksRoute(packID: "user-pack", event: .stop).workspaceTarget
+                    == pinned.workspaceTarget
+                && pinned.soundPacksCopyAndApplyRoute(
+                    packID: "factory-pack", event: .stop
+                ).workspaceTarget == pinned.workspaceTarget,
+            "面板事件路由必须保留目录身份，换绑后拒绝旧目标并传给声音编辑")
         expect(
             eventSettingsFirstFocusTarget(scopes: [.global, .surface(.workBuddy)])
                 == .scope(.global),

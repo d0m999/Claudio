@@ -77,6 +77,13 @@ struct EventSettingsWindowView: View {
         if model.workspaceError == .invalidRule || model.workspaceError == .staleRule {
             return false
         }
+        guard selection.route.workspaceTargetIsCurrent(in: model.configState.resolvedConfig)
+        else { return false }
+        if let target = selection.route.workspaceTarget,
+            model.selectedWorkspaceTarget != target
+        {
+            return false
+        }
         return current != nil && selection.unavailableRequestedScopeStoredValue == nil
             && model.selectedSoundScope == selection.route.scope
     }
@@ -262,6 +269,11 @@ struct EventSettingsWindowView: View {
             deletionCancelFocusID = nil
             synchronize()
         }
+        .onChange(of: model.configState) { _ in
+            if !selection.route.workspaceTargetIsCurrent(in: model.configState.resolvedConfig) {
+                selection.markCurrentScopeUnavailable()
+            }
+        }
         .onChange(of: selection.presentationState.focusRequestRevision) { _ in synchronize() }
         .onChange(of: selection.deletionPresentation.pending?.id) { pendingID in
             if pendingID != nil {
@@ -364,7 +376,15 @@ struct EventSettingsWindowView: View {
     private func synchronize() {
         player.stop()
         // Preserve invalid identities so delayed actions cannot write the Default Group.
-        model.selectSoundScope(selection.route.scope)
+        if selection.unavailableRequestedScopeStoredValue == nil {
+            model.selectSoundScope(selection.route.scope)
+            if !selection.route.workspaceTargetIsCurrent(in: model.configState.resolvedConfig)
+                || (selection.route.workspaceTarget != nil
+                    && model.selectedWorkspaceTarget != selection.route.workspaceTarget)
+            {
+                selection.markCurrentScopeUnavailable()
+            }
+        }
         if let target = selection.presentationState.focusTarget {
             focusedTarget = target
         } else if selection.unavailableRequestedScopeStoredValue != nil {

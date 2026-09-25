@@ -37,22 +37,46 @@ public let panelSoundScopeDefaultsKey = "claudio.panel.selected-surface"
 public struct EventSettingsWindowRoute: Sendable, Equatable, Hashable {
     public let scope: PanelSoundScopeID
     public let event: Event?
+    /// A panel shortcut retains the directory selected when it was created. A later UUID rebind
+    /// cannot turn the request into an edit of another workspace.
+    public let workspaceTarget: WorkspaceSoundWriteTarget?
     public let unavailableRequestedScopeStoredValue: String?
 
     public init(
         scope: PanelSoundScopeID,
         event: Event? = nil,
+        workspaceTarget: WorkspaceSoundWriteTarget? = nil,
         unavailableRequestedScopeStoredValue: String? = nil
     ) {
         self.scope = scope
         self.event = event
+        self.workspaceTarget = workspaceTarget
         self.unavailableRequestedScopeStoredValue = unavailableRequestedScopeStoredValue
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(scope)
+        hasher.combine(event)
+        hasher.combine(workspaceTarget?.id)
+        hasher.combine(workspaceTarget?.directory.kind.rawValue)
+        hasher.combine(workspaceTarget?.directory.path)
+        hasher.combine(workspaceTarget?.directory.commonGitDirectory)
+        hasher.combine(unavailableRequestedScopeStoredValue)
+    }
+
+    public func workspaceTargetIsCurrent(in config: ClaudioConfig) -> Bool {
+        guard let workspaceTarget else { return true }
+        guard case .workspace(let id) = scope, workspaceTarget.id == id,
+            let rule = config.workspaceRules.first(where: { $0.id == id })
+        else { return false }
+        return rule.directory == workspaceTarget.directory
     }
 
     public var surface: HostSurfaceID? { scope.surface }
 
     public func soundPacksRoute(packID: String, event: Event) -> SoundPacksWindowRoute {
-        .editEvent(scope: scope, packID: packID, event: event)
+        .editEvent(
+            scope: scope, packID: packID, event: event, workspaceTarget: workspaceTarget)
     }
 
     /// Missing-sound deep link for a read-only pack. The scope is retained explicitly so the
@@ -61,7 +85,8 @@ public struct EventSettingsWindowRoute: Sendable, Equatable, Hashable {
         packID: String,
         event: Event
     ) -> SoundPacksWindowRoute {
-        .copyAndApply(scope: scope, packID: packID, event: event)
+        .copyAndApply(
+            scope: scope, packID: packID, event: event, workspaceTarget: workspaceTarget)
     }
 }
 
