@@ -284,7 +284,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
                 publish(from: seed)
             case .events(let route, _, _):
                 let (_, seed) = captureModelTransition {
-                    model.setManagedScope(route.scope)
+                    model.setManagedScope(route.scope, workspaceTarget: route.workspaceTarget)
                 }
                 publish(from: seed)
             }
@@ -2139,7 +2139,10 @@ package final class SoundPacksEditorOwner: ObservableObject {
         candidateGenerationID: UUID?,
         seed: SoundPacksEditorModelSeed
     ) -> EventsSoundPackPresentation {
-        let packs = seed.packCards.map { makePackPresentation(card: $0, seed: seed) }
+        let routeAvailable = route.unavailableRequestedScopeStoredValue == nil
+        let packs = seed.packCards.map {
+            makePackPresentation(card: $0, seed: seed, signsWriteActions: routeAvailable)
+        }
         let selectedNativeTargets = seed.selectedPackID.flatMap {
             seed.nativeTargetsByPackID[$0]
         }
@@ -2158,11 +2161,12 @@ package final class SoundPacksEditorOwner: ObservableObject {
             return SoundPackEditorEventAccessPresentation(
                 event: row.event,
                 previewAvailability: preview.availability,
-                previewAction: preview.action,
-                adoptionAvailability: adoptionAvailability)
+                previewAction: routeAvailable ? preview.action : nil,
+                adoptionAvailability: routeAvailable
+                    ? adoptionAvailability : .ineligible(.writesStopped))
         }
         var adoptionPermit: SoundPackAdoptionPermit?
-        if seed.library.isFresh,
+        if routeAvailable, seed.library.isFresh,
             let candidateGenerationID,
             let event = route.event,
             case .eligible(let target) = model.aiCueAdoptionEligibility(for: event)
@@ -2175,7 +2179,9 @@ package final class SoundPacksEditorOwner: ObservableObject {
         return EventsSoundPackPresentation(
             route: route,
             requestRevision: requestRevision,
-            scope: scopeAvailability(seed, requestedScope: route.scope),
+            scope: routeAvailable
+                ? scopeAvailability(seed, requestedScope: route.scope)
+                : .unavailable(scope: route.scope, reason: .scopeUnavailable),
             packs: packs,
             selectedPack: packs.first(where: { $0.id == seed.selectedPackID }),
             eventAccess: eventAccess,

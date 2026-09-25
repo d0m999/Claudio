@@ -80,6 +80,42 @@ func runSoundPacksEditorOwnerSuites() {
                         == "workspace-pack",
                 "旧深链激活不得捕获新目录、签发应用写入或改写默认组")
 
+            let delayedEventRoute = EventSettingsWindowRoute(
+                scope: .workspace(original.id), event: .stop, workspaceTarget: captured,
+                unavailableRequestedScopeStoredValue: PanelSoundScopeID.workspace(original.id)
+                    .storedValue)
+            _ = owner.send(.activate(.events(route: delayedEventRoute, requestRevision: 2)))
+            guard case .events(let rejectedEvents) = owner.presentation.mode else {
+                expect(false, "失效 Events 快捷入口必须交付 Events presentation")
+                return
+            }
+            expect(
+                rejectedEvents.route == delayedEventRoute
+                    && rejectedEvents.scope
+                        == .unavailable(
+                            scope: .workspace(original.id), reason: .scopeUnavailable)
+                    && rejectedEvents.packs.allSatisfy { $0.useAction == nil }
+                    && rejectedEvents.adoptionPermit == nil,
+                "Events 共享编辑器不得把旧工作区入口换绑到新目录或签发写入权限")
+
+            let unavailableRawRoute = EventSettingsWindowRoute(
+                scope: .global, event: .stop,
+                unavailableRequestedScopeStoredValue: "future-surface")
+            _ = owner.send(.activate(.events(route: unavailableRawRoute, requestRevision: 3)))
+            guard case .events(let unavailableRaw) = owner.presentation.mode else {
+                expect(false, "未知 raw scope 必须交付 Events 失败展示")
+                return
+            }
+            expect(
+                unavailableRaw.scope == .unavailable(scope: .global, reason: .scopeUnavailable)
+                    && unavailableRaw.packs.allSatisfy { $0.useAction == nil }
+                    && unavailableRaw.eventAccess.allSatisfy {
+                        $0.previewAction == nil
+                            && $0.adoptionAvailability == .ineligible(.writesStopped)
+                    }
+                    && unavailableRaw.adoptionPermit == nil,
+                "展示用默认组不能为未知来源快捷入口签发试听或写入动作")
+
             let pinnedOverview = SoundPacksWindowRoute.overview(
                 scope: .workspace(original.id), workspaceTarget: captured)
             _ = owner.send(.activate(.sounds(route: pinnedOverview, requestRevision: 2)))
