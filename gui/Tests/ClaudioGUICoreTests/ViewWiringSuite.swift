@@ -1,3 +1,4 @@
+import ClaudioCore
 import ClaudioGUICore
 import Foundation
 
@@ -2861,6 +2862,82 @@ func runViewWiringSuites() {
                 && collapsingWhitespace(panel).contains(
                     ".focused($focusedTarget, equals: .headerSettings)"),
             "打开设置必须通过统一 session action，并把焦点留在 headerSettings")
+    }
+
+    suite("Panel 缺声恢复：默认组／工作区精确路由，只读修复复制并应用，失效目标失败关闭") {
+        guard
+            let panel = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PanelView.swift"),
+            let events = closureBody(after: "private var eventSection: some View", in: panel),
+            let recovery = closureBody(after: "onRecovery:", in: events)
+        else {
+            expect(false, "必须能读到 Panel 事件行的恢复动作")
+            return
+        }
+        let wiring = collapsingWhitespace(recovery)
+        expect(
+            wiring.contains("case .editSound, .repairSound:")
+                && wiring.contains(
+                    "guard panelModel.selectedSoundScope == selectedScope.scope, "
+                        + "!panelModel.config.selectedPack.isEmpty else { return }")
+                && wiring.contains(
+                    "if action == .repairSound && panelModel.selectedPackIsBuiltinReadOnly { "
+                        + "onConfigureSound( .copyAndApply( scope: selectedScope.scope, "
+                        + "packID: panelModel.config.selectedPack, event: event.event)) } else { "
+                        + "onConfigureSound( .editEvent( scope: selectedScope.scope, "
+                        + "packID: panelModel.config.selectedPack, event: event.event)) }")
+                && !wiring.contains("surface: nil"),
+            "只读内置包的修复须复制并用于当前组；其他恢复须精确编辑当前组的包与事件")
+
+        let workspace = PanelSoundScopeID.workspace(
+            UUID(uuidString: "61E452D2-5895-4D4C-BF22-D8B0A8FEB2E7")!)
+        let globalRoute = SoundPacksWindowRoute.editEvent(
+            scope: .global, packID: "selected-pack", event: .stop)
+        let workspaceRoute = SoundPacksWindowRoute.editEvent(
+            scope: workspace, packID: "selected-pack", event: .stop)
+        let globalCopyRoute = SoundPacksWindowRoute.copyAndApply(
+            scope: .global, packID: "selected-pack", event: .stop)
+        let workspaceCopyRoute = SoundPacksWindowRoute.copyAndApply(
+            scope: workspace, packID: "selected-pack", event: .stop)
+        let available = SettingsRouteAvailability(
+            integrationSurfaces: [],
+            eventScopes: [.global, workspace],
+            soundScopes: [.global, workspace],
+            soundPackIDs: ["selected-pack"],
+            events: Set(Event.allCases))
+        let routes = [globalRoute, workspaceRoute, globalCopyRoute, workspaceCopyRoute]
+        expect(
+            globalRoute.scope == .global
+                && workspaceRoute.scope == workspace
+                && globalCopyRoute.scope == .global
+                && workspaceCopyRoute.scope == workspace
+                && globalRoute.destination == .editEvent(packID: "selected-pack", event: .stop)
+                && workspaceRoute.destination == globalRoute.destination
+                && globalCopyRoute.destination
+                    == .copyAndApply(packID: "selected-pack", event: .stop)
+                && workspaceCopyRoute.destination == globalCopyRoute.destination
+                && !globalRoute.isCopyAndApply
+                && !workspaceRoute.isCopyAndApply
+                && globalCopyRoute.isCopyAndApply
+                && workspaceCopyRoute.isCopyAndApply
+                && routes.allSatisfy {
+                    resolveSettingsRoute(.sounds($0), availability: available).failure == nil
+                },
+            "编辑与复制并应用都必须保留默认组／工作区、包及事件")
+
+        let stale = SettingsRouteAvailability(
+            integrationSurfaces: [],
+            eventScopes: [.global],
+            soundScopes: [.global],
+            soundPackIDs: ["selected-pack"],
+            events: Set(Event.allCases))
+        for route in [workspaceRoute, workspaceCopyRoute] {
+            let resolution = resolveSettingsRoute(.sounds(route), availability: stale)
+            expect(
+                resolution.route == .sounds(route)
+                    && resolution.destination == .sounds
+                    && resolution.failure == .staleSoundScope(workspace),
+                "失效工作区必须保留原请求并显示 Sounds 失败，不能改为默认组：\(route)")
+        }
     }
 
     suite("声音包窗口：完整映射菜单列出已有音频并经窗口 model 绑定；面板不消费 inventory") {

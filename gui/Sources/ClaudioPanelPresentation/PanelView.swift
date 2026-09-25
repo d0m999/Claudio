@@ -722,10 +722,21 @@ public struct PanelView: View {
                                 guard panelModel.selectedSoundScope == selectedScope.scope,
                                     !panelModel.config.selectedPack.isEmpty
                                 else { return }
-                                onConfigureSound(
-                                    .editEvent(
-                                        surface: nil, packID: panelModel.config.selectedPack,
-                                        event: event.event))
+                                if action == .repairSound
+                                    && panelModel.selectedPackIsBuiltinReadOnly
+                                {
+                                    onConfigureSound(
+                                        .copyAndApply(
+                                            scope: selectedScope.scope,
+                                            packID: panelModel.config.selectedPack,
+                                            event: event.event))
+                                } else {
+                                    onConfigureSound(
+                                        .editEvent(
+                                            scope: selectedScope.scope,
+                                            packID: panelModel.config.selectedPack,
+                                            event: event.event))
+                                }
                             }
                         },
                         onToggleMute: {
@@ -1185,7 +1196,7 @@ private struct PanelAgentEventRow: View {
             if let attemptFailure {
                 Text(localizedEventPreviewAttemptFailure(attemptFailure, language: language))
                     .font(.system(size: 10, design: .rounded))
-                    .foregroundColor(.red)
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier(
                         "panel.event.\(presentation.event.rawValue).preview-failure")
