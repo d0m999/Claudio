@@ -23,8 +23,10 @@ bash scripts/verify-settings-experience.sh <BASE_SHA>
 - #102 所要求的 suite 都仍在两个手工注册的 executable harness 中。
 
 基线和 `HEAD` 的 format 诊断忽略会随周边编辑漂移的行列号，按
-`path:severity:rule/message` 归一为稳定身份，并保留相同身份的出现次数作多重集比较。纯行号漂移
-不算新增，但任何身份的新增出现仍会使门禁失败；这不表示既有诊断已经修复。
+`path:severity:rule/message` 归一为稳定身份，并保留相同身份的出现次数作多重集比较。
+未改动 `.swift-format` 时，仅改动过的 Swift 文件中的新增诊断会使门禁失败；递归 lint 在
+字节未变的文件上偶发的诊断差异不算源码回归。若 `.swift-format` 改动，则比较全仓新增诊断。
+这不表示既有诊断已经修复。
 
 ## 自动证据覆盖
 
