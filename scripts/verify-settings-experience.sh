@@ -145,6 +145,17 @@ settings_format_compare_diagnostics \
     "$head_diagnostics" \
     "$new_diagnostics"
 
+if git diff --quiet "$format_base...HEAD" -- .swift-format; then
+    changed_swift_paths="$temporary_root/changed-swift-paths.txt"
+    changed_diagnostics="$temporary_root/changed-format-diagnostics.txt"
+    git diff --name-only "$format_base...HEAD" -- '*.swift' >"$changed_swift_paths"
+    settings_format_keep_changed_diagnostics \
+        "$new_diagnostics" \
+        "$changed_swift_paths" \
+        "$changed_diagnostics"
+    mv "$changed_diagnostics" "$new_diagnostics"
+fi
+
 if [[ -s "$new_diagnostics" ]]; then
     new_diagnostic_count="$(wc -l <"$new_diagnostics" | tr -d ' ')"
     echo "❌ $new_diagnostic_count strict format diagnostic occurrences added since $format_base:" >&2

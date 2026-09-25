@@ -40,3 +40,21 @@ settings_format_compare_diagnostics() {
 
     LC_ALL=C comm -13 "$baseline_diagnostics" "$head_diagnostics" >"$new_diagnostics"
 }
+
+settings_format_keep_changed_diagnostics() {
+    local diagnostics="$1"
+    local changed_paths="$2"
+    local output="$3"
+
+    # Recursive lint can emit inconsistent diagnostics for byte-identical files between runs.
+    # Only a changed Swift file can introduce a source-format regression when .swift-format is
+    # unchanged. Keep duplicate occurrences so a new warning in a changed file still fails.
+    LC_ALL=C awk '
+        NR == FNR { changed[$0] = 1; next }
+        {
+            path = $0
+            sub(/: (error|warning|note): .*/, "", path)
+            if (path in changed) print
+        }
+    ' "$changed_paths" "$diagnostics" >"$output"
+}

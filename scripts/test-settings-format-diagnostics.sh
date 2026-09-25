@@ -77,6 +77,25 @@ if [[ "$added_count" != 1 ]]; then
     exit 1
 fi
 
+printf '%s\n' 'gui/A.swift' >"$temporary_root/changed-paths.txt"
+printf '%s\n' \
+    'gui/A.swift: error: [Indentation] indent by 4 spaces' \
+    'gui/B.swift: warning: [TrailingComma] add trailing comma' \
+    'gui/A.swift: error: [Indentation] indent by 4 spaces' \
+    >"$temporary_root/mixed-diagnostics.txt"
+settings_format_keep_changed_diagnostics \
+    "$temporary_root/mixed-diagnostics.txt" \
+    "$temporary_root/changed-paths.txt" \
+    "$temporary_root/changed-diagnostics.txt"
+if [[ "$(wc -l <"$temporary_root/changed-diagnostics.txt" | tr -d ' ')" != 2 ]]; then
+    echo "❌ changed-file diagnostics did not retain duplicate occurrences" >&2
+    exit 1
+fi
+if rg -q 'gui/B.swift' "$temporary_root/changed-diagnostics.txt"; then
+    echo "❌ unchanged-file lint drift was treated as a regression" >&2
+    exit 1
+fi
+
 if settings_format_validate_diagnostics \
     1 \
     "$unparseable_raw" \
