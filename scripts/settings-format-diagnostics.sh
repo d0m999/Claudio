@@ -3,12 +3,19 @@
 settings_format_normalize_diagnostics() {
     local raw_output="$1"
     local normalized_output="$2"
+    local source_root="${3:-}"
 
     # A diagnostic's line and column move when unrelated edits add or remove surrounding lines.
     # Keep path, severity, rule, and message as its stable identity. Do not deduplicate: repeated
     # identities are separate occurrences, so the sorted files form multisets for comm.
-    LC_ALL=C awk \
-        '/^[^:]+:[0-9]+:[0-9]+: (error|warning|note): / { print }' \
+    LC_ALL=C awk -v root="$source_root" \
+        '/^[^:]+:[0-9]+:[0-9]+: (error|warning|note): / {
+            line = $0
+            if (root != "" && substr(line, 1, length(root) + 1) == root "/") {
+                line = substr(line, length(root) + 2)
+            }
+            print line
+        }' \
         "$raw_output" \
         | LC_ALL=C sed -E 's/^([^:]+):[0-9]+:[0-9]+: /\1: /' \
         | LC_ALL=C sort >"$normalized_output"

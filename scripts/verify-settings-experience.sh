@@ -128,7 +128,7 @@ collect_format_diagnostics() {
         exit "$status"
     fi
 
-    settings_format_normalize_diagnostics "$raw_output" "$normalized_output"
+    settings_format_normalize_diagnostics "$raw_output" "$normalized_output" "$source_root"
     settings_format_validate_diagnostics "$status" "$raw_output" "$normalized_output"
 }
 
