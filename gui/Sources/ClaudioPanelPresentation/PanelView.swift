@@ -851,6 +851,7 @@ public struct PanelView: View {
                             pack.id)
                     }
                 }.padding(.horizontal, 9).padding(.top, 7)
+                    .accessibilityLabel(l10n.text(.panelSoundPackLabel))
                     .accessibilityIdentifier("panel.workspace.pack-picker")
                     .focused($focusedTarget, equals: .soundPackPicker)
                 MasterVolumeRow(
@@ -881,6 +882,7 @@ public struct PanelView: View {
                     )
                     .font(.caption).foregroundColor(.secondary)
                     Button(l10n.text(.workspaceEdit)) { onEditSoundScope(.workspace(id)) }
+                        .accessibilityLabel(l10n.text(.workspaceEdit))
                         .accessibilityIdentifier("panel.workspace.edit")
                         .focused($focusedTarget, equals: .workspaceDetails)
                 }
@@ -900,6 +902,7 @@ public struct PanelView: View {
                             else { return }
                             onRevealConfig(current)
                         }
+                        .accessibilityLabel(l10n.text(.panelRevealConfig))
                         .accessibilityIdentifier("panel.workspace.reveal-config")
                     }
                     if let recoveryFile = panelModel.workspaceRecoveryFile {
@@ -908,12 +911,14 @@ public struct PanelView: View {
                             else { return }
                             onRevealConfig(target)
                         }
+                        .accessibilityLabel(l10n.text(.panelRevealRecoveryFile))
                         .accessibilityIdentifier("panel.workspace.reveal-recovery")
                     }
                     if error.isPublishedConflict {
                         Button(l10n.text(.workspaceDeleteReload)) {
                             panelModel.reload()
                         }
+                        .accessibilityLabel(l10n.text(.workspaceDeleteReload))
                         .accessibilityIdentifier("panel.workspace.reload-after-conflict")
                     }
                 }
@@ -953,6 +958,11 @@ public struct PanelView: View {
                     }
                     .buttonStyle(.bordered)
                     .focused($focusedTarget, equals: .writeFailureRecoveryFile(path: file.path))
+                    .accessibilityLabel(
+                        writeFailureRecoveryFiles.count == 1
+                            ? l10n.text(.panelRevealRecoveryFile)
+                            : l10n.format(.panelRevealRecoveryFileNumber, Int64(index + 1))
+                    )
                     .accessibilityHint(l10n.text(.panelRevealRecoveryFileHint))
                     .accessibilityIdentifier("panel.write-failure.reveal-recovery.\(index + 1)")
                 }
@@ -1162,6 +1172,7 @@ private struct PanelAgentEventRow: View {
                         onRecovery(recoveryAction)
                     }
                     .buttonStyle(.link)
+                    .accessibilityLabel(recoveryTitle(for: recoveryAction))
                     .accessibilityIdentifier(
                         "panel.event.\(presentation.event.rawValue).preview-recovery")
                 }
