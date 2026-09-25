@@ -174,7 +174,11 @@ func runWorkspaceDeletionPresentationSuites() {
             "production Events destination and Workspace delete button must be mounted")
 
         expect(selection.requestDeletion(of: rule), "mounted view receives captured request")
-        for _ in 0..<3 {
+        let confirmationDeadline = Date().addingTimeInterval(1)
+        while window.attachedSheet == nil && window.sheets.isEmpty
+            && Date() < confirmationDeadline
+        {
+            hostingView.layoutSubtreeIfNeeded()
             _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.03))
         }
         expect(

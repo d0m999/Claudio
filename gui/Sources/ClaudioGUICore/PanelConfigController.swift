@@ -163,8 +163,9 @@ public final class PanelConfigController: ObservableObject {
         guard selectedSoundScope != scope else { return }
         selectedWorkspaceID = scope.workspaceID
         selectedWorkspacePackTarget = scope.workspaceID.flatMap { id in
-            baseConfig.workspaceRules.first(where: { $0.id == id }).map(
-                WorkspaceSoundPackTarget.init)
+            baseConfig.workspaceRules.first(where: { $0.id == id }).map { rule in
+                WorkspaceSoundPackTarget(rule: rule)
+            }
         }
         selectedSurface = scope.surface
         workspaceError = nil

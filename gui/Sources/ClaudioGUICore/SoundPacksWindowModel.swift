@@ -957,8 +957,9 @@ package final class SoundPacksWindowModel {
 
     private func captureManagedWorkspacePackTarget() {
         managedWorkspacePackTarget = managedScope.workspaceID.flatMap { id in
-            baseConfig.workspaceRules.first(where: { $0.id == id }).map(
-                WorkspaceSoundPackTarget.init)
+            baseConfig.workspaceRules.first(where: { $0.id == id }).map { rule in
+                WorkspaceSoundPackTarget(rule: rule)
+            }
         }
     }
 
