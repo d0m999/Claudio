@@ -272,6 +272,9 @@ package final class SettingsPresentationSession: ObservableObject {
             requestedRoute = route
             eventShortcut = nil
         case .eventShortcut(let requested):
+            if requested.workspaceTarget != nil {
+                dependencies.eventSettingsModel.reloadConfigForPinnedRoute()
+            }
             let route: EventSettingsWindowRoute
             if requested.workspaceTargetIsCurrent(
                 in: dependencies.eventSettingsModel.configState.resolvedConfig)

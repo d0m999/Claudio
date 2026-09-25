@@ -236,6 +236,7 @@ public final class PanelConfigController: ObservableObject {
     @Published public private(set) var masterVolumeError: SetMasterVolumeError?
 
     private let configFile: URL
+    private let configReadIsInjected: Bool
     private let lockFile: URL
     private let environment: AudioImportEnvironment
     private var builtinPackIDs: Set<String>
@@ -311,6 +312,7 @@ public final class PanelConfigController: ObservableObject {
         let lockFile = URL(fileURLWithPath: "/dev/null/claudio-panel-preview-config.lock")
 
         self.configFile = configFile
+        self.configReadIsInjected = true
         self.lockFile = lockFile
         self.environment = environment
         self.soundPackLibrary = SoundPackLibrary(environment: environment)
@@ -379,6 +381,7 @@ public final class PanelConfigController: ObservableObject {
         soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator?
     ) {
         self.configFile = configFile
+        self.configReadIsInjected = false
         self.lockFile = lockFile
         self.environment = environment
         self.soundPackLibrary = soundPackLibrary
@@ -756,6 +759,13 @@ public final class PanelConfigController: ObservableObject {
     /// （下面第一行），只是没人注意到，于是没人想到「失败路径也可以用它」。
     public func reloadConfigOnly() {
         reloadConfigOnly(origin: .external)
+    }
+
+    /// A pinned panel shortcut must compare its captured directory with a current config read.
+    /// State-gallery fixtures retain their injected snapshot instead of reading `/dev/null`.
+    package func reloadConfigForPinnedRoute() {
+        guard !configReadIsInjected else { return }
+        reloadConfigOnly()
     }
 
     private func reloadConfigOnly(origin: PanelRefreshOrigin) {

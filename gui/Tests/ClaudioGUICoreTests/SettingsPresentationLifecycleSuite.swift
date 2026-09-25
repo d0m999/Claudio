@@ -264,6 +264,57 @@ func runSettingsPresentationLifecycleSuites() async {
             "后续失效标记仍须保留原目录身份")
     }
 
+    suite("Settings panel workspace shortcut：先读回磁盘再判断有效新目录") {
+        withTempDirectory { root in
+            let id = UUID(uuidString: "984815F5-E8E6-4C13-89F2-818457A29756")!
+            let original = WorkspaceSoundRule(
+                id: id,
+                directory: WorkspaceDirectory(kind: .directory, path: "/fixture/cached-before"),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(
+                    selectedPack: "settings-fixture-pack", volume: 0.7))
+            let replacement = WorkspaceSoundRule(
+                id: id,
+                directory: WorkspaceDirectory(kind: .directory, path: "/fixture/on-disk-after"),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(
+                    selectedPack: "settings-fixture-pack", volume: 0.7))
+            let configFile = root.appendingPathComponent("config.json")
+            var config = ClaudioConfig(selectedPack: "settings-fixture-pack")
+            config.workspaceRules = [original]
+            writeFixture(try! JSONEncoder().encode(config), to: configFile)
+            let model = PanelConfigController(
+                configFile: configFile, lockFile: root.appendingPathComponent("config.lock"),
+                environment: makeAudioImportEnvironment(
+                    userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true)))
+            model.selectSoundScope(.workspace(id))
+            expect(
+                model.configState.resolvedConfig.workspaceRules.first?.directory
+                    == original.directory
+                    && model.selectedWorkspaceTarget == WorkspaceSoundWriteTarget(rule: original),
+                "夹具须先证明 Events 模型仍选中并缓存旧目录")
+            let fixture = SettingsPresentationFixtures.generalLogin(
+                route: .destination(.integrations), workspaceRules: [replacement],
+                eventSettingsModel: model)
+            config.workspaceRules = [replacement]
+            let newBytes = try! JSONEncoder().encode(config)
+            writeFixture(newBytes, to: configFile)
+            let current = EventSettingsWindowRoute(
+                scope: .workspace(id), workspaceTarget: WorkspaceSoundWriteTarget(rule: replacement)
+            )
+            expect(
+                fixture.session.send(.present(.eventShortcut(current)))
+                    == .presented(wasAlreadyPresented: true)
+                    && fixture.session.state.eventPresentation.route == current
+                    && fixture.session.state.eventPresentation.focusTarget == .scope(.workspace(id))
+                    && model.selectedWorkspaceTarget == current.workspaceTarget
+                    && model.configState.resolvedConfig.workspaceRules.first?.directory
+                        == replacement.directory
+                    && (try? Data(contentsOf: configFile)) == newBytes,
+                "有效新目录入口须先刷新缓存、进入原目标且不写配置")
+        }
+    }
+
     suite("Settings mounted sound entrance：失效工作区显示重选入口") {
         let rule = WorkspaceSoundRule(
             directory: WorkspaceDirectory(kind: .directory, path: "/fixture/stale-entrance"),

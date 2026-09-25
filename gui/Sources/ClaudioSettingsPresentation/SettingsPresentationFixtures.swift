@@ -123,6 +123,7 @@ package enum SettingsPresentationFixtures {
         textSize: ClaudioCompactPreviewDensity = .standard,
         experienceProfile: PreviewFixtures.SettingsExperienceProfile? = nil,
         workspaceRules: [WorkspaceSoundRule] = [],
+        eventSettingsModel injectedEventSettingsModel: PanelConfigController? = nil,
         builtinPackIDs: Set<String> = [],
         aiCueViewModel injectedAICueViewModel: AICueGenerationViewModel? = nil,
         aiCueScenario: PreviewFixtures.AICueGalleryScenario? = nil,
@@ -242,20 +243,22 @@ package enum SettingsPresentationFixtures {
         if let integrationInFlightAction {
             integrationsModel.pinPreviewInFlight(integrationInFlightAction)
         }
-        let eventSettingsModel = PanelConfigController(
-            previewConfigState: .operational(
-                settingsConfig),
-            eventRows: Event.allCases.map {
-                EventRow(
-                    event: $0,
-                    coverage: .present(fileName: "\($0.cliName).mp3"),
-                    enabled: true)
-            },
-            environment: AudioImportEnvironment(
-                userPacksDirectory: temporaryRoot.appendingPathComponent(
-                    "event-packs", isDirectory: true),
-                durationProbe: SettingsPresentationFixtureDurationProbe(),
-                packsLockFile: temporaryRoot.appendingPathComponent("event-packs.lock")))
+        let eventSettingsModel =
+            injectedEventSettingsModel
+            ?? PanelConfigController(
+                previewConfigState: .operational(
+                    settingsConfig),
+                eventRows: Event.allCases.map {
+                    EventRow(
+                        event: $0,
+                        coverage: .present(fileName: "\($0.cliName).mp3"),
+                        enabled: true)
+                },
+                environment: AudioImportEnvironment(
+                    userPacksDirectory: temporaryRoot.appendingPathComponent(
+                        "event-packs", isDirectory: true),
+                    durationProbe: SettingsPresentationFixtureDurationProbe(),
+                    packsLockFile: temporaryRoot.appendingPathComponent("event-packs.lock")))
         let nativeEffects = SoundPacksEditorNativeEffectsDispatcher(
             adapter: SettingsPresentationFixtureNativeEffectsAdapter())
         let aiCueViewModel =
