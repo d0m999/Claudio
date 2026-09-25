@@ -92,6 +92,21 @@ synthetic event 与 compiled mount 证据，不是系统 AX/TCC、真实键盘�
 | 能力阻止 | NOT VERIFIED | MiniMax/Qwen 非 speech、unsupported locale 在读 key/联网前可见失败 |
 | 生成到采用 | NOT VERIFIED | 显式生成、3 候选、试听、命名、采用、target drift 与失败回滚 |
 
+### #201 菜单栏与默认组／工作区专项复验
+
+此表跟踪 #201 实施后的原生验收。2026-09-25 的桌面会话暂时无法解锁；最终候选没有
+可用的原生操作记录。早期提交的探索性截图不能替代最终候选证据。复验时先记录待验
+commit、干净工作树、bundle 路径、构建时间、macOS/CPU、语言、外观和系统键盘导航设置；
+每项再附截图或操作记录。自动 harness、编译和 synthetic AppKit 事件另行记录。
+
+| #201 场景 | 状态 | 最终候选必须记录 |
+|---|---|---|
+| 删除工作区规则 | NOT VERIFIED | 长名／同名目录、确认目标与影响、取消／Escape、成功／拒写／冲突后的选择、焦点及结果 |
+| 集成页声音入口 | NOT VERIFIED | 从不同来源进入后保留手选工作区；首次默认组；失效目标不可写且可显式重新选择 |
+| 试听与恢复 | NOT VERIFIED | 零音量、未映射、缺失／不安全文件、刷新／配置／锁忙失败的可见原因与定向动作；许可音频实际听感单独记录 |
+| 导航与辅助功能 | NOT VERIFIED | 普通标题焦点、工作区／事件深链接、Tab／Shift-Tab、确认关闭及面板 handback；真实 VoiceOver 的标题、原因和结果 |
+| 视觉与活动状态 | NOT VERIFIED | 设置 1240×820／960×640、面板 312 pt；中英、明暗、Reduce Motion、Increase Contrast、显示缩放；长文案和活动完整状态 |
+
 ## 真实系统、Provider 与发布交接
 
 每行必须单独给证据；一行成功不能替代另一行。默认均为 `NOT RUN / NOT VERIFIED`。
