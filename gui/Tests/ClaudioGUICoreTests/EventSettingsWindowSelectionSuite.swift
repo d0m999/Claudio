@@ -149,13 +149,15 @@ func runEventSettingsWindowSelectionSuites() {
         let selection = EventSettingsWindowSelection()
         expect(
             selection.notePreviewFailure(
-                event: .stop, scope: .global, packID: "pack-a", reason: .assetChanged),
+                event: .stop, scope: .global, packID: "pack-a", reason: .assetChanged,
+                sourcePackReadOnly: true),
             "当前组点击时资产失效应留下可见失败事实")
         expect(
             selection.previewFailure?.event == .stop
                 && selection.previewFailure?.packID == "pack-a"
-                && selection.previewFailure?.reason == .assetChanged,
-            "失败反馈必须绑定点击时的声音包和事件")
+                && selection.previewFailure?.reason == .assetChanged
+                && selection.previewFailure?.sourcePackReadOnly == true,
+            "失败反馈必须绑定点击时的声音包、事件和只读状态")
         expect(selection.requestGroupVolumeFocus(for: .global), "音量恢复应聚焦当前组")
         expect(
             selection.presentationState.focusTarget == .masterVolume,

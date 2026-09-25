@@ -31,7 +31,6 @@ struct EventSettingsWindowView: View {
     @FocusState private var focusedTarget: EventSettingsFocusTarget?
     @State private var isAddingWorkspace = false
     @State private var deletionCancelFocusID: UUID?
-    @State private var deletionAlertOwnerID: ObjectIdentifier?
     @State private var player = NSSoundAudioPreviewPlayer()
     @State private var previewPulseTriggers: [Event: Int] = [:]
     @State private var previewSuccessTokens: [Event: UUID] = [:]
@@ -178,9 +177,10 @@ struct EventSettingsWindowView: View {
                             .settingsMountIdentity("workspace.event.preview-failure-readback")
                             Button(l10n.text(.eventPreviewRepairSound)) {
                                 onConfigureSound(
-                                    .editEvent(
+                                    soundRepairRoute(
                                         scope: failure.scope, packID: failure.packID,
-                                        event: failure.event))
+                                        event: failure.event,
+                                        readOnly: failure.sourcePackReadOnly))
                             }
                             .accessibilityIdentifier("workspace.event.preview-failure-repair")
                         }
@@ -254,29 +254,22 @@ struct EventSettingsWindowView: View {
         .onChange(of: selection.route) { _ in
             previewSuccessTokens.removeAll()
             deletionCancelFocusID = nil
-            deletionAlertOwnerID = nil
             synchronize()
         }
         .onChange(of: selection.presentationState.focusRequestRevision) { _ in synchronize() }
         .onChange(of: selection.deletionPresentation.pending?.id) { pendingID in
             if pendingID != nil {
                 deletionCancelFocusID = nil
-                deletionAlertOwnerID = nil
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEndSheetNotification)) {
-            notification in
-            guard let ownerID = deletionAlertOwnerID,
-                let owner = notification.object as? NSWindow,
-                ObjectIdentifier(owner) == ownerID
-            else { return }
+            _ in
             restoreDeletionCancelFocus(clearRequest: true)
         }
         .onDisappear {
             player.stop()
             previewSuccessTokens.removeAll()
             deletionCancelFocusID = nil
-            deletionAlertOwnerID = nil
             selection.cancelDeletion()
         }
         .sheet(
@@ -324,7 +317,7 @@ struct EventSettingsWindowView: View {
             Button(l10n.text(.workspaceCancel), role: .cancel) {
                 cancelDeletionFromAlert(request)
             }
-            .keyboardShortcut(.defaultAction)
+            .keyboardShortcut(.cancelAction)
             Button(l10n.text(.workspaceDeleteAction), role: .destructive) {
                 confirmDeletion(request)
             }
@@ -335,8 +328,6 @@ struct EventSettingsWindowView: View {
 
     private func cancelDeletionFromAlert(_ request: WorkspaceDeletionRequest) {
         guard selection.deletionPresentation.pending == request else { return }
-        let keyWindow = NSApp.keyWindow
-        deletionAlertOwnerID = (keyWindow?.sheetParent ?? keyWindow).map(ObjectIdentifier.init)
         deletionCancelFocusID = request.target.id
         selection.cancelDeletion()
         // SwiftUI can restore the title while its native alert is closing. Reapply the request
@@ -360,7 +351,6 @@ struct EventSettingsWindowView: View {
             focusedTarget = .workspaceRemove(id)
             if clearRequest {
                 deletionCancelFocusID = nil
-                deletionAlertOwnerID = nil
             }
         }
     }
@@ -802,6 +792,7 @@ struct EventSettingsWindowView: View {
                 Spacer()
                 Button {
                     let packID = model.config.selectedPack
+                    let sourcePackReadOnly = model.selectedPackIsBuiltinReadOnly
                     switch model.attemptPreview(event.event, using: player) {
                     case .started:
                         selection.clearPreviewFailure()
@@ -817,7 +808,8 @@ struct EventSettingsWindowView: View {
                     case .failed(let failure):
                         previewSuccessTokens.removeValue(forKey: event.event)
                         reportPreviewFailure(
-                            failure, event: event.event, scope: scope, packID: packID)
+                            failure, event: event.event, scope: scope, packID: packID,
+                            sourcePackReadOnly: sourcePackReadOnly)
                     }
                 } label: {
                     Image(systemName: "play.fill")
@@ -889,18 +881,31 @@ struct EventSettingsWindowView: View {
 
     private func configureSound(_ event: Event, scope: PanelSoundScopeID) {
         guard model.selectedSoundScope == scope, selection.route.scope == scope else { return }
-        onConfigureSound(.editEvent(scope: scope, packID: model.config.selectedPack, event: event))
+        onConfigureSound(
+            soundRepairRoute(
+                scope: scope, packID: model.config.selectedPack, event: event,
+                readOnly: model.selectedPackIsBuiltinReadOnly))
+    }
+
+    private func soundRepairRoute(
+        scope: PanelSoundScopeID, packID: String, event: Event, readOnly: Bool
+    ) -> SoundPacksWindowRoute {
+        readOnly
+            ? .copyAndApply(scope: scope, packID: packID, event: event)
+            : .editEvent(scope: scope, packID: packID, event: event)
     }
 
     private func reportPreviewFailure(
         _ reason: EventPreviewAttemptFailure,
         event: Event,
         scope: PanelSoundScopeID,
-        packID: String
+        packID: String,
+        sourcePackReadOnly: Bool
     ) {
         guard
             selection.notePreviewFailure(
-                event: event, scope: scope, packID: packID, reason: reason)
+                event: event, scope: scope, packID: packID, reason: reason,
+                sourcePackReadOnly: sourcePackReadOnly)
         else { return }
         let message = localizedEventPreviewAttemptFailure(reason, language: languageStore.language)
         onAnnouncement(message)
