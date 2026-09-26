@@ -134,6 +134,15 @@ final class SettingsRootNativeProbe {
         return window.attachedSheet != nil || !window.sheets.isEmpty
     }
 
+    var isActiveKeyWindow: Bool { NSApp.isActive && window.isKeyWindow }
+
+    func activate() {
+        window.center()
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        refresh()
+    }
+
     func clickSidebar(
         _ destination: SettingsDestination,
         horizontalFraction: CGFloat
@@ -171,12 +180,15 @@ final class SettingsRootNativeProbe {
         return false
     }
 
-    func sendKey(keyCode: UInt16, characters: String) -> Bool {
+    func sendKey(
+        keyCode: UInt16, characters: String,
+        modifiers: NSEvent.ModifierFlags = []
+    ) -> Bool {
         guard
             let down = NSEvent.keyEvent(
                 with: .keyDown,
                 location: .zero,
-                modifierFlags: [],
+                modifierFlags: modifiers,
                 timestamp: ProcessInfo.processInfo.systemUptime,
                 windowNumber: window.windowNumber,
                 context: nil,
@@ -187,7 +199,7 @@ final class SettingsRootNativeProbe {
             let up = NSEvent.keyEvent(
                 with: .keyUp,
                 location: .zero,
-                modifierFlags: [],
+                modifierFlags: modifiers,
                 timestamp: ProcessInfo.processInfo.systemUptime,
                 windowNumber: window.windowNumber,
                 context: nil,

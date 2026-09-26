@@ -99,11 +99,12 @@ package struct SettingsRootView: View {
         .settingsExitInteraction(destination: destination) { target in
             focusedTarget = target
         }
-        .onAppear {
+        .task(id: settingsPresentationSession.state) {
+            // Let the previous page leave the native key-view loop before applying the
+            // new request. Otherwise its focus teardown can overwrite the new title.
+            await Task.yield()
+            guard !Task.isCancelled else { return }
             synchronizeDestinationFocus(settingsPresentationSession.state)
-        }
-        .onReceive(settingsPresentationSession.$state) { state in
-            synchronizeDestinationFocus(state)
         }
     }
 
