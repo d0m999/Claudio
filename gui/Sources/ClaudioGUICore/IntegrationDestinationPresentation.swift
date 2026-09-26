@@ -16,13 +16,13 @@ public enum IntegrationConnectionRowKind: String, CaseIterable, Codable, Sendabl
 
 /// Actions that belong to a connection-section row. The row action is intentionally narrower
 /// than ``HostIntegrationUserAction``: selecting an Agent and operating its Toggle remain separate
-/// controls, while Events is routed by the Settings owner rather than the manager bridge.
+/// controls, while sound-scope navigation is routed by the Settings owner rather than the manager bridge.
 public enum IntegrationConnectionRowAction: Sendable, Equatable, Hashable {
     case redetect
     case copyHooks
     case repair(HostID)
     case copyConfigurationSource(HostID)
-    case manageEvents(HostID)
+    case manageSoundScopes
     case clearReceiptHistory(HostID)
 }
 
@@ -283,9 +283,9 @@ public func integrationConnectionSectionPresentation(
                     ? [] : [.copyConfigurationSource(facts.host)]),
             IntegrationConnectionRowPresentation(
                 kind: .eventsAndSounds,
-                title: "事件与提示音",
-                caption: "只修改 \(facts.host.displayName)；其他 app 的事件开关和声音保持不变",
-                actions: [.manageEvents(facts.host)]),
+                title: "默认组／工作区",
+                caption: "声音配置由默认组和各工作区独立管理。",
+                actions: [.manageSoundScopes]),
             IntegrationConnectionRowPresentation(
                 kind: .receiptHistory,
                 title: "脱敏连接证据",

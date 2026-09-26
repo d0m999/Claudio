@@ -56,6 +56,15 @@ package final class SoundPacksEditorOwner: ObservableObject {
     private var suppressesNextForkLibraryObservationCycle = false
     private var interfaceHasActivated = false
 
+    package func configureWorkspacePackWriter(
+        _ writer:
+            @escaping @MainActor (WorkspaceSoundWriteTarget, String) -> Result<
+                Void, WorkspaceSoundError
+            >
+    ) {
+        model.setWorkspacePackWriter(writer)
+    }
+
     package convenience init(
         configFile: URL,
         lockFile: URL = ClaudioPaths.configLockFile,
@@ -256,7 +265,9 @@ package final class SoundPacksEditorOwner: ObservableObject {
                 publish(from: model.editorProjectionSeed())
             case .sounds(let route, _):
                 let (_, seed) = captureModelTransition {
-                    model.setManagedSurface(route.surface)
+                    model.setManagedScope(
+                        route.scope,
+                        workspaceTarget: route.workspaceTarget)
                     let seed = model.editorProjectionSeed()
                     if case .ready = seed.library,
                         let packID = route.editTarget?.packID,
@@ -273,7 +284,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
                 publish(from: seed)
             case .events(let route, _, _):
                 let (_, seed) = captureModelTransition {
-                    model.setManagedSurface(route.surface)
+                    model.setManagedScope(route.scope, workspaceTarget: route.workspaceTarget)
                 }
                 publish(from: seed)
             }
@@ -1689,7 +1700,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
                 if let applyTarget, case .success(let outcome) = copyResult {
                     let applyResult = model.applyPackSelection(
                         outcome.newPackID,
-                        to: applyTarget,
+                        toScope: applyTarget,
                         allowFreshlyPublishedPack: true)
                     receipt = .copy(copyResult, applyResult: applyResult)
                 } else {
@@ -1865,7 +1876,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
                 allowsCopy: true,
                 allowsCopyAndApply: route.isCopyAndApply
                     && route.editTarget?.packID == $0.id,
-                copyAndApplyTarget: route.surface)
+                copyAndApplyTarget: route.scope)
         }
         let selectedPack =
             currentAICueDraft == nil
@@ -1984,7 +1995,10 @@ package final class SoundPacksEditorOwner: ObservableObject {
             routeState: routeState,
             scope: scopeAvailability(
                 seed,
-                requestedScope: route.surface.map(PanelSoundScopeID.surface) ?? .global),
+                requestedScope: route.scope),
+            workspaceName: route.scope.workspaceID.flatMap { id in
+                seed.config.workspaceRules.first(where: { $0.id == id })?.name
+            },
             masterVolume: seed.config.masterVolume,
             packs: packs,
             selectedPack: selectedPack,
@@ -2125,7 +2139,10 @@ package final class SoundPacksEditorOwner: ObservableObject {
         candidateGenerationID: UUID?,
         seed: SoundPacksEditorModelSeed
     ) -> EventsSoundPackPresentation {
-        let packs = seed.packCards.map { makePackPresentation(card: $0, seed: seed) }
+        let routeAvailable = route.unavailableRequestedScopeStoredValue == nil
+        let packs = seed.packCards.map {
+            makePackPresentation(card: $0, seed: seed, signsWriteActions: routeAvailable)
+        }
         let selectedNativeTargets = seed.selectedPackID.flatMap {
             seed.nativeTargetsByPackID[$0]
         }
@@ -2144,11 +2161,12 @@ package final class SoundPacksEditorOwner: ObservableObject {
             return SoundPackEditorEventAccessPresentation(
                 event: row.event,
                 previewAvailability: preview.availability,
-                previewAction: preview.action,
-                adoptionAvailability: adoptionAvailability)
+                previewAction: routeAvailable ? preview.action : nil,
+                adoptionAvailability: routeAvailable
+                    ? adoptionAvailability : .ineligible(.writesStopped))
         }
         var adoptionPermit: SoundPackAdoptionPermit?
-        if seed.library.isFresh,
+        if routeAvailable, seed.library.isFresh,
             let candidateGenerationID,
             let event = route.event,
             case .eligible(let target) = model.aiCueAdoptionEligibility(for: event)
@@ -2161,7 +2179,9 @@ package final class SoundPacksEditorOwner: ObservableObject {
         return EventsSoundPackPresentation(
             route: route,
             requestRevision: requestRevision,
-            scope: scopeAvailability(seed, requestedScope: route.scope),
+            scope: routeAvailable
+                ? scopeAvailability(seed, requestedScope: route.scope)
+                : .unavailable(scope: route.scope, reason: .scopeUnavailable),
             packs: packs,
             selectedPack: packs.first(where: { $0.id == seed.selectedPackID }),
             eventAccess: eventAccess,
@@ -2211,10 +2231,10 @@ package final class SoundPacksEditorOwner: ObservableObject {
         _ seed: SoundPacksEditorModelSeed,
         requestedScope: PanelSoundScopeID
     ) -> SoundPackEditorScopeAvailability {
-        guard isValidSoundPacksWindowSurface(seed.managedSurface), seed.writesAllowed else {
+        guard seed.writesAllowed else {
             return .unavailable(scope: requestedScope, reason: .scopeUnavailable)
         }
-        return .available(seed.managedSurface.map(PanelSoundScopeID.surface) ?? .global)
+        return .available(seed.managedScope)
     }
 
     private func makePackPresentation(
@@ -2223,7 +2243,7 @@ package final class SoundPacksEditorOwner: ObservableObject {
         signsWriteActions: Bool = true,
         allowsCopy: Bool = false,
         allowsCopyAndApply: Bool = false,
-        copyAndApplyTarget: HostSurfaceID? = nil
+        copyAndApplyTarget: PanelSoundScopeID = .global
     ) -> SoundPackEditorPackPresentation {
         let isInspected = card.id == seed.selectedPackID
         let isActiveForScope = card.isSelected
@@ -2267,7 +2287,8 @@ package final class SoundPacksEditorOwner: ObservableObject {
             copyAction: allowsCopy && seed.library.isFresh && isAvailable && !isBroken
                 && isInspected && !hasBusyOperation
                 ? makeAction(.copy, binding: .copy(packID: card.id), seed: seed) : nil,
-            copyAndApplyAction: allowsCopyAndApply && seed.library.isFresh && isAvailable
+            copyAndApplyAction: allowsCopyAndApply && seed.library.isFresh && seed.writesAllowed
+                && isAvailable
                 && !isBroken && isInspected && !hasBusyOperation
                 ? makeAction(
                     .copyAndApply,
@@ -2864,7 +2885,7 @@ private enum EditorScheduledWork {
     case assign(packID: String, fileName: String, event: Event)
     case clear(packID: String, event: Event)
     case fork(packID: String)
-    case copy(packID: String, applyTarget: HostSurfaceID?)
+    case copy(packID: String, applyTarget: PanelSoundScopeID?)
     case deletePack(packID: String)
     case deleteOrphan(packID: String, fileName: String)
     case restoreFactory(packID: String)
@@ -2907,7 +2928,7 @@ private enum EditorActionIntent {
     case toggleStar(packID: String)
     case fork(packID: String)
     case copy(packID: String)
-    case copyAndApply(packID: String, applyTarget: HostSurfaceID?)
+    case copyAndApply(packID: String, applyTarget: PanelSoundScopeID)
     case requestImport(packID: String, bindTo: Event?)
     case assign(packID: String, fileName: String, event: Event)
     case clear(packID: String, event: Event)

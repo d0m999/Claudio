@@ -21,7 +21,7 @@ func runSettingsNavigationSuites() {
         let expectedNames: [(SettingsDestination, String, String)] = [
             (.general, "通用", "General"),
             (.integrations, "集成", "Integrations"),
-            (.eventsAndSounds, "默认组／工作区", "Default Group / Workspaces"),
+            (.eventsAndSounds, "默认组／工作区", "Default Group & Workspaces"),
             (.notifications, "通知", "Notifications"),
             (.display, "显示", "Display"),
             (.sounds, "声音", "Sounds"),
@@ -170,6 +170,116 @@ func runSettingsNavigationSuites() {
                 == .staleSoundPack("delayed-pack"),
             "fresh ready 快照确认缺失后必须显示 stale pack 失败")
 
+    }
+
+    suite("Settings failed deep links：请求可见失败说明，普通导航保留标题焦点") {
+        let workspaceID = UUID(uuidString: "61E452D2-5895-4D4C-BF22-D8B0A8FEB2E7")!
+        let staleWorkspace = PanelSoundScopeID.workspace(workspaceID)
+        let availability = SettingsRouteAvailability(
+            integrationSurfaces: [],
+            eventScopes: [.global],
+            soundScopes: [.global],
+            soundPackIDs: ["valid-pack"],
+            events: Set(Event.allCases))
+        let failures: [(SettingsRoute, SettingsRouteFailure, SettingsWindowFocusTarget)] = [
+            (
+                .sounds(.editEvent(scope: .global, packID: "removed-pack", event: .stop)),
+                .staleSoundPack("removed-pack"),
+                .routeFailure(.sounds)
+            ),
+            (
+                .sounds(.editEvent(scope: staleWorkspace, packID: "valid-pack", event: .stop)),
+                .staleSoundScope(staleWorkspace),
+                .routeFailure(.sounds)
+            ),
+            (
+                .events(scope: staleWorkspace, event: .stop),
+                .staleSoundScope(staleWorkspace),
+                .routeFailure(.eventsAndSounds)
+            ),
+            (
+                .integrations(surface: .workBuddy),
+                .staleSurface(.workBuddy),
+                .routeFailure(.integrations)
+            ),
+        ]
+        for (route, failure, target) in failures {
+            let resolution = resolveSettingsRoute(route, availability: availability)
+            expect(
+                resolution.failure == failure
+                    && settingsWindowRequestedFocusTarget(resolution: resolution) == target,
+                "\(route) 失败后必须请求对应目的页的可见失败说明焦点")
+        }
+        expect(
+            settingsWindowRequestedFocusTarget(
+                resolution: resolveSettingsRoute(
+                    .destination(.general), availability: availability)) == .title(.general),
+            "普通 Settings 导航仍请求页面标题焦点")
+        for route in [SettingsRoute.destination(.sounds), .sounds(.overview)] {
+            expect(
+                settingsWindowRequestedFocusTarget(
+                    resolution: resolveSettingsRoute(route, availability: availability))
+                    == .title(.sounds),
+                "普通 Sounds 导航必须由统一设置壳请求可见页面标题焦点")
+        }
+        expect(
+            settingsWindowRequestedFocusTarget(
+                resolution: resolveSettingsRoute(
+                    .sounds(.editEvent(scope: .global, packID: "valid-pack", event: .stop)),
+                    availability: availability)) == nil,
+            "显式 Sounds 事件深链接仍由嵌入编辑器定位，不被标题覆盖")
+        expect(
+            settingsWindowRequestedFocusTarget(
+                resolution: resolveSettingsRoute(
+                    .destination(.eventsAndSounds), availability: availability)) == nil,
+            "普通 Events 导航仍由嵌入页请求标题焦点")
+    }
+
+    suite("Settings Sounds 工作区路由：身份、缺包回退与失效拒绝") {
+        let id = UUID(uuidString: "61E452D2-5895-4D4C-BF22-D8B0A8FEB2E7")!
+        let route = SoundPacksWindowRoute.copyAndApply(
+            scope: .workspace(id), packID: "source-pack", event: .stop)
+        expect(
+            SettingsRoute.sounds(route).stableIdentityComponents
+                == ["sounds", "workspace:\(id.uuidString)", "source-pack", "stop"],
+            "工作区 Sounds 深链必须携带 UUID，不能与默认组共用身份")
+        expect(
+            resolveSoundPacksWindowRoute(
+                route, availablePackIDs: [], libraryState: .ready)
+                == .resolved(.overview(scope: .workspace(id))),
+            "缺包降级仍须保留工作区目标")
+        let originalTarget = WorkspaceSoundWriteTarget(
+            id: id, directory: WorkspaceDirectory(kind: .directory, path: "/tmp/workspace-a"))
+        let reboundTarget = WorkspaceSoundWriteTarget(
+            id: id, directory: WorkspaceDirectory(kind: .directory, path: "/tmp/workspace-b"))
+        let anchored = SoundPacksWindowRoute.copyAndApply(
+            scope: .workspace(id), packID: "source-pack", event: .stop,
+            workspaceTarget: originalTarget)
+        let rebound = SoundPacksWindowRoute.copyAndApply(
+            scope: .workspace(id), packID: "source-pack", event: .stop,
+            workspaceTarget: reboundTarget)
+        expect(
+            Set([anchored, rebound]).count == 2
+                && resolveSoundPacksWindowRoute(
+                    anchored, availablePackIDs: [], libraryState: .ready)
+                    == .resolved(.overview(scope: .workspace(id), workspaceTarget: originalTarget))
+                && SettingsRoute.sounds(anchored).stableIdentityComponents
+                    == SettingsRoute.sounds(rebound).stableIdentityComponents,
+            "同 UUID 的目录目标须独立哈希并在缺包回退中保留，不将本地路径放进稳定导航身份")
+        let available = SettingsRouteAvailability(
+            integrationSurfaces: [], eventScopes: [.global, .workspace(id)],
+            soundScopes: [.global, .workspace(id)], soundPackIDs: ["source-pack"],
+            events: Set(Event.allCases))
+        expect(
+            resolveSettingsRoute(.sounds(route), availability: available).failure == nil,
+            "现存工作区 Sounds 路由应可解析")
+        let removed = SettingsRouteAvailability(
+            integrationSurfaces: [], eventScopes: [.global], soundScopes: [.global],
+            soundPackIDs: ["source-pack"], events: Set(Event.allCases))
+        expect(
+            resolveSettingsRoute(.sounds(route), availability: removed).failure
+                == .staleSoundScope(.workspace(id)),
+            "工作区删除后不得回退默认组")
     }
 
     suite("Settings sound shell：inactive editor 通过一个 coherent projection 提供 route 事实") {

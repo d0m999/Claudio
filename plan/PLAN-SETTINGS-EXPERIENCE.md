@@ -5,7 +5,7 @@
 > 日期：2026-09-06
 >
 > 范围：把当前分散的集成、事件、声音包与零散偏好收口到一个原生 macOS 统一设置窗口，
-> 完整交付「通用、集成、事件与提示音、通知、显示、声音、用量、快捷键、关于」九个设置目的页。
+> 完整交付「通用、集成、默认组／工作区、通知、显示、声音、用量、快捷键、关于」九个设置目的页。
 > 完整九页产品验收由 GitHub #85 及其子 tickets 拥有；#103 只拥有本文、ADR、执行计划与原型的
 > allowlisted 多 Provider SoT 对齐。Swift registry、transport、credentials、adapters 与 production UI
 > 分别由 #104–#109 及 #85 的设置子 tickets 拥有；任何真实凭据或 Provider smoke 仍需单独授权。
@@ -24,11 +24,12 @@
 > `mockups/pack-scoped-ai-cues.html`。本计划早期事件页行内生成任务保留为历史，不能作为
 > 当前生产 UI 已完成的证据。
 
-> **2026-09-06 当前合同覆盖说明**：本文件早期关于四档界面文字、可变 Panel 宽度、`Aa` 入口及以
-> 每 Surface 最多 20 条 receipt history 推算用量的文字均为历史计划，不再是生产要求。当前 SoT 是
-> `finalized.html`、`REPORT.md`、`CONTEXT.md`、ADR 0001–0010 与已落地代码：Panel 固定 312pt/紧凑密度，
-> Display 只保留活动状态点；「活动与诊断」消费七日本地活动摘要而不是 receipt 播放结果投影。历史段落
-> 保留用于追溯，但不得作为实现验收标准。
+> **现行合同覆盖说明（2026-09-25，#201/#202）**：本文件早期的 Global/Surface 稀疏声音覆盖、
+> 来源级编辑／采用、唯一全局主音量、四档界面文字、可变 Panel 宽度、`Aa` 入口及以每 Surface
+> receipt history 推算用量的文字均为历史计划，不再是生产要求。声音作用域以 `CONTEXT.md`、
+> ADR 0005/0016 及下文 §5.3 现行合同为准；设置窗口与动态静默分别遵循 ADR 0008/0009。
+> Panel 固定 312 pt／紧凑密度，Display 只保留活动状态点；「活动与诊断」消费七日本地活动摘要。
+> 旧原型、§1 的原始差距和 §7 的实施任务保留用于追溯，不作为新实施或验收指令。
 
 ## 0. 目标与完成定义
 
@@ -58,7 +59,7 @@
 | 文档归属 | 本计划是总计划；TTS 计划只保留 AI 提示音子域，并与本计划互相引用 |
 | 视觉验收 | 原生视觉合同，不逐像素复制 CSS；覆盖明暗模式、窗口断点、固定紧凑密度和 VoiceOver |
 
-## 1. 当前事实与逐页差距
+## 1. 原始基线与逐页差距（历史记录）
 
 `ClaudioGUIApp` 直接启动 AppKit，不注册会在旧 SDK 标记下冷启动弹出的空白 SwiftUI `Settings`
 场景，也不生成 process-wide `appSettings` 命令。生产 UI 由 `MenuBarController` 持有一个 retained 的统一
@@ -87,7 +88,7 @@
 | 以 App/Agent 作为事件配置身份 | 按宿主产品分组，选择稳定事件来源 `HostSurfaceID` | 产品不直接拥有统一事件能力；Surface 才拥有协议、配置、授权和回执代次 |
 | 「全屏时隐藏」 | 从生产规格删除 | 没有可靠公开 API 判断其他 app 的全屏状态；引入 AX/屏幕读取不符合该偏好的价值与隐私成本 |
 | 「空闲时自动隐藏」状态项 | 从生产规格删除 | claudi0 是无 Dock 的菜单栏 app，隐藏唯一入口会让用户无法主动重新打开 |
-| 通知页重复任务开始/响应结束/待响应开关 | 事件开关只留在「事件与提示音」；通知页负责动态静默策略 | 避免同一事件出现两个表面相同、优先级不明的开关 |
+| 通知页重复任务开始/响应结束/待响应开关 | 事件开关只留在「默认组／工作区」；通知页负责动态静默策略 | 避免同一事件出现两个表面相同、优先级不明的开关 |
 | 「会议期间静音」 | 精确改名为「日历忙碌时静音」 | 不读取标题猜测会议；只在授权后把当前非全天 busy 事件视为静默事实 |
 | 用量页「0 B 网络上传」 | 改为隐私边界说明，不显示伪精确字节数 | 宿主内容不上报，但用户显式 AI 生成会与所选 Provider 交换描述和音频 |
 | 声音页两个演示包 | 显示完整声音包库与唯一映射编辑器 | 原型行只是视觉样例，不能取代真实库状态、错误和安全写入 |
@@ -149,21 +150,21 @@ enum SettingsRoute {
 | 事实 | 唯一 owner | 设置页职责 |
 |---|---|---|
 | 宿主安装、连接、能力、回执 | `HostIntegrationManager` / bridge | 订阅、投影、提交显式动作 |
-| 全局与 Surface 声音配置 | 现有 config transaction/controller | 读取 effective profile，走现有外科式写入 |
+| 默认组与工作区声音配置 | 现有 config transaction/controller | 读取 effective profile，走现有外科式写入 |
 | 声音包磁盘事实 | app-lifetime `SoundPackLibrary` | 订阅同一 snapshot，不重复扫描 |
 | 声音包写入与映射 | `SoundPacksWindowModel` 既有写入 seams | 迁入「声音」目的页，不另造轻量 editor |
 | AI 提示音 | credential manager、generation engine、adoption seam | 复用现有 view model；不接触 key 明文 |
 | UI 偏好 | typed `SettingsPreferencesStore` | 读写有版本/默认值/非法值回退的 key |
 | 登录项 | ServiceManagement adapter | 显示系统真实 status；不以 UserDefaults 冒充 |
 | Focus/Calendar | GUI permission adapters | 发布最小动态静默快照；不进入 hook 回执 |
-| 活动摘要 | `HostHookReceiptStore` 与现有 log reader | 有限投影，不创建云端 analytics |
+| 活动摘要 | `LocalActivitySummaryStore` 与共享 `ActivityOverviewProjector` | 订阅七日本地活动事实，不从 receipt 或日志推算 |
 
 ### 3.3 持久化与信任边界
 
 | 数据 | 存储 | 规则 |
 |---|---|---|
-| 语言、界面文字、面板宽度、状态点、通知偏好、快捷键、上次目的页 | UserDefaults | typed key；非法值回落；有迁移测试 |
-| pack、事件、主音量、Surface 覆盖 | `~/.claudio/config.json` | 继续使用锁与外科式 JSON 更新，保留未知字段 |
+| 语言、状态点、通知偏好、快捷键、上次目的页 | UserDefaults | typed key；非法值回落；旧字号／面板宽度值保留但不再读写 |
+| 默认组与工作区各自的 pack、音量和五事件开关 | `~/.claudio/config.json` | 继续使用锁与外科式 JSON 更新，保留未知字段和退役覆盖原始字节 |
 | AI provider key | SenseAudio 使用 ADR 0015 的私有本地文件；其他 Provider 使用 macOS Keychain | 掩码表单录入，UI 只投影保存状态，如实披露未加密的本地文件存储；Key 不进入日志或导出 |
 | 动态静默 | 私有、带 schema/revision/expiry 的原子 snapshot | 只包含布尔原因和时间，不包含 Focus 名称、日历标题、参与人或位置 |
 | 回执与日志 | 现有 0600 私有文件 | 不扩大字段；不保存提示词、响应、项目路径或音频绝对路径 |
@@ -175,7 +176,7 @@ enum SettingsRoute {
 - 默认内容尺寸以原型的 `1240 × 820` 为基准；最小尺寸 `960 × 640`，内容不足时目的页纵向滚动，
   不允许窗口外壳横向滚动。
 - 使用真实 AppKit title bar、traffic lights、缩放和窗口恢复，不自绘网页窗口 chrome。
-- 侧栏默认 252 pt；紧凑窗口收至 220 pt；最大文字档允许增宽并让长标签自然换行。
+- 窗口宽度不超过 1100 pt 时侧栏 210 pt，否则 252 pt；长标签可换行，不引入应用内字号档位。
 - 目的页顺序固定为原型九项；「高级」和「claudi0」分组保留，品牌写法使用 `claudi0`。
 - 选中态使用中性底与彩色方形图标，不用事件色表达错误或连接状态。
 - 右侧内容最大阅读宽度约 820 pt；设置组使用系统设置式圆角分组，不堆叠装饰卡片。
@@ -197,9 +198,10 @@ enum SettingsRoute {
 - 每页至少覆盖 loading、ready、empty、permission-required、write-failed 和 stale（如适用）；
   没有数据不伪装成错误，读取失败不伪装为空。
 - 所有错误都从语义状态投影为可见文案与 VoiceOver 文案，禁止只打印日志或 Toast 后报成功。
-- Sidebar → 页面标题 → 页面首个可操作项形成稳定焦点序；路由到 Surface/Event/pack 时聚焦目标或
-  可见失败说明，不制造 phantom focus。
-- 支持简体中文与 English、四档 `ClaudioInterfaceTextSize`、明暗模式、Reduce Motion、
+- Sidebar → 可聚焦页面主标题 → 页面首个可操作项形成稳定焦点序。普通侧栏导航和集成页通用入口
+  请求标题焦点并保留有效声音作用域；显式工作区／事件／包深链接聚焦目标，失效时聚焦可见失败说明，
+  不把失败目标改成可写默认组，也不让旧事件级焦点请求覆盖普通导航。
+- 支持简体中文与 English、固定紧凑密度、系统辅助功能缩放、明暗模式、Reduce Motion、
   Increase Contrast 和默认关闭 Full Keyboard Access 的真实 macOS 行为。
 - 新文案必须同时更新 `Localizable.xcstrings` 和 `ClaudioL10nKey.allKnown`；路径、事件 token、
   manifest ID 和版本号才使用等宽字体。
@@ -234,18 +236,20 @@ macOS 13+ 的主 app 登录项入口见 Apple 的
 
 ### 5.2 集成
 
-用户结果：在统一设置里查看和管理每个**事件来源**的连接、事件能力与当前代次回执；任何动作只影响
-明确选择的 Surface。
+用户结果：在统一设置里查看和管理每个**事件来源**的连接、事件能力与当前代次回执；连接与回执
+动作只影响明确选择的 Surface，共享声音入口按当前手动声音作用域打开。
 
 内容与行为：
 
 - Agent 固定消费 `HostID.productVisibleCases`，顺序为 Claude Code → Codex → WorkBuddy；不显示宿主 Logo，
   名称选择与 Toggle 是两个独立控件。每行显示 manager 投影的五态 badge、`supported/total` 和真实 Toggle；
   `4/5`、`2/5` 保持中性能力事实。
-- 选中 Agent 后只显示四行 typed connection section，顺序固定为「连接状态、接入方式、事件与提示音、
+- 选中 Agent 后只显示四行 typed connection section，顺序固定为「连接状态、接入方式、默认组／工作区、
   脱敏回执历史」。连接状态合并现有诊断与最新当前 installation receipt；无回执明确显示「暂无当前安装实例回执」。
 - 接入方式消费 `HostIntegrationDescriptor.mechanism`；配置来源不是 manager 提供时不渲染复制动作。
-  「管理事件」只路由 `.events(scope: .surface(selectedHost.surfaceID), event: nil)`，清除回执只在第四行确认。
+  声音入口为「默认组／工作区…」（English: “Default Group & Workspaces…”），双语无障碍提示说明
+  声音按默认组与工作区管理。入口走普通 `.events` 目的页路由，保留有效的会话手动选择；首次显示默认组，
+  所选 host 不决定声音作用域。失效选择显示不可用和明确选择入口；清除回执只在第四行确认。
 - Toggle 关闭统一进入已有 disconnect 确认，取消无副作用；`notConnected` 开启 Toggle 调用 connect。其余连接、
   升级/修复和重新检测继续经既有 manager bridge，不添加第二个写入路径。
 - 五态连接动作纯投影：ready 重新检测；awaitingActivation 的 Codex 额外复制 `/hooks`；legacy 升级连接；
@@ -259,7 +263,32 @@ macOS 13+ 的主 app 登录项入口见 Apple 的
 验收：迁移前后 manager action、receipt transition、错误恢复和 accessibility label 保持等价；
 Codex `4/5` 与 WorkBuddy 从能力目录计算的覆盖数是诚实正常能力，不得为了填满原型显示假支持。
 
-### 5.3 事件与提示音
+### 5.3 默认组／工作区（原「事件与提示音」）
+
+**现行目的页为「默认组／工作区」**：默认组及每个工作区分别拥有完整声音包、音量与五事件开关；
+Surface 只负责接入和适用性。页面使用统一主标题、header trait、稳定无障碍身份和可聚焦标题目标，
+组名是详情标题。普通导航请求主标题焦点并保留有效手动选择；显式工作区／事件深链接定位目标，
+失效目标定位可见失败说明，不能写入默认组。关闭统一窗口仍由唯一 owner 归还焦点。
+
+- **删除工作区规则**：请求时捕获稳定规则 ID 与名称；原生确认显示名称，同名时补本机目录摘要，
+  说明只删除声音规则，项目文件与声音包保留，后续按剩余规则及默认组重新匹配。取消为安全初始动作；
+  取消、Escape、关闭或离页均不写入并把焦点还给原删除按钮。确认只消费捕获目标一次，在既有写入边界
+  重新验证；成功后选择默认组、显示结果并聚焦可达位置，但不修改默认组。拒写保留原值与选择，
+  错误即使详情不可写仍可见可达；`publishedConflict` 先读回并说明配置可能变化，不自动重试。
+- **手工试听**：面板和设置共享 `EventPreviewAvailability`。未映射、文件缺失／损坏、所选组音量为零、
+  安全／可读性失败都有可见文字及无障碍原因；不能仅藏在不可聚焦按钮的悬停提示。自动事件开关
+  关闭不单独禁用试听；试听只验证选中包音频，不证明宿主接入或激活。点击时音频失效或播放器启动
+  失败显示错误并使用现有播报通道；刷新后按真实库快照重新投影。
+- **恢复动作**：按类型化原因决定目标，不从本地化文案反推。音量为零定位当前组音量；缺声／损坏
+  定位同窗口的目标包与事件，安全失败进入现有包修复入口；刷新失败提供现有重试，有旧快照时
+  标识陈旧、无快照时显示失败而非空库；
+  配置／权限问题仅提供确实存在、可安全定位的 Finder 配置或恢复文件入口及显式重新载入；锁忙等
+  可重试写入由用户明确重试原目标，删除重试须重新确认；失效规则需显式重新选择或修复；发布冲突
+  读回实际状态并提供已有恢复目标。重新载入不等于原操作成功，不扫描猜测恢复文件名或自动重放写入。
+
+> **历史边界（ADR 0005/0016 已覆盖）**：以下从旧“用户结果”至“复制并用于全局默认／此来源”
+> 的 Global/Surface 页面方案只记录迁移前设计；不作为现行声音配置、删除或采用合同。后续 Provider
+> 流程与目录仍按其各自现行 ADR／计划解释。
 
 用户结果：在原型批准的层级内切换 Global/Surface，管理五个语义事件、试听、自动播放开关、
 主音量和 effective pack；缺声时精确深链到「声音」的包与事件。
@@ -392,7 +421,7 @@ slot、validation policy 与 production gate 一致；所有 UI capability 从 `
 ### 5.4 通知
 
 用户结果：控制**自动提示音何时临时静默**，而不是在第二个页面重复逐事件开关。手工试听永远不受
-动态静默影响，仍受主音量、文件安全和格式检查约束。
+动态静默影响，仍受所选组音量、文件安全和格式检查约束。
 
 内容与行为：
 
@@ -408,7 +437,7 @@ slot、validation policy 与 production gate 一致；所有 UI capability 从 `
    - 权限被拒时开关不伪装成功，提供打开隐私设置动作。
 3. **当前静默状态**
    - 可见显示未静默、Focus、日历忙碌、组合原因、状态过期或 observer 失败；
-   - 提供「管理事件提示音」内部路由，不复制五个事件开关。
+   - 提供「默认组／工作区」内部路由，不复制五个事件开关。
 
 GUI 把授权后的最小事实发布成 ADR 0009 定义的动态静默快照。helper 只接受 schema 正确、revision
 不倒退且尚未过期的 regular file；损坏/过期快照不继续静音，并写入不含私人信息的诊断结果。
@@ -442,11 +471,11 @@ GUI 把授权后的最小事实发布成 ADR 0009 定义的动态静默快照。
 内容与行为：
 
 - 迁入现有 `SoundPacksWindowView/Model` 能力，复用 app-lifetime `SoundPackLibrary` 和 refresh coordinator；
-- 选包应用目标明确显示 Global 或具体 Surface；包级生成与采用本身不带声音作用域；
+- 选包应用目标明确显示默认组或具体工作区；包级生成与采用本身不带声音作用域；
 - 包列表显示 built-in/user、license、完整/partial/broken、当前选择、只读/可编辑和刷新状态；
 - 支持导入声音包、复制内置包、使用此包、逐事件选文件/清除绑定/试听/在 Finder 显示、恢复出厂、删除用户包；
 - 包级 AI 采用复用同一安全导入和 manifest bind seam；成功后同一 library revision 更新两页。
-  空组首音成功才发布；普通复制不应用；共用与继承的使用者和不完整范围在动作旁可见；
+  空组首音成功才发布；普通复制不应用；共用该包的默认组／工作区使用者和不完整范围在动作旁可见；
 - 首次加载、SWR 旧快照、刷新失败、库失败、单包损坏、写入中、锁冲突和恢复 salvage 全部可见；
 - 100 包性能 ADR、浅 inventory、包锁、安全路径和未知字段保留规则不变。
 
@@ -465,9 +494,9 @@ adoption 和 route resolution；不得同时保留可写的 standalone 与 embed
 - 活动范围是今天及之前六个本地 Gregorian 日期，按回调发生时的本地日期入桶；切换时区不重分旧桶；
   清除后立即从零继续计数，并分别表示今日和七日的 partial 恢复边界；
 - 按 Surface 与公共 `Event` 展示活动，不显示提示词、响应、项目、会话、日历、provider、token 或声音路径；
-- 只有当前安装确认且成功映射的宿主回调计数。静音、动态静默、去抖、主音量为零、音频缺失、播放失败
+- 只有当前安装确认且成功映射的宿主回调计数。静音、动态静默、去抖、所选组音量为零、音频缺失、播放失败
   和 receipt 写入失败均不减少活动；未知、不支持和旧 installation callback 不计数；
-- Global 只汇总支持该事件的来源，并显示覆盖比例；不支持事件显示 `—`；
+- 「所有来源」只汇总支持该事件的来源，并显示覆盖比例；不支持事件显示 `—`；
 - 诊断区显示滚动日志是否存在、大小、最近失败数量；提供在 Finder 显示与复制路径；
 - 清除活动/日志是显式破坏动作，分别确认、分别加锁；活动清除只重建本地摘要，不影响连接 marker、当前
   回执、receipt history、声音配置或日志；日志清除不影响活动；
@@ -528,7 +557,10 @@ Apple 对全局 `NSEvent` key monitor 的权限说明见
 - AI session 在离开 Sounds 或关闭窗口时清理未采用候选；切换包、Event 或 profile 也按现有契约失效。
 - 任何目的页 write 成功后只刷新受影响 owner；write 失败不得发布假 revision 或清空旧成功状态。
 
-## 7. 实施任务与依赖图
+## 7. 实施任务与依赖图（历史任务记录）
+
+以下 S0–S16 反映统一设置最初实施顺序；其中 Global/Surface、四档字号与可变面板宽度任务已被现行合同覆盖。
+本轮 #202 只固定上方现行文档，后续交互实现与验收以 #201 的 P1–P4 阶段为准。
 
 下面每项可独立成为 ticket。每个 ticket 都必须同时包含 Foundation seam、SwiftUI wiring、双语文案、
 回归测试和失败态；不得把测试/无障碍统一推迟到最后补。S1–S13 可以在开发分支内逐步完成，但
@@ -739,11 +771,12 @@ git diff --check
 | 维度 | 必测 |
 |---|---|
 | 外观 | light、dark、Increase Contrast、Reduce Transparency |
-| 尺寸 | 1240×820、960×640、手动放大；无水平裁切 |
+| 尺寸 | 设置 1240×820、960×640，侧栏在窗口宽度 ≤1100 pt 时 210 pt、否则 252 pt，内容最大阅读宽度约 820 pt；面板固定 312 pt；无水平裁切 |
 | 文字 | 中文/英文 × 固定紧凑布局；系统 VoiceOver/Zoom 单独验证 |
 | 输入 | 鼠标、Tab/Shift-Tab、方向键、Return/Space、Escape、VoiceOver |
 | 生命周期 | panel → deep link → settings、页间路由、关闭 handback、重复打开 |
 | 失败 | 权限拒绝、config/pack/receipt/log 不可读、锁忙、磁盘写失败、陈旧 route |
+| 默认组／工作区 | 删除确认／取消／成功／拒写与同名目录、集成通用入口、普通标题焦点／显式深链接、试听禁用原因和对应恢复动作；分别记录原生键盘、VoiceOver 与真实听感 |
 
 额外真实门禁：
 
@@ -751,7 +784,7 @@ git diff --check
 - Focus：首次授权、拒绝、系统撤销、Focus 开关、observer failure；
 - Calendar：首次授权、拒绝、busy/全天/free、事件变更、无标题数据泄漏；
 - 快捷键：冲突、键盘布局变化、app 前后台、睡眠唤醒、注销；
-- 声音：真实 `NSSound` 试听、主音量、动态静默只抑制 automatic；
+- 声音：真实 `NSSound` 试听、所选组音量、动态静默只抑制 automatic；
 - AI：真实 key/provider/潜在费用需要独立显式授权。
 
 ## 10. 关键失败模式
@@ -773,7 +806,7 @@ git diff --check
 ## 11. 明确不做
 
 - 不在本计划新增宿主事件、伪造 WorkBuddy/Codex 支持或修改真实宿主配置。
-- 不重新引入全局静音、不把主音量写零模拟静音、不批量覆写逐事件选择。
+- 不重新引入全局静音、不把所选组音量写零模拟静音、不批量覆写逐事件选择。
 - 不使用 Accessibility、Screen Recording 或全局 key monitor 实现全屏、空闲或快捷键功能。
 - 不新增云端 telemetry、账号、完整 analytics ledger、供应商账单或网络字节计量。
 - 不把 Calendar 标题、参与人、位置、URL 或 Focus 名称写入 snapshot、日志、回执或 UI 历史。

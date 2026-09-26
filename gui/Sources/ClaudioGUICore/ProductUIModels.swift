@@ -147,7 +147,7 @@ public func panelPackSectionState(
     return .noPacks
 }
 
-/// 手工试听与事件自动播放静音完全正交。只要映射仍是安全、可读的正规文件且主音量非零，
+/// 手工试听与事件自动播放静音完全正交。只要映射仍是安全、可读的正规文件且所选组音量非零，
 /// `enabled == false` 的真实事件也可以从面板或声音包窗口手工试听。
 public enum EventPreviewAvailability: Sendable, Equatable {
     case available(fileName: String)
@@ -166,7 +166,7 @@ public enum EventPreviewAvailability: Sendable, Equatable {
         case .available:
             return nil
         case .masterVolumeZero:
-            return "主音量为零"
+            return "所选组音量为零"
         case .unmapped:
             return "尚未配置声音"
         case .missingOrDamaged:
@@ -181,7 +181,7 @@ public enum EventPreviewAvailability: Sendable, Equatable {
         case .available:
             return "播放当前映射的音频；事件静音不影响手工试听"
         case .masterVolumeZero:
-            return "主音量为零；调高主音量后可以试听"
+            return "所选组音量为零；调高所选组音量后可以试听"
         case .unmapped:
             return "尚未配置声音；请在声音包窗口中绑定音频"
         case .missingOrDamaged:
@@ -189,6 +189,60 @@ public enum EventPreviewAvailability: Sendable, Equatable {
         case .unsafeOrUnreadable(let reason):
             return "无法安全试听：\(reason)"
         }
+    }
+}
+
+/// The selected pack's targeted safety check uses the same containment and regular-file
+/// primitives as playback. No raw filename, path, or OS error becomes user-facing copy.
+public enum EventPreviewSafetyFailure: Sendable, Equatable {
+    case unsafeFile
+    case unreadableFile
+}
+
+public func localizedEventPreviewSafetyFailure(
+    _ failure: EventPreviewSafetyFailure, language: ClaudioAppLanguage
+) -> String {
+    let l10n = ClaudioL10n(language: language)
+    switch failure {
+    case .unsafeFile: return l10n.text(.eventPreviewUnsafeFile)
+    case .unreadableFile: return l10n.text(.eventPreviewUnreadableFile)
+    }
+}
+
+public enum EventPreviewRecoveryAction: Sendable, Equatable {
+    case adjustGroupVolume
+    case editSound
+    case repairSound
+}
+
+public func eventPreviewRecoveryAction(
+    for availability: EventPreviewAvailability
+) -> EventPreviewRecoveryAction? {
+    switch availability {
+    case .available: nil
+    case .masterVolumeZero: .adjustGroupVolume
+    case .unmapped: .editSound
+    case .missingOrDamaged, .unsafeOrUnreadable: .repairSound
+    }
+}
+
+public enum EventPreviewAttemptFailure: Sendable, Equatable {
+    case assetChanged
+    case playbackFailed
+}
+
+public enum EventPreviewAttemptOutcome: Sendable, Equatable {
+    case started
+    case failed(EventPreviewAttemptFailure)
+}
+
+public func localizedEventPreviewAttemptFailure(
+    _ failure: EventPreviewAttemptFailure, language: ClaudioAppLanguage
+) -> String {
+    let l10n = ClaudioL10n(language: language)
+    switch failure {
+    case .assetChanged: return l10n.text(.eventPreviewAssetChanged)
+    case .playbackFailed: return l10n.text(.eventPreviewPlaybackFailed)
     }
 }
 
@@ -231,8 +285,7 @@ public func localizedEventPreviewHint(
     }
 }
 
-/// 保留的声音包窗口只接受显式路由。每条路由都携带声音作用域；`nil` 明确表示 Global，
-/// 不是“缺少 scope”。窗口必须先验证非 nil Surface 属于产品 registry，才允许任何配置写入。
+/// 保留的声音包窗口只接受显式声音作用域；过期目标不得回退到默认组。
 public struct SoundPacksWindowRoute: Sendable, Equatable, Hashable {
     public enum Destination: Sendable, Equatable, Hashable {
         case overview
@@ -242,12 +295,36 @@ public struct SoundPacksWindowRoute: Sendable, Equatable, Hashable {
         case copyAndApply(packID: String, event: Event)
     }
 
-    public let surface: HostSurfaceID?
+    public let scope: PanelSoundScopeID
+    public var surface: HostSurfaceID? { scope.surface }
     public let destination: Destination
+    /// A deep link may pin the directory selected when the action was created. A later UUID
+    /// rebind must not turn that link into an edit of a different workspace.
+    public let workspaceTarget: WorkspaceSoundWriteTarget?
 
-    public init(surface: HostSurfaceID?, destination: Destination) {
-        self.surface = surface
+    public init(
+        scope: PanelSoundScopeID,
+        destination: Destination,
+        workspaceTarget: WorkspaceSoundWriteTarget? = nil
+    ) {
+        self.scope = scope
         self.destination = destination
+        self.workspaceTarget = workspaceTarget
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(scope)
+        hasher.combine(destination)
+        hasher.combine(workspaceTarget?.id)
+        hasher.combine(workspaceTarget?.directory.kind.rawValue)
+        hasher.combine(workspaceTarget?.directory.path)
+        hasher.combine(workspaceTarget?.directory.commonGitDirectory)
+    }
+
+    /// Retained source routes are rejected downstream; `nil` means Default Group.
+    public init(surface: HostSurfaceID?, destination: Destination) {
+        self.init(
+            scope: surface.map(PanelSoundScopeID.surface) ?? .global, destination: destination)
     }
 
     /// 兼容现有 Global 调用点的显式值；它仍真实携带 `surface == nil`。
@@ -257,8 +334,28 @@ public struct SoundPacksWindowRoute: Sendable, Equatable, Hashable {
         SoundPacksWindowRoute(surface: surface, destination: .overview)
     }
 
+    public static func overview(
+        scope: PanelSoundScopeID,
+        workspaceTarget: WorkspaceSoundWriteTarget? = nil
+    ) -> SoundPacksWindowRoute {
+        SoundPacksWindowRoute(
+            scope: scope, destination: .overview, workspaceTarget: workspaceTarget)
+    }
+
     public static func editEvent(packID: String, event: Event) -> SoundPacksWindowRoute {
         editEvent(surface: nil, packID: packID, event: event)
+    }
+
+    public static func editEvent(
+        scope: PanelSoundScopeID,
+        packID: String,
+        event: Event,
+        workspaceTarget: WorkspaceSoundWriteTarget? = nil
+    ) -> SoundPacksWindowRoute {
+        SoundPacksWindowRoute(
+            scope: scope,
+            destination: .editEvent(packID: packID, event: event),
+            workspaceTarget: workspaceTarget)
     }
 
     public static func editEvent(
@@ -276,6 +373,18 @@ public struct SoundPacksWindowRoute: Sendable, Equatable, Hashable {
         event: Event
     ) -> SoundPacksWindowRoute {
         copyAndApply(surface: nil, packID: packID, event: event)
+    }
+
+    public static func copyAndApply(
+        scope: PanelSoundScopeID,
+        packID: String,
+        event: Event,
+        workspaceTarget: WorkspaceSoundWriteTarget? = nil
+    ) -> SoundPacksWindowRoute {
+        SoundPacksWindowRoute(
+            scope: scope,
+            destination: .copyAndApply(packID: packID, event: event),
+            workspaceTarget: workspaceTarget)
     }
 
     public static func copyAndApply(
@@ -319,7 +428,9 @@ public func resolveSoundPacksWindowRoute(
 ) -> SoundPacksWindowRouteResolution {
     guard let packID = route.editTarget?.packID else { return .resolved(route) }
     if availablePackIDs.contains(packID) { return .resolved(route) }
-    if libraryState == .ready { return .resolved(.overview(surface: route.surface)) }
+    if libraryState == .ready {
+        return .resolved(.overview(scope: route.scope, workspaceTarget: route.workspaceTarget))
+    }
     return .pending(route)
 }
 

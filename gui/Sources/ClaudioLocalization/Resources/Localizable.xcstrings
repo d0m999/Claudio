@@ -1649,6 +1649,22 @@
         }
       }
     },
+    "event.preview.started": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview started"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "试听已开始"
+          }
+        }
+      }
+    },
     "event.preview.available-enabled": {
       "localizations": {
         "en": {
@@ -1718,13 +1734,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Master volume is zero; raise it to preview"
+            "value": "Selected group volume is zero; raise it to preview"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "主音量为零；调高主音量后可以试听"
+            "value": "所选组音量为零；调高所选组音量后可以试听"
           }
         }
       }
@@ -1734,13 +1750,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No sound is configured; bind audio in Sound Packs"
+            "value": "No sound is configured; bind audio on the Sounds page in Settings"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "尚未配置声音；请在声音包窗口中绑定音频"
+            "value": "尚未配置声音；请在设置的「声音」页绑定音频"
           }
         }
       }
@@ -1750,13 +1766,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mapped sound is missing or damaged; repair it in Sound Packs"
+            "value": "Mapped sound is missing or damaged; repair it on the Sounds page in Settings"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "映射的声音文件缺失或损坏；请在声音包窗口中修复"
+            "value": "映射的声音文件缺失或损坏；请在设置的「声音」页修复"
           }
         }
       }
@@ -1775,6 +1791,42 @@
             "value": "无法安全试听：%@"
           }
         }
+      }
+    },
+    "event.preview.unsafe-file": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The mapped audio path is unsafe or is not a regular file" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "映射音频路径不安全或目标不是正规文件" } }
+      }
+    },
+    "event.preview.unreadable-file": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The mapped file cannot be read" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "映射文件无法读取" } }
+      }
+    },
+    "event.preview.asset-changed": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The preview sound changed or disappeared. Sound pack status is refreshing." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "试听声音已变化或消失，正在刷新声音包状态。" } }
+      }
+    },
+    "event.preview.playback-failed": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Playback could not start. Check the sound on the Sounds page in Settings." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无法开始播放，请在设置的「声音」页检查该声音文件。" } }
+      }
+    },
+    "event.preview.adjust-group-volume": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Adjust selected group volume" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "调整所选组音量" } }
+      }
+    },
+    "event.preview.repair-sound": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Inspect in Settings > Sounds…" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "前往设置的「声音」页检查…" } }
       }
     },
     "event-notice.recent": {
@@ -9315,6 +9367,24 @@
         }
       }
     },
+    "event-settings.conflict-readback": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Current configuration was read back. The original write remains uncertain." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已重新读取当前配置；原写入结果仍不确定。" } }
+      }
+    },
+    "event-settings.retry-target-changed": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The original target changed after reloading. No retry was sent. Review the current setting and choose again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "重新载入后原操作目标已变化。没有重试写入；请核对当前设置后重新选择。" } }
+      }
+    },
+    "event-settings.retry-readback-unavailable": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The current configuration could not be verified. No retry was sent. Repair the configuration, then reload before trying again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无法核实当前配置。没有重试写入；请修复配置并重新载入后再操作。" } }
+      }
+    },
     "event-settings.shortcut-scope.unavailable": {
       "localizations": {
         "en": {
@@ -9640,13 +9710,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Manage how Claudio connects to each app. Event switches and sounds remain independently saved in Events & Sounds."
+            "value": "Manage each app's connection here. Sound packs, volume, and event switches belong to the Default Group or individual workspaces."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "管理 Claudio 与每个应用的连接方式。事件开关和提示音仍在“事件与提示音”中按 app 独立保存。"
+            "value": "在此管理各应用的连接。声音包、音量与事件开关由默认组或各工作区分别保存。"
           }
         }
       }
@@ -9816,13 +9886,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Events & Sounds"
+            "value": "Default Group & Workspaces"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "事件与提示音"
+            "value": "默认组／工作区"
           }
         }
       }
@@ -9960,13 +10030,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Only %@ changes; other apps' event switches and sounds stay unchanged."
+            "value": "Sound settings are managed independently for the Default Group and each workspace."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "只修改 %@；其他 app 的事件开关和声音保持不变"
+            "value": "声音配置由默认组和各工作区独立管理。"
           }
         }
       }
@@ -10552,7 +10622,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Default Group / Workspaces"
+            "value": "Default Group & Workspaces"
           }
         },
         "zh-Hans": {
@@ -10904,13 +10974,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Manage Events"
+            "value": "Default Group & Workspaces…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "管理事件"
+            "value": "默认组／工作区…"
           }
         }
       }
@@ -10920,13 +10990,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Opens Events & Sounds for the selected surface and event in this Settings window."
+            "value": "Opens sound settings for the Default Group and workspaces in this Settings window."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在当前设置窗口中打开所选事件来源和事件的“事件与提示音”。"
+            "value": "在当前设置窗口中打开按默认组和工作区管理的声音设置。"
           }
         }
       }
@@ -13939,6 +14009,166 @@
         }
       }
     },
+    "workspace.delete-confirm-title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete sound rule for “%@”?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除“%@”的声音规则？"
+          }
+        }
+      }
+    },
+    "workspace.delete-confirm-message": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Directory: %@\nOnly this sound rule is deleted. Project files and sound packs stay. Future callbacks match remaining Workspace rules or the Default Group."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目录：%@\n只删除这条声音规则，项目文件与声音包保留。后续回调按剩余工作区规则或默认组重新匹配。"
+          }
+        }
+      }
+    },
+    "workspace.delete-action": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Rule"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除规则"
+          }
+        }
+      }
+    },
+    "workspace.delete-succeeded": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Removed the sound rule for “%@”."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已删除“%@”的声音规则。"
+          }
+        }
+      }
+    },
+    "workspace.delete-failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not confirm deletion of “%@”: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法确认“%@”的删除结果：%@"
+          }
+        }
+      }
+    },
+    "workspace.delete-reload": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reload current configuration"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新载入当前配置"
+          }
+        }
+      }
+    },
+    "workspace.delete-readback-present": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The latest readable configuration still contains this rule. The published write conflicted; review the current configuration before requesting deletion again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最新可读配置仍有此规则。已发布的写入发生冲突；请核对当前配置后再重新请求删除。"
+          }
+        }
+      }
+    },
+    "workspace.delete-readback-absent": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The latest readable configuration has no rule with this ID. Which write removed it is uncertain; review the current configuration."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最新可读配置中已无此 ID 的规则。无法确定是哪次写入移除了它；请核对当前配置。"
+          }
+        }
+      }
+    },
+    "workspace.delete-readback-replaced": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The latest readable configuration uses this ID for another directory. No further deletion was attempted."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最新可读配置把此 ID 用于另一目录。没有继续尝试删除。"
+          }
+        }
+      }
+    },
+    "workspace.delete-readback-unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The configuration could not be read back reliably. The deletion outcome is unknown; inspect the current configuration and recovery files."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法可靠读回配置，删除结果未知；请检查当前配置与恢复文件。"
+          }
+        }
+      }
+    },
     "workspace.directory": {
       "localizations": {
         "en": {
@@ -14143,6 +14373,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "此声音目标已失效，无法编辑。"
+          }
+        }
+      }
+    },
+    "workspace.choose-default-group": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select Default Group"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择默认组"
           }
         }
       }

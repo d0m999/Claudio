@@ -128,7 +128,7 @@ collect_format_diagnostics() {
         exit "$status"
     fi
 
-    settings_format_normalize_diagnostics "$raw_output" "$normalized_output"
+    settings_format_normalize_diagnostics "$raw_output" "$normalized_output" "$source_root"
     settings_format_validate_diagnostics "$status" "$raw_output" "$normalized_output"
 }
 
@@ -144,6 +144,17 @@ settings_format_compare_diagnostics \
     "$baseline_diagnostics" \
     "$head_diagnostics" \
     "$new_diagnostics"
+
+if git diff --quiet "$format_base...HEAD" -- .swift-format; then
+    changed_swift_paths="$temporary_root/changed-swift-paths.txt"
+    changed_diagnostics="$temporary_root/changed-format-diagnostics.txt"
+    git diff --name-only "$format_base...HEAD" -- '*.swift' >"$changed_swift_paths"
+    settings_format_keep_changed_diagnostics \
+        "$new_diagnostics" \
+        "$changed_swift_paths" \
+        "$changed_diagnostics"
+    mv "$changed_diagnostics" "$new_diagnostics"
+fi
 
 if [[ -s "$new_diagnostics" ]]; then
     new_diagnostic_count="$(wc -l <"$new_diagnostics" | tr -d ' ')"

@@ -78,6 +78,12 @@ package final class SettingsPresentationSession: ObservableObject {
             pendingAnnouncement: nil,
             presentationRevision: 0)
 
+        let workspaceConfig = dependencies.eventSettingsModel
+        dependencies.soundPacksEditorOwner.configureWorkspacePackWriter { target, packID in
+            workspaceConfig.changeWorkspace(.pack(target, packID))
+                ? .success(()) : .failure(workspaceConfig.workspaceError ?? .configFailure)
+        }
+
         preferenceCancellable = dependencies.preferences.$snapshot
             .sink { [weak self] snapshot in
                 MainActor.assumeIsolated {
@@ -142,6 +148,21 @@ package final class SettingsPresentationSession: ObservableObject {
                             || presentation.routeRequestRevision
                                 != previousPresentation.routeRequestRevision
                     {
+                        // A valid deep link hands selection to the Events destination. Keep the
+                        // shell in step when that owner deliberately selects another scope (for
+                        // example, Default Group after deletion), rather than revalidating the
+                        // deleted link forever on later config publications.
+                        if case .events(let requestedScope, _) = self.routeResolution.route,
+                            requestedScope == previousPresentation.route.scope,
+                            presentation.route.scope != previousPresentation.route.scope,
+                            presentation.route.unavailableRequestedScopeStoredValue == nil
+                        {
+                            self.routeResolution = resolveSettingsRoute(
+                                .events(
+                                    scope: presentation.route.scope,
+                                    event: presentation.route.event),
+                                availability: self.availability)
+                        }
                         self.activateEventsEditor(
                             eventPresentation: presentation,
                             aiSession: self.dependencies.aiCueViewModel.session,
@@ -265,7 +286,21 @@ package final class SettingsPresentationSession: ObservableObject {
             guard let route else { return .unchanged }
             requestedRoute = route
             eventShortcut = nil
-        case .eventShortcut(let route):
+        case .eventShortcut(let requested):
+            if requested.workspaceTarget != nil {
+                dependencies.eventSettingsModel.reloadConfigForPinnedRoute()
+            }
+            let route: EventSettingsWindowRoute
+            if requested.workspaceTargetIsCurrent(
+                in: dependencies.eventSettingsModel.configState.resolvedConfig)
+            {
+                route = requested
+            } else {
+                route = EventSettingsWindowRoute(
+                    scope: requested.scope, event: requested.event,
+                    workspaceTarget: requested.workspaceTarget,
+                    unavailableRequestedScopeStoredValue: requested.scope.storedValue)
+            }
             requestedRoute =
                 route.unavailableRequestedScopeStoredValue == nil
                 ? .events(scope: route.scope, event: route.event)
@@ -334,7 +369,19 @@ package final class SettingsPresentationSession: ObservableObject {
                     generation: nil)
             }
             if eventRoute.unavailableRequestedScopeStoredValue == nil {
-                dependencies.eventSettingsModel.selectSoundScope(eventRoute.scope)
+                let model = dependencies.eventSettingsModel
+                let rebindsExplicitSelection =
+                    eventRoute.workspaceTarget != nil
+                    && model.selectedSoundScope == eventRoute.scope
+                    && model.selectedWorkspaceTarget != eventRoute.workspaceTarget
+                model.selectSoundScope(
+                    eventRoute.scope, rebindSelectedWorkspace: rebindsExplicitSelection)
+                if !eventRoute.workspaceTargetIsCurrent(in: model.configState.resolvedConfig)
+                    || (eventRoute.workspaceTarget != nil
+                        && model.selectedWorkspaceTarget != eventRoute.workspaceTarget)
+                {
+                    eventSettingsSelection.markCurrentScopeUnavailable()
+                }
             }
         case .destination(.eventsAndSounds):
             if let eventShortcut {
@@ -392,8 +439,14 @@ package final class SettingsPresentationSession: ObservableObject {
             }
             synchronizeIntegrationsLifecycle()
         case .eventsAndSounds:
+            if eventSettingsSelection.route.scope.workspaceID != nil,
+                !availability.eventScopes.contains(eventSettingsSelection.route.scope)
+            {
+                eventSettingsSelection.markCurrentScopeUnavailable()
+            }
             if requestsFocus {
-                eventSettingsSelection.requestInitialFocus(scopes: eventSettingsFocusScopes)
+                eventSettingsSelection.requestInitialFocus(
+                    scopes: eventSettingsFocusScopes, for: route)
             }
             activateEventsEditor()
         case .sounds:

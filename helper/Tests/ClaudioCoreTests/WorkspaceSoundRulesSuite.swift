@@ -8,8 +8,46 @@ private final class WorkspacePlaybackRecorder: ProcessSpawning, @unchecked Senda
     }
 }
 
+private final class WorkspaceGitResultRunner: CommandRunning, @unchecked Sendable {
+    private var results: [CommandRunResult]
+    private(set) var calls: [(executable: String, arguments: [String], timeout: TimeInterval)] = []
+
+    init(_ results: [CommandRunResult]) { self.results = results }
+
+    func run(executablePath: String, arguments: [String], timeout: TimeInterval)
+        -> CommandRunResult
+    {
+        calls.append((executablePath, arguments, timeout))
+        return results.isEmpty ? .launchFailed : results.removeFirst()
+    }
+}
+
+private final class WorkspaceHangingGitRunner: CommandRunning, @unchecked Sendable {
+    private(set) var outcomes: [CommandRunResult] = []
+
+    func run(executablePath: String, arguments: [String], timeout: TimeInterval)
+        -> CommandRunResult
+    {
+        let outcome = SystemCommandRunner().run(
+            executablePath: "/bin/sleep", arguments: ["20"], timeout: timeout)
+        outcomes.append(outcome)
+        return outcome
+    }
+}
+
 @MainActor
 func runWorkspaceSoundRulesSuites() {
+    suite("workspace directories: ordinary directory outside Git tree resolves") {
+        withTempDirectory { root in
+            let ordinary = root.appendingPathComponent("ordinary", isDirectory: true)
+            try! FileManager.default.createDirectory(
+                at: ordinary, withIntermediateDirectories: true)
+            expect(
+                (try? WorkspaceDirectoryResolver.resolve(ordinary.path).get())
+                    == WorkspaceDirectory(kind: .directory, path: ordinary.path),
+                "ancestor traversal reaches filesystem root and returns the ordinary directory")
+        }
+    }
     suite("workspace directories: two repositories, two worktrees, child and symlink identities") {
         withTempDirectory { root in
             @MainActor func git(_ args: [String]) {
@@ -76,6 +114,76 @@ func runWorkspaceSoundRulesSuites() {
             expect(
                 try! config.resolveSoundProfile(for: .claudeCode, cwd: a.path).get().selectedPack
                     == "default", "inapplicable Surface uses Default Group")
+        }
+    }
+    suite("workspace Git lookup retries one transient deadline, but a persistent hang fails closed")
+    {
+        withTempDirectory { root in
+            let repository = root.appendingPathComponent("repository")
+            let git = Process()
+            git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            git.arguments = ["init", "-q", repository.path]
+            git.standardOutput = FileHandle.nullDevice
+            git.standardError = FileHandle.nullDevice
+            try! git.run()
+            git.waitUntilExit()
+            expect(git.terminationStatus == 0, "fixture repository is valid")
+
+            let canonical = repository.resolvingSymlinksInPath().standardizedFileURL
+            let output = "\(canonical.path)\n\(canonical.appendingPathComponent(".git").path)\n"
+            let delayed = WorkspaceGitResultRunner([
+                .timedOut, .completed(exitCode: 0, stdout: output),
+            ])
+            expect(
+                WorkspaceDirectoryResolver.resolve(repository.path, commandRunner: delayed)
+                    == .success(
+                        WorkspaceDirectory(
+                            kind: .git, path: canonical.path,
+                            commonGitDirectory: canonical.appendingPathComponent(".git").path)),
+                "a valid repository is not rejected after one transient Git deadline")
+            expect(
+                delayed.calls.count == 2 && delayed.calls[0].timeout == 0.5
+                    && delayed.calls[1].timeout > delayed.calls[0].timeout
+                    && delayed.calls[1].timeout <= 2.0,
+                "one bounded longer attempt follows the fast Git deadline")
+            expect(
+                delayed.calls.allSatisfy {
+                    $0.executable == "/usr/bin/env"
+                        && $0.arguments.starts(with: ["-i", "PATH=/usr/bin:/bin"])
+                        && $0.arguments.contains("/usr/bin/git")
+                }, "both attempts keep the sanitized shell-free Git invocation")
+
+            let hung = WorkspaceGitResultRunner([.timedOut, .timedOut])
+            expect(
+                WorkspaceDirectoryResolver.resolve(repository.path, commandRunner: hung)
+                    == .failure(.gitUnavailable),
+                "a persistently hung Git command never becomes an ordinary directory")
+            expect(
+                hung.calls.count == 2 && hung.calls.allSatisfy { $0.timeout > 0 },
+                "a persistent hang receives only two finite attempts")
+
+            let realHang = WorkspaceHangingGitRunner()
+            let started = Date()
+            expect(
+                WorkspaceDirectoryResolver.resolve(repository.path, commandRunner: realHang)
+                    == .failure(.gitUnavailable),
+                "a real sleeping child fails closed through the production process runner")
+            expect(
+                realHang.outcomes == [.timedOut, .timedOut]
+                    && Date().timeIntervalSince(started) < 10,
+                "both real child processes are stopped and the retry remains bounded")
+        }
+    }
+    suite("workspace Git lookup rejects stale .git targets") {
+        withTempDirectory { root in
+            let directory = root.appendingPathComponent("stale")
+            try! FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
+            writeFixture(
+                "gitdir: /no/such/claudio-git-target", to: directory.appendingPathComponent(".git"))
+            expect(
+                WorkspaceDirectoryResolver.resolve(directory.path) == .failure(.gitUnavailable),
+                "a stale .git marker cannot silently become an ordinary directory")
         }
     }
     suite(
@@ -165,18 +273,25 @@ func runWorkspaceSoundRulesSuites() {
                 "explicit selected pack and volume create full rule")
             expect(mutate(.add(rule)).isWorkspaceFailure(.duplicateDirectory), "duplicate rejected")
             expect(
-                mutate(.volume(UUID(), 0.2)).isWorkspaceFailure(.staleRule),
+                mutate(
+                    .volume(
+                        WorkspaceSoundWriteTarget(id: UUID(), directory: rule.directory), 0.2)
+                ).isWorkspaceFailure(.staleRule),
                 "stale UUID never writes defaults")
             expect(
-                mutate(.surfaces(rule.id, [.workBuddy])).isWorkspaceFailure(.unsupportedSurface),
+                mutate(
+                    .surfaces(WorkspaceSoundWriteTarget(rule: rule), [.workBuddy])
+                ).isWorkspaceFailure(.unsupportedSurface),
                 "unverified WorkBuddy rejected")
             for event in Event.allCases {
                 expect(
-                    (try? mutate(.event(rule.id, event, false)).get()) != nil,
+                    (try? mutate(
+                        .event(WorkspaceSoundWriteTarget(rule: rule), event, false)
+                    ).get()) != nil,
                     "all five event switches independently writable")
             }
             expect(
-                (try? mutate(.volume(rule.id, 0.61)).get()) != nil,
+                (try? mutate(.volume(WorkspaceSoundWriteTarget(rule: rule), 0.61)).get()) != nil,
                 "workspace independent volume writes")
             let decoded = loadClaudioConfig(from: file)!
             let profile = try! decoded.resolveWorkspaceProfile(id: rule.id).get()
@@ -226,6 +341,64 @@ func runWorkspaceSoundRulesSuites() {
             expect(
                 (try! Data(contentsOf: file)) == bytes,
                 "rejected growth preserves exact original bytes")
+        }
+    }
+    suite("workspace edits reject a different directory reusing the same UUID") {
+        withTempDirectory { root in
+            let file = root.appendingPathComponent("config.json")
+            let lock = root.appendingPathComponent("config.lock")
+            let packs = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{"id":"next","events":{}}"#,
+                to: packs.appendingPathComponent("next/manifest.json"))
+            let original = WorkspaceSoundRule(
+                directory: WorkspaceDirectory(
+                    kind: .directory, path: root.appendingPathComponent("a").path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "old", volume: 0.5))
+            let replacement = WorkspaceSoundRule(
+                id: original.id,
+                directory: WorkspaceDirectory(
+                    kind: .directory, path: root.appendingPathComponent("b").path),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(selectedPack: "old", volume: 0.5))
+            var config = ClaudioConfig(selectedPack: "default", masterVolume: 0.2)
+            config.workspaceRules = [replacement]
+            let before = try! JSONEncoder().encode(config)
+            try! before.write(to: file)
+            let target = WorkspaceSoundWriteTarget(rule: original)
+            expect(
+                mutateWorkspaceSound(
+                    .pack(target, "next"), configFile: file, lockFile: lock,
+                    userPacksDirectory: packs
+                ).isWorkspaceFailure(.staleRule),
+                "rebound UUID must fail closed inside the config lock")
+            let staleMutations: [WorkspaceSoundMutation] = [
+                .volume(target, 0.8),
+                .event(target, .stop, false),
+                .surfaces(target, [.codex, .claudeCode]),
+            ]
+            for mutation in staleMutations {
+                expect(
+                    mutateWorkspaceSound(
+                        mutation, configFile: file, lockFile: lock,
+                        userPacksDirectory: packs
+                    ).isWorkspaceFailure(.staleRule),
+                    "every edit must reject a directory rebound under the same UUID")
+            }
+            expect((try! Data(contentsOf: file)) == before, "failed write preserves config bytes")
+            config.workspaceRules = [original]
+            try! JSONEncoder().encode(config).write(to: file)
+            expect(
+                (try? mutateWorkspaceSound(
+                    .pack(target, "next"), configFile: file, lockFile: lock,
+                    userPacksDirectory: packs
+                ).get()) != nil,
+                "unchanged ID and directory still accept the pack write")
+            expect(
+                loadClaudioConfig(from: file)?.workspaceRules.first?.profile?.selectedPack == "next"
+                    && loadClaudioConfig(from: file)?.selectedPack == "default",
+                "accepted workspace pack write leaves Default Group unchanged")
         }
     }
     suite(

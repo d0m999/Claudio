@@ -118,18 +118,30 @@ func runPanelErrorCopySuites() {
         expect(
             surfacePublished.panelRecoveryFile?.path == "/tmp/.claudio-stage-surface-fixture",
             "Surface 发布冲突也必须把恢复文件作为类型化目标")
-        let another = PanelWriteFailure(
-            reason: .configPublishedButFailed(reason: "another conflict"),
-            message: "another conflict",
-            recoveryFile: URL(fileURLWithPath: "/tmp/.claudio-stage-second"),
-            source: .packSwitch)
-        let recoveryFiles = panelWriteFailureRecoveryFiles(
-            items: retained + [another],
-            surfaceRecoveryFile: URL(fileURLWithPath: "/tmp/.claudio-stage-second"))
-        expect(
-            recoveryFiles.map(\.path)
-                == ["/tmp/.claudio-stage-fixture", "/tmp/.claudio-stage-second"],
-            "两个不同发布冲突都要有入口；重复路径只显示一次")
+        withTempDirectory { root in
+            let first = root.appendingPathComponent("first.recovery")
+            let second = root.appendingPathComponent("second.recovery")
+            writeFixture("first", to: first)
+            writeFixture("second", to: second)
+            let existing = PanelWriteFailure(
+                reason: .configPublishedButFailed(reason: "first conflict"),
+                message: "first conflict", recoveryFile: first, source: .mute)
+            let another = PanelWriteFailure(
+                reason: .configPublishedButFailed(reason: "another conflict"),
+                message: "another conflict", recoveryFile: second, source: .packSwitch)
+            let recoveryFiles = panelWriteFailureRecoveryFiles(
+                items: [existing, another], surfaceRecoveryFile: second)
+            expect(
+                recoveryFiles == [first.standardizedFileURL, second.standardizedFileURL],
+                "两个实际存在的发布冲突文件各有入口；重复路径只显示一次")
+            try! FileManager.default.removeItem(at: first)
+            expect(
+                panelWriteFailureRecoveryFiles(
+                    items: [existing, another], surfaceRecoveryFile: first) == [
+                        second.standardizedFileURL
+                    ],
+                "恢复文件消失后不能把其父目录伪装成该文件入口")
+        }
         for category in [
             PanelErrorCopyCategory.configMalformed, .configUnwritable,
             .surfaceOverrideMalformed, .configMissing, .surfaceLockBusy, .surfaceLockFailed,
@@ -198,8 +210,6 @@ func runPanelErrorCopySuites() {
     }
 
     suite("面板错误文案：不同 typed reason 各自可见，恢复文件仍完整保留") {
-        let recoveryA = "/tmp/.claudio-stage-first"
-        let recoveryB = "/tmp/.claudio-stage-second"
         let items = panelWriteFailureItems(
             muteError: .configReadFailure(reason: "events is an array"),
             packSwitchError: .configReadFailure(reason: "master_volume is a string"),
@@ -227,18 +237,21 @@ func runPanelErrorCopySuites() {
                 "展示标签不能泄露底层技术原因")
         }
 
-        let published = panelWriteFailureItems(
-            muteError: .configPublishedButFailed(
-                reason: "first conflict", recoveryPath: recoveryA),
-            packSwitchError: .configPublishedButFailed(
-                reason: "second conflict", recoveryPath: recoveryB),
-            masterVolumeError: nil)
-        let visible = panelWriteFailureRows(
-            items: published, l10n: ClaudioL10n(language: .english))
-        expect(visible.count == 2, "两个不同的发布冲突必须各自可见")
-        expect(
-            panelWriteFailureRecoveryFiles(items: published, surfaceRecoveryFile: nil).map(\.path)
-                == [recoveryA, recoveryB],
-            "保留独立失败行时仍须呈现两个不同的恢复文件入口")
+        withTempDirectory { root in
+            let recoveryA = root.appendingPathComponent("not-created-a").path
+            let recoveryB = root.appendingPathComponent("not-created-b").path
+            let published = panelWriteFailureItems(
+                muteError: .configPublishedButFailed(
+                    reason: "first conflict", recoveryPath: recoveryA),
+                packSwitchError: .configPublishedButFailed(
+                    reason: "second conflict", recoveryPath: recoveryB),
+                masterVolumeError: nil)
+            let visible = panelWriteFailureRows(
+                items: published, l10n: ClaudioL10n(language: .english))
+            expect(visible.count == 2, "两个不同的发布冲突必须各自可见")
+            expect(
+                panelWriteFailureRecoveryFiles(items: published, surfaceRecoveryFile: nil).isEmpty,
+                "仅有结果路径但文件已不存在时不提供虚假的 Finder 入口")
+        }
     }
 }

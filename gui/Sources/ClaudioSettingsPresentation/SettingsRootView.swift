@@ -78,6 +78,7 @@ package struct SettingsRootView: View {
                     .frame(width: ClaudioTheme.Metrics.hairline)
                     .accessibilityHidden(true)
                 routeSlot
+                    .settingsContentFocusSection()
                     .frame(
                         maxWidth: .infinity,
                         maxHeight: geometry.size.height,
@@ -99,11 +100,12 @@ package struct SettingsRootView: View {
         .settingsExitInteraction(destination: destination) { target in
             focusedTarget = target
         }
-        .onAppear {
+        .task(id: settingsPresentationSession.state) {
+            // Let the previous page leave the native key-view loop before applying the
+            // new request. Otherwise its focus teardown can overwrite the new title.
+            await Task.yield()
+            guard !Task.isCancelled else { return }
             synchronizeDestinationFocus(settingsPresentationSession.state)
-        }
-        .onReceive(settingsPresentationSession.$state) { state in
-            synchronizeDestinationFocus(state)
         }
     }
 
@@ -113,12 +115,8 @@ package struct SettingsRootView: View {
             debt.revision > handledFocusDebtRevision
         else { return }
         handledFocusDebtRevision = debt.revision
-        if state.routeResolution.failure != nil
-            || (debt.destination != .integrations
-                && debt.destination != .eventsAndSounds
-                && debt.destination != .sounds)
-        {
-            focusedTarget = SettingsWindowFocusTarget.title(state.routeResolution.destination)
+        if let target = settingsWindowRequestedFocusTarget(resolution: state.routeResolution) {
+            focusedTarget = target
         }
         _ = settingsPresentationSession.send(.acknowledgeFocus(revision: debt.revision))
     }
@@ -255,9 +253,9 @@ package struct SettingsRootView: View {
                     model: integrationsModel,
                     focusCoordinator: integrationsFocusCoordinator,
                     languageStore: preferences,
-                    onManageEvents: { host in
+                    onManageSoundScopes: {
                         settingsPresentationSession.send(
-                            .route(.events(scope: .global, event: nil)))
+                            .route(.destination(.eventsAndSounds)))
                     },
                     onAnnouncement: onAnnouncement)
             case .eventsAndSounds:
@@ -721,7 +719,10 @@ package struct SettingsRootView: View {
         .padding(14)
         .background(Color.red.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+        .focusable()
+        .focused($focusedTarget, equals: .routeFailure(destination))
         .accessibilityIdentifier("settings.route.failure.\(destination.rawValue)")
+        .settingsMountIdentity("settings.route.failure.\(destination.rawValue)")
     }
 
     private func settingsFailureMessage(_ failure: SettingsRouteFailure) -> String {

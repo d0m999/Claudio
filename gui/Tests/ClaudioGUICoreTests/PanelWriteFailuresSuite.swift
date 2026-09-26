@@ -255,4 +255,29 @@ func runPanelWriteFailuresSuites() {
                 == [recoveryPath, "/tmp/.claudio-stage-other"],
             "相同诊断文案但不同恢复文件属于不同 typed identity，均须保留")
     }
+
+    suite("panelWriteFailureRecoveryFiles：只列出现存恢复文件，并按首次出现顺序去重") {
+        withTempDirectory { root in
+            let first = root.appendingPathComponent("first.recovery")
+            let second = root.appendingPathComponent("second.recovery")
+            let missing = root.appendingPathComponent("missing.recovery")
+            writeFixture("first", to: first)
+            writeFixture("second", to: second)
+            let items = panelWriteFailureItems(
+                muteError: .configPublishedButFailed(
+                    reason: "first conflict", recoveryPath: first.path),
+                packSwitchError: .configPublishedButFailed(
+                    reason: "missing conflict", recoveryPath: missing.path),
+                masterVolumeError: .configPublishedButFailed(
+                    reason: "second conflict", recoveryPath: second.path))
+            expect(
+                panelWriteFailureRecoveryFiles(items: items, surfaceRecoveryFile: first)
+                    == [first, second],
+                "缺失路径不得出现；Surface 与事件写入共享同一文件时只显示一次")
+            try! FileManager.default.removeItem(at: second)
+            expect(
+                panelWriteFailureRecoveryFiles(items: items, surfaceRecoveryFile: nil) == [first],
+                "已消失的恢复文件不可退回父目录或保留过期 Finder 入口")
+        }
+    }
 }

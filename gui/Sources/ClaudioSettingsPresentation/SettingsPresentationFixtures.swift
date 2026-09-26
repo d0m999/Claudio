@@ -75,6 +75,10 @@ package final class SettingsPresentationFixture: ObservableObject {
         session.dependencies.preferences.lastSettingsDestination
     }
 
+    package var eventSettingsSelection: EventSettingsWindowSelection {
+        session.eventSettingsSelection
+    }
+
     package var previewStopRequestRevisions: AnyPublisher<UInt64, Never> {
         session.eventSettingsSelection.$presentationState
             .map(\.previewStopRequestRevision)
@@ -118,6 +122,9 @@ package enum SettingsPresentationFixtures {
         availability: SettingsRouteAvailability? = nil,
         textSize: ClaudioCompactPreviewDensity = .standard,
         experienceProfile: PreviewFixtures.SettingsExperienceProfile? = nil,
+        workspaceRules: [WorkspaceSoundRule] = [],
+        eventSettingsModel injectedEventSettingsModel: PanelConfigController? = nil,
+        soundPacksEditor injectedSoundPacksEditor: SoundPacksEditorOwner? = nil,
         builtinPackIDs: Set<String> = [],
         aiCueViewModel injectedAICueViewModel: AICueGenerationViewModel? = nil,
         aiCueScenario: PreviewFixtures.AICueGalleryScenario? = nil,
@@ -159,52 +166,55 @@ package enum SettingsPresentationFixtures {
         if generalState == .writeFailed {
             loginItemSettings.setEnabled(true)
         }
-        let settingsConfig = ClaudioConfig(
+        var settingsConfig = ClaudioConfig(
             selectedPack: "settings-fixture-pack",
             masterVolume: 0.7,
             surfaceOverrides: [
                 HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
                     selectedPack: "settings-fixture-workbuddy-pack")
             ])
-        let soundPacksEditor = SoundPacksEditorOwner.stateGalleryFixture(
-            previewConfig: settingsConfig,
-            packCards: [
-                PackCard(
-                    id: "settings-fixture-pack",
-                    name: "Settings Fixture Pack",
-                    isCC0: true,
-                    presentEvents: Set(Event.allCases),
-                    state: .complete,
-                    isSelected: true),
-                PackCard(
-                    id: "settings-fixture-workbuddy-pack",
-                    name: "Settings Fixture WorkBuddy Pack",
-                    isCC0: true,
-                    presentEvents: Set(Event.allCases),
-                    state: .complete,
-                    isSelected: false),
-                PackCard(
-                    id: "gallery-pack",
-                    name: "Gallery Pack",
-                    isCC0: true,
-                    presentEvents: Set(Event.allCases),
-                    state: .complete,
-                    isSelected: false),
-            ],
-            selectedPackID: "settings-fixture-pack",
-            selectedEventRows: Event.allCases.map {
-                EventRow(
-                    event: $0,
-                    coverage: .present(fileName: "\($0.cliName).mp3"),
-                    enabled: true)
-            },
-            builtinPackIDs: builtinPackIDs,
-            environment: AudioImportEnvironment(
-                userPacksDirectory: temporaryRoot.appendingPathComponent(
-                    "packs", isDirectory: true),
-                durationProbe: SettingsPresentationFixtureDurationProbe(),
-                packsLockFile: temporaryRoot.appendingPathComponent("packs.lock")),
-            activation: nil)
+        settingsConfig.workspaceRules = workspaceRules
+        let soundPacksEditor =
+            injectedSoundPacksEditor
+            ?? SoundPacksEditorOwner.stateGalleryFixture(
+                previewConfig: settingsConfig,
+                packCards: [
+                    PackCard(
+                        id: "settings-fixture-pack",
+                        name: "Settings Fixture Pack",
+                        isCC0: true,
+                        presentEvents: Set(Event.allCases),
+                        state: .complete,
+                        isSelected: true),
+                    PackCard(
+                        id: "settings-fixture-workbuddy-pack",
+                        name: "Settings Fixture WorkBuddy Pack",
+                        isCC0: true,
+                        presentEvents: Set(Event.allCases),
+                        state: .complete,
+                        isSelected: false),
+                    PackCard(
+                        id: "gallery-pack",
+                        name: "Gallery Pack",
+                        isCC0: true,
+                        presentEvents: Set(Event.allCases),
+                        state: .complete,
+                        isSelected: false),
+                ],
+                selectedPackID: "settings-fixture-pack",
+                selectedEventRows: Event.allCases.map {
+                    EventRow(
+                        event: $0,
+                        coverage: .present(fileName: "\($0.cliName).mp3"),
+                        enabled: true)
+                },
+                builtinPackIDs: builtinPackIDs,
+                environment: AudioImportEnvironment(
+                    userPacksDirectory: temporaryRoot.appendingPathComponent(
+                        "packs", isDirectory: true),
+                    durationProbe: SettingsPresentationFixtureDurationProbe(),
+                    packsLockFile: temporaryRoot.appendingPathComponent("packs.lock")),
+                activation: nil)
         let hostState =
             integrationScenario?.state
             ?? PreviewFixtures.workBuddyVisualScenarios.first {
@@ -236,20 +246,22 @@ package enum SettingsPresentationFixtures {
         if let integrationInFlightAction {
             integrationsModel.pinPreviewInFlight(integrationInFlightAction)
         }
-        let eventSettingsModel = PanelConfigController(
-            previewConfigState: .operational(
-                settingsConfig),
-            eventRows: Event.allCases.map {
-                EventRow(
-                    event: $0,
-                    coverage: .present(fileName: "\($0.cliName).mp3"),
-                    enabled: true)
-            },
-            environment: AudioImportEnvironment(
-                userPacksDirectory: temporaryRoot.appendingPathComponent(
-                    "event-packs", isDirectory: true),
-                durationProbe: SettingsPresentationFixtureDurationProbe(),
-                packsLockFile: temporaryRoot.appendingPathComponent("event-packs.lock")))
+        let eventSettingsModel =
+            injectedEventSettingsModel
+            ?? PanelConfigController(
+                previewConfigState: .operational(
+                    settingsConfig),
+                eventRows: Event.allCases.map {
+                    EventRow(
+                        event: $0,
+                        coverage: .present(fileName: "\($0.cliName).mp3"),
+                        enabled: true)
+                },
+                environment: AudioImportEnvironment(
+                    userPacksDirectory: temporaryRoot.appendingPathComponent(
+                        "event-packs", isDirectory: true),
+                    durationProbe: SettingsPresentationFixtureDurationProbe(),
+                    packsLockFile: temporaryRoot.appendingPathComponent("event-packs.lock")))
         let nativeEffects = SoundPacksEditorNativeEffectsDispatcher(
             adapter: SettingsPresentationFixtureNativeEffectsAdapter())
         let aiCueViewModel =

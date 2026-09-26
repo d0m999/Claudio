@@ -2,7 +2,7 @@
 
 发布流程在 codesign 前执行 `scripts/check-release-size.sh`。门禁按 Mach-O 架构数线性放大：
 
-- `claudi0-app`：每架构最多 `6,500,000 B`；
+- `claudi0-app`：每架构最多 `7,000,000 B`；
 - `claudi0` helper：每架构最多 `3,250,000 B`；
 - macOS 12 内嵌 `claudi0-login-item`：每架构最多 `500,000 B`；
 - app 内其余正规文件合计预留 `1,500,000 B`；
@@ -269,3 +269,53 @@ helper `2,969,496 / 3,250,000 B`，LoginItem `54,368 / 500,000 B`，非可执行
 `6,042,112 / 6,500,000 B`；`codesign --verify --deep --strict` 与
 `scripts/verify-dev-bundle-signature.sh` 均通过。该本地 ad-hoc app 只提供单架构检验，
 新分支的 Xcode 16.4 CI 和正式分发验收仍需独立回执。
+
+## 2026-09-25 默认组／工作区设置体验重基线（Issue #201 / #211）
+
+Issue #201 扩充删除确认、双语试听原因与恢复、设置路由焦点，以及面板和设置的事件展示。
+在相同的 GitHub `macos-15` / Xcode 16.4、arm64 Release `-Osize`、完整 `strip`、签名前
+`scripts/check-release-size.sh` 口径下，实测 GUI 主程序：
+
+| 候选提交 | GUI 切片 | 相对上一锚点 | 回执 |
+|---|---:|---:|---|
+| `ddb6b2a`（P1 与原生启动修复） | `6,471,656 B` | — | [检查版构建](https://github.com/d0m999/Claudio/actions/runs/36110045153) |
+| `8bf5ba6`（加入 P2） | `6,604,568 B` | `+132,912 B` | [检查版构建，旧预算拒绝](https://github.com/d0m999/Claudio/actions/runs/36112090064) |
+| `c8b0196`（加入 P3 与面板可读性） | `6,621,128 B` | `+16,560 B` | [诊断检查版构建](https://github.com/d0m999/Claudio/actions/runs/36112821716) |
+| `2a8885e`（P4 事件字形与试听脉冲） | `6,621,128 B` | `0 B` | [标准 CI，旧预算拒绝](https://github.com/d0m999/Claudio/actions/runs/36113248248) |
+
+旧预算 `6,500,000 B` 在 P2 之前只剩 `28,344 B`，P2 候选超过 `104,568 B`；
+该阶段候选超过 `121,128 B`。该候选的同一 CI 已通过 GUI harness `10,581/10,581`、
+Debug 与 Release build，失败在签名前的 GUI 体积门。诊断检查版仅为生成可观察原生界面，
+临时使用 `CLAUDIO_GUI_BYTES_PER_ARCH=7000000`；它仍走同一装包、strip 和导出检查，
+确认 GUI 无产品导出、helper `3,153,320 B`、LoginItem `55,248 B`、其他资源
+`721,035 B`，均在原有独立预算内。该诊断覆盖不能算作旧预算通过，也不改变正式门禁。
+
+增长对应已审查的设置和面板功能代码；这轮没有引入新框架、重复 helper Mach-O 或把可执行代码
+转移到资源预算。现有 `-Osize`、完整 strip 和导出检查保持不变。按上一节的 3% 余量与
+`0.1M` 圆整惯例：`6,621,128 × 1.03 = 6,819,761.84 B`，因此 GUI 每架构预算调整为
+**`6,900,000 B`**，给该候选留 `278,872 B`（相对实测 `4.21%`）余量。helper、
+LoginItem、非可执行资源预算与 GUI 零产品导出合同不变；单架构总预算由公式自动变为
+`12,150,000 B`。脚本默认值、`docs/ENV.md` 与 `ReleaseLayoutSuite` 的合同断言同步更新。
+这是 `2a8885e` 阶段的 arm64 / Xcode 16.4 重基线记录；无覆盖预算的最终统一设置门禁、
+双架构包、签名公证和原生体验仍各需独立回执。
+
+### 后续 `454c4a7` CI 回执与二次重基线
+
+[CI run 36120401072](https://github.com/d0m999/Claudio/actions/runs/36120401072) 在相同的
+GitHub `macos-15` / Xcode 16.4 工具链上通过。其 `Assemble local release-layout app` 步骤
+在完整 `strip` 后、ad-hoc 签名前通过共享门禁：arm64 GUI `6,737,128 B`，相对上表
+`2a8885e` 增加 `116,000 B`；helper `3,153,560 B`、LoginItem `55,248 B`、非可执行资源
+`722,284 B`。随后 CI 的 `Verify release size budget` 步骤对 ad-hoc 签名后的 app 再次
+执行同一脚本，实测 GUI 切片 **`6,755,264 B`**、helper `3,171,712 B`、LoginItem
+`73,392 B`、非可执行资源 `732,338 B`，bundle 正规文件合计 `10,732,706 B`；GUI
+无产品导出符号，两次检查均通过当时的默认预算。
+
+签名后 GUI 切片相对旧 `6,900,000 B` 上限只余 `144,736 B`，即实测的 `2.14%`。
+沿用约 `3%` 余量和 `0.1M` 向上圆整：`6,755,264 × 1.03 = 6,957,921.92 B`，
+故 GUI 每架构默认预算重定为 **`7,000,000 B`**，相对该实测余 `244,736 B`
+（`3.62%`）。单架构 bundle 总预算由既有公式自动变为 `12,250,000 B`；helper、
+LoginItem、非可执行资源预算，以及逐切片、架构一致性与 GUI 无产品导出检查不变。
+
+`454c4a7` 是本次预算分支基点 `dc3fdda` 的祖先；该 CI 回执只证明祖先提交的
+arm64 本地装包及 ad-hoc 签名复验。最终候选 HEAD 仍须在无预算覆盖的共享门禁下重新测量，
+并分别取得双架构、Developer ID 签名、公证与正式 release 的证据。

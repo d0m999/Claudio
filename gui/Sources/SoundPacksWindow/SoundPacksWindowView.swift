@@ -101,7 +101,8 @@ public struct EmbeddedSoundPacksEditorView: View {
         guard case .sounds(let sounds) = editorOwner.presentation.mode else { return }
         let projection = SoundPacksEditorFocusProjection(
             requestRevision: sounds.requestRevision,
-            routeState: sounds.routeState)
+            routeState: sounds.routeState,
+            scopeAvailability: sounds.scope)
         guard
             focusApplicationTracker.recordAndShouldApply(
                 projection,
@@ -112,7 +113,7 @@ public struct EmbeddedSoundPacksEditorView: View {
         case .resolved(let resolved):
             focusRoute = resolved
         case .pendingFreshSnapshot, .staleTarget:
-            focusRoute = .overview(surface: sounds.route.surface)
+            focusRoute = .overview(scope: sounds.route.scope)
         }
         if requestsInitialFocus {
             focusCoordinator.requestInitialFocus(route: focusRoute)
@@ -125,17 +126,24 @@ public struct EmbeddedSoundPacksEditorView: View {
         guard case .sounds(let sounds) = editorOwner.presentation.mode else { return nil }
         return SoundPacksEditorFocusProjection(
             requestRevision: sounds.requestRevision,
-            routeState: sounds.routeState)
+            routeState: sounds.routeState,
+            scopeAvailability: sounds.scope)
     }
 }
 
 package struct SoundPacksEditorFocusProjection: Equatable {
     package let requestRevision: UInt64
     package let routeState: SoundPacksEditorRouteState
+    package let scopeAvailability: SoundPackEditorScopeAvailability
 
-    package init(requestRevision: UInt64, routeState: SoundPacksEditorRouteState) {
+    package init(
+        requestRevision: UInt64,
+        routeState: SoundPacksEditorRouteState,
+        scopeAvailability: SoundPackEditorScopeAvailability
+    ) {
         self.requestRevision = requestRevision
         self.routeState = routeState
+        self.scopeAvailability = scopeAvailability
     }
 }
 
@@ -218,6 +226,7 @@ private struct SoundPacksWindowContentView: View {
     @State private var handledFocusRequestRevision = 0
     @State private var dropTargetEvent: Event?
     @State private var requestedRoute: SoundPacksWindowRoute = .overview
+    @State private var awaitsDeepLinkFocus = false
 
     init(
         editorOwner: SoundPacksEditorOwner,
@@ -298,6 +307,7 @@ private struct SoundPacksWindowContentView: View {
         }
         .onChange(of: activeSounds.recoveryActions.map(\.packID)) { _ in
             if activeSounds.packs.isEmpty,
+                focusedTarget != nil || requestedRoute.editTarget != nil,
                 let packID = activeSounds.recoveryActions.first?.packID
             {
                 focusedTarget = .retryFactoryRestore(packID: packID)
@@ -396,9 +406,12 @@ private struct SoundPacksWindowContentView: View {
     private var managedScopeBar: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 7) {
-                Image(systemName: managedSurface == nil ? "globe" : "square.stack.3d.up.fill")
-                    .foregroundColor(ClaudioTheme.clay(colorScheme))
-                    .accessibilityHidden(true)
+                Image(
+                    systemName: activeSounds.route.scope == .global
+                        ? "globe" : "square.stack.3d.up.fill"
+                )
+                .foregroundColor(ClaudioTheme.clay(colorScheme))
+                .accessibilityHidden(true)
                 Text(l10n.format(.soundPacksManagingScope, managedScopeName))
                     .font(.system(.subheadline, design: .rounded).weight(.semibold))
                     .foregroundColor(ClaudioTheme.text(colorScheme))
@@ -406,6 +419,9 @@ private struct SoundPacksWindowContentView: View {
             }
             if let reason = localizedManagedScopeFailure {
                 FailureRow(message: reason)
+                    .focusable()
+                    .focused($focusedTarget, equals: .managedScopeFailure)
+                    .accessibilityIdentifier("sound-packs.scope.failure")
             }
         }
         .padding(.horizontal, 12)
@@ -419,15 +435,22 @@ private struct SoundPacksWindowContentView: View {
     }
 
     private var managedScopeName: String {
-        guard let surface = managedSurface else {
+        switch activeSounds.route.scope {
+        case .global:
             return l10n.text(.panelGlobalName)
+        case .workspace:
+            return activeSounds.workspaceName ?? l10n.text(.workspaceUnavailable)
+        case .surface(let surface):
+            return HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?.displayName
+                ?? surface.rawValue
         }
-        return HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?.displayName
-            ?? surface.rawValue
     }
 
     private var localizedManagedScopeFailure: String? {
         guard case .unavailable = activeSounds.scope else { return nil }
+        if case .workspace = activeSounds.route.scope {
+            return l10n.text(.workspaceUnavailable)
+        }
         return l10n.format(.soundPacksDamagedScope, managedScopeName)
     }
 
@@ -516,45 +539,55 @@ private struct SoundPacksWindowContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10)
 
-            List(selection: selection) {
-                ForEach(activeSounds.packs) { card in
-                    HStack(spacing: 6) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(SelectedPackMetadata(id: card.id, name: card.name).displayName)
-                                .lineLimit(layoutAdaptation.packNameLineLimit)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 4)
-                        if card.isActiveForScope {
-                            ClaudioStatusCapsule(l10n.text(.soundPacksUsing), isEmphasized: true)
-                        }
-                    }
-                    .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
-                    .contentShape(Rectangle())
-                    .tag(Optional(card.id))
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel(packAccessibilityLabel(card))
-                    .accessibilityValue(packAccessibilityValue(card))
-                    .accessibilityHint(l10n.text(.soundPacksCardHint))
-                    .accessibilityIdentifier("sound-packs.pack.\(card.id)")
-                    .accessibilityAddTraits(
-                        card.isInspected ? .isSelected : [])
+            Group {
+                if activeSounds.packs.isEmpty {
+                    Spacer(minLength: 0)
+                } else {
+                    packList
                 }
             }
             .soundPacksLayoutProbe("sound-packs.pack-list")
-            .focusable(!activeSounds.packs.isEmpty)
-            .focused($focusedTarget, equals: .packList)
-            .accessibilityLabel(l10n.text(.soundPacksSidebarLabel))
-            .accessibilityValue(
-                selectedCard.map {
-                    l10n.format(
-                        .soundPacksSidebarViewing,
-                        SelectedPackMetadata(id: $0.id, name: $0.name).displayName)
-                } ?? l10n.text(.soundPacksSidebarNone)
-            )
-            .accessibilityHint(l10n.text(.soundPacksSidebarHint))
-            .accessibilityIdentifier("sound-packs.pack-list")
         }
+    }
+
+    private var packList: some View {
+        List(selection: selection) {
+            ForEach(activeSounds.packs) { card in
+                HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(SelectedPackMetadata(id: card.id, name: card.name).displayName)
+                            .lineLimit(layoutAdaptation.packNameLineLimit)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 4)
+                    if card.isActiveForScope {
+                        ClaudioStatusCapsule(l10n.text(.soundPacksUsing), isEmphasized: true)
+                    }
+                }
+                .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
+                .contentShape(Rectangle())
+                .tag(Optional(card.id))
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(packAccessibilityLabel(card))
+                .accessibilityValue(packAccessibilityValue(card))
+                .accessibilityHint(l10n.text(.soundPacksCardHint))
+                .accessibilityIdentifier("sound-packs.pack.\(card.id)")
+                .accessibilityAddTraits(
+                    card.isInspected ? .isSelected : [])
+            }
+        }
+        // List already owns a native key-view stop; another focusable wrapper swallows arrows.
+        .focused($focusedTarget, equals: .packList)
+        .accessibilityLabel(l10n.text(.soundPacksSidebarLabel))
+        .accessibilityValue(
+            selectedCard.map {
+                l10n.format(
+                    .soundPacksSidebarViewing,
+                    SelectedPackMetadata(id: $0.id, name: $0.name).displayName)
+            } ?? l10n.text(.soundPacksSidebarNone)
+        )
+        .accessibilityHint(l10n.text(.soundPacksSidebarHint))
+        .accessibilityIdentifier("sound-packs.pack-list")
     }
 
     @ViewBuilder
@@ -940,9 +973,7 @@ private struct SoundPacksWindowContentView: View {
     }
 
     private var copyAndApplyScopeName: String {
-        activeSounds.route.surface.flatMap { surface in
-            HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?.displayName
-        } ?? l10n.text(.panelGlobalName)
+        managedScopeName
     }
 
     private func invoke(_ action: SoundPackEditorAction?) {
@@ -1315,6 +1346,9 @@ private struct SoundPacksWindowContentView: View {
                         localizedEventName(row.event, language: languageStore.language))
                 )
                 .accessibilityValue(mappingText(row.coverage))
+                .focusable(readOnlyDeepLinkEvent == row.event)
+                .focused($focusedTarget, equals: .eventAudio(row.event))
+                .accessibilityIdentifier("sound-packs.event.\(row.event.rawValue).readonly-mapping")
         }
     }
 
@@ -1490,13 +1524,6 @@ private struct SoundPacksWindowContentView: View {
         }
     }
 
-    private var managedSurface: HostSurfaceID? {
-        switch activeSounds.scope {
-        case .available(let scope), .unavailable(scope: let scope, reason: _):
-            return scope.surface
-        }
-    }
-
     private var isImportingAudio: Bool {
         presentation.activities.contains {
             guard case .busy = $0.phase else { return false }
@@ -1573,6 +1600,7 @@ private struct SoundPacksWindowContentView: View {
         return SoundPacksWindowFocusScope(
             packIDs: activeSounds.packs.map(\.id),
             selectedPackID: activeSounds.selectedPack?.id,
+            hasManagedScopeFailure: localizedManagedScopeFailure != nil,
             editableEvents: canEditSelectedPack ? activeSounds.eventRows.map(\.event) : [],
             previewableEvents: activeSounds.eventRows.filter {
                 $0.previewAction != nil
@@ -1592,27 +1620,62 @@ private struct SoundPacksWindowContentView: View {
     }
 
     private func applyInitialFocus() {
+        let visibleEvents = Set(activeSounds.eventRows.map(\.event))
+        if case .unavailable = activeSounds.scope {
+            awaitsDeepLinkFocus = false
+        } else {
+            awaitsDeepLinkFocus =
+                requestedRoute.editTarget.map {
+                    activeSounds.selectedPack?.id != $0.packID || !visibleEvents.contains($0.event)
+                } ?? false
+        }
+        focusedTarget = soundPacksWindowDeepLinkFocusTarget(
+            route: requestedRoute,
+            scopeAvailability: activeSounds.scope,
+            selectedPackID: activeSounds.selectedPack?.id,
+            visibleEvents: visibleEvents,
+            fallback: soundPacksWindowFirstFocusTarget(focusScope))
+    }
+
+    private var readOnlyDeepLinkEvent: Event? {
+        guard !canEditSelectedPack,
+            activeSounds.selectedPack?.id == requestedRoute.editTarget?.packID
+        else { return nil }
         switch requestedRoute.destination {
-        case .overview:
-            focusedTarget = soundPacksWindowFirstFocusTarget(focusScope)
-        case .editEvent(_, let event), .copyAndApply(_, let event):
-            if canEditSelectedPack {
-                focusedTarget = .eventAudio(event)
-            } else if focusScope.previewableEvents.contains(event) {
-                focusedTarget = .eventPreview(event)
-            } else {
-                focusedTarget = soundPacksWindowFirstFocusTarget(focusScope)
-            }
+        case .overview: return nil
+        case .editEvent(_, let event), .copyAndApply(_, let event): return event
         }
     }
 
     private func reconcileFocusWithVisibleControls(assignFirstIfNil: Bool = false) {
+        if case .unavailable = activeSounds.scope {
+            awaitsDeepLinkFocus = false
+            if let focusedTarget, soundPacksWindowFocusOrder(focusScope).contains(focusedTarget) {
+                return
+            }
+            focusedTarget = .managedScopeFailure
+            return
+        }
+        if awaitsDeepLinkFocus, let target = requestedRoute.editTarget,
+            activeSounds.selectedPack?.id == target.packID,
+            activeSounds.eventRows.contains(where: { $0.event == target.event })
+        {
+            awaitsDeepLinkFocus = false
+            focusedTarget = .eventAudio(target.event)
+            return
+        }
         let order = soundPacksWindowFocusOrder(focusScope)
         if let focusedTarget {
+            if case .eventAudio(let event) = focusedTarget,
+                readOnlyDeepLinkEvent == event,
+                activeSounds.eventRows.contains(where: { $0.event == event })
+            {
+                return
+            }
             if !order.contains(focusedTarget) {
                 self.focusedTarget = order.first
             }
-        } else if assignFirstIfNil {
+        } else if assignFirstIfNil, requestedRoute.editTarget != nil {
             self.focusedTarget = order.first
         }
     }
@@ -1685,5 +1748,23 @@ private struct SoundPacksWindowContentView: View {
         return values.isEmpty
             ? l10n.text(.soundPacksPackNotUsed)
             : values.joined(separator: languageStore.language == .english ? ", " : "，")
+    }
+}
+
+/// Ordinary navigation leaves focus on the Settings title. Deep links name the inspected event
+/// even when its read-only mapping has no preview action.
+package func soundPacksWindowDeepLinkFocusTarget(
+    route: SoundPacksWindowRoute,
+    scopeAvailability: SoundPackEditorScopeAvailability,
+    selectedPackID: String?,
+    visibleEvents: Set<Event>,
+    fallback: SoundPacksWindowFocusTarget?
+) -> SoundPacksWindowFocusTarget? {
+    if case .unavailable = scopeAvailability { return .managedScopeFailure }
+    return switch route.destination {
+    case .overview: nil
+    case .editEvent(let packID, let event), .copyAndApply(let packID, let event):
+        selectedPackID == packID && visibleEvents.contains(event)
+            ? .eventAudio(event) : fallback
     }
 }

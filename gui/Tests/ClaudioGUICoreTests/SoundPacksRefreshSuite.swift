@@ -2267,7 +2267,7 @@ func runSoundPacksRefreshSuites() async {
             "打开设置必须认领稳定的 Panel AX identifier")
         expect(
             requestBody.contains(
-                "request: .route(.events(scope: route.scope, event: route.event))")
+                "request: .eventShortcut(route)")
                 && requestBody.contains("returnFocusTo: target")
                 && sharedRequestBody.contains("pendingSettingsPresentation = presentation")
                 && sharedRequestBody.contains("popover.close()"),

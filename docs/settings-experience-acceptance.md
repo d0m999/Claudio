@@ -23,8 +23,10 @@ bash scripts/verify-settings-experience.sh <BASE_SHA>
 - #102 所要求的 suite 都仍在两个手工注册的 executable harness 中。
 
 基线和 `HEAD` 的 format 诊断忽略会随周边编辑漂移的行列号，按
-`path:severity:rule/message` 归一为稳定身份，并保留相同身份的出现次数作多重集比较。纯行号漂移
-不算新增，但任何身份的新增出现仍会使门禁失败；这不表示既有诊断已经修复。
+`path:severity:rule/message` 归一为稳定身份，并保留相同身份的出现次数作多重集比较。
+未改动 `.swift-format` 时，仅改动过的 Swift 文件中的新增诊断会使门禁失败；递归 lint 在
+字节未变的文件上偶发的诊断差异不算源码回归。若 `.swift-format` 改动，则比较全仓新增诊断。
+这不表示既有诊断已经修复。
 
 ## 自动证据覆盖
 
@@ -61,6 +63,17 @@ Keyboard Access 的 harness 环境中则调用该 mounted production modifier �
 synthetic event 与 compiled mount 证据，不是系统 AX/TCC、真实键盘焦点或 VoiceOver tree 证据；后者仍
 必须按下方清单手验。
 
+工作区删除的取消焦点另有可独立执行的 key-window 回归：
+
+```bash
+swift run --package-path gui claudio-gui-tests --workspace-deletion-native-focus
+```
+
+它需要可激活窗口的 macOS 桌面，运行期间不要切换前台 app；分别在系统「键盘导航」关闭和开启时
+执行，日志会记录当前设置。测试挂载生产 Events 页，经原生确认的 responder chain 发送 Escape，
+随后验证 Space / Return 能重新打开同一工作区的确认，无关及带修饰键的输入不能发起删除。
+这锁定取消后的可用焦点，不替代 Computer Use／人工读回实际焦点、Tab 顺序或 VoiceOver。
+
 ## 安全与隐私判据
 
 自动回归必须保持以下边界：
@@ -89,6 +102,21 @@ synthetic event 与 compiled mount 证据，不是系统 AX/TCC、真实键盘�
 | credential 状态 | NOT VERIFIED | missing/verified/deferred/rejected/pending/unavailable 与替换/取消/删除 |
 | 能力阻止 | NOT VERIFIED | MiniMax/Qwen 非 speech、unsupported locale 在读 key/联网前可见失败 |
 | 生成到采用 | NOT VERIFIED | 显式生成、3 候选、试听、命名、采用、target drift 与失败回滚 |
+
+### #201 菜单栏与默认组／工作区专项复验
+
+此表跟踪 #201 实施后的原生验收。2026-09-25 的桌面会话暂时无法解锁；最终候选没有
+可用的原生操作记录。早期提交的探索性截图不能替代最终候选证据。复验时先记录待验
+commit、干净工作树、bundle 路径、构建时间、macOS/CPU、语言、外观和系统键盘导航设置；
+每项再附截图或操作记录。自动 harness、编译和 synthetic AppKit 事件另行记录。
+
+| #201 场景 | 状态 | 最终候选必须记录 |
+|---|---|---|
+| 删除工作区规则 | NOT VERIFIED | 长名／同名目录、确认目标与影响、取消／Escape、成功／拒写／冲突后的选择、焦点及结果 |
+| 集成页声音入口 | NOT VERIFIED | 从不同来源进入后保留手选工作区；首次默认组；失效目标不可写且可显式重新选择 |
+| 试听与恢复 | NOT VERIFIED | 零音量、未映射、缺失／不安全文件、刷新／配置／锁忙失败的可见原因与定向动作；许可音频实际听感单独记录 |
+| 导航与辅助功能 | NOT VERIFIED | 普通标题焦点、工作区／事件深链接、Tab／Shift-Tab、确认关闭及面板 handback；真实 VoiceOver 的标题、原因和结果 |
+| 视觉与活动状态 | NOT VERIFIED | 设置 1240×820／960×640、面板 312 pt；中英、明暗、Reduce Motion、Increase Contrast、显示缩放；长文案和活动完整状态 |
 
 ## 真实系统、Provider 与发布交接
 

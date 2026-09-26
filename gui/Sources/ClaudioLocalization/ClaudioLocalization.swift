@@ -266,6 +266,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let eventCoveragePresentFile: Self = "event.coverage.present-file"
     public static let eventCoverageBrokenFile: Self = "event.coverage.broken-file"
     public static let eventPreviewLabel: Self = "event.preview.label"
+    public static let eventPreviewStarted: Self = "event.preview.started"
     public static let eventPreviewAvailableEnabled: Self = "event.preview.available-enabled"
     public static let eventPreviewAvailableMuted: Self = "event.preview.available-muted"
     public static let eventPreviewUnavailable: Self = "event.preview.unavailable"
@@ -279,6 +280,12 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let eventPreviewUnmapped: Self = "event.preview.unmapped"
     public static let eventPreviewMissing: Self = "event.preview.missing"
     public static let eventPreviewUnsafe: Self = "event.preview.unsafe"
+    public static let eventPreviewUnsafeFile: Self = "event.preview.unsafe-file"
+    public static let eventPreviewUnreadableFile: Self = "event.preview.unreadable-file"
+    public static let eventPreviewAssetChanged: Self = "event.preview.asset-changed"
+    public static let eventPreviewPlaybackFailed: Self = "event.preview.playback-failed"
+    public static let eventPreviewAdjustGroupVolume: Self = "event.preview.adjust-group-volume"
+    public static let eventPreviewRepairSound: Self = "event.preview.repair-sound"
     public static let eventNoticeRecent: Self = "event-notice.recent"
     public static let eventNoticeOtherCount: Self = "event-notice.other-count"
     public static let eventNoticeUnknownSource: Self = "event-notice.unknown-source"
@@ -489,6 +496,11 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "event-settings.automatic-playback-for"
     public static let eventSettingsManageSounds: Self = "event-settings.manage-sounds"
     public static let eventSettingsManageSoundsHint: Self = "event-settings.manage-sounds.hint"
+    public static let eventSettingsConflictReadback: Self = "event-settings.conflict-readback"
+    public static let eventSettingsRetryTargetChanged: Self =
+        "event-settings.retry-target-changed"
+    public static let eventSettingsRetryReadbackUnavailable: Self =
+        "event-settings.retry-readback-unavailable"
     public static let eventSettingsWindowTitle: Self = "window.event-settings.title"
     public static let eventSettingsUnavailableShortcutScope: Self =
         "event-settings.shortcut-scope.unavailable"
@@ -1245,6 +1257,17 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let workspaceNeedsRepair: Self = "workspace.needs-repair"
     public static let workspaceAdd: Self = "workspace.add"
     public static let workspaceRemove: Self = "workspace.remove"
+    public static let workspaceDeleteConfirmTitle: Self = "workspace.delete-confirm-title"
+    public static let workspaceDeleteConfirmMessage: Self = "workspace.delete-confirm-message"
+    public static let workspaceDeleteAction: Self = "workspace.delete-action"
+    public static let workspaceDeleteSucceeded: Self = "workspace.delete-succeeded"
+    public static let workspaceDeleteFailed: Self = "workspace.delete-failed"
+    public static let workspaceDeleteReload: Self = "workspace.delete-reload"
+    public static let workspaceDeleteReadbackPresent: Self = "workspace.delete-readback-present"
+    public static let workspaceDeleteReadbackAbsent: Self = "workspace.delete-readback-absent"
+    public static let workspaceDeleteReadbackReplaced: Self = "workspace.delete-readback-replaced"
+    public static let workspaceDeleteReadbackUnavailable: Self =
+        "workspace.delete-readback-unavailable"
     public static let workspaceDirectory: Self = "workspace.directory"
     public static let workspaceChooseDirectory: Self = "workspace.choose-directory"
     public static let workspaceGitScope: Self = "workspace.git-scope"
@@ -1258,6 +1281,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let workspaceDismiss: Self = "workspace.dismiss"
     public static let workspaceAllSources: Self = "workspace.all-sources"
     public static let workspaceUnavailable: Self = "workspace.unavailable"
+    public static let workspaceChooseDefaultGroup: Self = "workspace.choose-default-group"
     public static let workspaceNoSurfaces: Self = "workspace.no-surfaces"
     public static let workspaceWriteFailure: Self = "workspace.write-failure"
     public static let workspaceCreate: Self = "workspace.create"
@@ -1283,6 +1307,16 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .workspaceNeedsRepair,
         .workspaceAdd,
         .workspaceRemove,
+        .workspaceDeleteConfirmTitle,
+        .workspaceDeleteConfirmMessage,
+        .workspaceDeleteAction,
+        .workspaceDeleteSucceeded,
+        .workspaceDeleteFailed,
+        .workspaceDeleteReload,
+        .workspaceDeleteReadbackPresent,
+        .workspaceDeleteReadbackAbsent,
+        .workspaceDeleteReadbackReplaced,
+        .workspaceDeleteReadbackUnavailable,
         .workspaceDirectory,
         .workspaceChooseDirectory,
         .workspaceGitScope,
@@ -1296,6 +1330,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .workspaceDismiss,
         .workspaceAllSources,
         .workspaceUnavailable,
+        .workspaceChooseDefaultGroup,
         .workspaceNoSurfaces,
         .workspaceWriteFailure,
         .workspaceCreate,
@@ -1387,7 +1422,9 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .eventSettingsPreviewAllFailure,
         .eventSettingsAutomaticPlayback, .eventSettingsAutomaticPlaybackFor,
         .eventSettingsManageSounds,
-        .eventSettingsManageSoundsHint, .eventSettingsWindowTitle,
+        .eventSettingsManageSoundsHint, .eventSettingsConflictReadback,
+        .eventSettingsRetryTargetChanged, .eventSettingsRetryReadbackUnavailable,
+        .eventSettingsWindowTitle,
         .eventSettingsUnavailableShortcutScope,
         .integrationsWindowTitle,
         .settingsWindowTitle, .settingsDestinationGeneral, .settingsDestinationIntegrations,
@@ -1590,10 +1627,14 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .eventTaskStart, .eventStop, .eventStopFailure, .eventNotification, .eventSubagentStop,
         .eventEditorHint, .eventCoveragePresent, .eventCoverageUnmapped, .eventCoverageBroken,
         .eventCoveragePresentFile, .eventCoverageBrokenFile, .eventPreviewLabel,
+        .eventPreviewStarted,
         .eventPreviewAvailableEnabled, .eventPreviewAvailableMuted, .eventPreviewUnavailable,
         .eventMuteHint, .eventMute, .eventUnmute, .eventEnabled, .eventMuted, .eventPreviewHint,
         .eventPreviewMasterVolumeZero, .eventPreviewUnmapped, .eventPreviewMissing,
-        .eventPreviewUnsafe, .eventNoticeRecent, .eventNoticeOtherCount,
+        .eventPreviewUnsafe, .eventPreviewUnsafeFile, .eventPreviewUnreadableFile,
+        .eventPreviewAssetChanged, .eventPreviewPlaybackFailed,
+        .eventPreviewAdjustGroupVolume, .eventPreviewRepairSound,
+        .eventNoticeRecent, .eventNoticeOtherCount,
         .eventNoticeUnknownSource, .eventNoticeUnknownProject, .eventNoticeUnknownSession,
         .eventNoticeSessionID, .eventNoticeExpired, .eventNoticeParentSession,
         .eventNoticeExpandHint,

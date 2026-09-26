@@ -211,7 +211,7 @@ private let byteWritingMembers = [
 private let byteWritingFunctions = [
     "open", "openat", "creat", "fopen", "fdopen", "freopen", "write", "pwrite", "writev",
     "fwrite", "fputs", "fputc", "fprintf", "truncate", "ftruncate", "mkstemp", "mmap",
-    "mkdir", "fchmod",
+    "mkdir", "fchmod", "writePrivateAtomic",
     // `copyfile(2)` —— `/codex review 3af8d5f` 红队实测：`copyfile(src, dst, nil, COPYFILE_DATA)` 把 src
     // 的字节 truncate + 就地写进 dst 的同一个 inode（无 temp+rename），被 kill 会在最终路径留半截文件，
     // 而它既没有 `.write(` 也没有 O_ token，上一版全绿。它是纯 Foundation 自由函数，写盘表面的一员。
@@ -520,8 +520,10 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     "helper/Sources/ClaudioCore/LocalActivitySummary.swift": [
         "fchmod(", "mkstemp(", "rename(", "unlink(", "write(",
     ],
-    // `play.state` 的防抖戳（一次原子写）+ `afplay` 子进程。子进程不写盘（它只出声）。
-    "helper/Sources/ClaudioCore/Play.swift": [".write(", "Process("],
+    // `play.state` 的防抖戳调用私有 staging + rename 发布函数；`afplay` 子进程只出声。
+    "helper/Sources/ClaudioCore/Play.swift": ["writePrivateAtomic(", "Process("],
+    // Dynamic Quiet snapshot 也经同一私有 staging + rename 函数发布。
+    "helper/Sources/ClaudioCore/DynamicQuietState.swift": ["writePrivateAtomic("],
     // 有界只读：`open(O_RDONLY | O_NOFOLLOW | O_NONBLOCK)`。它是**读者**，不是写者 ——
     // `O_RDONLY` 刻意不在 ④ 的写意图 flag 里。
     "helper/Sources/ClaudioCore/SafeFileRead.swift": ["open("],
@@ -536,7 +538,7 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     // Bootstrap report/journal：0600 staging 完整写入并 fsync，随后同目录 rename 原子发布；
     // unlink 仅删除精确 UUID 报告、已调和 journal 或失败 staging。
     "helper/Sources/ClaudioCore/BootstrapReport.swift": [
-        "fchmod(", "mkstemp(", "rename(", "unlink(", "write(",
+        "fchmod(", "mkstemp(", "rename(", "unlink(", "write(", "writePrivateAtomic(",
     ],
     // 已知旧版 codex-notify：私有同目录 staging 写入后恢复执行权限，再以 rename(2) 原子替换。
     // 写入前在同一宿主锁内重读并比较预期内容，未知或并发修改版本 fail closed。
@@ -626,7 +628,7 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
 private let contentReplacingWriteSites: [String: Int] = [
     "helper/Sources/ClaudioCore/EventNoticeTransport.swift": 1,
     "helper/Sources/ClaudioCore/Log.swift": 2,
-    "helper/Sources/ClaudioCore/Play.swift": 1,
+    // Play.swift now uses writePrivateAtomic; PlaySuite exercises FIFO replacement and exact bytes.
     "helper/Sources/ClaudioCore/ConcreteHostIntegrationAdapters.swift": 1,
     "gui/Sources/ClaudioGUICore/AudioImport.swift": 1,
     "gui/Sources/ClaudioGUICore/AICuePackDraftTransaction.swift": 1,

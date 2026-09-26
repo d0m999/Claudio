@@ -716,10 +716,10 @@ func runViewWiringSuites() {
                 && !panel.contains("PanelPackSectionView("),
             "生产面板必须挂载不推移布局、可退出的全宽自绘选择器，且不再挂载来源卡片或包画廊")
         expect(
-            panel.contains("configWritesAllowed: panelModel.surfaceSoundIssue == nil")
+            panel.contains("configWritesAllowed: panelModel.soundControlsEnabled")
                 && panel.contains("libraryUnavailableSection")
                 && panel.contains("configFailureNotice()"),
-            "损坏 Surface 必须禁用事件写入；声音库与 config 失败必须在当前 Panel 显式呈现")
+            "事件写入必须消费共享可用性判断；声音库与 config 失败必须在当前 Panel 显式呈现")
 
         guard
             let showStart = panel.range(
@@ -2118,9 +2118,9 @@ func runViewWiringSuites() {
         expect(
             panelCollapsed.contains("panelWriteFailureRecoveryFiles(")
                 && panelCollapsed.contains("ForEach(Array(writeFailureRecoveryFiles.enumerated())")
-                && panelCollapsed.contains("onRevealConfig(recoveryTarget)")
-                && panelCollapsed.contains("configFile: file"),
-            "每个发布冲突恢复文件均须通过既有 onRevealConfig 通道定位，不得只显示第一个")
+                && panelCollapsed.contains("onRevealConfig(current)")
+                && panelCollapsed.contains("panelExistingRecoveryFileTarget(file)"),
+            "每个发布冲突恢复文件须验证现存节点后通过既有 Finder 通道定位")
         expect(
             panel.contains("let visibleEvents"),
             "applyFirstFocus 必须只把**真的被渲染出来**的行送进焦点序 —— 非 .operational 态下"
@@ -2462,43 +2462,10 @@ func runViewWiringSuites() {
             "onCommit 仍须把真实 landed/nil 返回 MasterVolumeRow，维持成功提交与失败回滚契约")
     }
 
-    // MARK: - PLAN-SOUND-MANAGER.md T2：自动试听回归 + 「清除绑定」菜单项接线（存在性级，理由同本文件
-    // 头部——EventRowView/PanelView 都住在不可 import 的 `ClaudioGUI` executableTarget）
+    // MARK: - PLAN-SOUND-MANAGER.md T2：按钮试听由可导入的生产 Panel 挂载 suite 检验；
+    // 这里只守旧编辑器与声音包窗口之间仍无可编译接线边界的跨文件契约。
 
-    suite("PanelView：手工试听只消费安全解析与当前音量；映射导入完全离开面板") {
-        guard let panel = codeWithoutStrings("gui/Sources/ClaudioPanelPresentation/PanelView.swift")
-        else {
-            expect(false, "读不到 PanelView.swift")
-            return
-        }
-        let flat = collapsingWhitespace(panel)
-        expect(
-            flat.contains("private func playPreview(for row: EventRow)")
-                && flat.contains("eventPreviewFileURL(")
-                && flat.contains("previewVolume(for: panelModel.config)"),
-            "面板试听必须委托共享安全解析并读取最新主音量")
-        expect(
-            !flat.contains("AudioImportViewModel")
-                && !flat.contains("runAudioOpenPanel")
-                && !flat.contains("clearEventBinding("),
-            "面板不得保留映射导入、选择文件或清除绑定写路径")
-        guard
-            let previewStart = flat.range(of: "private func playPreview(for row: EventRow)")?
-                .lowerBound,
-            let playStart = flat[previewStart...].range(of: "return previewPlayer.play(")?
-                .lowerBound
-        else {
-            expect(false, "找不到 PanelView.playPreview 的缺文件分支")
-            return
-        }
-        let missingFileBranch = flat[previewStart..<playStart]
-        expect(
-            missingFileBranch.contains("panelModel.reloadAfterMissingPreview()")
-                && !missingFileBranch.contains("panelModel.reload()"),
-            "试听文件失效必须走保留写入错误的刷新入口")
-    }
-
-    suite("声音包窗口：清除绑定与事件编辑只走窗口；生产面板事件行不再承载编辑入口") {
+    suite("声音包窗口：清除绑定只走窗口；面板恢复携带精确包与事件路由") {
         guard
             let panel = codeOnly("gui/Sources/ClaudioPanelPresentation/PanelView.swift"),
             let window = codeOnly("gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift")
@@ -2510,8 +2477,10 @@ func runViewWiringSuites() {
             panel.contains("PanelAgentEventRow(")
                 && !panel.contains("EventRowView(")
                 && !panel.contains("onOpenEditor:")
-                && !panel.contains("clearEventBinding("),
-            "生产面板事件行只能试听/静音，所有映射编辑统一由下方打开设置进入")
+                && !panel.contains("clearEventBinding(")
+                && panel.contains("onConfigureSound(")
+                && panel.contains("packID: panelModel.config.selectedPack"),
+            "面板只提交当前包与事件的设置路由，不在行内写包映射")
         expect(
             window.contains("Button(l10n.text(.soundPacksClearBinding), role: .destructive)")
                 && window.contains("invoke(row.clearAction)")

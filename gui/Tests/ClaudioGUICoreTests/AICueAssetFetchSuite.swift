@@ -1102,7 +1102,8 @@ func runAICueAssetFetchSuites() async {
                 headers: ["content-type": "audio/mpeg"],
                 firstChunk: Data([0x49]),
                 delayedChunk: Data([0x44, 0x33]),
-                delayNanoseconds: 100_000_000)
+                // Leave room for URLSession callback scheduling in the full GUI harness.
+                delayNanoseconds: 500_000_000)
         ])
         let inactivityError = await observedAssetFetchError {
             try await controlledAssetLoader(inactivitySeconds: 0.02).load(

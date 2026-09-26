@@ -580,11 +580,10 @@ func runSoundPacksWindowAccessibilitySuites() {
         }
 
         expect(
-            view.contains(".focusable(!activeSounds.packs.isEmpty)")
-                && view.contains(".focused($focusedTarget, equals: .packList)")
+            view.contains(".focused($focusedTarget, equals: .packList)")
                 && view.contains(".focused($focusedTarget, equals: .revealSelectedPack)")
                 && view.contains("card.revealAction"),
-            "纯焦点序必须绑到 owner 投影的列表与 Finder capability，空列表不可聚焦")
+            "纯焦点序必须绑到 owner 投影的原生列表与 Finder capability")
         expect(
             view.contains("soundPacksWindowFocusOrder(focusScope)")
                 && view.contains("soundPacksWindowFirstFocusTarget(focusScope)"),

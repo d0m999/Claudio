@@ -340,11 +340,17 @@ struct SettingsSoundsAICueView: View {
     }
 
     private var copyAndApplyTitle: String {
-        let target =
-            route.surface.map { surface in
+        let target: String
+        switch route.scope {
+        case .global:
+            target = l10n.text(.panelGlobalName)
+        case .workspace:
+            target = sounds?.workspaceName ?? l10n.text(.workspaceUnavailable)
+        case .surface(let surface):
+            target =
                 HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?.displayName
-                    ?? surface.rawValue
-            } ?? l10n.text(.panelGlobalName)
+                ?? surface.rawValue
+        }
         return l10n.format(.settingsSoundsAICueCopyAndApply, target as NSString)
     }
 

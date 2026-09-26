@@ -37,31 +37,56 @@ public let panelSoundScopeDefaultsKey = "claudio.panel.selected-surface"
 public struct EventSettingsWindowRoute: Sendable, Equatable, Hashable {
     public let scope: PanelSoundScopeID
     public let event: Event?
+    /// A panel shortcut retains the directory selected when it was created. A later UUID rebind
+    /// cannot turn the request into an edit of another workspace.
+    public let workspaceTarget: WorkspaceSoundWriteTarget?
     public let unavailableRequestedScopeStoredValue: String?
 
     public init(
         scope: PanelSoundScopeID,
         event: Event? = nil,
+        workspaceTarget: WorkspaceSoundWriteTarget? = nil,
         unavailableRequestedScopeStoredValue: String? = nil
     ) {
         self.scope = scope
         self.event = event
+        self.workspaceTarget = workspaceTarget
         self.unavailableRequestedScopeStoredValue = unavailableRequestedScopeStoredValue
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(scope)
+        hasher.combine(event)
+        hasher.combine(workspaceTarget?.id)
+        hasher.combine(workspaceTarget?.directory.kind.rawValue)
+        hasher.combine(workspaceTarget?.directory.path)
+        hasher.combine(workspaceTarget?.directory.commonGitDirectory)
+        hasher.combine(unavailableRequestedScopeStoredValue)
+    }
+
+    public func workspaceTargetIsCurrent(in config: ClaudioConfig) -> Bool {
+        guard let workspaceTarget else { return true }
+        guard case .workspace(let id) = scope, workspaceTarget.id == id,
+            let rule = config.workspaceRules.first(where: { $0.id == id })
+        else { return false }
+        return rule.directory == workspaceTarget.directory
     }
 
     public var surface: HostSurfaceID? { scope.surface }
 
     public func soundPacksRoute(packID: String, event: Event) -> SoundPacksWindowRoute {
-        .editEvent(surface: surface, packID: packID, event: event)
+        .editEvent(
+            scope: scope, packID: packID, event: event, workspaceTarget: workspaceTarget)
     }
 
     /// Missing-sound deep link for a read-only pack. The scope is retained explicitly so the
-    /// Sounds page can copy first and apply only to this Global/Surface target.
+    /// Sounds page can copy first and apply only to this Default Group/Workspace target.
     public func soundPacksCopyAndApplyRoute(
         packID: String,
         event: Event
     ) -> SoundPacksWindowRoute {
-        .copyAndApply(surface: surface, packID: packID, event: event)
+        .copyAndApply(
+            scope: scope, packID: packID, event: event, workspaceTarget: workspaceTarget)
     }
 }
 
@@ -87,7 +112,12 @@ public func eventPreviewFileURL(
 /// deterministic entry point; event controls follow the visible row order through SwiftUI's key
 /// view loop.
 public enum EventSettingsFocusTarget: Sendable, Equatable, Hashable {
+    case title
     case scope(PanelSoundScopeID)
+    case unavailableScope
+    case workspaceRemove(UUID)
+    case workspaceDeleteResult
+    case workspaceDeleteFeedback
     case event(Event)
     case previewAll
     case masterVolume
@@ -396,8 +426,8 @@ public func panelSoundScopeIntegrationActionLabel(
     ClaudioL10n(language: language).format(.panelSoundScopeIntegrationAction, name)
 }
 
-/// 持久化选择的恢复规则：显式 `global` 永远保留；合法历史 Surface 原样恢复；从未选择或
-/// 失效值优先首个可用 Surface，没有 Surface 才回退 Global。
+/// A missing Workspace keeps its typed identity so a refreshed panel cannot silently turn the
+/// next sound edit into a Default Group write. Unknown legacy values still display Global.
 public func resolvedPanelSoundScopeSelection(
     storedValue: String?,
     scopes: [PanelSoundScopePresentation]
@@ -408,7 +438,34 @@ public func resolvedPanelSoundScopeSelection(
     {
         return exact.scope
     }
+    if let storedValue, storedValue.hasPrefix("workspace:"),
+        let id = UUID(uuidString: String(storedValue.dropFirst("workspace:".count)))
+    {
+        return .workspace(id)
+    }
     return .global
+}
+
+/// The retained selection stays visibly unavailable until the user picks a current scope.
+public func panelSoundScopeSelectionPresentation(
+    storedValue: String?,
+    scopes: [PanelSoundScopePresentation],
+    language: ClaudioAppLanguage
+) -> PanelSoundScopePresentation {
+    let selection = resolvedPanelSoundScopeSelection(storedValue: storedValue, scopes: scopes)
+    if let current = scopes.first(where: { $0.scope == selection }) { return current }
+    if case .workspace = selection {
+        let l10n = ClaudioL10n(language: language)
+        let name = l10n.text(.workspaceLabel)
+        let reason = l10n.text(.workspaceUnavailable)
+        return PanelSoundScopePresentation(
+            scope: selection, host: nil, name: name,
+            supportedCount: 0, totalCount: Event.allCases.count,
+            status: .needsAttention, coverageText: "", stateText: reason,
+            summaryText: reason, hasSparseOverride: false,
+            accessibilityLabel: name + (language == .english ? ", " : "，") + reason)
+    }
+    return scopes[0]
 }
 
 /// 延迟执行的选择动作在写入前必须针对最新可用集合重验目标。失效目标返回 `nil`，调用方据此
@@ -472,7 +529,7 @@ public func resolvedEventSettingsScope(
 }
 
 /// A first launch displays the Default Group; only a manual choice persists a different scope.
-/// Host callbacks and integration refreshes never select a Workspace.
+/// Refreshes retain a missing Workspace's stored identity until the user selects another scope.
 public func panelSoundScopeStoredValueToPersist(
     storedValue: String?,
     resolvedSelection: PanelSoundScopeID
@@ -520,7 +577,8 @@ public func panelEventPresentations(
     scope: PanelSoundScopeID,
     masterVolume: Double,
     language: ClaudioAppLanguage,
-    configWritesAllowed: Bool = true
+    configWritesAllowed: Bool = true,
+    safetyFailures: [Event: EventPreviewSafetyFailure] = [:]
 ) -> [PanelEventPresentation] {
     let l10n = ClaudioL10n(language: language)
     let separator = language == .english ? ", " : "，"
@@ -548,7 +606,10 @@ public func panelEventPresentations(
         }
         let previewAvailability = eventPreviewAvailability(
             coverage: row.coverage,
-            masterVolume: masterVolume)
+            masterVolume: masterVolume,
+            safetyFailureReason: safetyFailures[event].map {
+                localizedEventPreviewSafetyFailure($0, language: language)
+            })
         let controls = PanelEventControlAvailability(
             previewEnabled: implemented && previewAvailability.isAvailable,
             muteEnabled: implemented && configWritesAllowed,

@@ -241,3 +241,15 @@ public func panelConfigRecoveryTarget(configFile: URL) -> URL? {
         directory = parent
     }
 }
+
+/// A recovery-file action may point only at the actual regular file preserved by a write result.
+/// Unlike the config action, it must never silently fall back to an ancestor directory.
+public func panelExistingRecoveryFileTarget(_ recoveryFile: URL) -> URL? {
+    let file = recoveryFile.standardizedFileURL
+    var status = stat()
+    let exists = file.withUnsafeFileSystemRepresentation { path -> Bool in
+        guard let path else { return false }
+        return Darwin.lstat(path, &status) == 0
+    }
+    return exists && (status.st_mode & S_IFMT) == S_IFREG ? file : nil
+}

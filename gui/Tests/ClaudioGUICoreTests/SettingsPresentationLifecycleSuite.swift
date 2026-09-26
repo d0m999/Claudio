@@ -140,6 +140,254 @@ func runSettingsPresentationLifecycleSuites() async {
     }
 
     #if DEBUG
+    suite("Settings sound entrance session：首次默认、手选工作区与失效目标") {
+        let first = SettingsPresentationFixtures.generalLogin(
+            route: .destination(.integrations))
+        let firstSession = first.session
+        expect(
+            firstSession.state.eventPresentation.route.scope == .global
+                && firstSession.send(.route(.destination(.eventsAndSounds))) == .routed
+                && firstSession.state.routeResolution.route == .destination(.eventsAndSounds)
+                && firstSession.state.eventPresentation.route.scope == .global
+                && first.eventSettingsModel.selectedSoundScope == .global,
+            "首次从集成进入声音设置应使用默认组")
+
+        let rule = WorkspaceSoundRule(
+            directory: WorkspaceDirectory(kind: .directory, path: "/fixture/sound-entrance"),
+            surfaces: [.codex],
+            profile: WorkspaceSoundProfile(selectedPack: "settings-fixture-pack", volume: 0.7))
+        let fixture = SettingsPresentationFixtures.generalLogin(
+            route: .destination(.eventsAndSounds), workspaceRules: [rule])
+        let session = fixture.session
+        let selected = PanelSoundScopeID.workspace(rule.id)
+        fixture.eventSettingsSelection.select(EventSettingsWindowRoute(scope: selected))
+        fixture.eventSettingsModel.selectSoundScope(selected)
+        let configBefore = fixture.eventSettingsModel.configState
+
+        expect(
+            session.send(.route(.events(scope: selected, event: .stop))) == .routed
+                && session.state.eventPresentation.focusTarget == .event(.stop),
+            "显式事件深链必须聚焦所选工作区的事件")
+        _ = session.send(.route(.destination(.integrations)))
+        expect(
+            session.send(.route(.destination(.eventsAndSounds))) == .routed
+                && session.state.eventPresentation.route.event == .stop
+                && session.state.eventPresentation.focusTarget == .title
+                && settingsWindowRequestedFocusTarget(resolution: session.state.routeResolution)
+                    == nil,
+            "旧事件深链后从集成通用入口返回必须聚焦页面标题")
+        expect(
+            session.send(.route(.events(scope: selected, event: nil))) == .routed
+                && session.state.eventPresentation.focusTarget == .scope(selected),
+            "显式工作区深链必须聚焦该工作区行")
+
+        for host in HostID.productVisibleCases {
+            expect(
+                session.send(.route(.integrations(surface: host.surfaceID))) == .routed
+                    && fixture.integrationsModel.selectedHost == host,
+                "应能分别从每个 Host 的集成页测试声音入口")
+            expect(
+                session.send(.route(.destination(.eventsAndSounds))) == .routed
+                    && session.state.routeResolution.route == .destination(.eventsAndSounds)
+                    && session.state.eventPresentation.route.scope == selected
+                    && fixture.integrationsModel.selectedHost == host
+                    && fixture.eventSettingsModel.selectedSoundScope == selected
+                    && session.state.eventPresentation.focusTarget == .title
+                    && fixture.eventSettingsModel.configState == configBefore,
+                "集成所选 Host 不得重选或写入手动声音作用域")
+        }
+
+        session.replaceAvailabilityForTesting(
+            SettingsRouteAvailability(
+                integrationSurfaces: Set(HostID.productVisibleCases.map(\.surfaceID)),
+                eventScopes: [.global], soundScopes: [.global], soundPackIDs: [],
+                events: Set(Event.allCases)))
+        _ = session.send(.route(.integrations(surface: .codex)))
+        expect(
+            session.send(.route(.destination(.eventsAndSounds))) == .routed
+                && session.state.eventPresentation.route.scope == selected
+                && session.state.eventPresentation.route
+                    .unavailableRequestedScopeStoredValue == selected.storedValue
+                && session.state.eventPresentation.focusTarget == .unavailableScope
+                && fixture.eventSettingsModel.selectedSoundScope == selected
+                && fixture.eventSettingsModel.configState == configBefore,
+            "失效工作区由普通入口保留为不可用目标，不静默切到可写默认组")
+        expect(
+            session.send(.route(.events(scope: selected, event: .stop)))
+                == .rejected(.staleSoundScope(selected))
+                && session.state.eventPresentation.route.scope == selected
+                && settingsWindowRequestedFocusTarget(resolution: session.state.routeResolution)
+                    == .routeFailure(.eventsAndSounds),
+            "显式工作区／事件深链接仍必须按可用性拒绝")
+    }
+
+    suite("Settings panel workspace shortcut：同 UUID 换绑保留旧目录并定位不可用说明") {
+        let id = UUID(uuidString: "5DA1F0E5-488F-4EE1-8F20-EC0B75A3A74D")!
+        let original = WorkspaceSoundRule(
+            id: id,
+            directory: WorkspaceDirectory(kind: .directory, path: "/fixture/panel-before"),
+            surfaces: [.codex],
+            profile: WorkspaceSoundProfile(selectedPack: "settings-fixture-pack", volume: 0.7))
+        let replacement = WorkspaceSoundRule(
+            id: id,
+            directory: WorkspaceDirectory(kind: .directory, path: "/fixture/panel-after"),
+            surfaces: [.codex],
+            profile: WorkspaceSoundProfile(selectedPack: "settings-fixture-pack", volume: 0.7))
+        let fixture = SettingsPresentationFixtures.generalLogin(
+            route: .destination(.integrations), workspaceRules: [replacement])
+        let oldTarget = WorkspaceSoundWriteTarget(rule: original)
+        let delayed = EventSettingsWindowRoute(
+            scope: .workspace(id), event: .stop, workspaceTarget: oldTarget)
+        expect(
+            fixture.session.send(.present(.eventShortcut(delayed)))
+                == .presented(wasAlreadyPresented: true)
+                && fixture.session.state.eventPresentation.route.workspaceTarget == oldTarget
+                && fixture.session.state.eventPresentation.route
+                    .unavailableRequestedScopeStoredValue == delayed.scope.storedValue
+                && fixture.session.state.eventPresentation.focusTarget == .unavailableScope
+                && fixture.eventSettingsModel.selectedSoundScope == .global,
+            "面板旧目录快捷入口不能把新目录选成可写目标，并须聚焦可见失败说明")
+
+        let currentTarget = WorkspaceSoundWriteTarget(rule: replacement)
+        let current = EventSettingsWindowRoute(
+            scope: .workspace(id), workspaceTarget: currentTarget)
+        expect(
+            fixture.session.send(.present(.eventShortcut(current)))
+                == .presented(wasAlreadyPresented: true)
+                && fixture.session.state.eventPresentation.route == current
+                && fixture.session.state.eventPresentation.focusTarget == .scope(.workspace(id))
+                && fixture.eventSettingsModel.selectedWorkspaceTarget == currentTarget,
+            "新目录的显式入口才可选择该工作区并请求工作区焦点")
+        fixture.eventSettingsSelection.markCurrentScopeUnavailable()
+        expect(
+            fixture.eventSettingsSelection.route.workspaceTarget == currentTarget,
+            "后续失效标记仍须保留原目录身份")
+    }
+
+    suite("Settings panel workspace shortcut：先读回磁盘再判断有效新目录") {
+        withTempDirectory { root in
+            let id = UUID(uuidString: "984815F5-E8E6-4C13-89F2-818457A29756")!
+            let original = WorkspaceSoundRule(
+                id: id,
+                directory: WorkspaceDirectory(kind: .directory, path: "/fixture/cached-before"),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(
+                    selectedPack: "settings-fixture-pack", volume: 0.7))
+            let replacement = WorkspaceSoundRule(
+                id: id,
+                directory: WorkspaceDirectory(kind: .directory, path: "/fixture/on-disk-after"),
+                surfaces: [.codex],
+                profile: WorkspaceSoundProfile(
+                    selectedPack: "settings-fixture-pack", volume: 0.7))
+            let configFile = root.appendingPathComponent("config.json")
+            var config = ClaudioConfig(selectedPack: "settings-fixture-pack")
+            config.workspaceRules = [original]
+            writeFixture(try! JSONEncoder().encode(config), to: configFile)
+            let model = PanelConfigController(
+                configFile: configFile, lockFile: root.appendingPathComponent("config.lock"),
+                environment: makeAudioImportEnvironment(
+                    userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true)))
+            model.selectSoundScope(.workspace(id))
+            expect(
+                model.configState.resolvedConfig.workspaceRules.first?.directory
+                    == original.directory
+                    && model.selectedWorkspaceTarget == WorkspaceSoundWriteTarget(rule: original),
+                "夹具须先证明 Events 模型仍选中并缓存旧目录")
+            let fixture = SettingsPresentationFixtures.generalLogin(
+                route: .destination(.integrations), workspaceRules: [replacement],
+                eventSettingsModel: model)
+            config.workspaceRules = [replacement]
+            let newBytes = try! JSONEncoder().encode(config)
+            writeFixture(newBytes, to: configFile)
+            let current = EventSettingsWindowRoute(
+                scope: .workspace(id), workspaceTarget: WorkspaceSoundWriteTarget(rule: replacement)
+            )
+            expect(
+                fixture.session.send(.present(.eventShortcut(current)))
+                    == .presented(wasAlreadyPresented: true)
+                    && fixture.session.state.eventPresentation.route == current
+                    && fixture.session.state.eventPresentation.focusTarget == .scope(.workspace(id))
+                    && model.selectedWorkspaceTarget == current.workspaceTarget
+                    && model.configState.resolvedConfig.workspaceRules.first?.directory
+                        == replacement.directory
+                    && (try? Data(contentsOf: configFile)) == newBytes,
+                "有效新目录入口须先刷新缓存、进入原目标且不写配置")
+        }
+    }
+
+    suite("Settings mounted sound entrance：失效工作区显示重选入口") {
+        let rule = WorkspaceSoundRule(
+            directory: WorkspaceDirectory(kind: .directory, path: "/fixture/stale-entrance"),
+            surfaces: [.codex],
+            profile: WorkspaceSoundProfile(selectedPack: "settings-fixture-pack", volume: 0.7))
+        let fixture = SettingsPresentationFixtures.generalLogin(
+            route: .destination(.eventsAndSounds), workspaceRules: [rule])
+        let selected = PanelSoundScopeID.workspace(rule.id)
+        fixture.eventSettingsSelection.select(EventSettingsWindowRoute(scope: selected))
+        fixture.eventSettingsModel.selectSoundScope(selected)
+        _ = fixture.session.send(.route(.integrations(surface: .codex)))
+        fixture.session.replaceAvailabilityForTesting(
+            SettingsRouteAvailability(
+                integrationSurfaces: Set(HostID.productVisibleCases.map(\.surfaceID)),
+                eventScopes: [.global], soundScopes: [.global], soundPackIDs: [],
+                events: Set(Event.allCases)))
+        let hostingView = NSHostingView(rootView: SettingsRootView(session: fixture.session))
+        hostingView.frame = NSRect(x: 0, y: 0, width: 1_240, height: 820)
+        hostingView.layoutSubtreeIfNeeded()
+        SettingsMountRecorder.reset()
+        _ = fixture.session.send(.route(.destination(.eventsAndSounds)))
+        for _ in 0..<3 {
+            hostingView.layoutSubtreeIfNeeded()
+            _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.03))
+        }
+        expect(
+            SettingsMountRecorder.identifiers.contains("settings.destination.events-and-sounds")
+                && SettingsMountRecorder.identifiers.contains("settings.title.events-and-sounds")
+                && SettingsMountRecorder.identifiers.contains("workspace.scope.unavailable")
+                && SettingsMountRecorder.identifiers.contains("workspace.choose-default-group")
+                && fixture.session.state.eventPresentation.route.scope == selected,
+            "production root 应挂载不可写说明与显式默认组重选按钮")
+        SettingsMountRecorder.reset()
+        _ = fixture.session.send(.route(.events(scope: selected, event: .stop)))
+        for _ in 0..<3 {
+            hostingView.layoutSubtreeIfNeeded()
+            _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.03))
+        }
+        expect(
+            SettingsMountRecorder.identifiers.contains("settings.route.failure.events-and-sounds"),
+            "失效显式深链必须挂载与焦点请求同身份的可见失败说明")
+
+        let soundFailures: [(SettingsRoute, SettingsRouteFailure)] = [
+            (
+                .sounds(.editEvent(scope: .global, packID: "missing-pack", event: .stop)),
+                .staleSoundPack("missing-pack")
+            ),
+            (
+                .sounds(.editEvent(scope: selected, packID: "settings-fixture-pack", event: .stop)),
+                .staleSoundScope(selected)
+            ),
+        ]
+        // The failure row stays mounted when a second Sounds request replaces its message.
+        SettingsMountRecorder.reset()
+        for (route, failure) in soundFailures {
+            let result = fixture.session.send(.route(route))
+            for _ in 0..<3 {
+                hostingView.layoutSubtreeIfNeeded()
+                _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.03))
+            }
+            let requestedFocus = settingsWindowRequestedFocusTarget(
+                resolution: fixture.session.state.routeResolution)
+            let failureIsMounted = SettingsMountRecorder.identifiers.contains(
+                "settings.route.failure.sounds")
+            expect(
+                result == .rejected(failure)
+                    && requestedFocus == .routeFailure(.sounds) && failureIsMounted,
+                "\(route) 必须请求并挂载 Sounds 失败说明：\(result), \(String(describing: requestedFocus)), mounted=\(failureIsMounted)"
+            )
+        }
+        withExtendedLifetime(hostingView) {}
+    }
+
     suite("Settings session route：generic、explicit 与 repeated 请求保持单事务") {
         let fixture = SettingsPresentationFixtures.generalLogin(
             route: .destination(.usage),
@@ -539,12 +787,19 @@ func runSettingsPresentationLifecycleSuites() async {
         withExtendedLifetime((stateCancellable, soundCancellable)) {}
     }
 
-    suite("Settings mounted root：visible explicit route 必须消费 emitted focus debt") {
+    await suite("Settings mounted root：visible explicit route 必须消费 emitted focus debt") {
         let fixture = SettingsPresentationFixtures.generalLogin(
             route: .destination(.general),
             availability: PreviewFixtures.settingsRouteAvailability)
         let hostingView = NSHostingView(rootView: SettingsRootView(session: fixture.session))
         hostingView.frame = NSRect(x: 0, y: 0, width: 1_240, height: 820)
+        let window = NSWindow(
+            contentRect: hostingView.frame,
+            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hostingView
+        window.orderFront(nil)
+        defer { window.orderOut(nil); window.close() }
         hostingView.layoutSubtreeIfNeeded()
         _ = fixture.session.send(.windowPhaseChanged(.key))
         if let initialDebt = fixture.session.state.focusDebt {
@@ -554,11 +809,16 @@ func runSettingsPresentationLifecycleSuites() async {
         let priorRevision = fixture.session.state.explicitRouteRequestRevision
         _ = fixture.session.send(.route(.destination(.notifications)))
         hostingView.layoutSubtreeIfNeeded()
+        let deadline = Date(timeIntervalSinceNow: 2)
+        while fixture.session.state.focusDebt != nil, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+            hostingView.layoutSubtreeIfNeeded()
+        }
         expect(
             fixture.session.state.activeDestination == .notifications
                 && fixture.session.state.explicitRouteRequestRevision == priorRevision + 1
                 && fixture.session.state.focusDebt == nil,
-            "mounted root 必须用 $state emitted value 移交目标焦点并 exact-ack visible route debt")
+            "mounted root 必须在页面渲染后移交目标焦点并 exact-ack visible route debt")
         withExtendedLifetime(hostingView) {}
     }
 

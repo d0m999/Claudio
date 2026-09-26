@@ -88,11 +88,34 @@ public final class PanelConfigController: ObservableObject {
     /// `nil` 是全局默认 profile；非 nil 时 `config` 是该 surface 的 effective 投影。
     @Published public private(set) var selectedSurface: HostSurfaceID?
     @Published public private(set) var selectedWorkspaceID: UUID? = nil
+    private var selectedWorkspaceWriteTarget: WorkspaceSoundWriteTarget?
     @Published public private(set) var workspaceError: WorkspaceSoundError? = nil
+    @Published public private(set) var previewSafetyFailures: [Event: EventPreviewSafetyFailure] =
+        [:]
+    private var previewSafetyRevision: UInt64 = 0
+    private var previewSafetyTask: Task<Void, Never>?
+    public var workspaceRecoveryFile: URL? {
+        workspaceError?.recoveryPath.flatMap {
+            panelExistingRecoveryFileTarget(URL(fileURLWithPath: $0))
+        }
+    }
+    public var configRecoveryTarget: URL? {
+        ClaudioGUICore.panelConfigRecoveryTarget(configFile: configFile)
+    }
     public var selectedSoundScope: PanelSoundScopeID {
         if let selectedWorkspaceID { return .workspace(selectedWorkspaceID) }
         if let selectedSurface { return .surface(selectedSurface) }
         return .global
+    }
+    /// A retired Surface or unavailable Workspace stays visible without panel write controls.
+    public var soundControlsEnabled: Bool {
+        guard surfaceSoundIssue == nil else { return false }
+        guard selectedWorkspaceID != nil else { return true }
+        return workspaceError != .staleRule && workspaceError != .invalidRule
+    }
+    /// The directory pinned by the last explicit selection, even after a stale config readback.
+    public var selectedWorkspaceTarget: WorkspaceSoundWriteTarget? {
+        selectedWorkspaceWriteTarget
     }
     public var workspaceRules: [WorkspaceSoundRule] { baseConfig.workspaceRules }
     public var workspaceRulesMalformed: Bool { baseConfig.workspaceRulesMalformed }
@@ -104,6 +127,22 @@ public final class PanelConfigController: ObservableObject {
     public func previewURL(for event: Event) -> URL? {
         guard let row = eventRows.first(where: { $0.event == event }) else { return nil }
         return eventPreviewFileURL(row: row, packID: config.selectedPack, environment: environment)
+    }
+
+    /// Rechecks the selected audio at click time and refreshes the shared read projection after
+    /// either failure. A retry is always a new user action, never a replay of a config write.
+    public func attemptPreview(
+        _ event: Event, using player: AudioPreviewPlaying
+    ) -> EventPreviewAttemptOutcome {
+        guard let file = previewURL(for: event) else {
+            reloadAfterMissingPreview()
+            return .failed(.assetChanged)
+        }
+        guard player.play(fileAt: file, volume: Float(previewVolume(for: config))) else {
+            reloadAfterMissingPreview()
+            return .failed(.playbackFailed)
+        }
+        return .started
     }
     @discardableResult
     public func changeWorkspace(_ mutation: WorkspaceSoundMutation) -> Bool {
@@ -119,8 +158,10 @@ public final class PanelConfigController: ObservableObject {
                 .changed, source: configProjectionToken)
             return true
         case .failure(let error):
-            if error == .publishedConflict {
+            if error.isPublishedConflict || error == .staleRule {
                 reload(origin: .writeAction, refreshSoundPackLibrary: false)
+            }
+            if error.isPublishedConflict {
                 soundPacksRefreshCoordinator?.completeConfigFactChange(
                     .changed, source: configProjectionToken)
             }
@@ -128,9 +169,20 @@ public final class PanelConfigController: ObservableObject {
             return false
         }
     }
-    public func selectSoundScope(_ scope: PanelSoundScopeID) {
-        guard selectedSoundScope != scope else { return }
+    /// Rebinding the same workspace is only for an explicit user selection after a stale readback.
+    public func selectSoundScope(
+        _ scope: PanelSoundScopeID, rebindSelectedWorkspace: Bool = false
+    ) {
+        guard selectedSoundScope != scope || rebindSelectedWorkspace else { return }
+        if rebindSelectedWorkspace {
+            reload(origin: .external, refreshSoundPackLibrary: false)
+        }
         selectedWorkspaceID = scope.workspaceID
+        selectedWorkspaceWriteTarget = scope.workspaceID.flatMap { id in
+            baseConfig.workspaceRules.first(where: { $0.id == id }).map { rule in
+                WorkspaceSoundWriteTarget(rule: rule)
+            }
+        }
         selectedSurface = scope.surface
         workspaceError = nil
         surfaceSoundIssueState = nil
@@ -140,6 +192,7 @@ public final class PanelConfigController: ObservableObject {
         } else if !readSource.readsSharedSnapshot {
             eventRows = packCoverage(
                 packID: config.selectedPack, config: config, environment: environment)
+            schedulePreviewSafetyCheck()
         }
     }
     /// Keep the diagnostic message with its typed UI category; views render the category only.
@@ -189,6 +242,7 @@ public final class PanelConfigController: ObservableObject {
     @Published public private(set) var masterVolumeError: SetMasterVolumeError?
 
     private let configFile: URL
+    private let configReadIsInjected: Bool
     private let lockFile: URL
     private let environment: AudioImportEnvironment
     private var builtinPackIDs: Set<String>
@@ -264,6 +318,7 @@ public final class PanelConfigController: ObservableObject {
         let lockFile = URL(fileURLWithPath: "/dev/null/claudio-panel-preview-config.lock")
 
         self.configFile = configFile
+        self.configReadIsInjected = true
         self.lockFile = lockFile
         self.environment = environment
         self.soundPackLibrary = SoundPackLibrary(environment: environment)
@@ -332,6 +387,7 @@ public final class PanelConfigController: ObservableObject {
         soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator?
     ) {
         self.configFile = configFile
+        self.configReadIsInjected = false
         self.lockFile = lockFile
         self.environment = environment
         self.soundPackLibrary = soundPackLibrary
@@ -423,7 +479,11 @@ public final class PanelConfigController: ObservableObject {
     /// 位置上两套测试全绿。搬过来后，`PanelConfigControllerSuite` 对这三样各有一条行为断言。
     public func toggleMute(_ event: Event) {
         if let id = selectedWorkspaceID {
-            _ = changeWorkspace(.event(id, event, !config.isEnabled(event)))
+            guard let target = selectedWorkspaceWriteTarget, target.id == id else {
+                workspaceError = .staleRule
+                return
+            }
+            _ = changeWorkspace(.event(target, event, !config.isEnabled(event)))
             return
         }
         let currentlyEnabled = eventRows.first(where: { $0.event == event })?.enabled ?? true
@@ -495,10 +555,27 @@ public final class PanelConfigController: ObservableObject {
 
     /// A pending slider commit retains its original target across selection changes.
     @discardableResult
-    public func setVolume(_ volume: Double, for scope: PanelSoundScopeID) -> Double? {
+    public func setVolume(
+        _ volume: Double, for scope: PanelSoundScopeID,
+        workspaceTarget: WorkspaceSoundWriteTarget? = nil
+    ) -> Double? {
         if case .surface = scope { return nil }
         if let id = scope.workspaceID {
-            return changeWorkspace(.volume(id, volume)) ? volume : nil
+            if selectedSoundScope == scope, let workspaceTarget,
+                selectedWorkspaceWriteTarget != workspaceTarget
+            {
+                workspaceError = .staleRule
+                return nil
+            }
+            let target =
+                workspaceTarget
+                ?? (selectedSoundScope == scope
+                    ? selectedWorkspaceWriteTarget : nil)
+            guard let target, target.id == id else {
+                workspaceError = .staleRule
+                return nil
+            }
+            return changeWorkspace(.volume(target, volume)) ? volume : nil
         }
         let landed = masterVolumeController.setVolume(volume)
         // republish：面板读 `panelModel.masterVolumeError`，不直接读 masterVolumeController（那会开
@@ -542,7 +619,12 @@ public final class PanelConfigController: ObservableObject {
     @discardableResult
     public func switchPack(to packID: String) -> PanelPackSwitchOutcome {
         if let id = selectedWorkspaceID {
-            return changeWorkspace(.pack(id, packID))
+            guard let target = selectedWorkspaceWriteTarget, target.id == id else {
+                workspaceError = .staleRule
+                return .failed(
+                    .configWriteFailure(reason: WorkspaceSoundError.staleRule.description))
+            }
+            return changeWorkspace(.pack(target, packID))
                 ? .succeeded
                 : .failed(.configWriteFailure(reason: workspaceError?.description ?? ""))
         }
@@ -685,6 +767,13 @@ public final class PanelConfigController: ObservableObject {
         reloadConfigOnly(origin: .external)
     }
 
+    /// A pinned panel shortcut must compare its captured directory with a current config read.
+    /// State-gallery fixtures retain their injected snapshot instead of reading `/dev/null`.
+    package func reloadConfigForPinnedRoute() {
+        guard !configReadIsInjected else { return }
+        reloadConfigOnly()
+    }
+
     private func reloadConfigOnly(origin: PanelRefreshOrigin) {
         if origin == .external {
             clearWriteFailures()
@@ -792,6 +881,7 @@ public final class PanelConfigController: ObservableObject {
         guard readSource.readsSharedSnapshot else {
             eventRows = packCoverage(
                 packID: config.selectedPack, config: config, environment: environment)
+            schedulePreviewSafetyCheck()
             let loadedPackSection = Self.loadPackSection(config: config, environment: environment)
             packCards = loadedPackSection.cards
             packSectionState = loadedPackSection.state
@@ -805,6 +895,7 @@ public final class PanelConfigController: ObservableObject {
             applySnapshot(librarySnapshot)
         } else {
             eventRows = []
+            clearPreviewSafetyCheck()
             packCards = []
             if case .loadFailed = libraryPresentationState {
                 // Preserve the explicit failure state until a retry produces a new library value.
@@ -817,6 +908,19 @@ public final class PanelConfigController: ObservableObject {
     }
 
     private func applyEffectiveConfig() {
+        if let id = selectedWorkspaceID {
+            guard let target = selectedWorkspaceWriteTarget,
+                baseConfig.workspaceRules.first(where: { $0.id == id })?.directory
+                    == target.directory
+            else {
+                workspaceError = .staleRule
+                config = ClaudioConfig(
+                    selectedPack: "", masterVolume: baseConfig.masterVolume,
+                    eventsEnabled: Dictionary(
+                        uniqueKeysWithValues: Event.allCases.map { ($0.cliName, false) }))
+                return
+            }
+        }
         let resolved =
             selectedWorkspaceID.map { baseConfig.resolveWorkspaceProfile(id: $0) }
             ?? baseConfig.resolveSoundProfile(for: nil)
@@ -884,6 +988,7 @@ public final class PanelConfigController: ObservableObject {
                 packSectionState = .readFailed(reason: error.message)
                 selectedPackMetadata = SelectedPackMetadata(id: config.selectedPack, name: nil)
                 eventRows = []
+                clearPreviewSafetyCheck()
                 libraryPresentationState = .loadFailed(reason: error.message)
             }
         }
@@ -892,6 +997,7 @@ public final class PanelConfigController: ObservableObject {
     private func applySnapshot(_ snapshot: SoundPackLibrarySnapshot) {
         builtinPackIDs = snapshot.factoryPackIDs
         eventRows = snapshot.eventRows(packID: config.selectedPack, config: config)
+        schedulePreviewSafetyCheck()
         let pinnedCards = snapshot.packCards(
             config: config,
             scope: .panelStarredDisplay,
@@ -902,6 +1008,29 @@ public final class PanelConfigController: ObservableObject {
             availablePackCount: snapshot.facts.count)
         selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(config.selectedPack)
         selectedPackMetadata = snapshot.selectedPackMetadata(packID: config.selectedPack)
+    }
+
+    private func clearPreviewSafetyCheck() {
+        previewSafetyTask?.cancel()
+        previewSafetyRevision &+= 1
+        previewSafetyFailures = [:]
+    }
+
+    private func schedulePreviewSafetyCheck() {
+        clearPreviewSafetyCheck()
+        guard readSource.readsSharedSnapshot else { return }
+        guard eventRows.contains(where: { $0.coverage != .unmapped }) else { return }
+        let revision = previewSafetyRevision
+        let packID = config.selectedPack
+        let soundPackLibrary = soundPackLibrary
+        previewSafetyTask = Task { [weak self] in
+            let failures = await soundPackLibrary.previewSafetyFailures(packID: packID)
+            guard !Task.isCancelled else { return }
+            guard let self, self.previewSafetyRevision == revision,
+                self.config.selectedPack == packID
+            else { return }
+            self.previewSafetyFailures = failures
+        }
     }
 
     private static func loadPackSection(

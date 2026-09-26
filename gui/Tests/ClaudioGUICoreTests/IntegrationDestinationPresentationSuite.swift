@@ -91,8 +91,20 @@ func runIntegrationDestinationPresentationSuites() {
                 && hostIntegrationMechanismDisplayName(facts.mechanism) == "原生 hooks",
             "WorkBuddy 接入方式必须来自 descriptor，不伪造 Core 不存在的机制子类型")
         expect(
-            section.row(.eventsAndSounds)?.actions == [.manageEvents(.workBuddy)],
-            "事件管理只允许从第三行路由当前 Surface")
+            section.row(.eventsAndSounds)?.actions == [.manageSoundScopes],
+            "声音入口不携带所选 Host；第三行只负责打开默认组／工作区")
+        let chinese = ClaudioL10n(language: .zhHans)
+        expect(
+            section.row(.eventsAndSounds)?.title == chinese.text(.integrationsEventsAndSounds)
+                && section.row(.eventsAndSounds)?.caption
+                    == chinese.text(.integrationsSurfaceEventsCaption),
+            "第三行的基础投影与中文展示应表达相同的默认组／工作区语义")
+        for host in HostID.productVisibleCases {
+            expect(
+                content.connectionSection(for: host)?.row(.eventsAndSounds)?.actions
+                    == [.manageSoundScopes],
+                "每个 Host 的声音入口都必须是同一个无 Host 目标的动作")
+        }
         expect(
             section.row(.receiptHistory)?.actions == [.clearReceiptHistory(.workBuddy)],
             "回执清除只允许从第四行进入确认")

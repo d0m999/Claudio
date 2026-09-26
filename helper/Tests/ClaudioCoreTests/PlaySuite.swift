@@ -1352,6 +1352,7 @@ func runPlaySuites() {
             makeFIFO(at: debounceStateFile)
 
             let spawner = RecordingSpawner()
+            let now = Date(timeIntervalSince1970: 2_000_000)
             let env = PlayEnvironment(
                 lockFile: root.appendingPathComponent("play.lock"),
                 configFile: configFile,
@@ -1359,6 +1360,7 @@ func runPlaySuites() {
                 bundledPacksDirectory: nil,
                 spawner: spawner,
                 debounceStateFile: debounceStateFile,
+                now: { now },
                 logFile: root.appendingPathComponent("claudio.log"),
                 logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
@@ -1375,6 +1377,18 @@ func runPlaySuites() {
                 "an unreadable play.state must fold into 'never debounced yet', so this call"
                     + " must still play, got \(outcome)")
             expect(spawner.callCount == 1, "must actually spawn despite a FIFO-shaped play.state")
+            let attributes = try? FileManager.default.attributesOfItem(
+                atPath: debounceStateFile.path)
+            let isRegular = attributes?[.type] as? FileAttributeType == .typeRegular
+            expect(
+                isRegular,
+                "atomic timestamp publication must replace the FIFO with a regular file")
+            if isRegular {
+                let timestamp = try? String(contentsOf: debounceStateFile, encoding: .utf8)
+                expect(
+                    timestamp == String(now.timeIntervalSince1970),
+                    "the replaced state file must preserve the existing epoch-seconds format")
+            }
         }
     }
 }

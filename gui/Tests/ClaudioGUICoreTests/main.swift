@@ -78,6 +78,30 @@ if let index = CommandLine.arguments.firstIndex(of: "--manifest-lock-holder") {
     exit(0)
 }
 
+if CommandLine.arguments.contains("--settings-navigation-native-focus") {
+    let application = NSApplication.shared
+    application.setActivationPolicy(.regular)
+    Task { @MainActor in
+        await runSettingsNavigationFocusSuites()
+        print("Settings navigation native focus: \(totalChecks) checks, \(failures) failures")
+        exit(failures == 0 ? 0 : 1)
+    }
+    application.run()
+    exit(1)
+}
+
+if CommandLine.arguments.contains("--workspace-deletion-native-focus") {
+    let application = NSApplication.shared
+    application.setActivationPolicy(.regular)
+    Task { @MainActor in
+        await runWorkspaceDeletionFocusSuites()
+        print("Workspace deletion native focus: \(totalChecks) checks, \(failures) failures")
+        exit(failures == 0 ? 0 : 1)
+    }
+    application.run()
+    exit(1)
+}
+
 if CommandLine.arguments.contains("--ai-cue-native-focus") {
     let application = NSApplication.shared
     application.setActivationPolicy(.regular)
@@ -125,17 +149,37 @@ if CommandLine.arguments.contains("--sound-editor-interface") {
     exit(failures == 0 ? 0 : 1)
 }
 
+if CommandLine.arguments.contains("--sound-editor-focus") {
+    await runSoundPacksEditorViewSuites()
+    print("Sound editor focus: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
+if CommandLine.arguments.contains("--event-settings-retry") {
+    runEventSettingsWindowSelectionSuites()
+    print("Event settings retry: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
 if CommandLine.arguments.contains("--workspace-sounds") {
     runLocalizationSuites()
     runPanelFocusOrderSuites()
     await runPanelPresentationSuites()
     runPanelConfigControllerSuites()
     runWorkspaceSoundPresentationSuites()
+    runSoundPacksEditorOwnerSuites()
     runSurfaceSoundIssueLifecycleSuites()
     runSettingsNavigationSuites()
     runAICuePackScopedSuites()
     await runAICuePackScopedAsyncSuites()
     print("Workspace sounds: \(totalChecks) checks, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+
+if CommandLine.arguments.contains("--settings-lifecycle") {
+    runSettingsNavigationSuites()
+    await runSettingsPresentationLifecycleSuites()
+    print("Settings lifecycle: \(totalChecks) checks, \(failures) failures")
     exit(failures == 0 ? 0 : 1)
 }
 
@@ -285,6 +329,7 @@ await runEventAttentionStressSuites()
 runPanelSoundScopeInteractionSuites()
 await runPanelPresentationSuites()
 runEventSettingsWindowSelectionSuites()
+runWorkspaceDeletionPresentationSuites()
 runPanelFocusInFlightSuites()
 runContrastSuites()
 runContrastHexParsingSuites()

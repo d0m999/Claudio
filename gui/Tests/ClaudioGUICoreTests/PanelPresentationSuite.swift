@@ -37,6 +37,47 @@ func runPanelPresentationSuites() async {
             workBuddy.soundPacksRoute(packID: "user-pack", event: .stop)
                 == .editEvent(surface: .workBuddy, packID: "user-pack", event: .stop),
             "逐事件声音编辑必须把当前 Surface 原样交给声音包窗口")
+        let workspaceID = UUID(uuidString: "61E452D2-5895-4D4C-BF22-D8B0A8FEB2E7")!
+        let workspace = EventSettingsWindowRoute(scope: .workspace(workspaceID))
+        expect(
+            workspace.soundPacksRoute(packID: "user-pack", event: .stop)
+                == .editEvent(
+                    scope: .workspace(workspaceID), packID: "user-pack", event: .stop),
+            "工作区事件编辑必须保留规则身份")
+        expect(
+            workspace.soundPacksCopyAndApplyRoute(packID: "factory-pack", event: .stop)
+                == .copyAndApply(
+                    scope: .workspace(workspaceID), packID: "factory-pack", event: .stop),
+            "只读包复制并应用必须保留工作区目标")
+        let original = WorkspaceSoundRule(
+            id: workspaceID,
+            directory: WorkspaceDirectory(kind: .directory, path: "/tmp/route-before"),
+            surfaces: [.codex],
+            profile: WorkspaceSoundProfile(selectedPack: "user-pack", volume: 0.7))
+        let rebound = WorkspaceSoundRule(
+            id: workspaceID,
+            directory: WorkspaceDirectory(kind: .directory, path: "/tmp/route-after"),
+            surfaces: [.codex],
+            profile: WorkspaceSoundProfile(selectedPack: "user-pack", volume: 0.7))
+        let pinned = EventSettingsWindowRoute(
+            scope: .workspace(workspaceID),
+            workspaceTarget: WorkspaceSoundWriteTarget(rule: original))
+        var reboundConfig = ClaudioConfig(selectedPack: "default")
+        reboundConfig.workspaceRules = [rebound]
+        expect(
+            !pinned.workspaceTargetIsCurrent(in: reboundConfig)
+                && Set([
+                    pinned,
+                    EventSettingsWindowRoute(
+                        scope: .workspace(workspaceID),
+                        workspaceTarget: WorkspaceSoundWriteTarget(rule: rebound)),
+                ]).count == 2
+                && pinned.soundPacksRoute(packID: "user-pack", event: .stop).workspaceTarget
+                    == pinned.workspaceTarget
+                && pinned.soundPacksCopyAndApplyRoute(
+                    packID: "factory-pack", event: .stop
+                ).workspaceTarget == pinned.workspaceTarget,
+            "面板事件路由必须保留目录身份，换绑后拒绝旧目标并传给声音编辑")
         expect(
             eventSettingsFirstFocusTarget(scopes: [.global, .surface(.workBuddy)])
                 == .scope(.global),
@@ -358,7 +399,7 @@ func runPanelPresentationSuites() async {
         expect(scopes.first?.summaryText == "5 events · Default", "默认组摘要错误")
     }
 
-    suite("面板作用域恢复：显式 Global/合法历史值保留，首次与失效值选首个可用来源") {
+    suite("面板作用域恢复：失效工作区保留身份，未知旧值显示默认组") {
         let scopes = panelSoundScopePresentations(
             sourceRows: [
                 panelPresentationRow(.claudeCode, status: .ready, supported: 5),
@@ -382,7 +423,34 @@ func runPanelPresentationSuites() async {
         expect(
             resolvedPanelSoundScopeSelection(storedValue: "stale", scopes: scopes)
                 == .global,
-            "失效值应选首个可用来源")
+            "未知旧值仅借用默认组展示")
+        let missingWorkspace = PanelSoundScopeID.workspace(UUID())
+        let missingValue = missingWorkspace.storedValue
+        expect(
+            resolvedPanelSoundScopeSelection(storedValue: missingValue, scopes: scopes)
+                == missingWorkspace,
+            "失效工作区不能静默改成默认组写入目标")
+        expect(
+            panelSoundScopeStoredValueToPersist(
+                storedValue: missingValue, resolvedSelection: missingWorkspace) == missingValue,
+            "刷新不能覆盖用户存储的失效工作区身份")
+        let unavailableEnglish = panelSoundScopeSelectionPresentation(
+            storedValue: missingValue, scopes: scopes, language: .english)
+        let unavailableChinese = panelSoundScopeSelectionPresentation(
+            storedValue: missingValue, scopes: scopes, language: .zhHans)
+        expect(
+            unavailableEnglish.scope == missingWorkspace
+                && unavailableEnglish.status == .needsAttention
+                && unavailableEnglish.summaryText.contains("no longer available"),
+            "英文选择器须明确显示失效作用域")
+        expect(
+            unavailableChinese.scope == missingWorkspace
+                && unavailableChinese.summaryText.contains("已失效"),
+            "中文选择器须明确显示失效作用域")
+        expect(
+            validatedPanelSoundScopeSelection(
+                missingWorkspace, availableScopes: scopes.map(\.scope)) == nil,
+            "失效工作区不能被菜单选成可写目标")
         expect(
             resolvedPanelSoundScopeSelection(storedValue: nil, scopes: [scopes[0]]) == .global,
             "没有可用来源时必须回退 Global")
@@ -537,6 +605,65 @@ func runPanelPresentationSuites() async {
             language: .zhHans,
             configWritesAllowed: false)
         expect(readOnly.allSatisfy { !$0.controls.muteEnabled }, "配置不可写时不得展示可操作静音")
+    }
+
+    await suite("默认组与工作区共用安全试听投影，事件自动静音不影响手工试听") {
+        await withTempDirectory { root in
+            let packs = root.appendingPathComponent("packs")
+            let pack = packs.appendingPathComponent("selected")
+            writeFixture("audio", to: pack.appendingPathComponent("safe.aiff"))
+            writeFixture("outside", to: root.appendingPathComponent("outside.aiff"))
+            createSymlink(
+                at: pack.appendingPathComponent("escape.aiff"),
+                pointingTo: root.appendingPathComponent("outside.aiff"))
+            try! FileManager.default.createDirectory(
+                at: pack.appendingPathComponent("directory.aiff"),
+                withIntermediateDirectories: true)
+            let rows = [
+                EventRow(event: .stop, coverage: .present(fileName: "safe.aiff"), enabled: false),
+                EventRow(
+                    event: .notification, coverage: .broken(fileName: "escape.aiff"), enabled: true),
+                EventRow(
+                    event: .subagentStop, coverage: .broken(fileName: "directory.aiff"),
+                    enabled: true),
+                EventRow(
+                    event: .stopFailure, coverage: .broken(fileName: "missing.aiff"), enabled: true),
+            ]
+            let environment = makeAudioImportEnvironment(userPacksDirectory: packs)
+            let fact = SoundPackFacts(
+                id: "selected", name: nil, isCC0: false, factoryIntegrity: nil,
+                eventCoverage: Dictionary(
+                    uniqueKeysWithValues: rows.map { ($0.event, $0.coverage) }),
+                cardState: .partial(present: 1, total: Event.allCases.count),
+                audioInventory: .deferred)
+            let library = SoundPackLibrary(
+                scanner: SoundPackLibraryScanner { _ in .success([fact]) },
+                previewSafetyEnvironment: environment)
+            _ = await library.refreshSnapshot(trigger: .initial)
+            let failures = await library.previewSafetyFailures(packID: "selected")
+            expect(
+                failures == [.notification: .unsafeFile, .subagentStop: .unsafeFile],
+                "越界链接和非正规文件是实际安全失败；缺失文件仍归缺失原因")
+            for scope in [PanelSoundScopeID.global, .workspace(UUID())] {
+                let projected = panelEventPresentations(
+                    rows: rows, scope: scope, masterVolume: 0.6, language: .english,
+                    safetyFailures: failures)
+                expect(
+                    projected.first(where: { $0.event == .stop })?.controls.previewEnabled == true,
+                    "自动静音的安全文件仍可手工试听")
+                expect(
+                    projected.first(where: { $0.event == .notification })?
+                        .controls.previewAvailability
+                        == .unsafeOrUnreadable(
+                            reason: "The mapped audio path is unsafe or is not a regular file"),
+                    "安全失败必须进入共享可用性，而非只存在于悬停提示")
+                expect(
+                    projected.first(where: { $0.event == .stopFailure })?
+                        .controls.previewAvailability
+                        == .missingOrDamaged(fileName: "missing.aiff"),
+                    "真实缺失仍使用缺失原因")
+            }
+        }
     }
 
     suite("当前声音：事件行同时显示真实文件名与 AI 提示音名称") {
