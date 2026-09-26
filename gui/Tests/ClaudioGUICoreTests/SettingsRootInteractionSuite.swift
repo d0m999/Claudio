@@ -136,6 +136,8 @@ final class SettingsRootNativeProbe {
 
     var isActiveKeyWindow: Bool { NSApp.isActive && window.isKeyWindow }
 
+    var isNativeListFocused: Bool { window.firstResponder is NSOutlineView }
+
     func activate() {
         window.center()
         NSApp.activate(ignoringOtherApps: true)

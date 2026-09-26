@@ -539,46 +539,55 @@ private struct SoundPacksWindowContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10)
 
-            List(selection: selection) {
-                ForEach(activeSounds.packs) { card in
-                    HStack(spacing: 6) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(SelectedPackMetadata(id: card.id, name: card.name).displayName)
-                                .lineLimit(layoutAdaptation.packNameLineLimit)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 4)
-                        if card.isActiveForScope {
-                            ClaudioStatusCapsule(l10n.text(.soundPacksUsing), isEmphasized: true)
-                        }
-                    }
-                    .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
-                    .contentShape(Rectangle())
-                    .tag(Optional(card.id))
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel(packAccessibilityLabel(card))
-                    .accessibilityValue(packAccessibilityValue(card))
-                    .accessibilityHint(l10n.text(.soundPacksCardHint))
-                    .accessibilityIdentifier("sound-packs.pack.\(card.id)")
-                    .accessibilityAddTraits(
-                        card.isInspected ? .isSelected : [])
+            Group {
+                if activeSounds.packs.isEmpty {
+                    Spacer(minLength: 0)
+                } else {
+                    packList
                 }
             }
             .soundPacksLayoutProbe("sound-packs.pack-list")
-            // List already owns a native key-view stop; another focusable wrapper swallows arrows.
-            .disabled(activeSounds.packs.isEmpty)
-            .focused($focusedTarget, equals: .packList)
-            .accessibilityLabel(l10n.text(.soundPacksSidebarLabel))
-            .accessibilityValue(
-                selectedCard.map {
-                    l10n.format(
-                        .soundPacksSidebarViewing,
-                        SelectedPackMetadata(id: $0.id, name: $0.name).displayName)
-                } ?? l10n.text(.soundPacksSidebarNone)
-            )
-            .accessibilityHint(l10n.text(.soundPacksSidebarHint))
-            .accessibilityIdentifier("sound-packs.pack-list")
         }
+    }
+
+    private var packList: some View {
+        List(selection: selection) {
+            ForEach(activeSounds.packs) { card in
+                HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(SelectedPackMetadata(id: card.id, name: card.name).displayName)
+                            .lineLimit(layoutAdaptation.packNameLineLimit)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 4)
+                    if card.isActiveForScope {
+                        ClaudioStatusCapsule(l10n.text(.soundPacksUsing), isEmphasized: true)
+                    }
+                }
+                .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
+                .contentShape(Rectangle())
+                .tag(Optional(card.id))
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(packAccessibilityLabel(card))
+                .accessibilityValue(packAccessibilityValue(card))
+                .accessibilityHint(l10n.text(.soundPacksCardHint))
+                .accessibilityIdentifier("sound-packs.pack.\(card.id)")
+                .accessibilityAddTraits(
+                    card.isInspected ? .isSelected : [])
+            }
+        }
+        // List already owns a native key-view stop; another focusable wrapper swallows arrows.
+        .focused($focusedTarget, equals: .packList)
+        .accessibilityLabel(l10n.text(.soundPacksSidebarLabel))
+        .accessibilityValue(
+            selectedCard.map {
+                l10n.format(
+                    .soundPacksSidebarViewing,
+                    SelectedPackMetadata(id: $0.id, name: $0.name).displayName)
+            } ?? l10n.text(.soundPacksSidebarNone)
+        )
+        .accessibilityHint(l10n.text(.soundPacksSidebarHint))
+        .accessibilityIdentifier("sound-packs.pack-list")
     }
 
     @ViewBuilder

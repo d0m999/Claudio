@@ -199,6 +199,62 @@ func runSettingsNavigationFocusSuites() async {
         }
         expect(restored, "the list must retain arrow navigation after its selection changes")
     }
+
+    await suite("Settings native focus: an empty sound-pack list contributes no Tab stop") {
+        expect(
+            NSApp.isFullKeyboardAccessEnabled,
+            "enable system Keyboard navigation for this regression")
+        guard NSApp.isFullKeyboardAccessEnabled else { return }
+        await withTempDirectory { root in
+            let owner = SoundPacksEditorOwner.stateGalleryFixture(
+                previewConfig: ClaudioConfig(selectedPack: "missing-pack"),
+                packCards: [], selectedPackID: nil, selectedEventRows: [],
+                environment: makeAudioImportEnvironment(
+                    userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true)),
+                activation: nil)
+            let fixture = SettingsPresentationFixtures.generalLogin(
+                route: .destination(.about), soundPacksEditor: owner)
+            let probe = SettingsRootNativeProbe(session: fixture.session)
+            defer { probe.close() }
+            probe.activate()
+            let active = await settingsNavigationFocusWait { probe.isActiveKeyWindow }
+            expect(active, "the native focus regression requires an active key window")
+            guard active else { return }
+            _ = fixture.session.send(.windowPhaseChanged(.key))
+            let ready = await settingsNavigationFocusWait { fixture.session.state.focusDebt == nil }
+            expect(ready, "the mounted root must consume the initial title focus request")
+            expect(
+                probe.clickSidebar(.sounds, horizontalFraction: 0.5),
+                "open empty Sounds through the real sidebar")
+            let routed = await settingsNavigationFocusWait {
+                fixture.session.state.focusDebt == nil
+            }
+            expect(routed, "the mounted root must consume the Sounds title focus request")
+            await Task.yield()
+            guard case .sounds(let sounds) = owner.presentation.mode else {
+                expect(false, "the empty Sounds editor must be mounted")
+                return
+            }
+            expect(sounds.packs.isEmpty, "the native list must have no inspectable pack")
+            expect(probe.sendKey(keyCode: 48, characters: "\t"), "Tab must reach New Pack")
+            expect(
+                probe.sendKey(keyCode: 48, characters: "\t"),
+                "Tab must skip the empty list and reach the provider picker")
+            expect(
+                !probe.isNativeListFocused,
+                "an empty native List must not take a keyboard focus stop")
+            guard !probe.isNativeListFocused else { return }
+            expect(
+                probe.sendKey(keyCode: 48, characters: "\t"), "Tab must reach credential management"
+            )
+            expect(
+                probe.sendKey(keyCode: 49, characters: " "), "Space must open the credential sheet")
+            let opened = await settingsNavigationFocusWait { probe.hasAttachedSheet }
+            expect(
+                opened,
+                "empty-list traversal must reach the next real action without a phantom Tab stop")
+        }
+    }
 }
 
 @MainActor
