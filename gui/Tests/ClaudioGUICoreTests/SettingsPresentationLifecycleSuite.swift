@@ -787,12 +787,19 @@ func runSettingsPresentationLifecycleSuites() async {
         withExtendedLifetime((stateCancellable, soundCancellable)) {}
     }
 
-    suite("Settings mounted root：visible explicit route 必须消费 emitted focus debt") {
+    await suite("Settings mounted root：visible explicit route 必须消费 emitted focus debt") {
         let fixture = SettingsPresentationFixtures.generalLogin(
             route: .destination(.general),
             availability: PreviewFixtures.settingsRouteAvailability)
         let hostingView = NSHostingView(rootView: SettingsRootView(session: fixture.session))
         hostingView.frame = NSRect(x: 0, y: 0, width: 1_240, height: 820)
+        let window = NSWindow(
+            contentRect: hostingView.frame,
+            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hostingView
+        window.orderFront(nil)
+        defer { window.orderOut(nil); window.close() }
         hostingView.layoutSubtreeIfNeeded()
         _ = fixture.session.send(.windowPhaseChanged(.key))
         if let initialDebt = fixture.session.state.focusDebt {
@@ -802,11 +809,16 @@ func runSettingsPresentationLifecycleSuites() async {
         let priorRevision = fixture.session.state.explicitRouteRequestRevision
         _ = fixture.session.send(.route(.destination(.notifications)))
         hostingView.layoutSubtreeIfNeeded()
+        let deadline = Date(timeIntervalSinceNow: 2)
+        while fixture.session.state.focusDebt != nil, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+            hostingView.layoutSubtreeIfNeeded()
+        }
         expect(
             fixture.session.state.activeDestination == .notifications
                 && fixture.session.state.explicitRouteRequestRevision == priorRevision + 1
                 && fixture.session.state.focusDebt == nil,
-            "mounted root 必须用 $state emitted value 移交目标焦点并 exact-ack visible route debt")
+            "mounted root 必须在页面渲染后移交目标焦点并 exact-ack visible route debt")
         withExtendedLifetime(hostingView) {}
     }
 
