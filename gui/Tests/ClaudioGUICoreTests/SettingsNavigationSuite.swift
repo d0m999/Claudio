@@ -215,6 +215,19 @@ func runSettingsNavigationSuites() {
                 resolution: resolveSettingsRoute(
                     .destination(.general), availability: availability)) == .title(.general),
             "普通 Settings 导航仍请求页面标题焦点")
+        for route in [SettingsRoute.destination(.sounds), .sounds(.overview)] {
+            expect(
+                settingsWindowRequestedFocusTarget(
+                    resolution: resolveSettingsRoute(route, availability: availability))
+                    == .title(.sounds),
+                "普通 Sounds 导航必须由统一设置壳请求可见页面标题焦点")
+        }
+        expect(
+            settingsWindowRequestedFocusTarget(
+                resolution: resolveSettingsRoute(
+                    .sounds(.editEvent(scope: .global, packID: "valid-pack", event: .stop)),
+                    availability: availability)) == nil,
+            "显式 Sounds 事件深链接仍由嵌入编辑器定位，不被标题覆盖")
         expect(
             settingsWindowRequestedFocusTarget(
                 resolution: resolveSettingsRoute(

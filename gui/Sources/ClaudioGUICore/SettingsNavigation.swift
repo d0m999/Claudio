@@ -372,8 +372,8 @@ public enum SettingsWindowFocusTarget: Sendable, Equatable, Hashable {
     case shortcutAction(GlobalShortcutAction)
 }
 
-/// Embedded destinations receive successful route focus from their own presentation owners.
-/// The shell owns the visible failure explanation for every rejected deep link.
+/// Embedded destinations own deep-link focus. The shell owns the Sounds overview title and
+/// the visible failure explanation for every rejected deep link.
 public func settingsWindowRequestedFocusTarget(
     resolution: SettingsRouteResolution
 ) -> SettingsWindowFocusTarget? {
@@ -381,8 +381,11 @@ public func settingsWindowRequestedFocusTarget(
         return .routeFailure(resolution.destination)
     }
     switch resolution.destination {
-    case .integrations, .eventsAndSounds, .sounds:
+    case .integrations, .eventsAndSounds:
         return nil
+    case .sounds:
+        if case .sounds(let route) = resolution.route, route.editTarget != nil { return nil }
+        return .title(.sounds)
     case .general, .notifications, .display, .usage, .shortcuts, .about:
         return .title(resolution.destination)
     }

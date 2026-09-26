@@ -307,6 +307,7 @@ private struct SoundPacksWindowContentView: View {
         }
         .onChange(of: activeSounds.recoveryActions.map(\.packID)) { _ in
             if activeSounds.packs.isEmpty,
+                focusedTarget != nil || requestedRoute.editTarget != nil,
                 let packID = activeSounds.recoveryActions.first?.packID
             {
                 focusedTarget = .retryFactoryRestore(packID: packID)
@@ -1664,7 +1665,7 @@ private struct SoundPacksWindowContentView: View {
             if !order.contains(focusedTarget) {
                 self.focusedTarget = order.first
             }
-        } else if assignFirstIfNil {
+        } else if assignFirstIfNil, requestedRoute.editTarget != nil {
             self.focusedTarget = order.first
         }
     }
@@ -1740,7 +1741,8 @@ private struct SoundPacksWindowContentView: View {
     }
 }
 
-/// Route focus names the inspected event even when its read-only mapping has no preview action.
+/// Ordinary navigation leaves focus on the Settings title. Deep links name the inspected event
+/// even when its read-only mapping has no preview action.
 package func soundPacksWindowDeepLinkFocusTarget(
     route: SoundPacksWindowRoute,
     scopeAvailability: SoundPackEditorScopeAvailability,
@@ -1750,7 +1752,7 @@ package func soundPacksWindowDeepLinkFocusTarget(
 ) -> SoundPacksWindowFocusTarget? {
     if case .unavailable = scopeAvailability { return .managedScopeFailure }
     return switch route.destination {
-    case .overview: fallback
+    case .overview: nil
     case .editEvent(let packID, let event), .copyAndApply(let packID, let event):
         selectedPackID == packID && visibleEvents.contains(event)
             ? .eventAudio(event) : fallback

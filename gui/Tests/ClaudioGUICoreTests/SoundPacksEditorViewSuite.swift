@@ -95,6 +95,21 @@ func runSoundPacksEditorViewSuites() async {
             "Gallery 必须由 production view interface 编译并挂载")
     }
 
+    suite("Sound editor overview：初始导航不抢统一设置标题焦点") {
+        expect(
+            soundPacksWindowDeepLinkFocusTarget(
+                route: .overview, scopeAvailability: .available(.global), selectedPackID: "builtin",
+                visibleEvents: Set(Event.allCases), fallback: .packList) == nil,
+            "普通导航应保留设置壳的标题焦点，不自动聚焦包列表")
+        expect(
+            soundPacksWindowDeepLinkFocusTarget(
+                route: .overview,
+                scopeAvailability: .unavailable(scope: .global, reason: .scopeUnavailable),
+                selectedPackID: "builtin", visibleEvents: Set(Event.allCases), fallback: .packList)
+                == .managedScopeFailure,
+            "失效声音作用域仍优先聚焦可见失败说明")
+    }
+
     suite("Sound editor read-only deep link：缺声也定位目标事件") {
         let route = SoundPacksWindowRoute.editEvent(
             surface: nil, packID: "builtin", event: .stop)
