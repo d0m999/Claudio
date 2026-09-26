@@ -523,11 +523,36 @@ struct EventSettingsWindowView: View {
             if rule.surfaces.isEmpty { Text(l10n.text(.workspaceNoSurfaces)).font(.caption) }
             Text("WorkBuddy · " + l10n.text(.workspaceEvidencePending)).font(.caption)
                 .foregroundColor(.secondary)
-            Button(l10n.text(.workspaceRemove)) {
-                _ = selection.requestDeletion(of: rule)
+            workspaceRemoveButton(rule)
+                .focused($focusedTarget, equals: .workspaceRemove(rule.id))
+                .settingsMountIdentity("workspace.remove")
+        }
+    }
+
+    @ViewBuilder
+    private func workspaceRemoveButton(_ rule: WorkspaceSoundRule) -> some View {
+        let nativeButton = Button(l10n.text(.workspaceRemove)) {
+            _ = selection.requestDeletion(of: rule)
+        }
+        let button = Group {
+            if NSApp.isFullKeyboardAccessEnabled {
+                nativeButton
+            } else {
+                nativeButton.focusable()
             }
-            .focused($focusedTarget, equals: .workspaceRemove(rule.id))
-            .settingsMountIdentity("workspace.remove")
+        }
+        if #available(macOS 14.0, *) {
+            // Cancellation must restore usable focus even with system keyboard navigation off.
+            // Only add a proxy in that mode; otherwise the native Button owns its one Tab stop.
+            button.onKeyPress(keys: [.space, .return], phases: .down) { press in
+                guard focusedTarget == .workspaceRemove(rule.id),
+                    press.modifiers.intersection([.command, .control, .option, .shift]).isEmpty
+                else { return .ignored }
+                _ = selection.requestDeletion(of: rule)
+                return .handled
+            }
+        } else {
+            button
         }
     }
 

@@ -63,6 +63,17 @@ Keyboard Access 的 harness 环境中则调用该 mounted production modifier �
 synthetic event 与 compiled mount 证据，不是系统 AX/TCC、真实键盘焦点或 VoiceOver tree 证据；后者仍
 必须按下方清单手验。
 
+工作区删除的取消焦点另有可独立执行的 key-window 回归：
+
+```bash
+swift run --package-path gui claudio-gui-tests --workspace-deletion-native-focus
+```
+
+它需要可激活窗口的 macOS 桌面，运行期间不要切换前台 app；分别在系统「键盘导航」关闭和开启时
+执行，日志会记录当前设置。测试挂载生产 Events 页，经原生确认的 responder chain 发送 Escape，
+随后验证 Space / Return 能重新打开同一工作区的确认，无关及带修饰键的输入不能发起删除。
+这锁定取消后的可用焦点，不替代 Computer Use／人工读回实际焦点、Tab 顺序或 VoiceOver。
+
 ## 安全与隐私判据
 
 自动回归必须保持以下边界：

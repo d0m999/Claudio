@@ -78,6 +78,18 @@ if let index = CommandLine.arguments.firstIndex(of: "--manifest-lock-holder") {
     exit(0)
 }
 
+if CommandLine.arguments.contains("--workspace-deletion-native-focus") {
+    let application = NSApplication.shared
+    application.setActivationPolicy(.regular)
+    Task { @MainActor in
+        await runWorkspaceDeletionFocusSuites()
+        print("Workspace deletion native focus: \(totalChecks) checks, \(failures) failures")
+        exit(failures == 0 ? 0 : 1)
+    }
+    application.run()
+    exit(1)
+}
+
 if CommandLine.arguments.contains("--ai-cue-native-focus") {
     let application = NSApplication.shared
     application.setActivationPolicy(.regular)
