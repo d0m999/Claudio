@@ -144,6 +144,61 @@ func runSettingsNavigationFocusSuites() async {
             activated && fixture.session.state.routeResolution.destination == .eventsAndSounds,
             "Tab/Space from the Events title must select Default Group instead of a sidebar row")
     }
+
+    await suite("Settings native focus: the first sound-pack list stop accepts arrow navigation") {
+        expect(
+            NSApp.isFullKeyboardAccessEnabled,
+            "enable system Keyboard navigation for this regression")
+        guard NSApp.isFullKeyboardAccessEnabled else { return }
+        let fixture = SettingsPresentationFixtures.generalLogin(route: .destination(.about))
+        let probe = SettingsRootNativeProbe(session: fixture.session)
+        defer { probe.close() }
+        probe.activate()
+        let active = await settingsNavigationFocusWait { probe.isActiveKeyWindow }
+        expect(active, "the native focus regression requires an active key window")
+        guard active else { return }
+        _ = fixture.session.send(.windowPhaseChanged(.key))
+        let ready = await settingsNavigationFocusWait { fixture.session.state.focusDebt == nil }
+        expect(ready, "the mounted root must consume the initial title focus request")
+        expect(
+            probe.clickSidebar(.sounds, horizontalFraction: 0.5),
+            "open Sounds through the real sidebar")
+        let routed = await settingsNavigationFocusWait { fixture.session.state.focusDebt == nil }
+        expect(routed, "the mounted root must consume the Sounds title focus request")
+        await Task.yield()
+        guard case .sounds(let sounds) = fixture.soundPacksEditor.presentation.mode else {
+            expect(false, "the Sounds editor must be mounted")
+            return
+        }
+        let originalPackID = sounds.selectedPack?.id
+        expect(
+            sounds.packs.count > 1 && originalPackID != nil,
+            "the list needs distinct inspectable packs")
+        expect(probe.sendKey(keyCode: 48, characters: "\t"), "Tab must reach New Pack")
+        expect(
+            probe.sendKey(keyCode: 48, characters: "\t"), "the next Tab must reach the native list")
+        expect(
+            probe.sendKey(keyCode: 125, characters: "\u{F701}"),
+            "Down must navigate the list at its first Tab stop")
+        let selected = await settingsNavigationFocusWait {
+            guard case .sounds(let current) = fixture.soundPacksEditor.presentation.mode else {
+                return false
+            }
+            return current.selectedPack?.id != originalPackID
+        }
+        expect(
+            selected, "the list's first Tab stop must inspect the next pack without an extra Tab")
+        expect(
+            probe.sendKey(keyCode: 126, characters: "\u{F700}"),
+            "Up must remain owned by the native list")
+        let restored = await settingsNavigationFocusWait {
+            guard case .sounds(let current) = fixture.soundPacksEditor.presentation.mode else {
+                return false
+            }
+            return current.selectedPack?.id == originalPackID
+        }
+        expect(restored, "the list must retain arrow navigation after its selection changes")
+    }
 }
 
 @MainActor

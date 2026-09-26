@@ -565,7 +565,8 @@ private struct SoundPacksWindowContentView: View {
                 }
             }
             .soundPacksLayoutProbe("sound-packs.pack-list")
-            .focusable(!activeSounds.packs.isEmpty)
+            // List already owns a native key-view stop; another focusable wrapper swallows arrows.
+            .disabled(activeSounds.packs.isEmpty)
             .focused($focusedTarget, equals: .packList)
             .accessibilityLabel(l10n.text(.soundPacksSidebarLabel))
             .accessibilityValue(
