@@ -23,6 +23,16 @@ private enum SettingsRootInteractionDriver {
 
 extension View {
     @ViewBuilder
+    func settingsContentFocusSection() -> some View {
+        if #available(macOS 13, *) {
+            // Keep title-to-action traversal inside the page before returning to the sidebar.
+            focusSection()
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
     func settingsSidebarInteraction(
         item: SettingsDestination,
         availableDestinations: [SettingsDestination],

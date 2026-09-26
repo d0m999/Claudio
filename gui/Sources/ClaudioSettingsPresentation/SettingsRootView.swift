@@ -78,6 +78,7 @@ package struct SettingsRootView: View {
                     .frame(width: ClaudioTheme.Metrics.hairline)
                     .accessibilityHidden(true)
                 routeSlot
+                    .settingsContentFocusSection()
                     .frame(
                         maxWidth: .infinity,
                         maxHeight: geometry.size.height,
